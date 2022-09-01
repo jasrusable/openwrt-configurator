@@ -1,0 +1,34 @@
+{
+  "target": {
+    "deviceId": "tplink,archer-c50-v4",
+    "openWrtVersion": "22.01.3"
+  },
+  "general": {
+    "hostname": "test",
+    "timezone": "Africa/Johannesburg"
+  },
+  "devices": [
+    {
+      "name": "br-lan",
+      "type": "bridge",
+      "ports": ["eth1", "eth2", "eth3", "eth4"]
+    },
+    {
+      "name": "br-wan",
+      "type": "bridge",
+      "ports": ["eth0"]
+    }
+  ],
+  "interfaces": [
+    {
+      "name": "lan",
+      "device": "br-lan",
+      "proto": "dhcp"
+    },
+    {
+      "name": "wan",
+      "device": "br-wan",
+      "proto": "dhcp"
+    }
+  ]
+}

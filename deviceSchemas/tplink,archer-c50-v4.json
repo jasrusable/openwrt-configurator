@@ -1,0 +1,14 @@
+{
+  "name": "tplink,archer-c50-v4",
+  "flags": {
+    "dsa": ">21.02.3"
+  },
+  "ports": [
+    { "name": "eth0", "role": "wan" },
+    { "name": "eth1", "role": "lan" },
+    { "name": "eth2", "role": "lan" },
+    { "name": "eth3", "role": "lan" },
+    { "name": "eth4", "role": "lan" },
+    { "name": "eth6", "role": "cpu", "cpuName": "eth0" }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "general": {
+    "timezone": "Africa/Johannesburg"
+  },
+  "networks": [
+    {
+      "name": "lan",
+      "ip": "10.0.0.0/16"
+    }
+  ],
+  "wifi": [
+    {
+      "ssid": "Jaculu",
+      "network": "lan",
+      "device": "wlan0",
+      "mode": "ap",
+      "key": "test123",
+      "encryption": "psk2"
+    }
+  ],
+  "devices": [
+    {
+      "deviceId": "ubnt,edgerouter-x",
+      "roles": ["router"],
+      "hostname": "jaculu-router"
+    },
+    {
+      "deviceId": "tplink,archer-c50-v4",
+      "roles": ["ap"],
+      "hostname": "jaculu-ap-2"
+    }
+  ]
+}
