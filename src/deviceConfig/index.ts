@@ -29,10 +29,10 @@ export const configMapping: Mapping[] = [
         `uci set system.main=system`,
 
         // Hostname
-        `uci set system.main.hostname='${config.general.hostname}'`,
+        `uci set system.main.hostname='${config.system.hostname}'`,
 
         // Timezone
-        `uci set system.main.zonename='${config.general.timezone}'`,
+        `uci set system.main.zonename='${config.system.timezone}'`,
 
         // Other
         `uci set system.main.ttylogin='0'`,
@@ -54,6 +54,7 @@ export const configMapping: Mapping[] = [
       const cpuPort = (schema.ports || []).find((port) => port.role === "cpu");
       const cpuPortName = cpuPort?.name;
       const cpuPortCpuName = cpuPort?.cpuName;
+
       if (dsaOrSwConfig === "swConfig" && (!cpuPort || !cpuPortCpuName)) {
         throw new Error("CPU port not defined.");
       }
@@ -107,7 +108,11 @@ export const configMapping: Mapping[] = [
                   `uci set network.device${index}=device`,
                   `uci set network.device${index}.name='${device.name}'`,
                   `uci set network.device${index}.type='${device.type}'`,
-                  `uci set network.device${index}.ports='${cpuPortCpuName}.${vlan}'`,
+                  ...(device.type === "bridge"
+                    ? [
+                        `uci set network.device${index}.ports='${cpuPortCpuName}.${vlan}'`,
+                      ]
+                    : []),
                 ];
 
                 return [...acc, ...switchVlanCommands, ...deviceCommands];
@@ -120,12 +125,104 @@ export const configMapping: Mapping[] = [
           return [
             ...acc,
             ...[
+              // General settings
               `uci set network.${interface_.name}=interface`,
               `uci set network.${interface_.name}.device='${interface_.device}'`,
+              `uci set network.${interface_.name}.force_link='${
+                interface_.forceLink === false ? 0 : 1
+              }'`,
+              `uci set network.${interface_.name}.defaultroute='${
+                interface_.useDefaultGateway === false ? 0 : 1
+              }'`,
+              `uci set network.${interface_.name}.auto='${
+                interface_.bringUpAtBoot === false ? 0 : 1
+              }'`,
               `uci set network.${interface_.name}.proto='${interface_.proto}'`,
+
+              // Static settings
+              ...(interface_.proto === "static"
+                ? [
+                    // ipv4
+                    `uci set network.${interface_.name}.ipaddr='${interface_.ipv4Address}'`,
+                    `uci set network.${interface_.name}.netmask='${interface_.ipv4NetMask}'`,
+                    `uci set network.${interface_.name}.gateway='${interface_.ipv4Gateway}'`,
+                    `uci set network.${interface_.name}.broadcast='${interface_.ipv4Broadcast}'`,
+                    // ipv6
+                    ...(interface_.ipv6Addresses || []).map((address) => {
+                      return `uci add_list network.${interface_.name}.ip6addr='${address}'`;
+                    }),
+                    `uci set network.${interface_.name}.ip6gw='${interface_.ipv6Gateway}'`,
+                    `uci set network.${interface_.name}.ip6prefix='${interface_.ipv6Prefix}'`,
+                  ]
+                : []),
             ],
           ];
         }, []),
+      ];
+    },
+  },
+  {
+    name: "wireless",
+    commands: ({ config, schema }) => {
+      const defaultBandChannels = {
+        "2g": 1,
+        "5g": 36,
+      };
+
+      return [
+        // Clear wireless settings.
+        "while uci -q delete wireless.@wifi-iface[0]; do :; done",
+        "while uci -q delete wireless.@wifi-device[0]; do :; done",
+
+        // Set up radios
+        ...(schema.radios || []).reduce<string[]>((acc, radio) => {
+          const configRadio = config.wireless.radios.find(
+            (r) => r.name === radio.name
+          );
+
+          const channel =
+            configRadio?.channel || defaultBandChannels[radio.band];
+
+          return [
+            ...acc,
+            `uci set wireless.${radio.name}=wifi-device`,
+            `uci set wireless.${radio.name}.type='${radio.type}'`,
+            `uci set wireless.${radio.name}.path='${radio.path}'`,
+            `uci set wireless.${radio.name}.channel='${channel}'`,
+            `uci set wireless.${radio.name}.band='${radio.band}'`,
+            `uci set wireless.${radio.name}.htmode='${radio.htmode}'`,
+            `uci set wireless.${radio.name}.disabled='${
+              configRadio?.disabled === true ? 1 : 0
+            }'`,
+          ];
+        }, []),
+
+        // Set up networks
+        ...config.wireless.networks.reduce<string[]>(
+          (acc, wirelessNetwork, index) => {
+            const name = `wifinet${index}`;
+            return [
+              ...acc,
+              `uci set wireless.${name}=wifi-iface`,
+              `uci set wireless.${name}.device='${wirelessNetwork.device}'`,
+              `uci set wireless.${name}.mode='${wirelessNetwork.mode}'`,
+              `uci set wireless.${name}.network='${wirelessNetwork.network}'`,
+
+              // AP settings
+              ...(wirelessNetwork.mode === "ap"
+                ? [
+                    `uci set wireless.${name}.ssid='${wirelessNetwork.ssid}'`,
+                    `uci set wireless.${name}.encryption='${wirelessNetwork.encryption}'`,
+                    `uci set wireless.${name}.key='${wirelessNetwork.key}'`,
+                    `uci set wireless.${name}.wmm='${
+                      wirelessNetwork.wmm === false ? 0 : 1
+                    }'`,
+                  ]
+                : []),
+            ];
+          },
+          []
+        ),
       ];
     },
   },
@@ -142,6 +239,12 @@ export const configMapping: Mapping[] = [
         `uci set dropbear.main.Port='22'`,
         `uci set dropbear.main.Interface='lan'`,
       ];
+    },
+  },
+  {
+    name: "reloads",
+    commands: () => {
+      return ["uci commit", "service system reload", "service network reload"];
     },
   },
 ];
