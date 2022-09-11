@@ -1,10 +1,12 @@
 import {
   DeviceConfig,
-  deviceConfigSchema,
   deviceSchema,
   DeviceSchema,
+  getDeviceConfigSchema,
+  parseDeviceConfig,
 } from "./configSchema";
 import fs from "fs";
+import { z } from "zod";
 
 type Mapping = {
   name: string;
@@ -80,48 +82,102 @@ export const configMapping: Mapping[] = [
 
         ...(dsaOrSwConfig === "swConfig"
           ? [
+              // swConfig specific settings
+
               // Create swConfig switch.
               `uci set network.switch=switch`,
               `uci set network.switch.name='switch0'`,
               `uci set network.switch.reset='1'`,
               `uci set network.switch.enable_vlan='1'`,
-              ...config.devices.reduce<string[]>((acc, device, index) => {
-                const portsList = [...device.ports, `${cpuPortName}t`]
-                  .map((port) => {
-                    const name = port.replace("eth", "");
-                    return name;
-                  })
-                  .join(" ");
+              ...config.network.devices.reduce<string[]>(
+                (acc, device, index) => {
+                  const vlans = device.vlans;
 
-                const vlan = index + 1;
+                  if (vlans) {
+                    const commands = vlans.reduce<string[]>(
+                      (acc, vlan, index) => {
+                        if (!cpuPortName) {
+                          throw new Error("CPU port not defined.");
+                        }
+                        const portNamesList = [
+                          { name: cpuPortName, status: "tagged" },
+                          ...vlan.ports,
+                        ]
+                          .map((port) => {
+                            const name = port.name.replace("eth", "");
+                            return port.status === "tagged" ? `${name}t` : name;
+                          })
+                          .join(" ");
 
-                // Create swConfig switch vlans
-                const switchVlanCommands = [
-                  `uci set network.switch_vlan${index}=switch_vlan`,
-                  `uci set network.switch_vlan${index}.device='switch0'`,
-                  `uci set network.switch_vlan${index}.vlan='${vlan}'`,
-                  `uci set network.switch_vlan${index}.ports='${portsList}'`,
-                ];
+                        const switchVlanCommands = [
+                          `uci set network.switch_vlan${index}=switch_vlan`,
+                          `uci set network.switch_vlan${index}.device='switch0'`,
+                          `uci set network.switch_vlan${index}.vlan='${vlan.id}'`,
+                          `uci set network.switch_vlan${index}.ports='${portNamesList}'`,
+                        ];
 
-                // Create devices
-                const deviceCommands = [
-                  `uci set network.device${index}=device`,
-                  `uci set network.device${index}.name='${device.name}'`,
-                  `uci set network.device${index}.type='${device.type}'`,
-                  ...(device.type === "bridge"
-                    ? [
-                        `uci set network.device${index}.ports='${cpuPortCpuName}.${vlan}'`,
-                      ]
-                    : []),
-                ];
+                        // Create devices
+                        const deviceCommands = [
+                          `uci set network.device${index}=device`,
+                          `uci set network.device${index}.name='${device.name}.${vlan.id}'`,
+                          `uci set network.device${index}.type='${device.type}'`,
+                          ...(device.type === "bridge"
+                            ? [
+                                `uci set network.device${index}.ports='${cpuPortCpuName}.${vlan.id}'`,
+                              ]
+                            : []),
+                        ];
 
-                return [...acc, ...switchVlanCommands, ...deviceCommands];
-              }, []),
+                        return [
+                          ...acc,
+                          ...switchVlanCommands,
+                          ...deviceCommands,
+                        ];
+                      },
+                      []
+                    );
+
+                    return [...acc, ...commands];
+                  } else {
+                    const portsList = [`${cpuPortName}t`, ...device.ports]
+                      .map((port) => {
+                        const name = port.replace("eth", "");
+                        return name;
+                      })
+                      .join(" ");
+
+                    const vlan = index + 1;
+
+                    // Create swConfig switch vlans
+                    const switchVlanCommands = [
+                      `uci set network.switch_vlan${index}=switch_vlan`,
+                      `uci set network.switch_vlan${index}.device='switch0'`,
+                      `uci set network.switch_vlan${index}.vlan='${vlan}'`,
+                      `uci set network.switch_vlan${index}.ports='${portsList}'`,
+                    ];
+
+                    // Create devices
+                    const deviceCommands = [
+                      `uci set network.device${index}=device`,
+                      `uci set network.device${index}.name='${device.name}'`,
+                      `uci set network.device${index}.type='${device.type}'`,
+                      ...(device.type === "bridge"
+                        ? [
+                            `uci set network.device${index}.ports='${cpuPortCpuName}.${vlan}'`,
+                          ]
+                        : []),
+                    ];
+
+                    return [...acc, ...switchVlanCommands, ...deviceCommands];
+                  }
+                },
+                []
+              ),
             ]
           : []),
 
         // Create interfaces
-        ...config.interfaces.reduce<string[]>((acc, interface_) => {
+        ...config.network.interfaces.reduce<string[]>((acc, interface_) => {
           return [
             ...acc,
             ...[
@@ -265,15 +321,28 @@ export const getDeviceCommands = ({
   return commands;
 };
 
-const config = deviceConfigSchema.parse(
+const deviceTargetSchema = z.object({
+  target: z.object({
+    deviceId: z.string(),
+    openWrtVersion: z.string(),
+  }),
+});
+
+const { target } = deviceTargetSchema.parse(
   JSON.parse(fs.readFileSync("./src/deviceConfig/deviceConfig.json", "utf-8"))
 );
 
 const schema = deviceSchema.parse(
   JSON.parse(
-    fs.readFileSync(`./deviceSchemas/${config.target.deviceId}.json`, "utf-8")
+    fs.readFileSync(`./deviceSchemas/${target.deviceId}.json`, "utf-8")
   )
 );
+
+const rawConfig = JSON.parse(
+  fs.readFileSync("./src/deviceConfig/deviceConfig.json", "utf-8")
+);
+
+const config = parseDeviceConfig({ schema, config: rawConfig });
 
 const commands = getDeviceCommands({ config, schema });
 

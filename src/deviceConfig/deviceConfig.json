@@ -7,20 +7,34 @@
     "hostname": "test",
     "timezone": "Africa/Johannesburg"
   },
-  "devices": [
-    {
-      "name": "br-lan",
-      "type": "bridge",
-      "ports": ["eth0", "eth1", "eth2", "eth3", "eth4"]
-    }
-  ],
-  "interfaces": [
-    {
-      "name": "lan",
-      "device": "br-lan",
-      "proto": "dhcp"
-    }
-  ],
+  "network": {
+    "devices": [
+      {
+        "name": "br-lan",
+        "type": "bridge",
+        "ports": ["eth0", "eth1", "eth2", "eth3", "eth4"],
+        "vlans": [
+          {
+            "id": 1,
+            "ports": [
+              { "name": "eth0", "status": "untagged" },
+              { "name": "eth1", "status": "untagged" },
+              { "name": "eth2", "status": "untagged" },
+              { "name": "eth3", "status": "untagged" },
+              { "name": "eth4", "status": "untagged" }
+            ]
+          }
+        ]
+      }
+    ],
+    "interfaces": [
+      {
+        "name": "lan",
+        "device": "br-lan.1",
+        "proto": "dhcp"
+      }
+    ]
+  },
   "wireless": {
     "radios": [
       {
