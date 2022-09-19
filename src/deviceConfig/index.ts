@@ -57,10 +57,6 @@ export const configMapping: Mapping[] = [
       const cpuPortName = cpuPort?.name;
       const cpuPortCpuName = cpuPort?.cpuName;
 
-      if (dsaOrSwConfig === "swConfig" && (!cpuPort || !cpuPortCpuName)) {
-        throw new Error("CPU port not defined.");
-      }
-
       return [
         // Clear network settings.
         "while uci -q delete network.@interface[0]; do :; done",
@@ -93,12 +89,13 @@ export const configMapping: Mapping[] = [
                 (acc, device, index) => {
                   const vlans = device.vlans;
 
+                  if (!cpuPortName || !cpuPortCpuName) {
+                    throw new Error("CPU port not defined.");
+                  }
+
                   if (vlans) {
                     const commands = vlans.reduce<string[]>(
                       (acc, vlan, index) => {
-                        if (!cpuPortName) {
-                          throw new Error("CPU port not defined.");
-                        }
                         const portNamesList = [
                           { name: cpuPortName, status: "tagged" },
                           ...vlan.ports,

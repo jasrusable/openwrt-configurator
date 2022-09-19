@@ -1,7 +1,7 @@
 {
   "name": "tplink,archer-c50-v4",
   "flags": {
-    "dsa": ">21.02.3"
+    "swConfig": "<24"
   },
   "ports": [
     { "name": "eth0", "role": "wan" },

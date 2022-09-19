@@ -7,6 +7,29 @@
     "hostname": "test",
     "timezone": "Africa/Johannesburg"
   },
+  "dhcp": {
+    "dnsmasq": [
+      {
+        "domainneeded": true,
+        "boguspriv": true,
+        "filterwin2k": false,
+        "localise_queries": true,
+        "rebind_protection": true,
+        "rebind_localhost": true,
+        "local": "/lan/",
+        "domain": "lan",
+        "expandhosts": true,
+        "nonegcache": false,
+        "authoritative": true,
+        "readethers": true,
+        "leasefile": "/tmp/dhcp.leases",
+        "resolvfile": "/tmp/resolv.conf.d/resolv.conf.auto",
+        "nonwildcard": true,
+        "localservice": true,
+        "ednspacket_max": 1232
+      }
+    ]
+  },
   "network": {
     "devices": [
       {

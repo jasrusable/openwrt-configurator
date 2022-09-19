@@ -2,7 +2,9 @@
   "name": "sandpit",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "bin": {
+    "onc": "./bin/index.ts"
+  },
   "scripts": {
     "start": "ts-node ./src/index.ts"
   },
@@ -26,9 +28,13 @@
     "is-valid-hostname": "^1.0.2",
     "joi": "^17.6.0",
     "lodash": "^4.17.21",
+    "semver": "^7.3.7",
     "timezone-validator": "^1.0.3",
     "ts-node": "^10.4.0",
     "typescript": "^4.5.4",
     "zod": "^3.11.6"
+  },
+  "devDependencies": {
+    "@types/semver": "^7.3.12"
   }
 }

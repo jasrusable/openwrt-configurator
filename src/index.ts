@@ -1,64 +1,70 @@
+#!/usr/bin/env node
+
 import fs from "fs";
 import commandLineArgs from "command-line-args";
 import commandLineUsage from "command-line-usage";
 import { getDeviceScript } from "./openwrt-backend";
 import { z } from "zod";
+import { deviceSchema } from "./deviceConfig/configSchema";
 
-enum Roles {
+export enum Roles {
   AP = "ap",
   Router = "router",
 }
 
-const ZodDevice = z
-  .object({
-    deviceId: z.string(),
-    roles: z.array(z.nativeEnum(Roles)),
-    hostname: z.string(),
-  })
-  .strict();
-export type Device = z.infer<typeof ZodDevice>;
-
-const ZodNetwork = z
-  .object({
-    name: z.string(),
-    ip: z.string(),
-  })
-  .strict();
-export type Network = z.infer<typeof ZodNetwork>;
-
-enum WifiMode {
-  Ap = "ap",
-}
-
-enum WifiEncryption {
+export enum WifiEncryption {
   Psk2 = "psk2",
+  None = "none",
 }
 
-const ZodWifi = z
-  .object({
-    mode: z.nativeEnum(WifiMode),
-    device: z.string(),
-    ssid: z.string(),
-    encryption: z.nativeEnum(WifiEncryption),
-    key: z.string(),
-    network: z.string(),
-  })
-  .strict();
-export type Wifi = z.infer<typeof ZodWifi>;
-
-const ZodConfig = z
+const configSchema = z
   .object({
     general: z
       .object({
         timezone: z.string(),
       })
       .strict(),
-    networks: z.array(ZodNetwork),
-    wifi: z.array(ZodWifi),
-    devices: z.array(ZodDevice),
+    networks: z.array(
+      z.object({
+        name: z.string(),
+        router: z
+          .object({
+            protocol: z.enum(["static", "dhcp", "pppoe"]),
+            ip: z.string().optional(),
+            netmask: z.string().optional(),
+            firewallZone: z.string(),
+          })
+          .optional(),
+        devices: z
+          .object({
+            protocol: z.enum(["dhcp"]),
+          })
+          .optional(),
+        vlan: z.number().optional(),
+        vlanUntagged: z.boolean().optional(),
+      })
+    ),
+    wifi: z.array(
+      z.object({
+        mode: z.enum(["ap"]),
+        ssid: z.string(),
+        encryption: z.nativeEnum(WifiEncryption),
+        key: z.string().optional(),
+        network: z.string(),
+      })
+    ),
+    devices: z.array(
+      z.object({
+        deviceId: z.string(),
+        version: z.string(),
+        roles: z.array(z.nativeEnum(Roles)),
+        hostname: z.string(),
+      })
+    ),
   })
   .strict();
-export type Config = z.infer<typeof ZodConfig>;
+export type Config = z.infer<typeof configSchema>;
+export type DeviceConfig = Config["devices"][0];
 
 const optionDefinitions = [
   {
@@ -88,11 +94,23 @@ export const main = () => {
   } else {
     console.log(options);
     const configString = fs.readFileSync(options.config, "utf-8");
-    const config: Config = ZodConfig.parse(JSON.parse(configString));
-    config.devices.forEach((device) => {
-      const a = getDeviceScript({ config, deviceConfig: device });
-      console.log(`#device ${device.hostname}`)
-      console.log(a.join('\n'))
+    const config: Config = configSchema.parse(JSON.parse(configString));
+    config.devices.forEach((deviceConfig) => {
+      const device = deviceSchema.parse(
+        JSON.parse(
+          fs.readFileSync(
+            `./deviceSchemas/${deviceConfig.deviceId}.json`,
+            "utf-8"
+          )
+        )
+      );
+      const a = getDeviceScript({
+        config,
+        deviceConfig: deviceConfig,
+        deviceSchema: device,
+      });
+      console.log(`#device ${deviceConfig.hostname}`);
+      console.log(a.join("\n"));
     });
   }
 };

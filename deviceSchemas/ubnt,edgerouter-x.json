@@ -1,0 +1,13 @@
+{
+  "name": "ubnt,edgerouter-x.json",
+  "flags": {
+    "swConfig": "<21.02"
+  },
+  "ports": [
+    { "name": "eth0", "role": "wan" },
+    { "name": "eth1", "role": "lan" },
+    { "name": "eth2", "role": "lan" },
+    { "name": "eth3", "role": "lan" },
+    { "name": "eth4", "role": "lan" }
+  ]
+}

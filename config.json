@@ -2,32 +2,63 @@
   "general": {
     "timezone": "Africa/Johannesburg"
   },
-  "networks": [
-    {
-      "name": "lan",
-      "ip": "10.0.0.0/16"
-    }
-  ],
-  "wifi": [
-    {
-      "ssid": "Jaculu",
-      "network": "lan",
-      "device": "wlan0",
-      "mode": "ap",
-      "key": "test123",
-      "encryption": "psk2"
-    }
-  ],
   "devices": [
     {
       "deviceId": "ubnt,edgerouter-x",
+      "version": "21.02.3",
       "roles": ["router"],
       "hostname": "jaculu-router"
     },
     {
       "deviceId": "tplink,archer-c50-v4",
+      "version": "21.02.3",
       "roles": ["ap"],
       "hostname": "jaculu-ap-2"
+    }
+  ],
+  "networks": [
+    {
+      "name": "wan",
+      "router": {
+        "protocol": "pppoe",
+        "firewallZone": "wan"
+      }
+    },
+    {
+      "name": "lan",
+      "vlan": 1,
+      "vlanUntagged": true,
+      "devices": {
+        "protocol": "dhcp"
+      },
+      "router": {
+        "protocol": "static",
+        "ip": "10.0.0.1",
+        "netmask": "255.255.0.0",
+        "firewallZone": "lan"
+      }
+    },
+    {
+      "name": "guest",
+      "vlan": 2,
+      "devices": {
+        "protocol": "dhcp"
+      },
+      "router": {
+        "protocol": "static",
+        "ip": "10.1.0.1",
+        "netmask": "255.255.0.0",
+        "firewallZone": "guest"
+      }
+    }
+  ],
+  "wifi": [
+    {
+      "mode": "ap",
+      "ssid": "Test123",
+      "network": "lan",
+      "key": "test123456",
+      "encryption": "psk2"
     }
   ]
 }
