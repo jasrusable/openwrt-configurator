@@ -4,10 +4,10 @@
     "swConfig": "<21.02"
   },
   "ports": [
-    { "name": "eth0", "role": "wan" },
-    { "name": "eth1", "role": "lan" },
-    { "name": "eth2", "role": "lan" },
-    { "name": "eth3", "role": "lan" },
-    { "name": "eth4", "role": "lan" }
+    { "name": "eth0", "defaultRole": "wan" },
+    { "name": "eth1", "defaultRole": "lan" },
+    { "name": "eth2", "defaultRole": "lan" },
+    { "name": "eth3", "defaultRole": "lan" },
+    { "name": "eth4", "defaultRole": "lan" }
   ]
 }

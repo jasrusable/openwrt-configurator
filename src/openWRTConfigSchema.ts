@@ -159,7 +159,7 @@ export const dhcpDnsmasqSchema = z.object({
   dnsforwardmax: z.number(),
   domain: z.string(),
   noresolv: z.boolean(),
-  server: z.array(z.string()),
+  server: z.array(z.string()).optional(),
 });
 
 export const openWRTConfigSchema = z.object({

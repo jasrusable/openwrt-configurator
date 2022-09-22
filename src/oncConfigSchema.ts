@@ -12,9 +12,19 @@ export const oncConfigSchema = z
   .object({
     devices: z.array(
       z.object({
+        enabled: z.boolean().optional(),
         deviceId: z.string(),
         version: z.string(),
         roles: z.array(z.enum(["router", "ap"])),
+        untagged_vlan_ip: z.string().optional(),
+        provisioning_config: z
+          .object({
+            ssh_auth: z.object({
+              username: z.string(),
+              password: z.string(),
+            }),
+          })
+          .optional(),
         system: z.object({
           hostname: z.string(),
         }),

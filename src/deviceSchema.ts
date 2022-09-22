@@ -9,8 +9,8 @@ export const deviceSchema = z.object({
     .array(
       z.object({
         name: z.string(),
-        role: z.enum(["lan", "wan", "cpu"]),
-        cpuName: z.string().optional(),
+        defaultRole: z.enum(["lan", "wan"]).optional(),
+        swConfigCpuName: z.string().optional(),
       })
     )
     .optional(),
@@ -21,7 +21,7 @@ export const deviceSchema = z.object({
         type: z.enum(["mac80211"]),
         path: z.string(),
         band: z.enum(["2g", "5g"]),
-        htmode: z.enum(["HT20", "VHT80"]),
+        htmodes: z.array(z.enum(["HT20", "VHT80"])),
       })
     )
     .optional(),

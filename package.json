@@ -28,6 +28,7 @@
     "is-valid-hostname": "^1.0.2",
     "joi": "^17.6.0",
     "lodash": "^4.17.21",
+    "node-ssh": "^13.0.0",
     "semver": "^7.3.7",
     "timezone-validator": "^1.0.3",
     "ts-node": "^10.4.0",

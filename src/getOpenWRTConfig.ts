@@ -27,7 +27,7 @@ export const getOpenWRTConfig = ({
   const useSwConfig = !!semver.satisfies(deviceVersion, swConfigVersionRange);
 
   const cpuPort = (deviceSchema.ports || []).find(
-    (port) => port.role === "cpu"
+    (port) => !!port.swConfigCpuName
   );
 
   const networks = oncConfig.network.networks.filter(
@@ -66,7 +66,7 @@ export const getOpenWRTConfig = ({
               ports: (deviceSchema.ports || [])
                 .map((port) => {
                   const name = port.name.replace("eth", "");
-                  return port.role === "cpu"
+                  return !!port.swConfigCpuName
                     ? `${name}t`
                     : network.vlan_untagged === true
                     ? name
@@ -79,14 +79,14 @@ export const getOpenWRTConfig = ({
       }),
       device: useSwConfig
         ? networks.map((network) => {
-            if (!cpuPort || !cpuPort.cpuName) {
+            if (!cpuPort || !cpuPort.swConfigCpuName) {
               throw new Error("CPU port not defined.");
             }
             return {
               properties: {
                 name: `br-lan.${network.vlan}`,
                 type: "bridge",
-                ports: [`${cpuPort.cpuName}.${network.vlan}`],
+                ports: [`${cpuPort.swConfigCpuName}.${network.vlan}`],
               },
             };
           })
@@ -152,7 +152,7 @@ export const getOpenWRTConfig = ({
               path: radio.path,
               band: radio.band,
               channel: defaultBandChannels[radio.band],
-              htmode: radio.htmode,
+              htmode: radio.htmodes[0],
             },
           };
         }),
