@@ -1,64 +1,248 @@
 {
-  "general": {
-    "timezone": "Africa/Johannesburg"
-  },
   "devices": [
     {
       "deviceId": "ubnt,edgerouter-x",
       "version": "21.02.3",
       "roles": ["router"],
-      "hostname": "jaculu-router"
+      "system": {
+        "hostname": "jaculu-router"
+      }
     },
     {
       "deviceId": "tplink,archer-c50-v4",
       "version": "21.02.3",
-      "roles": ["ap"],
-      "hostname": "jaculu-ap-2"
-    }
-  ],
-  "networks": [
-    {
-      "name": "wan",
-      "router": {
-        "protocol": "pppoe",
-        "firewallZone": "wan"
-      }
-    },
-    {
-      "name": "lan",
-      "vlan": 1,
-      "vlanUntagged": true,
-      "devices": {
-        "protocol": "dhcp"
-      },
-      "router": {
-        "protocol": "static",
-        "ip": "10.0.0.1",
-        "netmask": "255.255.0.0",
-        "firewallZone": "lan"
-      }
-    },
-    {
-      "name": "guest",
-      "vlan": 2,
-      "devices": {
-        "protocol": "dhcp"
-      },
-      "router": {
-        "protocol": "static",
-        "ip": "10.1.0.1",
-        "netmask": "255.255.0.0",
-        "firewallZone": "guest"
+      "roles": ["router", "ap"],
+      "system": {
+        "hostname": "jaculu-ap-2"
       }
     }
   ],
-  "wifi": [
-    {
-      "mode": "ap",
-      "ssid": "Test123",
-      "network": "lan",
-      "key": "test123456",
-      "encryption": "psk2"
+  "system": {
+    "timezone": "Africa/Johannesburg"
+  },
+  "firewall": {
+    "defaults": {
+      "input": "ACCEPT",
+      "output": "ACCEPT",
+      "forward": "REJECT",
+      "synflood_protect": true
+    },
+    "zones": [
+      {
+        "name": "wan",
+        "input": "REJECT",
+        "output": "ACCEPT",
+        "forward": "REJECT",
+        "masq": true,
+        "mtu_fix": true,
+        "network": ["wan"]
+      },
+      {
+        "name": "lan",
+        "input": "ACCEPT",
+        "output": "ACCEPT",
+        "forward": "ACCEPT",
+        "network": ["lan"]
+      },
+      {
+        "name": "guest",
+        "input": "REJECT",
+        "output": "ACCEPT",
+        "forward": "REJECT",
+        "network": ["guest"]
+      }
+    ],
+    "forwardings": [
+      {
+        "src": "lan",
+        "dest": "wan"
+      },
+      {
+        "src": "guest",
+        "dest": "wan"
+      },
+      {
+        "src": "lan",
+        "dest": "guest"
+      }
+    ],
+    "rules": [
+      {
+        "name": "Allow-DHCP-Renew",
+        "proto": ["udp"],
+        "family": "ipv4",
+        "src": "wan",
+        "dest_port": [68],
+        "target": "ACCEPT"
+      },
+      {
+        "name": "Allow-Ping",
+        "src": "wan",
+        "proto": ["icmp"],
+        "icmp_type": ["echo-request"],
+        "family": "ipv4",
+        "target": "ACCEPT"
+      },
+      {
+        "name": "Allow-IGMP",
+        "src": "wan",
+        "family": "ipv4",
+        "proto": ["igmp"],
+        "target": "ACCEPT"
+      },
+      {
+        "name": "Allow-DHCPv6",
+        "src": "wan",
+        "proto": ["udp"],
+        "family": "ipv6",
+        "src_ip": ["fc00::/6"],
+        "dest_ip": ["fc00::/6"],
+        "dest_port": [546],
+        "target": "ACCEPT"
+      },
+      {
+        "name": "Allow-MLD",
+        "proto": ["icmp"],
+        "family": "ipv6",
+        "src": "wan",
+        "src_ip": ["fe80::/10"],
+        "icmp_type": ["130/0", "131/0", "132/0", "143/0"],
+        "target": "ACCEPT"
+      },
+      {
+        "name": "Allow-ICMPv6-Input",
+        "proto": ["icmp"],
+        "icmp_type": [
+          "echo-request",
+          "echo-reply",
+          "destination-unreachable",
+          "packet-too-big",
+          "time-exceeded",
+          "bad-header",
+          "unknown-header-type",
+          "router-solicitation",
+          "neighbour-solicitation",
+          "router-advertisement",
+          "neighbour-advertisement"
+        ],
+        "family": "ipv6",
+        "src": "wan",
+        "limit": "1000/sec",
+        "target": "ACCEPT"
+      },
+      {
+        "name": "Allow-ICMPv6-Forward",
+        "src": "wan",
+        "dest": "*",
+        "proto": ["icmp"],
+        "icmp_type": [
+          "echo-request",
+          "echo-reply",
+          "destination-unreachable",
+          "packet-too-big",
+          "time-exceeded",
+          "bad-header",
+          "unknown-header-type"
+        ],
+        "limit": "1000/sec",
+        "family": "ipv6",
+        "target": "ACCEPT"
+      },
+      {
+        "name": "Allow-IPSec-ESP",
+        "src": "wan",
+        "dest": "lan",
+        "proto": ["esp"],
+        "target": "ACCEPT"
+      },
+      {
+        "name": "Allow-ISAKMP",
+        "src": "wan",
+        "dest": "lan",
+        "dest_port": [500],
+        "proto": ["udp"],
+        "target": "ACCEPT"
+      },
+      {
+        "name": "Support-UDP-Traceroute",
+        "src": "wan",
+        "dest_port": "33434:33689",
+        "proto": ["udp"],
+        "family": "ipv4",
+        "target": "REJECT",
+        "enabled": false
+      },
+      {
+        "name": "Guest DHCP and DNS",
+        "src": "guest",
+        "dest_port": [53, 67, 68],
+        "target": "ACCEPT"
+      }
+    ]
+  },
+  "dhcp": {
+    "dnsmasq": {
+      "domainneeded": true,
+      "localise_queries": true,
+      "rebind_localhost": true,
+      "local": "/lan/",
+      "expandhosts": true,
+      "authoritative": true,
+      "readethers": true,
+      "leasefile": "/tmp/dhcp.leases",
+      "localservice": true,
+      "ednspacket_max": 1232,
+      "dnsforwardmax": 300,
+      "domain": "lan",
+      "noresolv": true,
+      "server": ["127.0.0.1:5053"]
     }
-  ]
+  },
+  "network": {
+    "networks": [
+      {
+        "name": "wan",
+        "router": {
+          "device": "eth0",
+          "proto": "pppoe"
+        }
+      },
+      {
+        "name": "lan",
+        "vlan": 1,
+        "vlan_untagged": true,
+        "devices": {
+          "proto": "dhcp"
+        },
+        "router": {
+          "proto": "static",
+          "ipaddr": "10.0.0.1",
+          "netmask": "255.255.0.0"
+        }
+      },
+      {
+        "name": "guest",
+        "vlan": 2,
+        "devices": {
+          "proto": "dhcp"
+        },
+        "router": {
+          "proto": "static",
+          "ipddr": "10.1.0.1",
+          "netmask": "255.255.0.0"
+        }
+      }
+    ]
+  },
+  "wireless": {
+    "wifi-iface": [
+      {
+        "mode": "ap",
+        "ssid": "Test123",
+        "network": "lan",
+        "key": "test123456",
+        "encryption": "psk2"
+      }
+    ]
+  }
 }
