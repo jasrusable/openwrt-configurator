@@ -6,11 +6,7 @@ export const deviceSchemaSchema = z.object({
   ports: z
     .array(
       z.object({
-        name: z
-          .string()
-          .refine((value) => value.startsWith("eth"), {
-            message: `Expected port to start with 'eth'`,
-          }),
+        name: z.string(),
         defaultRole: z.enum(["lan", "wan"]).optional(),
         swConfigCpuName: z.string().optional(),
       })

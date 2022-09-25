@@ -26,11 +26,11 @@ export const boardJsonSchema = z.object({
   network: z.object({
     lan: z.object({
       ports: z.array(z.string()).optional(),
-      device: z.string(),
+      device: z.string().optional(),
       protocol: z.string(),
     }),
     wan: z.object({
-      device: z.string(),
+      device: z.string().optional(),
       protocol: z.string(),
       ports: z.array(z.string()).optional(),
     }),
