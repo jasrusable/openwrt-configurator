@@ -13,18 +13,7 @@ export const getOpenWRTConfig = ({
   deviceSchema: DeviceSchema;
 }) => {
   const isRouter = deviceConfig.roles.includes("router");
-
-  const swConfigVersionRange = deviceSchema.flags.swConfig
-    .split(".")
-    .map((n, index) => (index === 1 ? parseInt(n) : n))
-    .join(".");
-
-  const deviceVersion = deviceConfig.version
-    .split(".")
-    .map((n) => parseInt(n, 10))
-    .join(".");
-
-  const useSwConfig = !!semver.satisfies(deviceVersion, swConfigVersionRange);
+  const useSwConfig = deviceSchema.swConfig;
 
   const cpuPort = (deviceSchema.ports || []).find(
     (port) => !!port.swConfigCpuName

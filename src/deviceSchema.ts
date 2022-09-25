@@ -1,14 +1,16 @@
 import { z } from "zod";
 
-export const deviceSchema = z.object({
+export const deviceSchemaSchema = z.object({
   name: z.string(),
-  flags: z.object({
-    swConfig: z.string(),
-  }),
+  swConfig: z.boolean(),
   ports: z
     .array(
       z.object({
-        name: z.string(),
+        name: z
+          .string()
+          .refine((value) => value.startsWith("eth"), {
+            message: `Expected port to start with 'eth'`,
+          }),
         defaultRole: z.enum(["lan", "wan"]).optional(),
         swConfigCpuName: z.string().optional(),
       })
@@ -27,4 +29,4 @@ export const deviceSchema = z.object({
     .optional(),
 });
 
-export type DeviceSchema = z.infer<typeof deviceSchema>;
+export type DeviceSchema = z.infer<typeof deviceSchemaSchema>;

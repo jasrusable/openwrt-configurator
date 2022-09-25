@@ -1,9 +1,10 @@
 import fs from "fs";
-import { deviceSchema } from "../src/deviceSchema";
+import { deviceSchemaSchema } from "../src/deviceSchema";
 import { ONCConfig, oncConfigSchema } from "../src/oncConfigSchema";
 import { getDeviceScript } from "../src/getDeviceScript";
 import { program } from "commander";
 import { provisionConfig } from "../src/provisionConfig";
+import { getDeviceSchema } from "../src/getDeviceSchema";
 
 export const main = async () => {
   program.name("ONC").description("Open Network Controller").version("0.0.1");
@@ -18,17 +19,16 @@ export const main = async () => {
         JSON.parse(oncConfigString)
       );
 
-      const deviceSchemas = oncConfig.devices.map((deviceConfig) => {
-        const parsedDeviceSchema = deviceSchema.parse(
-          JSON.parse(
-            fs.readFileSync(
-              `./deviceSchemas/${deviceConfig.deviceModelId}.json`,
-              "utf-8"
-            )
-          )
-        );
-        return parsedDeviceSchema;
-      });
+      const deviceConfigs = oncConfig.devices.filter(
+        (device) => device.enabled !== false
+      );
+
+      const deviceSchemas = await Promise.all(
+        deviceConfigs.map(async (deviceConfig) => {
+          const deviceSchema = await getDeviceSchema({ deviceConfig });
+          return deviceSchema;
+        })
+      );
 
       await provisionConfig({ oncConfig, deviceSchemas });
     });
@@ -46,20 +46,15 @@ export const main = async () => {
         (device) => device.enabled !== false
       );
 
-      const devicesSchemas = deviceConfigs.map((deviceConfig) => {
-        const parsedDeviceSchema = deviceSchema.parse(
-          JSON.parse(
-            fs.readFileSync(
-              `./deviceSchemas/${deviceConfig.deviceModelId}.json`,
-              "utf-8"
-            )
-          )
-        );
-        return parsedDeviceSchema;
-      });
+      const deviceSchemas = await Promise.all(
+        deviceConfigs.map(async (deviceConfig) => {
+          const deviceSchema = await getDeviceSchema({ deviceConfig });
+          return deviceSchema;
+        })
+      );
 
       for (const deviceConfig of deviceConfigs) {
-        const deviceSchema = devicesSchemas.find(
+        const deviceSchema = deviceSchemas.find(
           (schema) => schema.name === deviceConfig.deviceModelId
         );
         if (!deviceSchema) {
