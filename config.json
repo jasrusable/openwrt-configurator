@@ -2,7 +2,7 @@
   "devices": [
     {
       "enabled": false,
-      "deviceId": "ubnt,edgerouter-x",
+      "deviceModelId": "ubnt,edgerouter-x",
       "version": "21.02.3",
       "roles": ["router"],
       "system": {
@@ -10,10 +10,10 @@
       }
     },
     {
-      "deviceId": "tplink,archer-c50-v4",
+      "deviceModelId": "tplink,archer-c50-v4",
       "version": "21.02.2",
       "roles": ["ap"],
-      "untagged_vlan_ip": "10.0.0.219",
+      "ipaddr": "10.0.0.218",
       "provisioning_config": {
         "ssh_auth": {
           "username": "root",

@@ -10,6 +10,33 @@ const boardJsonSchema = z.object({
   }),
 });
 
+const getBoardJson = async (ssh: NodeSSH) => {
+  const boardJsonResult = await ssh.execCommand("cat /etc/board.json");
+  if (!boardJsonResult.stdout || boardJsonResult.code !== 0) {
+    throw new Error("Failed to verify /etc/board.json file.");
+  }
+  const boardJson = boardJsonSchema.parse(JSON.parse(boardJsonResult.stdout));
+  return boardJson;
+};
+
+const getDeviceVersion = async (ssh: NodeSSH) => {
+  const versionResult = await ssh.execCommand("cat /etc/openwrt_release");
+  const lines = versionResult.stdout.split("\n");
+  const distribReleaseLine = lines.find((line) =>
+    line.startsWith("DISTRIB_RELEASE")
+  );
+  if (!distribReleaseLine) {
+    throw new Error(
+      "Failed to determine device version in /etc/openwrt_release"
+    );
+  }
+  const version = distribReleaseLine
+    .split("=")[1]
+    .replace(`'`, "")
+    .replace(`'`, "");
+  return version;
+};
+
 export const provisionOpenWRTDevice = async ({
   deviceId,
   deviceVersion,
@@ -26,7 +53,7 @@ export const provisionOpenWRTDevice = async ({
   ipAddress: string;
   openWRTConfig: OpenWRTConfig;
 }) => {
-  console.log(`Provisioning root@${ipAddress}...`);
+  console.log(`Provisioning ${auth.username}@${ipAddress}...`);
   const ssh = new NodeSSH();
 
   console.log(`Connecting...`);
@@ -37,35 +64,17 @@ export const provisionOpenWRTDevice = async ({
   });
   console.log(`Connected.`);
 
-  // console.log(`Verifying device version...`);
-  // const versionResult = await connectedSsh.execCommand(
-  //   "cat /etc/openwrt_release"
-  // );
-  // const lines = versionResult.stdout.split("\n");
-  // const distribReleaseLine = lines.find((line) =>
-  //   line.startsWith("DISTRIB_RELEASE")
-  // );
-  // if (!distribReleaseLine) {
-  //   throw new Error(
-  //     "Failed to determine device version in /etc/openwrt_release"
-  //   );
-  // }
-  // const version = distribReleaseLine.split("=")[1].replace(`'`, "");
-  // if (version !== deviceVersion) {
-  //   throw new Error(
-  //     `Mismatching device version Expected ${deviceVersion} but found ${version}`
-  //   );
-  // }
-  // console.log("Verified.");
+  console.log(`Verifying device version...`);
+  const version = await getDeviceVersion(connectedSsh);
+  if (version !== deviceVersion) {
+    throw new Error(
+      `Mismatching device version Expected ${deviceVersion} but found ${version}`
+    );
+  }
+  console.log("Verified.");
 
   console.log(`Verifying device... `);
-  const boardJsonResult = await connectedSsh.execCommand("cat /etc/board.json");
-  if (!boardJsonResult.stdout || boardJsonResult.code !== 0) {
-    throw new Error("Failed to verify /etc/board.json file.");
-  }
-
-  const boardJson = boardJsonSchema.parse(JSON.parse(boardJsonResult.stdout));
-
+  const boardJson = await getBoardJson(connectedSsh);
   if (boardJson.model.id !== deviceId) {
     throw new Error(
       `Mismatching device id. Expected ${deviceId} but found ${boardJson.model.id} in /etc/board.json`
