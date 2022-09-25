@@ -1,6 +1,6 @@
 {
-  "name": "sandpit",
-  "version": "1.0.0",
+  "name": "onc",
+  "version": "0.0.1",
   "description": "",
   "bin": {
     "onc": "./bin/index.ts"
@@ -10,14 +10,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OpenNetworkController/sandpit.git"
+    "url": "git+https://github.com/OpenNetworkController/onc-cli.git"
   },
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/OpenNetworkController/sandpit/issues"
+    "url": "https://github.com/OpenNetworkController/onc-cli/issues"
   },
-  "homepage": "https://github.com/OpenNetworkController/sandpit#readme",
+  "homepage": "https://github.com/OpenNetworkController/onc-cli#readme",
   "dependencies": {
     "@types/lodash": "^4.14.178",
     "@types/node": "^17.0.0",
