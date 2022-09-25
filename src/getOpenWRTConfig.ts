@@ -1,7 +1,7 @@
 import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
 import semver from "semver";
-import { OpenWRTConfig } from "./openWRTConfigSchema";
+import { OpenWRTConfig, openWRTConfigSchema } from "./openWRTConfigSchema";
 
 export const getOpenWRTConfig = ({
   oncConfig,
@@ -30,7 +30,7 @@ export const getOpenWRTConfig = ({
     (port) => !!port.swConfigCpuName
   );
 
-  const networks = oncConfig.network.networks.filter(
+  const networks = oncConfig.config.network.networks.filter(
     (network) => !!network.vlan
   );
 
@@ -42,7 +42,7 @@ export const getOpenWRTConfig = ({
         {
           properties: {
             hostname: deviceConfig.system.hostname,
-            timezone: oncConfig.system.timezone,
+            timezone: oncConfig.config.system.timezone,
           },
         },
       ],
@@ -99,6 +99,21 @@ export const getOpenWRTConfig = ({
               },
             },
           ],
+      ...(!useSwConfig && {
+        "bridge-vlan": networks
+          .filter((network) => network.vlan !== undefined)
+          .map((network) => {
+            return {
+              properties: {
+                device: `br-lan`,
+                vlan: network.vlan as number,
+                ports: (deviceSchema.ports || []).map((port) =>
+                  network.vlan_untagged ? port.name : `${port.name}:t`
+                ),
+              },
+            };
+          }),
+      }),
       interface: [
         {
           name: "loopback",
@@ -114,28 +129,35 @@ export const getOpenWRTConfig = ({
             name: network.name,
             properties: {
               device: `br-lan.${network.vlan}`,
-              proto: "dhcp" as const,
+              ...(isRouter ? network.router : network.non_router),
             },
-          };
+          } as any;
         }),
       ],
     },
     ...(isRouter && {
       firewall: {
-        defaults: [{ properties: oncConfig.firewall.defaults }],
-        zone: oncConfig.firewall.zones.map((zone) => {
+        defaults: [{ properties: oncConfig.config.firewall.defaults }],
+        zone: oncConfig.config.firewall.zones.map((zone) => {
           return {
             properties: zone,
           };
         }),
-        forwarding: oncConfig.firewall.forwardings.map((forwarding) => {
+        forwarding: oncConfig.config.firewall.forwardings.map((forwarding) => {
           return {
             properties: forwarding,
           };
         }),
-        rule: oncConfig.firewall.rules.map((rule) => {
+        rule: oncConfig.config.firewall.rules.map((rule) => {
           return { properties: rule };
         }),
+      },
+      dhcp: {
+        dnsmasq: [
+          {
+            properties: oncConfig.config.dhcp.dnsmasq,
+          },
+        ],
       },
     }),
     ...(radios.length > 0 && {
@@ -157,14 +179,14 @@ export const getOpenWRTConfig = ({
           };
         }),
         "wifi-iface": radios.reduce<any[]>((acc, radio, radioIndex) => {
-          const wifiNetworks = oncConfig.wireless["wifi-iface"].map(
+          const wifiNetworks = oncConfig.config.wireless["wifi-iface"].map(
             (wifi, wifiIndex) => {
               const name = `wifinet${radioIndex}${wifiIndex}`;
               return {
                 name,
                 properties: {
                   device: radio.name,
-                  mode: "ap",
+                  mode: wifi.mode,
                   network: wifi.network,
                   ssid: wifi.ssid,
                   encryption: wifi.encryption,
@@ -179,5 +201,7 @@ export const getOpenWRTConfig = ({
     }),
   };
 
-  return openWRTConfig;
+  const parsedOpenWRTConfig = openWRTConfigSchema.parse(openWRTConfig);
+
+  return parsedOpenWRTConfig;
 };
