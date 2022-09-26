@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const deviceSchemaSchema = z.object({
   name: z.string(),
-  swConfig: z.boolean(),
+  swConfig: z.boolean().optional(),
   ports: z
     .array(
       z.object({

@@ -6,7 +6,7 @@ import {
   firewallRuleSchema,
   firewallZoneSchema,
   wirelessWifiIfaceSchema,
-} from "./openWRTConfigSchema";
+} from "./openWrtConfigSchema";
 
 export const oncConfigSchema = z
   .object({

@@ -1,6 +1,6 @@
 import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
-import { OpenWrtConfig, openWrtConfigSchema } from "./openWRTConfigSchema";
+import { OpenWrtConfig, openWrtConfigSchema } from "./openWrtConfigSchema";
 import { parseSchema } from "./utils";
 
 export const getOpenWrtConfig = ({

@@ -1,4 +1,4 @@
-import { OpenWrtConfig } from "./openWRTConfigSchema";
+import { OpenWrtConfig } from "./openWrtConfigSchema";
 
 export const getLuciCommands = ({
   openWRTConfig,

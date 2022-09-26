@@ -1,7 +1,7 @@
 import { DeviceSchema } from "./deviceSchema";
 import { getOpenWrtConfig } from "./getOpenWrtConfig";
 import { ONCConfig } from "./oncConfigSchema";
-import { provisionOpenWRTDevice } from "./provisionOpenWRTDevice";
+import { provisionOpenWRTDevice } from "./provisionOpenWrtDevice";
 
 export const provisionConfig = async ({
   oncConfig,
@@ -36,7 +36,7 @@ export const provisionConfig = async ({
         deviceVersion: deviceConfig.version,
         ipAddress: deviceConfig.ipaddr,
         auth: deviceConfig.provisioning_config.ssh_auth,
-        openWRTConfig,
+        openWrtConfig: openWRTConfig,
       });
     }
   }
