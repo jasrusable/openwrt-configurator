@@ -1,68 +1,8 @@
 import { OpenWRTConfig } from "./openWRTConfigSchema";
 import { NodeSSH } from "node-ssh";
-import { z } from "zod";
 import { getLuciCommands } from "./getLuciCommands";
 import { resetCommands, revertCommands } from "./getDeviceScript";
-
-export const boardJsonSchema = z.object({
-  model: z.object({
-    id: z.string(),
-  }),
-  switch: z
-    .record(
-      z.object({
-        enable: z.boolean(),
-        reset: z.boolean(),
-        ports: z.array(
-          z.object({
-            num: z.number(),
-            role: z.enum(["lan", "wan"]).optional(),
-            device: z.string().optional(),
-          })
-        ),
-      })
-    )
-    .optional(),
-  network: z.object({
-    lan: z.object({
-      ports: z.array(z.string()).optional(),
-      device: z.string().optional(),
-      protocol: z.string(),
-    }),
-    wan: z.object({
-      device: z.string().optional(),
-      protocol: z.string(),
-      ports: z.array(z.string()).optional(),
-    }),
-  }),
-});
-
-export const getBoardJson = async (ssh: NodeSSH) => {
-  const boardJsonResult = await ssh.execCommand("cat /etc/board.json");
-  if (!boardJsonResult.stdout || boardJsonResult.code !== 0) {
-    throw new Error("Failed to verify /etc/board.json file.");
-  }
-  const boardJson = boardJsonSchema.parse(JSON.parse(boardJsonResult.stdout));
-  return boardJson;
-};
-
-const getDeviceVersion = async (ssh: NodeSSH) => {
-  const versionResult = await ssh.execCommand("cat /etc/openwrt_release");
-  const lines = versionResult.stdout.split("\n");
-  const distribReleaseLine = lines.find((line) =>
-    line.startsWith("DISTRIB_RELEASE")
-  );
-  if (!distribReleaseLine) {
-    throw new Error(
-      "Failed to determine device version in /etc/openwrt_release"
-    );
-  }
-  const version = distribReleaseLine
-    .split("=")[1]
-    .replace(`'`, "")
-    .replace(`'`, "");
-  return version;
-};
+import { getBoardJson, getDeviceVersion } from "./utils";
 
 export const provisionOpenWRTDevice = async ({
   deviceId,

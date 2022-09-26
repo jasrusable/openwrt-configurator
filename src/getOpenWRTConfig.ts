@@ -155,6 +155,7 @@ export const getOpenWRTConfig = ({
           const defaultBandChannels = {
             "2g": 1,
             "5g": 36,
+            "6g": 36,
           };
           return {
             name: radio.name,

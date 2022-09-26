@@ -1,4 +1,5 @@
 import axios from "axios";
+import { NodeSSH } from "node-ssh";
 import { z } from "zod";
 
 const profileSchema = z.object({
@@ -58,4 +59,97 @@ export const requestBuild = async ({
       packages,
     },
   });
+};
+
+export const boardJsonSchema = z.object({
+  model: z.object({
+    id: z.string(),
+  }),
+  switch: z
+    .record(
+      z.object({
+        enable: z.boolean(),
+        reset: z.boolean(),
+        ports: z.array(
+          z.object({
+            num: z.number(),
+            role: z.enum(["lan", "wan"]).optional(),
+            device: z.string().optional(),
+          })
+        ),
+      })
+    )
+    .optional(),
+  network: z.object({
+    lan: z.object({
+      ports: z.array(z.string()).optional(),
+      device: z.string().optional(),
+      protocol: z.string(),
+    }),
+    wan: z.object({
+      device: z.string().optional(),
+      protocol: z.string(),
+      ports: z.array(z.string()).optional(),
+    }),
+  }),
+});
+
+export const getBoardJson = async (ssh: NodeSSH) => {
+  const boardJsonResult = await ssh.execCommand("cat /etc/board.json");
+  if (!boardJsonResult.stdout || boardJsonResult.code !== 0) {
+    throw new Error("Failed to verify /etc/board.json file.");
+  }
+  const boardJson = boardJsonSchema.parse(JSON.parse(boardJsonResult.stdout));
+  return boardJson;
+};
+
+const wirelessConfig = z.object({
+  values: z.record(
+    z.object({
+      ".type": z.enum(["wifi-device"]),
+      ".name": z.string(),
+      type: z.enum(["mac80211"]),
+      path: z.string(),
+      channel: z.string(),
+      band: z.enum(["2g", "5g", "6g"]),
+      htmode: z.enum(["HT20", "HT40", "VHT20", "VHT40", "VHT80"]),
+    })
+  ),
+});
+
+export const getRadios = async (ssh: NodeSSH) => {
+  const wirelessStatus = await ssh.execCommand(
+    `ubus call uci get '{"config": "wireless", "type": "wifi-device"}'`
+  );
+  if (!wirelessStatus.stdout || wirelessStatus.code !== 0) {
+    if (wirelessStatus.stderr === "Command failed: Not found") {
+      return [];
+    } else {
+      console.error(wirelessStatus.stderr);
+      throw new Error("Failed to get wireless status");
+    }
+  }
+  const parsedWirelessStatus = wirelessConfig.parse(
+    JSON.parse(wirelessStatus.stdout)
+  );
+  const radios = Object.values(parsedWirelessStatus.values);
+  return radios;
+};
+
+export const getDeviceVersion = async (ssh: NodeSSH) => {
+  const versionResult = await ssh.execCommand("cat /etc/openwrt_release");
+  const lines = versionResult.stdout.split("\n");
+  const distribReleaseLine = lines.find((line) =>
+    line.startsWith("DISTRIB_RELEASE")
+  );
+  if (!distribReleaseLine) {
+    throw new Error(
+      "Failed to determine device version in /etc/openwrt_release"
+    );
+  }
+  const version = distribReleaseLine
+    .split("=")[1]
+    .replace(`'`, "")
+    .replace(`'`, "");
+  return version;
 };

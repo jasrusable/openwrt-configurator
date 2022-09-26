@@ -18,8 +18,10 @@ export const deviceSchemaSchema = z.object({
         name: z.string(),
         type: z.enum(["mac80211"]),
         path: z.string(),
-        band: z.enum(["2g", "5g"]),
-        htmodes: z.array(z.enum(["HT20", "VHT80"])),
+        band: z.enum(["2g", "5g", "6g"]),
+        htmodes: z.array(
+          z.enum(["HT20", "HT40", "VHT20", "VHT40", "VHT80", "VHT160"])
+        ),
       })
     )
     .optional(),

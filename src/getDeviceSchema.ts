@@ -1,7 +1,7 @@
 import { NodeSSH } from "node-ssh";
 import { DeviceSchema, deviceSchemaSchema } from "./deviceSchema";
 import { ONCDeviceConfig } from "./oncConfigSchema";
-import { getBoardJson } from "./provisionOpenWRTDevice";
+import { getBoardJson, getRadios } from "./utils";
 
 export const getDeviceSchema = async ({
   deviceConfig,
@@ -15,7 +15,10 @@ export const getDeviceSchema = async ({
     password: deviceConfig.provisioning_config?.ssh_auth.password,
   });
 
-  const boardJson = await getBoardJson(connectedSsh);
+  const [boardJson, radios] = await Promise.all([
+    getBoardJson(connectedSsh),
+    getRadios(connectedSsh),
+  ]);
 
   const isSwConfig = !!boardJson.switch;
 
@@ -52,6 +55,17 @@ export const getDeviceSchema = async ({
             } as const;
           }),
         ],
+    ...(radios.length > 0 && {
+      radios: radios.map((radio) => {
+        return {
+          name: radio[".name"],
+          type: radio.type,
+          path: radio.path,
+          band: radio.band,
+          htmodes: [radio.htmode],
+        };
+      }),
+    }),
   };
 
   const deviceSchema = deviceSchemaSchema.parse(deviceSchemaTmp);
@@ -66,7 +80,6 @@ export const getDeviceSchema = async ({
     const cpuPort = (deviceSchema.ports || []).find(
       (port) => !!port.swConfigCpuName
     );
-
     if (!cpuPort) {
       throw new Error(
         `Found no CPU port for swConfig device ${deviceConfig.deviceModelId} at ${deviceConfig.ipaddr}. Expected at least one CPU port.`
