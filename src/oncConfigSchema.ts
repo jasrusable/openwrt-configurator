@@ -14,7 +14,7 @@ export const oncConfigSchema = z
       z
         .object({
           enabled: z.boolean().optional(),
-          deviceModelId: z.string(),
+          device_model_id: z.string(),
           version: z.string(),
           roles: z.array(z.enum(["router", "ap"])),
           ipaddr: z.string().optional(),

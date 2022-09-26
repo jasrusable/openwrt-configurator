@@ -1,7 +1,7 @@
 import { NodeSSH } from "node-ssh";
 import { DeviceSchema, deviceSchemaSchema } from "./deviceSchema";
 import { ONCDeviceConfig } from "./oncConfigSchema";
-import { getBoardJson, getRadios } from "./utils";
+import { getBoardJson, getRadios, parseSchema } from "./utils";
 
 export const getDeviceSchema = async ({
   deviceConfig,
@@ -23,7 +23,7 @@ export const getDeviceSchema = async ({
   const isSwConfig = !!boardJson.switch;
 
   const deviceSchemaTmp: DeviceSchema = {
-    name: deviceConfig.deviceModelId,
+    name: deviceConfig.device_model_id,
     swConfig: isSwConfig,
     ports: isSwConfig
       ? (boardJson.switch || {}).switch0.ports.map((port) => {
@@ -68,11 +68,11 @@ export const getDeviceSchema = async ({
     }),
   };
 
-  const deviceSchema = deviceSchemaSchema.parse(deviceSchemaTmp);
+  const deviceSchema = parseSchema(deviceSchemaSchema, deviceSchemaTmp);
 
   if ((deviceSchema.ports || []).length === 0) {
     throw new Error(
-      `Found no ports for ${deviceConfig.deviceModelId} at ${deviceConfig.ipaddr}. Expected at least one port.`
+      `Found no ports for ${deviceConfig.device_model_id} at ${deviceConfig.ipaddr}. Expected at least one port.`
     );
   }
 
@@ -82,7 +82,7 @@ export const getDeviceSchema = async ({
     );
     if (!cpuPort) {
       throw new Error(
-        `Found no CPU port for swConfig device ${deviceConfig.deviceModelId} at ${deviceConfig.ipaddr}. Expected at least one CPU port.`
+        `Found no CPU port for swConfig device ${deviceConfig.device_model_id} at ${deviceConfig.ipaddr}. Expected at least one CPU port.`
       );
     }
   }

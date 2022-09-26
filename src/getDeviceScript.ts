@@ -1,6 +1,6 @@
 import { DeviceSchema } from "./deviceSchema";
 import { getLuciCommands } from "./getLuciCommands";
-import { getOpenWRTConfig } from "./getOpenWRTConfig";
+import { getOpenWrtConfig } from "./getOpenWrtConfig";
 import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
 
 export const resetCommands = [
@@ -42,7 +42,7 @@ export const getDeviceScript = ({
   deviceConfig: ONCDeviceConfig;
   deviceSchema: DeviceSchema;
 }) => {
-  const openWRTConfig = getOpenWRTConfig({
+  const openWRTConfig = getOpenWrtConfig({
     oncConfig: oncConfig,
     deviceConfig,
     deviceSchema,

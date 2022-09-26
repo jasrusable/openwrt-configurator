@@ -1,9 +1,9 @@
-import { OpenWRTConfig } from "./openWRTConfigSchema";
+import { OpenWrtConfig } from "./openWRTConfigSchema";
 
 export const getLuciCommands = ({
   openWRTConfig,
 }: {
-  openWRTConfig: OpenWRTConfig;
+  openWRTConfig: OpenWrtConfig;
 }) => {
   const configKeys = Object.keys(openWRTConfig);
   const commands = configKeys.reduce<string[]>((acc, configKey) => {

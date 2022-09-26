@@ -1,24 +1,22 @@
-import fs from "fs";
-import { deviceSchemaSchema } from "../src/deviceSchema";
+import { readFileSync } from "fs";
 import { ONCConfig, oncConfigSchema } from "../src/oncConfigSchema";
 import { getDeviceScript } from "../src/getDeviceScript";
 import { program } from "commander";
 import { provisionConfig } from "../src/provisionConfig";
 import { getDeviceSchema } from "../src/getDeviceSchema";
+import { parseSchema } from "../src/utils";
 
 export const main = async () => {
   program.name("ONC").description("Open Network Controller").version("0.0.1");
 
   program
     .command("provision")
-    .description("Provision configuration to devices.")
+    .description("provision configuration to devices")
     .requiredOption("-c, --config <config>")
     .action(async (args) => {
-      const oncConfigString = fs.readFileSync(args.config, "utf-8");
-      const oncConfig: ONCConfig = oncConfigSchema.parse(
-        JSON.parse(oncConfigString)
-      );
-
+      const oncConfigString = readFileSync(args.config, "utf-8");
+      const oncJson = JSON.parse(oncConfigString);
+      const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
       const deviceConfigs = oncConfig.devices.filter(
         (device) => device.enabled !== false
       );
@@ -34,14 +32,13 @@ export const main = async () => {
     });
 
   program
-    .command("uci-commands")
-    .description("Print uci commands")
+    .command("print-uci-commands")
+    .description("print uci commands for configuration")
     .requiredOption("-c, --config <config>")
     .action(async (args) => {
-      const oncConfigString = fs.readFileSync(args.config, "utf-8");
-      const oncConfig: ONCConfig = oncConfigSchema.parse(
-        JSON.parse(oncConfigString)
-      );
+      const oncConfigString = readFileSync(args.config, "utf-8");
+      const oncJson = JSON.parse(oncConfigString);
+      const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
       const deviceConfigs = oncConfig.devices.filter(
         (device) => device.enabled !== false
       );
@@ -55,11 +52,11 @@ export const main = async () => {
 
       for (const deviceConfig of deviceConfigs) {
         const deviceSchema = deviceSchemas.find(
-          (schema) => schema.name === deviceConfig.deviceModelId
+          (schema) => schema.name === deviceConfig.device_model_id
         );
         if (!deviceSchema) {
           throw new Error(
-            `Device schema not found for device model: ${deviceConfig.deviceModelId}`
+            `Device schema not found for device model: ${deviceConfig.device_model_id}`
           );
         }
         const commands = getDeviceScript({

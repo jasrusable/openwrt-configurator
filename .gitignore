@@ -104,3 +104,7 @@ dist
 .tern-port
 
 config.json
+
+artifacts
+
+.DS_store

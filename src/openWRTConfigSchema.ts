@@ -170,7 +170,7 @@ export const dhcpDnsmasqSchema = z.object({
   server: z.array(z.string()).optional(),
 });
 
-export const openWRTConfigSchema = z.object({
+export const openWrtConfigSchema = z.object({
   system: z.object({
     system: z.array(
       z
@@ -313,7 +313,7 @@ export const openWRTConfigSchema = z.object({
     .optional(),
 });
 
-export type OpenWRTConfig = z.infer<typeof openWRTConfigSchema>;
+export type OpenWrtConfig = z.infer<typeof openWrtConfigSchema>;
 
 // const parser = ({
 //   configSchema,

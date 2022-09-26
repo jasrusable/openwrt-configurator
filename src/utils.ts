@@ -1,6 +1,6 @@
 import axios from "axios";
 import { NodeSSH } from "node-ssh";
-import { z } from "zod";
+import { z, ZodError, ZodSchema } from "zod";
 
 const profileSchema = z.object({
   id: z.string(),
@@ -99,11 +99,14 @@ export const getBoardJson = async (ssh: NodeSSH) => {
   if (!boardJsonResult.stdout || boardJsonResult.code !== 0) {
     throw new Error("Failed to verify /etc/board.json file.");
   }
-  const boardJson = boardJsonSchema.parse(JSON.parse(boardJsonResult.stdout));
+  const boardJson = parseSchema(
+    boardJsonSchema,
+    JSON.parse(boardJsonResult.stdout)
+  );
   return boardJson;
 };
 
-const wirelessConfig = z.object({
+const wirelessConfigSchema = z.object({
   values: z.record(
     z.object({
       ".type": z.enum(["wifi-device"]),
@@ -129,7 +132,8 @@ export const getRadios = async (ssh: NodeSSH) => {
       throw new Error("Failed to get wireless status");
     }
   }
-  const parsedWirelessStatus = wirelessConfig.parse(
+  const parsedWirelessStatus = parseSchema(
+    wirelessConfigSchema,
     JSON.parse(wirelessStatus.stdout)
   );
   const radios = Object.values(parsedWirelessStatus.values);
@@ -152,4 +156,14 @@ export const getDeviceVersion = async (ssh: NodeSSH) => {
     .replace(`'`, "")
     .replace(`'`, "");
   return version;
+};
+
+export const parseSchema = <D>(schema: ZodSchema<D>, data: any) => {
+  try {
+    return schema.parse(data);
+  } catch (e: any) {
+    console.error(`Failed to parse schema.`);
+    console.error(e?.issues);
+    throw new Error(`Failed to parse schema.`);
+  }
 };

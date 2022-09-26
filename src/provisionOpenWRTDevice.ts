@@ -1,4 +1,4 @@
-import { OpenWRTConfig } from "./openWRTConfigSchema";
+import { OpenWrtConfig } from "./openWRTConfigSchema";
 import { NodeSSH } from "node-ssh";
 import { getLuciCommands } from "./getLuciCommands";
 import { resetCommands, revertCommands } from "./getDeviceScript";
@@ -18,7 +18,7 @@ export const provisionOpenWRTDevice = async ({
     password: string;
   };
   ipAddress: string;
-  openWRTConfig: OpenWRTConfig;
+  openWRTConfig: OpenWrtConfig;
 }) => {
   console.log(`Provisioning ${auth.username}@${ipAddress}...`);
   const ssh = new NodeSSH();

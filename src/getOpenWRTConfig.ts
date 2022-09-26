@@ -1,9 +1,9 @@
 import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
-import semver from "semver";
-import { OpenWRTConfig, openWRTConfigSchema } from "./openWRTConfigSchema";
+import { OpenWrtConfig, openWrtConfigSchema } from "./openWRTConfigSchema";
+import { parseSchema } from "./utils";
 
-export const getOpenWRTConfig = ({
+export const getOpenWrtConfig = ({
   oncConfig,
   deviceConfig,
   deviceSchema,
@@ -25,7 +25,7 @@ export const getOpenWRTConfig = ({
 
   const radios = deviceSchema.radios || [];
 
-  const openWRTConfig: OpenWRTConfig = {
+  const openWrtConfig: OpenWrtConfig = {
     system: {
       system: [
         {
@@ -191,7 +191,7 @@ export const getOpenWRTConfig = ({
     }),
   };
 
-  const parsedOpenWRTConfig = openWRTConfigSchema.parse(openWRTConfig);
+  const parsedOpenWRTConfig = parseSchema(openWrtConfigSchema, openWrtConfig);
 
   return parsedOpenWRTConfig;
 };
