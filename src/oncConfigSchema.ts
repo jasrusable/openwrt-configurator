@@ -5,8 +5,171 @@ import {
   firewallForwardingSchema,
   firewallRuleSchema,
   firewallZoneSchema,
+  networkBridgeVlanSchema,
+  networkDeviceSchema,
+  networkInterfaceSchema,
+  networkSwitchSchema,
+  networkSwitchVlanSchema,
+  systemSystemSchema,
   wirelessWifiIfaceSchema,
 } from "./openWrtConfigSchema";
+
+const extendedNetworkBridgeVlanSchema = networkBridgeVlanSchema.extend({
+  ports: z.union([z.array(z.string()), z.enum(["*", "*t"])]),
+});
+
+const targetsSchema = z.union([
+  z.enum(["*"]),
+  z.array(
+    z.object({
+      opt: z.enum(["sw_config"]).optional(),
+      tag: z.string().optional(),
+      value: z.union([z.enum(["*"]), z.boolean(), z.array(z.string())]),
+    })
+  ),
+]);
+
+export type Targets = z.infer<typeof targetsSchema>;
+
+const getExtensionSchema = (schema?: z.ZodObject<any>) => {
+  const extensionSchema = z.object({
+    targets: targetsSchema.optional(),
+    target_overrides: z
+      .array(
+        z.object({
+          targets: targetsSchema,
+          overrides: schema ? schema.partial() : z.any(),
+        })
+      )
+      .optional(),
+  });
+
+  return extensionSchema;
+};
+
+const temp = getExtensionSchema();
+
+export type ExtensionSchema = z.infer<typeof temp>;
+
+const getTargetsExtension = (schema?: z.ZodObject<any>) => ({
+  ".": getExtensionSchema(schema).optional(),
+});
+
+const networkSchema = z.object({
+  switch: z
+    .array(
+      networkSwitchSchema
+        .extend(getTargetsExtension(networkSwitchSchema))
+        .strict()
+    )
+    .optional(),
+  switch_vlan: z
+    .array(
+      networkSwitchVlanSchema
+        .extend(getTargetsExtension(networkSwitchVlanSchema))
+        .strict()
+    )
+    .optional(),
+  device: z
+    .array(
+      networkDeviceSchema
+        .extend({ ports: z.union([z.enum(["*"]), z.array(z.string())]) })
+        .extend(
+          getTargetsExtension(
+            networkDeviceSchema.extend({
+              ports: z.union([z.enum(["*"]), z.string(z.string())]),
+            })
+          )
+        )
+        .strict()
+    )
+    .optional(),
+  "bridge-vlan": z
+    .array(
+      extendedNetworkBridgeVlanSchema
+        .partial()
+        .extend(getTargetsExtension(extendedNetworkBridgeVlanSchema))
+        .strict()
+    )
+    .optional(),
+  interface: z.array(
+    networkInterfaceSchema
+      .partial()
+      .extend(getTargetsExtension(networkInterfaceSchema))
+      .strict()
+  ),
+});
+
+export const configConfigSchema = z.object({
+  system: z
+    .object({
+      system: z.array(
+        z
+          .object({
+            timezone: z.string(),
+          })
+          .strict()
+          .extend(
+            getTargetsExtension(systemSystemSchema.omit({ hostname: true }))
+          )
+      ),
+    })
+    .strict(),
+  network: networkSchema.extend(getTargetsExtension(networkSchema)).strict(),
+  firewall: z
+    .object({
+      defaults: z.array(
+        firewallDefaultSchema
+          .partial()
+          .extend(getTargetsExtension(firewallDefaultSchema))
+          .strict()
+      ),
+      zones: z.array(
+        firewallZoneSchema
+          .partial()
+          .extend(getTargetsExtension(firewallZoneSchema))
+          .strict()
+      ),
+      forwardings: z.array(
+        firewallForwardingSchema
+          .partial()
+          .extend(getTargetsExtension(firewallForwardingSchema))
+          .strict()
+      ),
+      rules: z.array(
+        firewallRuleSchema
+          .partial()
+          .extend(getTargetsExtension(firewallRuleSchema))
+          .strict()
+      ),
+    })
+    .extend(getTargetsExtension()),
+  dhcp: z
+    .object({
+      dnsmasq: z.array(
+        dhcpDnsmasqSchema
+          .partial()
+          .extend(getTargetsExtension(dhcpDnsmasqSchema))
+          .strict()
+      ),
+    })
+    .partial()
+    .extend(getTargetsExtension())
+    .strict(),
+  wireless: z
+    .object({
+      "wifi-iface": z.array(
+        wirelessWifiIfaceSchema
+          .partial()
+          .extend(getTargetsExtension(wirelessWifiIfaceSchema))
+          .omit({ device: true })
+          .strict()
+      ),
+    })
+    .partial()
+    .extend(getTargetsExtension())
+    .strict(),
+});
 
 export const oncConfigSchema = z
   .object({
@@ -14,10 +177,16 @@ export const oncConfigSchema = z
       z
         .object({
           enabled: z.boolean().optional(),
-          device_model_id: z.string(),
+          model_id: z.string(),
           version: z.string(),
-          roles: z.array(z.enum(["router", "ap"])),
-          ipaddr: z.string().optional(),
+          ipaddr: z.string(),
+          hostname: z.string(),
+          tags: z.array(
+            z.object({
+              name: z.string(),
+              value: z.array(z.string()),
+            })
+          ),
           provisioning_config: z
             .object({
               ssh_auth: z.object({
@@ -26,67 +195,10 @@ export const oncConfigSchema = z
               }),
             })
             .optional(),
-          system: z.object({
-            hostname: z.string(),
-          }),
         })
         .strict()
     ),
-    config: z
-      .object({
-        system: z
-          .object({
-            timezone: z.string(),
-          })
-          .strict(),
-        firewall: z
-          .object({
-            defaults: firewallDefaultSchema.strict(),
-            zones: z.array(firewallZoneSchema.strict()),
-            forwardings: z.array(firewallForwardingSchema.strict()),
-            rules: z.array(firewallRuleSchema.strict()),
-          })
-          .strict(),
-        dhcp: z.object({
-          dnsmasq: dhcpDnsmasqSchema.strict(),
-        }),
-        network: z
-          .object({
-            networks: z.array(
-              z
-                .object({
-                  name: z.string(),
-                  router: z
-                    .object({
-                      device: z.string().optional(),
-                      proto: z.enum(["static", "dhcp", "pppoe"]),
-                      ipaddr: z.string().optional(),
-                      netmask: z.string().optional(),
-                    })
-                    .strict()
-                    .optional(),
-                  non_router: z
-                    .object({
-                      proto: z.enum(["dhcp"]),
-                    })
-                    .strict()
-                    .optional(),
-                  vlan: z.number().optional(),
-                  vlan_untagged: z.boolean().optional(),
-                })
-                .strict()
-            ),
-          })
-          .strict(),
-        wireless: z
-          .object({
-            "wifi-iface": z.array(
-              wirelessWifiIfaceSchema.omit({ device: true }).strict()
-            ),
-          })
-          .strict(),
-      })
-      .strict(),
+    config: configConfigSchema,
   })
   .strict();
 

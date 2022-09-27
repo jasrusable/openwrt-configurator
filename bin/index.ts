@@ -52,11 +52,11 @@ export const main = async () => {
 
       for (const deviceConfig of deviceConfigs) {
         const deviceSchema = deviceSchemas.find(
-          (schema) => schema.name === deviceConfig.device_model_id
+          (schema) => schema.name === deviceConfig.model_id
         );
         if (!deviceSchema) {
           throw new Error(
-            `Device schema not found for device model: ${deviceConfig.device_model_id}`
+            `Device schema not found for device model: ${deviceConfig.model_id}`
           );
         }
         const commands = getDeviceScript({
@@ -64,7 +64,7 @@ export const main = async () => {
           deviceConfig: deviceConfig,
           deviceSchema,
         });
-        console.log(`#device ${deviceConfig.system.hostname}`);
+        console.log(`#device ${deviceConfig.hostname}`);
         console.log(commands.join("\n"));
       }
     });

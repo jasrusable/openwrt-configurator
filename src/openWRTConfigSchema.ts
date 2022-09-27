@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { firewallProtocols, firewallTargets, icmpTypes } from "./openwrtValues";
+import { firewallProtocols, firewallTargets, icmpTypes } from "./openWrtValues";
 
 const schemaSchema = z.array(
   z.object({
@@ -64,8 +64,8 @@ const schema: SchemaSchema = [
 ];
 
 export const systemSystemSchema = z.object({
-  hostname: z.string(),
-  timezone: z.string(),
+  hostname: z.string().optional(),
+  timezone: z.string().optional(),
 });
 
 export const networkSwitchSchema = z.object({
@@ -93,8 +93,9 @@ export const networkBridgeVlanSchema = z.object({
 });
 
 export const networkInterfaceSchema = z.object({
+  name: z.string(),
   device: z.string(),
-  proto: z.enum(["static", "dhcp"]),
+  proto: z.enum(["static", "dhcp", "pppoe"]),
   ipaddr: z.string().optional(),
   netmask: z.string().optional(),
 });

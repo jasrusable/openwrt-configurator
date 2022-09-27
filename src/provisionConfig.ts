@@ -17,11 +17,11 @@ export const provisionConfig = async ({
   for (const deviceConfig of enabledDeviceConfigs) {
     if (deviceConfig.ipaddr && deviceConfig.provisioning_config?.ssh_auth) {
       const deviceSchema = deviceSchemas.find(
-        (schema) => schema.name === deviceConfig.device_model_id
+        (schema) => schema.name === deviceConfig.model_id
       );
       if (!deviceSchema) {
         throw new Error(
-          `Device schema not found for device model: ${deviceConfig.device_model_id}`
+          `Device schema not found for device model: ${deviceConfig.model_id}`
         );
       }
 
@@ -32,7 +32,7 @@ export const provisionConfig = async ({
       });
 
       await provisionOpenWRTDevice({
-        deviceId: deviceConfig.device_model_id,
+        deviceId: deviceConfig.model_id,
         deviceVersion: deviceConfig.version,
         ipAddress: deviceConfig.ipaddr,
         auth: deviceConfig.provisioning_config.ssh_auth,

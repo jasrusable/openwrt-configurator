@@ -163,7 +163,7 @@ export const parseSchema = <D>(schema: ZodSchema<D>, data: any) => {
     return schema.parse(data);
   } catch (e: any) {
     console.error(`Failed to parse schema.`);
-    console.error(e?.issues);
+    console.error(JSON.stringify(e?.issues, null, 4));
     throw new Error(`Failed to parse schema.`);
   }
 };
