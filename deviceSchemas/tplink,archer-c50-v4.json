@@ -1,0 +1,28 @@
+{
+  "name": "tplink,archer-c50-v4",
+  "swConfig": true,
+  "ports": [
+    { "name": "eth0", "defaultRole": "wan" },
+    { "name": "eth1", "defaultRole": "lan" },
+    { "name": "eth2", "defaultRole": "lan" },
+    { "name": "eth3", "defaultRole": "lan" },
+    { "name": "eth4", "defaultRole": "lan" },
+    { "name": "eth6", "swConfigCpuName": "eth0" }
+  ],
+  "radios": [
+    {
+      "name": "radio0",
+      "type": "mac80211",
+      "path": "platform/10300000.wmac",
+      "band": "2g",
+      "htmodes": ["HT20"]
+    },
+    {
+      "name": "radio1",
+      "type": "mac80211",
+      "path": "pci0000:00/0000:00:00.0/0000:01:00.0",
+      "band": "5g",
+      "htmodes": ["VHT80"]
+    }
+  ]
+}
