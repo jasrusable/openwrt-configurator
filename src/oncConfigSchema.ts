@@ -51,6 +51,14 @@ const temp = getExtensionSchema();
 
 export type ExtensionSchema = z.infer<typeof temp>;
 
+const extendedNetworkDeviceSchema = networkDeviceSchema.extend({
+  ports: z.union([z.enum(["*", "&*"]), z.array(z.string())]),
+});
+
+const extendedNetworkSwitchVlanSchema = networkSwitchVlanSchema.extend({
+  ports: z.union([z.enum(["*", "*t", "&*", "&*t"]), z.array(z.string())]),
+});
+
 const getTargetsExtension = (schema?: z.ZodObject<any>) => ({
   ".": getExtensionSchema(schema).optional(),
 });
@@ -65,22 +73,17 @@ const networkSchema = z.object({
     .optional(),
   switch_vlan: z
     .array(
-      networkSwitchVlanSchema
-        .extend(getTargetsExtension(networkSwitchVlanSchema))
+      extendedNetworkSwitchVlanSchema
+        .partial()
+        .extend(getTargetsExtension(extendedNetworkSwitchVlanSchema))
         .strict()
     )
     .optional(),
   device: z
     .array(
-      networkDeviceSchema
-        .extend({ ports: z.union([z.enum(["*"]), z.array(z.string())]) })
-        .extend(
-          getTargetsExtension(
-            networkDeviceSchema.extend({
-              ports: z.union([z.enum(["*"]), z.string(z.string())]),
-            })
-          )
-        )
+      extendedNetworkDeviceSchema
+        .partial()
+        .extend(getTargetsExtension(extendedNetworkDeviceSchema))
         .strict()
     )
     .optional(),

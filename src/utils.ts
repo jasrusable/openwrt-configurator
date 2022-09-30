@@ -1,6 +1,8 @@
 import axios from "axios";
 import { NodeSSH } from "node-ssh";
 import { z, ZodError, ZodSchema } from "zod";
+import { DeviceSchema } from "./deviceSchema";
+import { ONCConfig } from "./oncConfigSchema";
 
 const profileSchema = z.object({
   id: z.string(),
@@ -166,4 +168,56 @@ export const parseSchema = <D>(schema: ZodSchema<D>, data: any) => {
     console.error(JSON.stringify(e?.issues, null, 4));
     throw new Error(`Failed to parse schema.`);
   }
+};
+
+export const getNetworkDevices = ({
+  oncConfigConfig,
+  deviceSchema,
+}: {
+  oncConfigConfig: ONCConfig["config"];
+  deviceSchema: DeviceSchema;
+}) => {
+  const ports = deviceSchema.ports || [];
+  const cpuPort = ports.find((port) => !!port.swConfigCpuName);
+
+  const expectCpuPort = () => {
+    if (!cpuPort?.swConfigCpuName) {
+      throw new Error(`CPU port not defined`);
+    }
+
+    return cpuPort as { name: string; swConfigCpuName: string };
+  };
+
+  const schema = z.object({
+    name: z.string(),
+    type: z.enum(["network", "vlan", "bridge"]),
+  });
+
+  const allDevices = [
+    ...(!deviceSchema.swConfig
+      ? ports.map((port) => ({ name: port.name, type: "network" }))
+      : []),
+    ...(oncConfigConfig.network.device || []).map((device) => ({
+      name: device.name,
+      type: device.type,
+    })),
+    ...(oncConfigConfig.network["bridge-vlan"] || []).map((bridgeVlan) => ({
+      name: `${bridgeVlan.device}.${bridgeVlan.vlan}`,
+      type: "vlan",
+    })),
+    ...(oncConfigConfig.network["switch_vlan"] || []).map((switchVlan) => {
+      const cpuPort = expectCpuPort();
+      return {
+        name: `${cpuPort.swConfigCpuName}.${switchVlan.vlan}`,
+        type: "network",
+      };
+    }),
+    ...(deviceSchema.swConfig
+      ? [{ name: expectCpuPort().swConfigCpuName, type: "network" }]
+      : []),
+  ];
+
+  const parsedDevices = allDevices.map((device) => parseSchema(schema, device));
+
+  return parsedDevices;
 };
