@@ -1,6 +1,6 @@
 import axios from "axios";
 import { NodeSSH } from "node-ssh";
-import { z, ZodError, ZodSchema } from "zod";
+import { z, ZodError, ZodObject, ZodRawShape, ZodSchema } from "zod";
 import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig } from "./oncConfigSchema";
 
@@ -220,4 +220,72 @@ export const getNetworkDevices = ({
   const parsedDevices = allDevices.map((device) => parseSchema(schema, device));
 
   return parsedDevices;
+};
+
+export const targetsSchema = z.union([
+  z.enum(["*"]),
+  z.array(
+    z.object({
+      opt: z.enum(["sw_config"]).optional(),
+      tag: z.string().optional(),
+      value: z.union([z.enum(["*"]), z.boolean(), z.array(z.string())]),
+    })
+  ),
+]);
+
+export type Targets = z.infer<typeof targetsSchema>;
+
+export const getExtensionSchema = (schema?: z.ZodObject<any>) => {
+  const extensionSchema = z.object({
+    targets: targetsSchema.optional(),
+    target_overrides: z
+      .array(
+        z.object({
+          targets: targetsSchema,
+          overrides: schema ? schema.partial() : z.any(),
+        })
+      )
+      .optional(),
+  });
+
+  return extensionSchema;
+};
+
+const temp = getExtensionSchema();
+
+export type ExtensionSchema = z.infer<typeof temp>;
+
+export const getTargetsExtension = (schema?: z.ZodObject<any>) => ({
+  ".": getExtensionSchema(schema).optional(),
+});
+
+export const sectionSchema = <T extends ZodRawShape>(schema: ZodObject<T>) => {
+  return z
+    .array(
+      z
+        .object({
+          name: z.string().optional(),
+          properties: schema.strict(),
+        })
+        .strict()
+    )
+    .optional();
+};
+
+export const oncSectionSchema = <T extends ZodRawShape>(
+  schema: ZodObject<T>
+) => {
+  return z
+    .array(schema.partial().extend(getTargetsExtension(schema)).strict())
+    .optional();
+};
+
+export const configSchema = <T extends ZodRawShape>(schema: ZodObject<T>) => {
+  return schema.optional();
+};
+
+export const makeOncConfigSchema = <T extends ZodRawShape>(
+  schema: ZodObject<T>
+) => {
+  return schema.extend(getTargetsExtension(schema)).strict();
 };

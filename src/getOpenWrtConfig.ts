@@ -1,14 +1,8 @@
 import { DeviceSchema } from "./deviceSchema";
-import {
-  configConfigSchema,
-  ExtensionSchema,
-  ONCConfig,
-  ONCDeviceConfig,
-  Targets,
-} from "./oncConfigSchema";
+import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
 import { OpenWrtConfig, openWrtConfigSchema } from "./openWrtConfigSchema";
-import { omit } from "lodash";
 import { getNetworkDevices, parseSchema } from "./utils";
+import { resolveOncConfig } from "./resolveOncConfig";
 
 export const getOpenWrtConfig = ({
   oncConfig,
@@ -20,11 +14,8 @@ export const getOpenWrtConfig = ({
   deviceSchema: DeviceSchema;
 }) => {
   const useSwConfig = deviceSchema.swConfig;
-
   const ports = deviceSchema.ports || [];
-
   const cpuPort = ports.find((port) => !!port.swConfigCpuName);
-
   const expectCpuPort = () => {
     if (!cpuPort?.swConfigCpuName) {
       throw new Error(`CPU port not defined`);
@@ -32,81 +23,14 @@ export const getOpenWrtConfig = ({
 
     return cpuPort as { name: string; swConfigCpuName: string };
   };
-
   const physicalPorts = ports.filter((port) => !port.swConfigCpuName);
-
   const radios = deviceSchema.radios || [];
 
-  const targetMatches = (targets?: Targets) => {
-    if (!targets) {
-      return true;
-    }
-
-    if (typeof targets === "string") {
-      return targets === "*";
-    }
-
-    const tagMatches =
-      Array.isArray(targets) &&
-      targets.find((target) =>
-        deviceConfig.tags.find((tag) =>
-          tag.name === target.tag &&
-          typeof target.value === "string" &&
-          target.value === "*"
-            ? true
-            : Array.isArray(target.value)
-            ? !!target.value.find((val) => tag.value.includes(val))
-            : false
-        )
-      );
-    if (tagMatches) {
-      return true;
-    }
-
-    const optMatches =
-      Array.isArray(targets) &&
-      targets.find(
-        (target) => target.opt === "sw_config" && target.value === useSwConfig
-      );
-
-    if (optMatches) {
-      return true;
-    }
-
-    return false;
-  };
-
-  const applyConfig = <S extends Record<string, any>>(section: S) => {
-    const sectionConfig = section["."] as ExtensionSchema | undefined;
-    const targets = sectionConfig?.targets;
-    const matches = targetMatches(targets);
-    const overrides = (sectionConfig?.target_overrides || [])
-      .filter((override) => {
-        return targetMatches(override.targets);
-      })
-      .reduce((acc, override) => {
-        return { ...acc, ...override.overrides };
-      }, {});
-    return matches ? omit({ ...section, ...overrides }, ".") : {};
-  };
-
-  const resolvedOncConfig = Object.keys(oncConfig.config).reduce(
-    (config, configKey) => {
-      const a = applyConfig((oncConfig.config as any)[configKey]);
-      const resolvedConfig = Object.keys(a).reduce((section, sectionKey) => {
-        const sections: any[] = (a as any)[sectionKey] || [];
-        const resolvedSections = sections
-          .map((section) => {
-            const resolvedSection = applyConfig(section);
-            return resolvedSection;
-          })
-          .filter((section) => Object.keys(section).length > 0);
-        return { ...section, [sectionKey]: resolvedSections };
-      }, {});
-      return { ...config, [configKey]: resolvedConfig };
-    },
-    {}
-  ) as ONCConfig["config"];
+  const resolvedOncConfig = resolveOncConfig({
+    deviceConfig,
+    deviceSchema,
+    oncConfig,
+  });
 
   const bridgedDevices = (resolvedOncConfig.network.device || [])
     .filter((device) => device.type === "bridge")
@@ -264,8 +188,6 @@ export const getOpenWrtConfig = ({
     },
     {}
   ) as OpenWrtConfig;
-
-  // console.log(JSON.stringify(resolvedOpenWrtConfig.network, null, 4));
 
   const openWrtConfig = parseSchema(openWrtConfigSchema, resolvedOpenWrtConfig);
 

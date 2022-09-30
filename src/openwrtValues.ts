@@ -30,5 +30,3 @@ export const icmpTypes = [
   "router-advertisement",
   "neighbour-advertisement",
 ] as const;
-
-export const ports = z.union([z.array(z.number()), z.string()]);
