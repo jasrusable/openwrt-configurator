@@ -8,15 +8,19 @@ import {
 import { oncSystemSystemSchema, systemSystemSchema } from "./system";
 
 export const systemSchema = configSchema(
-  z.object({
-    system: sectionSchema(systemSystemSchema),
-  })
+  z
+    .object({
+      system: sectionSchema(systemSystemSchema),
+    })
+    .passthrough()
 );
 
 export const oncSystemSchema = makeOncConfigSchema(
-  z.object({
-    system: oncSectionSchema(oncSystemSystemSchema),
-  })
+  z
+    .object({
+      system: oncSectionSchema(oncSystemSystemSchema),
+    })
+    .passthrough()
 );
 
 export const systemResetCommands = [

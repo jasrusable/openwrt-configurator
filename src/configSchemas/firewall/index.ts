@@ -14,21 +14,25 @@ import { firewallRuleSchema, oncFirewallRuleSchema } from "./rule";
 import { firewallZoneSchema, oncFirewallZoneSchema } from "./zone";
 
 export const firewallSchema = configSchema(
-  z.object({
-    defaults: sectionSchema(firewallDefaultsSchema),
-    zone: sectionSchema(firewallZoneSchema),
-    forwarding: sectionSchema(firewallForwardingSchema),
-    rule: sectionSchema(firewallRuleSchema),
-  })
+  z
+    .object({
+      defaults: sectionSchema(firewallDefaultsSchema),
+      zone: sectionSchema(firewallZoneSchema),
+      forwarding: sectionSchema(firewallForwardingSchema),
+      rule: sectionSchema(firewallRuleSchema),
+    })
+    .passthrough()
 );
 
 export const oncFirewallSchema = makeOncConfigSchema(
-  z.object({
-    defaults: oncSectionSchema(oncFirewallDefaultsSchema),
-    zone: oncSectionSchema(oncFirewallZoneSchema),
-    forwarding: oncSectionSchema(oncFirewallForwardingSchema),
-    rule: oncSectionSchema(oncFirewallRuleSchema),
-  })
+  z
+    .object({
+      defaults: oncSectionSchema(oncFirewallDefaultsSchema),
+      zone: oncSectionSchema(oncFirewallZoneSchema),
+      forwarding: oncSectionSchema(oncFirewallForwardingSchema),
+      rule: oncSectionSchema(oncFirewallRuleSchema),
+    })
+    .passthrough()
 );
 
 export const firewallResetCommands = [

@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const networkDeviceSchema = z.object({
   name: z.string(),
-  type: z.enum(["bridge"]),
+  type: z.union([z.enum(["bridge"]), z.string()]),
   ports: z.array(z.string()),
 });
 

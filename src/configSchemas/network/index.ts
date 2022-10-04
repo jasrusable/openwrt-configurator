@@ -18,23 +18,27 @@ import {
 } from "./switchVlan";
 
 export const networkSchema = configSchema(
-  z.object({
-    switch: sectionSchema(networkSwitchSchema),
-    switch_vlan: sectionSchema(networkSwitchVlanSchema),
-    device: sectionSchema(networkDeviceSchema),
-    "bridge-vlan": sectionSchema(networkBridgeVlanSchema),
-    interface: sectionSchema(networkInterfaceSchema),
-  })
+  z
+    .object({
+      switch: sectionSchema(networkSwitchSchema),
+      switch_vlan: sectionSchema(networkSwitchVlanSchema),
+      device: sectionSchema(networkDeviceSchema),
+      "bridge-vlan": sectionSchema(networkBridgeVlanSchema),
+      interface: sectionSchema(networkInterfaceSchema),
+    })
+    .strict()
 );
 
 export const oncNetworkSchema = makeOncConfigSchema(
-  z.object({
-    switch: oncSectionSchema(oncNetworkSwitchSchema),
-    switch_vlan: oncSectionSchema(oncNetworkSwitchVlanSchema),
-    device: oncSectionSchema(oncNetworkDeviceSchema),
-    "bridge-vlan": oncSectionSchema(oncNetworkBridgeVlanSchema),
-    interface: oncSectionSchema(oncNetworkInterfaceSchema),
-  })
+  z
+    .object({
+      switch: oncSectionSchema(oncNetworkSwitchSchema),
+      switch_vlan: oncSectionSchema(oncNetworkSwitchVlanSchema),
+      device: oncSectionSchema(oncNetworkDeviceSchema),
+      "bridge-vlan": oncSectionSchema(oncNetworkBridgeVlanSchema),
+      interface: oncSectionSchema(oncNetworkInterfaceSchema),
+    })
+    .strict()
 );
 
 export const networkResetCommands = [

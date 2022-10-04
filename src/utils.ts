@@ -255,17 +255,19 @@ const temp = getExtensionSchema();
 
 export type ExtensionSchema = z.infer<typeof temp>;
 
-export const getTargetsExtension = (schema?: z.ZodObject<any>) => ({
+export const getTargetsExtension = (schema?: z.ZodObject<any, any>) => ({
   ".": getExtensionSchema(schema).optional(),
 });
 
-export const sectionSchema = <T extends ZodRawShape>(schema: ZodObject<T>) => {
+export const sectionSchema = <T extends ZodRawShape>(
+  schema: ZodObject<T, any>
+) => {
   return z
     .array(
       z
         .object({
           name: z.string().optional(),
-          properties: schema.strict(),
+          properties: schema,
         })
         .strict()
     )
@@ -273,19 +275,21 @@ export const sectionSchema = <T extends ZodRawShape>(schema: ZodObject<T>) => {
 };
 
 export const oncSectionSchema = <T extends ZodRawShape>(
-  schema: ZodObject<T>
+  schema: ZodObject<T, any>
 ) => {
   return z
     .array(schema.partial().extend(getTargetsExtension(schema)).strict())
     .optional();
 };
 
-export const configSchema = <T extends ZodRawShape>(schema: ZodObject<T>) => {
+export const configSchema = <T extends ZodRawShape>(
+  schema: ZodObject<T, any>
+) => {
   return schema.optional();
 };
 
 export const makeOncConfigSchema = <T extends ZodRawShape>(
-  schema: ZodObject<T>
+  schema: ZodObject<T, any>
 ) => {
   return schema.extend(getTargetsExtension(schema)).strict();
 };

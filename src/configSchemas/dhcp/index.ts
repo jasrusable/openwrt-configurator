@@ -8,15 +8,19 @@ import {
 import { dhcpDnsmasqSchema, oncDhcpDnsmasqSchema } from "./dnsmasq";
 
 export const dhcpSchema = configSchema(
-  z.object({
-    dnsmasq: sectionSchema(dhcpDnsmasqSchema),
-  })
+  z
+    .object({
+      dnsmasq: sectionSchema(dhcpDnsmasqSchema),
+    })
+    .passthrough()
 );
 
 export const oncDhcpSchema = makeOncConfigSchema(
-  z.object({
-    dnsmasq: oncSectionSchema(oncDhcpDnsmasqSchema),
-  })
+  z
+    .object({
+      dnsmasq: oncSectionSchema(oncDhcpDnsmasqSchema),
+    })
+    .passthrough()
 );
 
 export const dhcpResetCommands = [

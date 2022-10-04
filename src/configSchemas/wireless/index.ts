@@ -15,17 +15,21 @@ import {
 } from "./wifiIface";
 
 export const wirelessSchema = configSchema(
-  z.object({
-    "wifi-device": sectionSchema(wirelessWifiDeviceSchema),
-    "wifi-iface": sectionSchema(wirelessWifiIfaceSchema),
-  })
+  z
+    .object({
+      "wifi-device": sectionSchema(wirelessWifiDeviceSchema),
+      "wifi-iface": sectionSchema(wirelessWifiIfaceSchema),
+    })
+    .strict()
 );
 
 export const oncWirelessSchema = makeOncConfigSchema(
-  z.object({
-    "wifi-device": oncSectionSchema(oncWirelessWifiDeviceSchema),
-    "wifi-iface": oncSectionSchema(oncWirelessWifiIfaceSchema),
-  })
+  z
+    .object({
+      "wifi-device": oncSectionSchema(oncWirelessWifiDeviceSchema),
+      "wifi-iface": oncSectionSchema(oncWirelessWifiIfaceSchema),
+    })
+    .strict()
 );
 
 export const wirelessResetCommands = [
