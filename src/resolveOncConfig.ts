@@ -1,7 +1,7 @@
 import { omit } from "lodash";
 import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig, oncConfigSchema, ONCDeviceConfig } from "./oncConfigSchema";
-import { ExtensionSchema, Targets } from "./utils";
+import { ExtensionSchema, Target } from "./utils";
 
 export const resolveOncConfig = ({
   deviceConfig,
@@ -14,52 +14,53 @@ export const resolveOncConfig = ({
 }) => {
   const useSwConfig = deviceSchema.swConfig;
 
-  const targetMatches = (targets?: Targets) => {
-    if (!targets) {
+  const targetMatches = (target?: Target) => {
+    if (!target) {
       return true;
     }
 
-    if (typeof targets === "string") {
-      return targets === "*";
+    const lhsMapping: any = Object.keys(deviceConfig.tags).reduce(
+      (acc, tagKey) => {
+        return {
+          ...acc,
+          [`tag.${tagKey}`]: deviceConfig.tags[tagKey],
+        };
+      },
+      { sw_config: useSwConfig }
+    );
+
+    const equals = target.split(" == ");
+    if (equals.length === 2) {
+      const [lhs, rhs] = equals;
+      const value = lhsMapping[lhs];
+      const parsedRhs = JSON.parse(rhs.replace(/\'/g, `"`));
+      if (Array.isArray(value)) {
+        return value.includes(parsedRhs);
+      }
+      return value === parsedRhs;
     }
 
-    const tagMatches =
-      Array.isArray(targets) &&
-      targets.find((target) =>
-        deviceConfig.tags.find((tag) =>
-          tag.name === target.tag &&
-          typeof target.value === "string" &&
-          target.value === "*"
-            ? true
-            : Array.isArray(target.value)
-            ? !!target.value.find((val) => tag.value.includes(val))
-            : false
-        )
-      );
-    if (tagMatches) {
-      return true;
+    const notEquals = target.split(" != ");
+    if (notEquals.length === 2) {
+      const [lhs, rhs] = notEquals;
+      const value = lhsMapping[lhs];
+      const parsedRhs = JSON.parse(rhs.replace(/\'/g, `"`));
+      if (Array.isArray(value)) {
+        return !value.includes(parsedRhs);
+      }
+      return value !== parsedRhs;
     }
 
-    const optMatches =
-      Array.isArray(targets) &&
-      targets.find(
-        (target) => target.opt === "sw_config" && target.value === useSwConfig
-      );
-
-    if (optMatches) {
-      return true;
-    }
-
-    return false;
+    throw new Error(`Unable to parse target: ${target}`);
   };
 
   const applyObject = <S extends Record<string, any>>(object: S) => {
     const sectionConfig = object["."] as ExtensionSchema | undefined;
-    const targets = sectionConfig?.targets;
-    const matches = targetMatches(targets);
+    const target = sectionConfig?.target;
+    const matches = targetMatches(target);
     const overrides = (sectionConfig?.target_overrides || [])
       .filter((override) => {
-        return targetMatches(override.targets);
+        return targetMatches(override.target);
       })
       .reduce((acc, override) => {
         return { ...acc, ...override.overrides };

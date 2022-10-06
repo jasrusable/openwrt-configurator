@@ -56,11 +56,6 @@ export const getOpenWrtConfig = ({
     (port) => !usedDeviceNames.includes(port.name)
   );
 
-  const allDevices = getNetworkDevices({
-    oncConfigConfig: resolvedOncConfig,
-    deviceSchema,
-  });
-
   const swConfigUntaggedPortNames = [
     ...(resolvedOncConfig.network.switch_vlan || []).reduce<string[]>(
       (acc, switchVlan) => {

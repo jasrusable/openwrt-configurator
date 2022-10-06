@@ -23,12 +23,7 @@ export const oncConfigSchema = z
           version: z.string(),
           ipaddr: z.string(),
           hostname: z.string(),
-          tags: z.array(
-            z.object({
-              name: z.string(),
-              value: z.array(z.string()),
-            })
-          ),
+          tags: z.record(z.union([z.string(), z.array(z.string())])),
           provisioning_config: z
             .object({
               ssh_auth: z.object({

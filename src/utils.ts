@@ -222,26 +222,17 @@ export const getNetworkDevices = ({
   return parsedDevices;
 };
 
-export const targetsSchema = z.union([
-  z.enum(["*"]),
-  z.array(
-    z.object({
-      opt: z.enum(["sw_config"]).optional(),
-      tag: z.string().optional(),
-      value: z.union([z.enum(["*"]), z.boolean(), z.array(z.string())]),
-    })
-  ),
-]);
+export const targetSchema = z.string();
 
-export type Targets = z.infer<typeof targetsSchema>;
+export type Target = z.infer<typeof targetSchema>;
 
 export const getExtensionSchema = (schema?: z.ZodObject<any>) => {
   const extensionSchema = z.object({
-    targets: targetsSchema.optional(),
+    target: targetSchema.optional(),
     target_overrides: z
       .array(
         z.object({
-          targets: targetsSchema,
+          target: targetSchema,
           overrides: schema ? schema.partial() : z.any(),
         })
       )
