@@ -6,11 +6,11 @@ import { oncSystemSchema } from "./configSchemas/system";
 import { oncWirelessSchema } from "./configSchemas/wireless";
 
 export const configConfigSchema = z.object({
-  system: oncSystemSchema,
-  network: oncNetworkSchema,
-  firewall: oncFirewallSchema,
-  dhcp: oncDhcpSchema,
-  wireless: oncWirelessSchema,
+  system: oncSystemSchema.optional(),
+  network: oncNetworkSchema.optional(),
+  firewall: oncFirewallSchema.optional(),
+  dhcp: oncDhcpSchema.optional(),
+  wireless: oncWirelessSchema.optional(),
 });
 
 export const oncConfigSchema = z

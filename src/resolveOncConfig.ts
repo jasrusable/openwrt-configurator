@@ -1,4 +1,3 @@
-import { omit } from "lodash";
 import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig, oncConfigSchema, ONCDeviceConfig } from "./oncConfigSchema";
 import { ExtensionSchema, Target } from "./utils";
@@ -65,7 +64,10 @@ export const resolveOncConfig = ({
       .reduce((acc, override) => {
         return { ...acc, ...override.overrides };
       }, {});
-    return matches ? omit({ ...object, ...overrides }, ".") : {};
+    const data = Object.fromEntries(
+      Object.entries({ ...object, ...overrides }).filter((e) => e[0] != ".")
+    );
+    return matches ? data : {};
   };
 
   const resolvedOncConfig = Object.keys(oncConfig.config).reduce(

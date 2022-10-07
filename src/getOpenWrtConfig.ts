@@ -32,7 +32,7 @@ export const getOpenWrtConfig = ({
     oncConfig,
   });
 
-  const bridgedDevices = (resolvedOncConfig.network.device || [])
+  const bridgedDevices = (resolvedOncConfig.network?.device || [])
     .filter((device) => device.type === "bridge")
     .reduce<string[]>((acc, device) => {
       const devices = (Array.isArray(device.ports) ? device.ports : []).map(
@@ -44,7 +44,7 @@ export const getOpenWrtConfig = ({
       return [...new Set([...acc, ...devices])];
     }, []);
 
-  const interfacedDevices = (resolvedOncConfig.network.interface || [])
+  const interfacedDevices = (resolvedOncConfig.network?.interface || [])
     .map((interface_) => {
       return interface_.device;
     })
@@ -57,7 +57,7 @@ export const getOpenWrtConfig = ({
   );
 
   const swConfigUntaggedPortNames = [
-    ...(resolvedOncConfig.network.switch_vlan || []).reduce<string[]>(
+    ...(resolvedOncConfig.network?.switch_vlan || []).reduce<string[]>(
       (acc, switchVlan) => {
         const untaggedPorts = Array.isArray(switchVlan.ports)
           ? switchVlan.ports.filter((port) => {
@@ -77,7 +77,7 @@ export const getOpenWrtConfig = ({
   );
 
   const getDevicePorts = (deviceName: string) => {
-    const deviceSection = (resolvedOncConfig.network.device || []).find(
+    const deviceSection = (resolvedOncConfig.network?.device || []).find(
       (device) => device.name === deviceName
     );
     if (!deviceSection || !deviceSection.ports) {

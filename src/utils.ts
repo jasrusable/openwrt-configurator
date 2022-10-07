@@ -197,15 +197,15 @@ export const getNetworkDevices = ({
     ...(!deviceSchema.swConfig
       ? ports.map((port) => ({ name: port.name, type: "network" }))
       : []),
-    ...(oncConfigConfig.network.device || []).map((device) => ({
+    ...(oncConfigConfig?.network?.device || []).map((device) => ({
       name: device.name,
       type: device.type,
     })),
-    ...(oncConfigConfig.network["bridge-vlan"] || []).map((bridgeVlan) => ({
+    ...(oncConfigConfig?.network?.["bridge-vlan"] || []).map((bridgeVlan) => ({
       name: `${bridgeVlan.device}.${bridgeVlan.vlan}`,
       type: "vlan",
     })),
-    ...(oncConfigConfig.network["switch_vlan"] || []).map((switchVlan) => {
+    ...(oncConfigConfig?.network?.["switch_vlan"] || []).map((switchVlan) => {
       const cpuPort = expectCpuPort();
       return {
         name: `${cpuPort.swConfigCpuName}.${switchVlan.vlan}`,
