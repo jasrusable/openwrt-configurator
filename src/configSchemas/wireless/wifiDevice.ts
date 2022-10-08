@@ -1,13 +1,17 @@
 import { z } from "zod";
+import { allHtModes, wifiBands, wifiTypes } from "../../openWrtValues";
 
 export const wirelessWifiDeviceSchema = z
   .object({
-    type: z.string(),
+    type: z.enum(wifiTypes),
     path: z.string(),
-    channel: z.number(),
-    band: z.string(),
-    htmode: z.string(),
+    band: z.enum(wifiBands),
+    channel: z.number().optional(),
+    htmode: z.enum(allHtModes).optional(),
   })
   .passthrough();
 
-export const oncWirelessWifiDeviceSchema = wirelessWifiDeviceSchema;
+export const oncWirelessWifiDeviceSchema = wirelessWifiDeviceSchema.omit({
+  type: true,
+  path: true,
+});

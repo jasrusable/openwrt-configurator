@@ -1,0 +1,8 @@
+DOING:
+5. Fix wifi things
+
+TODO:
+1. Readme.md
+2. Test OpenWrt config -> luci
+3. Test provisioning functions
+4. Implement conditional logic in targets

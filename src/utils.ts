@@ -3,6 +3,7 @@ import { NodeSSH } from "node-ssh";
 import { z, ZodError, ZodObject, ZodRawShape, ZodSchema } from "zod";
 import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig } from "./oncConfigSchema";
+import { allHtModes, wifiBands, wifiTypes } from "./openWrtValues";
 
 const profileSchema = z.object({
   id: z.string(),
@@ -113,11 +114,11 @@ const wirelessConfigSchema = z.object({
     z.object({
       ".type": z.enum(["wifi-device"]),
       ".name": z.string(),
-      type: z.enum(["mac80211"]),
+      type: z.enum(wifiTypes),
       path: z.string(),
       channel: z.string(),
-      band: z.enum(["2g", "5g", "6g"]),
-      htmode: z.enum(["HT20", "HT40", "VHT20", "VHT40", "VHT80"]),
+      band: z.enum(wifiBands),
+      htmode: z.enum(allHtModes).optional(),
     })
   ),
 });

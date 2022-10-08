@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { allHtModes, wifiBands, wifiTypes } from "./openWrtValues";
 
 export const deviceSchemaSchema = z.object({
   name: z.string(),
@@ -16,12 +17,10 @@ export const deviceSchemaSchema = z.object({
     .array(
       z.object({
         name: z.string(),
-        type: z.enum(["mac80211"]),
+        type: z.enum(wifiTypes),
         path: z.string(),
-        band: z.enum(["2g", "5g", "6g"]),
-        htmodes: z.array(
-          z.enum(["HT20", "HT40", "VHT20", "VHT40", "VHT80", "VHT160"])
-        ),
+        band: z.enum(wifiBands),
+        htmodes: z.array(z.enum(allHtModes)).optional(),
       })
     )
     .optional(),

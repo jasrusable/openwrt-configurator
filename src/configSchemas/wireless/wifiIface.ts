@@ -5,14 +5,12 @@ export const wirelessWifiIfaceSchema = z
     device: z.string(),
     mode: z.enum(["ap"]),
     network: z.string(),
-    ssid: z.string(),
-    encryption: z.string(),
-    key: z.string(),
+    ssid: z.string().optional(),
+    encryption: z.string().optional(),
+    key: z.string().optional(),
   })
   .passthrough();
 
 export const oncWirelessWifiIfaceSchema = wirelessWifiIfaceSchema
-  .omit({
-    device: true,
-  })
+  .omit({ device: true })
   .passthrough();

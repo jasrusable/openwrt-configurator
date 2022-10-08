@@ -1,5 +1,3 @@
-import { z } from "zod";
-
 export const firewallProtocols = [
   "tcp",
   "udp",
@@ -30,3 +28,32 @@ export const icmpTypes = [
   "router-advertisement",
   "neighbour-advertisement",
 ] as const;
+
+export const htModes = [
+  {
+    name: "HT20",
+    bands: ["2g"],
+  },
+  {
+    name: "HT40",
+    bands: ["2g"],
+  },
+  {
+    name: "VHT20",
+    bands: ["5g"],
+  },
+  {
+    name: "VHT40",
+    bands: ["5g"],
+  },
+  {
+    name: "VHT80",
+    bands: ["5g"],
+  },
+] as const;
+
+export const allHtModes = ["HT20", "HT40", "VHT20", "VHT40", "VHT80"] as const;
+
+export const wifiBands = ["2g", "5g", "6g"] as const;
+
+export const wifiTypes = ["mac80211"] as const;
