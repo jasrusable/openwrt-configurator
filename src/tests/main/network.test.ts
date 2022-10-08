@@ -13,7 +13,7 @@ const deviceConfigs = oncConfig.devices.filter(
   (device) => device.enabled !== false
 );
 
-test("main", async (t) => {
+test("network", async (t) => {
   const deviceSchemas = await Promise.all(
     deviceConfigs.map(async (deviceConfig) => {
       const deviceSchema = await getDeviceSchema({
@@ -31,14 +31,6 @@ test("main", async (t) => {
     deviceConfig: routerDeviceConfig,
     deviceSchema: routerDeviceSchema,
   });
-  t.is(
-    routerOpenWrtConfig.system?.system?.[0]?.properties.hostname,
-    "my-router"
-  );
-  t.is(
-    routerOpenWrtConfig.system?.system?.[0]?.properties.timezone,
-    "Africa/Johannesburg"
-  );
 
   // Ensure no switch or switch_vlan on DSA router.
   t.is(routerOpenWrtConfig.network?.switch, undefined);
@@ -160,7 +152,7 @@ test("main", async (t) => {
   );
 
   // Ensure br-lan.1 device is defined.
-  t.is(apOpenWrtConfig.network?.device?.[0].name, 'device0');
+  t.is(apOpenWrtConfig.network?.device?.[0].name, "device0");
   t.is(apOpenWrtConfig.network?.device?.[0].properties.name, "br-lan.1");
   t.is(apOpenWrtConfig.network?.device?.[0].properties.type, "bridge");
   t.is(apOpenWrtConfig.network?.device?.[0].properties.ports.length, 1);
@@ -169,7 +161,7 @@ test("main", async (t) => {
   ]);
 
   // Ensure br-lan.2 device is defined.
-  t.is(apOpenWrtConfig.network?.device?.[1].name, 'device1');
+  t.is(apOpenWrtConfig.network?.device?.[1].name, "device1");
   t.is(apOpenWrtConfig.network?.device?.[1].properties.name, "br-lan.2");
   t.is(apOpenWrtConfig.network?.device?.[1].properties.type, "bridge");
   t.is(apOpenWrtConfig.network?.device?.[1].properties.ports.length, 1);
@@ -193,34 +185,4 @@ test("main", async (t) => {
   t.is(apOpenWrtConfig.network?.interface?.[2].name, "guest");
   t.is(apOpenWrtConfig.network?.interface?.[2].properties.device, "br-lan.2");
   t.is(apOpenWrtConfig.network?.interface?.[2].properties.proto, "dhcp");
-});
-
-test("wireless", async (t) => {
-  const deviceSchemas = await Promise.all(
-    deviceConfigs.map(async (deviceConfig) => {
-      const deviceSchema = await getDeviceSchema({
-        deviceConfig,
-        useLocal: true,
-      });
-      return deviceSchema;
-    })
-  );
-
-  const routerDeviceConfig = deviceConfigs[0];
-  const routerDeviceSchema = deviceSchemas[0];
-  const routerOpenWrtConfig = getOpenWrtConfig({
-    oncConfig,
-    deviceConfig: routerDeviceConfig,
-    deviceSchema: routerDeviceSchema,
-  });
-  t.is(routerOpenWrtConfig.wireless, undefined);
-
-  const apDeviceConfig = deviceConfigs[1];
-  const apDeviceSchema = deviceSchemas[1];
-  const apOpenWrtConfig = getOpenWrtConfig({
-    oncConfig,
-    deviceConfig: apDeviceConfig,
-    deviceSchema: apDeviceSchema,
-  });
-  t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[0].name, "wifinet02g");
 });
