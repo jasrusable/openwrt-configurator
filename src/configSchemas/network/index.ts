@@ -41,10 +41,12 @@ export const oncNetworkSchema = makeOncConfigSchema(
     .strict()
 );
 
-export const networkResetCommands = [
-  "while uci -q delete network.@interface[0]; do :; done",
-  "while uci -q delete network.@device[0]; do :; done",
-  "while uci -q delete network.@bridge-vlan[0]; do :; done",
-  "while uci -q delete network.@switch_vlan[0]; do :; done",
-  "while uci -q delete network.@switch[0]; do :; done",
-];
+export const networkSectionsToReset = {
+  network: {
+    interface: true,
+    device: true,
+    "bridge-vlan": true,
+    switch_vlan: true,
+    switch: true,
+  },
+};

@@ -35,9 +35,11 @@ export const oncFirewallSchema = makeOncConfigSchema(
     .passthrough()
 );
 
-export const firewallResetCommands = [
-  "while uci -q delete firewall.@defaults[0]; do :; done",
-  "while uci -q delete firewall.@zone[0]; do :; done",
-  "while uci -q delete firewall.@forwarding[0]; do :; done",
-  "while uci -q delete firewall.@rule[0]; do :; done",
-];
+export const firewallSectionsToReset = {
+  firewall: {
+    defaults: true,
+    zone: true,
+    forwarding: true,
+    rule: true,
+  },
+};

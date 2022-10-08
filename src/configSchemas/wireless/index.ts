@@ -32,7 +32,9 @@ export const oncWirelessSchema = makeOncConfigSchema(
     .strict()
 );
 
-export const wirelessResetCommands = [
-  "while uci -q delete wireless.@wifi-iface[0]; do :; done",
-  "while uci -q delete wireless.@wifi-device[0]; do :; done",
-];
+export const wirelessSectionsToReset = {
+  wireless: {
+    "wifi-device": true,
+    "wifi-iface": true,
+  },
+};

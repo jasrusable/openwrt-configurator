@@ -29,8 +29,10 @@ export const oncDhcpSchema = makeOncConfigSchema(
     .passthrough()
 );
 
-export const dhcpResetCommands = [
-  "while uci -q delete dhcp.@dnsmasq[0]; do :; done",
-  "while uci -q delete dhcp.@dhcp[0]; do :; done",
-  "while uci -q delete dhcp.@odhcpd[0]; do :; done",
-];
+export const dhcpSectionsToReset = {
+  dhcp: {
+    dnsmasq: true,
+    dhcp: true,
+    odhcpd: true,
+  },
+};

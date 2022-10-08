@@ -23,6 +23,8 @@ export const oncSystemSchema = makeOncConfigSchema(
     .passthrough()
 );
 
-export const systemResetCommands = [
-  "while uci -q delete system.@system[0]; do :; done",
-];
+export const systemSectionsToReset = {
+  system: {
+    system: true,
+  },
+};

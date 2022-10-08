@@ -1,7 +1,7 @@
 import { OpenWrtConfig } from "./openWrtConfigSchema";
 import { NodeSSH } from "node-ssh";
 import { getLuciCommands } from "./getLuciCommands";
-import { resetCommands, revertCommands } from "./getDeviceScript";
+import { buildInResetCommands, builtInRevertCommands } from "./getDeviceScript";
 import { getBoardJson, getDeviceVersion } from "./utils";
 
 export const provisionOpenWRTDevice = async ({
@@ -52,7 +52,7 @@ export const provisionOpenWRTDevice = async ({
   const luciCommands = getLuciCommands({ openWRTConfig: openWrtConfig });
 
   const commandsToRun = [
-    ...resetCommands,
+    ...buildInResetCommands,
     ...luciCommands,
     "uci commit",
     "reload_config",
@@ -68,7 +68,7 @@ export const provisionOpenWRTDevice = async ({
       console.error(`${result.stderr}`);
 
       console.error(`Reverting...`);
-      for (const revertCommand of revertCommands) {
+      for (const revertCommand of builtInRevertCommands) {
         const revertResult = await connectedSsh.execCommand(revertCommand);
         if (revertResult.code !== 0) {
           console.error(`Failed to revert with command: ${revertCommand}`);

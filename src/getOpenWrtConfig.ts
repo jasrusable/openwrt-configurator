@@ -120,11 +120,12 @@ export const getOpenWrtConfig = ({
         const resolvedSections = sections.map(
           (resolvedSection: any, sectionIndex) => {
             const namer = unnamedSections?.[configKey]?.[sectionKey];
+            const defaultName = `${sectionKey}${sectionIndex}`;
             return {
               name:
                 namer !== true
-                  ? resolvedSection.name
-                  : `${sectionKey}${sectionIndex}`,
+                  ? resolvedSection.name || defaultName
+                  : defaultName,
               properties: {
                 ...resolvedSection,
 
