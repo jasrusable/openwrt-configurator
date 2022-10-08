@@ -12,7 +12,7 @@ export const getLuciCommands = ({
       const sections = (openWRTConfig as any)[configKey][sectionKey] as any[];
       const sectionCommands = sections.reduce((acc, section, sectionIndex) => {
         const { name, properties } = section;
-        const sectionName = name || `${sectionKey}${sectionIndex}`;
+        const sectionName = name;
         const identifier = `${configKey}.${sectionName}`;
         const commands = [
           `uci set ${identifier}=${sectionKey}`,

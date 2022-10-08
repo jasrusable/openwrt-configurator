@@ -6,20 +6,20 @@ import { getOpenWrtConfig } from "../../getOpenWrtConfig";
 import { ONCConfig, oncConfigSchema } from "../../oncConfigSchema";
 import { parseSchema } from "../../utils";
 
-test("main", async (t) => {
-  const oncConfigString = readFileSync(
-    join(__dirname, "./config.json"),
-    "utf-8"
-  );
-  const oncJson = JSON.parse(oncConfigString);
-  const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
-  const deviceConfigs = oncConfig.devices.filter(
-    (device) => device.enabled !== false
-  );
+const oncConfigString = readFileSync(join(__dirname, "./config.json"), "utf-8");
+const oncJson = JSON.parse(oncConfigString);
+const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
+const deviceConfigs = oncConfig.devices.filter(
+  (device) => device.enabled !== false
+);
 
+test("main", async (t) => {
   const deviceSchemas = await Promise.all(
     deviceConfigs.map(async (deviceConfig) => {
-      const deviceSchema = await getDeviceSchema({ deviceConfig });
+      const deviceSchema = await getDeviceSchema({
+        deviceConfig,
+        useLocal: true,
+      });
       return deviceSchema;
     })
   );
@@ -45,7 +45,7 @@ test("main", async (t) => {
   t.is(routerOpenWrtConfig.network?.switch_vlan, undefined);
 
   // Ensure br-lan device is defined.
-  t.is(routerOpenWrtConfig.network?.device?.[0].name, "br-lan");
+  t.is(routerOpenWrtConfig.network?.device?.[0].name, "device0");
   t.is(routerOpenWrtConfig.network?.device?.[0].properties.name, "br-lan");
   t.is(routerOpenWrtConfig.network?.device?.[0].properties.type, "bridge");
   t.is(routerOpenWrtConfig.network?.device?.[0].properties.ports.length, 4);
@@ -160,7 +160,7 @@ test("main", async (t) => {
   );
 
   // Ensure br-lan.1 device is defined.
-  t.is(apOpenWrtConfig.network?.device?.[0].name, "br-lan.1");
+  t.is(apOpenWrtConfig.network?.device?.[0].name, 'device0');
   t.is(apOpenWrtConfig.network?.device?.[0].properties.name, "br-lan.1");
   t.is(apOpenWrtConfig.network?.device?.[0].properties.type, "bridge");
   t.is(apOpenWrtConfig.network?.device?.[0].properties.ports.length, 1);
@@ -169,7 +169,7 @@ test("main", async (t) => {
   ]);
 
   // Ensure br-lan.2 device is defined.
-  t.is(apOpenWrtConfig.network?.device?.[1].name, "br-lan.2");
+  t.is(apOpenWrtConfig.network?.device?.[1].name, 'device1');
   t.is(apOpenWrtConfig.network?.device?.[1].properties.name, "br-lan.2");
   t.is(apOpenWrtConfig.network?.device?.[1].properties.type, "bridge");
   t.is(apOpenWrtConfig.network?.device?.[1].properties.ports.length, 1);
@@ -193,4 +193,34 @@ test("main", async (t) => {
   t.is(apOpenWrtConfig.network?.interface?.[2].name, "guest");
   t.is(apOpenWrtConfig.network?.interface?.[2].properties.device, "br-lan.2");
   t.is(apOpenWrtConfig.network?.interface?.[2].properties.proto, "dhcp");
+});
+
+test("wireless", async (t) => {
+  const deviceSchemas = await Promise.all(
+    deviceConfigs.map(async (deviceConfig) => {
+      const deviceSchema = await getDeviceSchema({
+        deviceConfig,
+        useLocal: true,
+      });
+      return deviceSchema;
+    })
+  );
+
+  const routerDeviceConfig = deviceConfigs[0];
+  const routerDeviceSchema = deviceSchemas[0];
+  const routerOpenWrtConfig = getOpenWrtConfig({
+    oncConfig,
+    deviceConfig: routerDeviceConfig,
+    deviceSchema: routerDeviceSchema,
+  });
+  t.is(routerOpenWrtConfig.wireless, undefined);
+
+  const apDeviceConfig = deviceConfigs[1];
+  const apDeviceSchema = deviceSchemas[1];
+  const apOpenWrtConfig = getOpenWrtConfig({
+    oncConfig,
+    deviceConfig: apDeviceConfig,
+    deviceSchema: apDeviceSchema,
+  });
+  t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[0].name, "wifinet02g");
 });

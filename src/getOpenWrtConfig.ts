@@ -117,74 +117,79 @@ export const getOpenWrtConfig = ({
       ).reduce((section, sectionKey) => {
         const sections: any[] =
           (resolvedOncConfig as any)[configKey][sectionKey] || [];
-        const resolvedSections = sections.map((resolvedSection: any) => {
-          const namer = unnamedSections?.[configKey]?.[sectionKey];
-          return {
-            ...(resolvedSection.name && namer !== true
-              ? { name: resolvedSection.name }
-              : {}),
-            properties: {
-              ...resolvedSection,
+        const resolvedSections = sections.map(
+          (resolvedSection: any, sectionIndex) => {
+            const namer = unnamedSections?.[configKey]?.[sectionKey];
+            return {
+              name:
+                namer !== true
+                  ? resolvedSection.name
+                  : `${sectionKey}${sectionIndex}`,
+              properties: {
+                ...resolvedSection,
 
-              // Add hostname
-              ...(configKey === "system" &&
-                sectionKey === "system" && {
-                  hostname: deviceConfig.hostname,
-                }),
-
-              // Resolve device ports
-              ...(configKey === "network" &&
-                sectionKey === "device" && {
-                  ports: getDevicePorts(resolvedSection.name),
-                }),
-
-              // Resolve bridge-vlan ports
-              ...(!useSwConfig &&
-                configKey === "network" &&
-                sectionKey === "bridge-vlan" && {
-                  ports: getDevicePorts(resolvedSection.device).map((port) => {
-                    if (typeof resolvedSection.ports === "string") {
-                      return resolvedSection.ports === "*"
-                        ? port
-                        : resolvedSection.ports === "*t"
-                        ? `${port}:t`
-                        : "";
-                    } else {
-                      return resolvedSection.ports;
-                    }
+                // Add hostname
+                ...(configKey === "system" &&
+                  sectionKey === "system" && {
+                    hostname: deviceConfig.hostname,
                   }),
-                }),
 
-              // Resolve switch_vlan ports
-              ...(useSwConfig &&
-                configKey === "network" &&
-                sectionKey === "switch_vlan" && {
-                  ports: [
-                    ...[expectCpuPort()].map((port) => {
-                      return `${port.name}:t`;
-                    }),
-                    ...(typeof resolvedSection.ports === "string"
-                      ? (resolvedSection.ports.startsWith("*")
-                          ? physicalPorts
-                          : resolvedSection.ports.startsWith("&*")
-                          ? swConfigPortsWhichCanBeUntagged
-                          : []
-                        ).map(
-                          (port) =>
-                            `${port.name}${
-                              resolvedSection.ports.includes("t") ? ":t" : ""
-                            }`
-                        )
-                      : resolvedSection.ports),
-                  ]
-                    .map((portName) =>
-                      portName.replace("eth", "").replace(":", "")
-                    )
-                    .join(" "),
-                }),
-            },
-          };
-        });
+                // Resolve device ports
+                ...(configKey === "network" &&
+                  sectionKey === "device" && {
+                    ports: getDevicePorts(resolvedSection.name),
+                  }),
+
+                // Resolve bridge-vlan ports
+                ...(!useSwConfig &&
+                  configKey === "network" &&
+                  sectionKey === "bridge-vlan" && {
+                    ports: getDevicePorts(resolvedSection.device).map(
+                      (port) => {
+                        if (typeof resolvedSection.ports === "string") {
+                          return resolvedSection.ports === "*"
+                            ? port
+                            : resolvedSection.ports === "*t"
+                            ? `${port}:t`
+                            : "";
+                        } else {
+                          return resolvedSection.ports;
+                        }
+                      }
+                    ),
+                  }),
+
+                // Resolve switch_vlan ports
+                ...(useSwConfig &&
+                  configKey === "network" &&
+                  sectionKey === "switch_vlan" && {
+                    ports: [
+                      ...[expectCpuPort()].map((port) => {
+                        return `${port.name}:t`;
+                      }),
+                      ...(typeof resolvedSection.ports === "string"
+                        ? (resolvedSection.ports.startsWith("*")
+                            ? physicalPorts
+                            : resolvedSection.ports.startsWith("&*")
+                            ? swConfigPortsWhichCanBeUntagged
+                            : []
+                          ).map(
+                            (port) =>
+                              `${port.name}${
+                                resolvedSection.ports.includes("t") ? ":t" : ""
+                              }`
+                          )
+                        : resolvedSection.ports),
+                    ]
+                      .map((portName) =>
+                        portName.replace("eth", "").replace(":", "")
+                      )
+                      .join(" "),
+                  }),
+              },
+            };
+          }
+        );
         return { ...section, [sectionKey]: resolvedSections };
       }, {});
       return { ...config, [configKey]: resolvedConfig };

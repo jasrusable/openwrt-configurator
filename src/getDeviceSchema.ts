@@ -4,15 +4,17 @@ import { DeviceSchema, deviceSchemaSchema } from "./deviceSchema";
 import { ONCDeviceConfig } from "./oncConfigSchema";
 import { getBoardJson, getRadios, parseSchema } from "./utils";
 
-const useLocal = false;
+const useLocalOverride = false;
 
 export const getDeviceSchema = async ({
   deviceConfig,
+  useLocal,
 }: {
   deviceConfig: ONCDeviceConfig;
+  useLocal?: boolean;
 }) => {
   // For local testing:
-  if (useLocal) {
+  if (useLocalOverride || useLocal) {
     const schema = JSON.parse(
       readFileSync(`./deviceSchemas/${deviceConfig.model_id}.json`, "utf-8")
     );
