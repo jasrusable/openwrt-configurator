@@ -117,78 +117,74 @@ export const getOpenWrtConfig = ({
       ).reduce((section, sectionKey) => {
         const sections: any[] =
           (resolvedOncConfig as any)[configKey][sectionKey] || [];
-        const resolvedSections = sections.map(
-          (resolvedSection: any, sectionIndex) => {
-            const namer = unnamedSections?.[configKey]?.[sectionKey];
-            return {
-              ...(resolvedSection.name && namer !== true
-                ? { name: resolvedSection.name }
-                : {}),
-              properties: {
-                ...resolvedSection,
+        const resolvedSections = sections.map((resolvedSection: any) => {
+          const namer = unnamedSections?.[configKey]?.[sectionKey];
+          return {
+            ...(resolvedSection.name && namer !== true
+              ? { name: resolvedSection.name }
+              : {}),
+            properties: {
+              ...resolvedSection,
 
-                // Add hostname
-                ...(configKey === "system" &&
-                  sectionKey === "system" && {
-                    hostname: deviceConfig.hostname,
-                  }),
+              // Add hostname
+              ...(configKey === "system" &&
+                sectionKey === "system" && {
+                  hostname: deviceConfig.hostname,
+                }),
 
-                // Resolve device ports
-                ...(configKey === "network" &&
-                  sectionKey === "device" && {
-                    ports: getDevicePorts(resolvedSection.name),
-                  }),
+              // Resolve device ports
+              ...(configKey === "network" &&
+                sectionKey === "device" && {
+                  ports: getDevicePorts(resolvedSection.name),
+                }),
 
-                // Resolve bridge-vlan ports
-                ...(!useSwConfig &&
-                  configKey === "network" &&
-                  sectionKey === "bridge-vlan" && {
-                    ports: getDevicePorts(resolvedSection.device).map(
-                      (port) => {
-                        if (typeof resolvedSection.ports === "string") {
-                          return resolvedSection.ports === "*"
-                            ? port
-                            : resolvedSection.ports === "*t"
-                            ? `${port}:t`
-                            : "";
-                        } else {
-                          return resolvedSection.ports;
-                        }
-                      }
-                    ),
+              // Resolve bridge-vlan ports
+              ...(!useSwConfig &&
+                configKey === "network" &&
+                sectionKey === "bridge-vlan" && {
+                  ports: getDevicePorts(resolvedSection.device).map((port) => {
+                    if (typeof resolvedSection.ports === "string") {
+                      return resolvedSection.ports === "*"
+                        ? port
+                        : resolvedSection.ports === "*t"
+                        ? `${port}:t`
+                        : "";
+                    } else {
+                      return resolvedSection.ports;
+                    }
                   }),
+                }),
 
-                // Resolve switch_vlan ports
-                ...(useSwConfig &&
-                  configKey === "network" &&
-                  sectionKey === "switch_vlan" && {
-                    ports: [
-                      ...[expectCpuPort()].map((port) => {
-                        return `${port.name}:t`;
-                      }),
-                      ...(typeof resolvedSection.ports === "string"
-                        ? (resolvedSection.ports.startsWith("*")
-                            ? physicalPorts
-                            : resolvedSection.ports.startsWith("&*")
-                            ? swConfigPortsWhichCanBeUntagged
-                            : []
-                          ).map(
-                            (port) =>
-                              `${port.name}${
-                                resolvedSection.ports.includes("t") ? ":t" : ""
-                              }`
-                          )
-                        : resolvedSection.ports),
-                    ]
-                      .map((portName) =>
-                        portName.replace("eth", "").replace(":", "")
-                      )
-                      .join(" "),
-                  }),
-              },
-            };
-          }
-        );
+              // Resolve switch_vlan ports
+              ...(useSwConfig &&
+                configKey === "network" &&
+                sectionKey === "switch_vlan" && {
+                  ports: [
+                    ...[expectCpuPort()].map((port) => {
+                      return `${port.name}:t`;
+                    }),
+                    ...(typeof resolvedSection.ports === "string"
+                      ? (resolvedSection.ports.startsWith("*")
+                          ? physicalPorts
+                          : resolvedSection.ports.startsWith("&*")
+                          ? swConfigPortsWhichCanBeUntagged
+                          : []
+                        ).map(
+                          (port) =>
+                            `${port.name}${
+                              resolvedSection.ports.includes("t") ? ":t" : ""
+                            }`
+                        )
+                      : resolvedSection.ports),
+                  ]
+                    .map((portName) =>
+                      portName.replace("eth", "").replace(":", "")
+                    )
+                    .join(" "),
+                }),
+            },
+          };
+        });
         return { ...section, [sectionKey]: resolvedSections };
       }, {});
       return { ...config, [configKey]: resolvedConfig };
@@ -198,28 +194,69 @@ export const getOpenWrtConfig = ({
     "2g": 11,
     "5g": 36,
     "6g": 36,
+    "60g": 36,
   };
+
+  const wifiDevices: NonNullable<
+    NonNullable<OpenWrtConfig["wireless"]>["wifi-device"]
+  > = radios.map((radio, radioIndex) => {
+    const wifiDeviceConfig =
+      (resolvedOncConfig.wireless?.["wifi-device"] || []).find(
+        (wifiDevice) => wifiDevice.band === radio.band
+      ) || {};
+    return {
+      name: `radio${radioIndex}`,
+      properties: {
+        ...wifiDeviceConfig,
+        channel: wifiDeviceConfig.channel || defaultChannels[radio.band],
+        type: radio.type,
+        band: radio.band,
+        path: radio.path,
+      },
+    };
+  });
+
+  type WifiInterface = NonNullable<
+    NonNullable<OpenWrtConfig["wireless"]>["wifi-iface"]
+  >;
+
+  const wifiInterfaces: WifiInterface = (
+    resolvedOncConfig.wireless?.["wifi-iface"] || []
+  ).reduce<any[]>((acc, { band, ...wifiIface }, wifiIfaceIndex) => {
+    const radioBands = radios.map((radio) => radio.band);
+    const bands =
+      (typeof band === "string"
+        ? band === "all"
+          ? radioBands
+          : [band]
+        : band) || radioBands;
+
+    const radiosAndBands = bands
+      .map((band) => {
+        const device = radios.find((radio) => radio.band === band);
+        return { band, device };
+      })
+      .filter((a) => !!a.device);
+
+    const interfaces = radiosAndBands.map(({ device, band }) => {
+      return {
+        name: `wifinet${wifiIfaceIndex}${band}`,
+        properties: {
+          device: device!.name,
+          ...wifiIface,
+        },
+      };
+    });
+
+    return [...acc, ...interfaces];
+  }, []);
 
   const final: OpenWrtConfig = {
     ...resolvedOpenWrtConfig,
-    ...(radios && {
+    ...(radios.length > 0 && {
       wireless: {
-        "wifi-device": radios.map((radio, radioIndex) => {
-          const wifiDeviceConfig =
-            (resolvedOncConfig.wireless?.["wifi-device"] || []).find(
-              (wifiDevice) => wifiDevice.band === radio.band
-            ) || {};
-          return {
-            name: `radio${radioIndex}`,
-            properties: {
-              ...wifiDeviceConfig,
-              channel: wifiDeviceConfig.channel || defaultChannels[radio.band],
-              type: radio.type,
-              band: radio.band,
-              path: radio.path,
-            },
-          };
-        }),
+        "wifi-device": wifiDevices,
+        "wifi-iface": wifiInterfaces,
       },
     }),
   };
