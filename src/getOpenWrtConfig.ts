@@ -109,6 +109,10 @@ export const getOpenWrtConfig = ({
     },
   };
 
+  const sanitizeName = (name: string) => {
+    return name.replace(/[^0-9a-z]/gi, "");
+  };
+
   const resolvedOpenWrtConfig = Object.keys(resolvedOncConfig)
     .filter((key) => key !== "wireless")
     .reduce((config, configKey) => {
@@ -121,11 +125,13 @@ export const getOpenWrtConfig = ({
           (resolvedSection: any, sectionIndex) => {
             const namer = unnamedSections?.[configKey]?.[sectionKey];
             const defaultName = `${sectionKey}${sectionIndex}`;
+            const name =
+              namer !== true
+                ? resolvedSection.name || defaultName
+                : defaultName;
+            const sanitizedName = sanitizeName(name);
             return {
-              name:
-                namer !== true
-                  ? resolvedSection.name || defaultName
-                  : defaultName,
+              name: sanitizedName,
               properties: {
                 ...resolvedSection,
 
