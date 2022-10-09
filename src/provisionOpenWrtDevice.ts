@@ -7,7 +7,7 @@ export const provisionOpenWRTDevice = async ({
   deviceModelId,
   ipAddress,
   auth,
-  openWrtConfig,
+  state,
 }: {
   deviceModelId: string;
   ipAddress: string;
@@ -15,7 +15,10 @@ export const provisionOpenWRTDevice = async ({
     username: string;
     password: string;
   };
-  openWrtConfig: OpenWrtConfig;
+  state: {
+    config: OpenWrtConfig;
+    packages?: string[];
+  };
 }) => {
   console.log(`Provisioning ${auth.username}@${ipAddress}...`);
   const ssh = new NodeSSH();
@@ -40,7 +43,7 @@ export const provisionOpenWRTDevice = async ({
   const installedPackages = await getInstalledPackages(connectedSsh);
   console.log(installedPackages);
 
-  const commands = getDeviceScript({ openWrtConfig });
+  const commands = getDeviceScript({ openWrtConfig: state.config });
   console.log("Provisioning...");
   for (const command of commands) {
     const result = await connectedSsh.execCommand(command);

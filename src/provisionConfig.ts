@@ -1,5 +1,6 @@
 import { getDeviceSchema } from "./getDeviceSchema";
 import { getOpenWrtConfig } from "./getOpenWrtConfig";
+import { getOpenWrtState } from "./getOpenWrtState";
 import { ONCConfig } from "./oncConfigSchema";
 import { provisionOpenWRTDevice } from "./provisionOpenWrtDevice";
 
@@ -30,7 +31,7 @@ export const provisionConfig = async ({
         );
       }
 
-      const openWRTConfig = getOpenWrtConfig({
+      const state = getOpenWrtState({
         oncConfig,
         deviceConfig,
         deviceSchema,
@@ -40,7 +41,7 @@ export const provisionConfig = async ({
         deviceModelId: deviceConfig.model_id,
         ipAddress: deviceConfig.ipaddr,
         auth: deviceConfig.provisioning_config.ssh_auth,
-        openWrtConfig: openWRTConfig,
+        state,
       });
     }
   }

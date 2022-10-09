@@ -2,6 +2,56 @@ import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig, oncConfigSchema, ONCDeviceConfig } from "./oncConfigSchema";
 import { ExtensionSchema, Target } from "./utils";
 
+export const targetMatches = ({
+  target,
+  deviceConfig,
+  deviceSchema,
+}: {
+  target?: Target;
+  deviceConfig: ONCDeviceConfig;
+  deviceSchema: DeviceSchema;
+}) => {
+  if (!target) {
+    return true;
+  }
+
+  const useSwConfig = deviceSchema.swConfig;
+
+  const lhsMapping: any = Object.keys(deviceConfig.tags).reduce(
+    (acc, tagKey) => {
+      return {
+        ...acc,
+        [`tag.${tagKey}`]: deviceConfig.tags[tagKey],
+      };
+    },
+    { sw_config: useSwConfig }
+  );
+
+  const equals = target.split(" == ");
+  if (equals.length === 2) {
+    const [lhs, rhs] = equals;
+    const value = lhsMapping[lhs];
+    const parsedRhs = JSON.parse(rhs.replace(/\'/g, `"`));
+    if (Array.isArray(value)) {
+      return value.includes(parsedRhs);
+    }
+    return value === parsedRhs;
+  }
+
+  const notEquals = target.split(" != ");
+  if (notEquals.length === 2) {
+    const [lhs, rhs] = notEquals;
+    const value = lhsMapping[lhs];
+    const parsedRhs = JSON.parse(rhs.replace(/\'/g, `"`));
+    if (Array.isArray(value)) {
+      return !value.includes(parsedRhs);
+    }
+    return value !== parsedRhs;
+  }
+
+  throw new Error(`Unable to parse target: ${target}`);
+};
+
 export const resolveOncConfig = ({
   deviceConfig,
   deviceSchema,
@@ -13,53 +63,17 @@ export const resolveOncConfig = ({
 }) => {
   const useSwConfig = deviceSchema.swConfig;
 
-  const targetMatches = (target?: Target) => {
-    if (!target) {
-      return true;
-    }
-
-    const lhsMapping: any = Object.keys(deviceConfig.tags).reduce(
-      (acc, tagKey) => {
-        return {
-          ...acc,
-          [`tag.${tagKey}`]: deviceConfig.tags[tagKey],
-        };
-      },
-      { sw_config: useSwConfig }
-    );
-
-    const equals = target.split(" == ");
-    if (equals.length === 2) {
-      const [lhs, rhs] = equals;
-      const value = lhsMapping[lhs];
-      const parsedRhs = JSON.parse(rhs.replace(/\'/g, `"`));
-      if (Array.isArray(value)) {
-        return value.includes(parsedRhs);
-      }
-      return value === parsedRhs;
-    }
-
-    const notEquals = target.split(" != ");
-    if (notEquals.length === 2) {
-      const [lhs, rhs] = notEquals;
-      const value = lhsMapping[lhs];
-      const parsedRhs = JSON.parse(rhs.replace(/\'/g, `"`));
-      if (Array.isArray(value)) {
-        return !value.includes(parsedRhs);
-      }
-      return value !== parsedRhs;
-    }
-
-    throw new Error(`Unable to parse target: ${target}`);
-  };
-
   const applyObject = <S extends Record<string, any>>(object: S) => {
     const sectionConfig = object["."] as ExtensionSchema | undefined;
     const target = sectionConfig?.target;
-    const matches = targetMatches(target);
+    const matches = targetMatches({ target, deviceConfig, deviceSchema });
     const overrides = (sectionConfig?.target_overrides || [])
       .filter((override) => {
-        return targetMatches(override.target);
+        return targetMatches({
+          target: override.target,
+          deviceConfig,
+          deviceSchema,
+        });
       })
       .reduce((acc, override) => {
         return { ...acc, ...override.overrides };

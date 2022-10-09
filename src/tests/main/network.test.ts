@@ -138,14 +138,14 @@ test("network", async (t) => {
   t.is(apOpenWrtConfig.network?.switch?.[0].properties.enable_vlan, true);
 
   // Ensure switch_vlans are defined.
-  t.is(apOpenWrtConfig.network?.switch_vlan?.[0].name, "switch_vlan0");
+  t.is(apOpenWrtConfig.network?.switch_vlan?.[0].name, "switchvlan0");
   t.is(apOpenWrtConfig.network?.switch_vlan?.[0].properties.device, "switch0");
   t.is(apOpenWrtConfig.network?.switch_vlan?.[0].properties.vlan, 1);
   t.deepEqual(
     apOpenWrtConfig.network?.switch_vlan?.[0].properties.ports,
     "6t 0 1 2 3 4"
   );
-  t.is(apOpenWrtConfig.network?.switch_vlan?.[1].name, "switch_vlan1");
+  t.is(apOpenWrtConfig.network?.switch_vlan?.[1].name, "switchvlan1");
   t.is(apOpenWrtConfig.network?.switch_vlan?.[1].properties.device, "switch0");
   t.is(apOpenWrtConfig.network?.switch_vlan?.[1].properties.vlan, 2);
   t.deepEqual(

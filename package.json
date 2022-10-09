@@ -7,6 +7,8 @@
   },
   "scripts": {
     "start": "ts-node ./src/index.ts",
+    "provision": "ts-node --transpile-only ./bin/index.ts provision",
+    "print-uci-commands": "ts-node --transpile-only ./bin/index.ts print-uci-commands",
     "build": "tsc",
     "package": "pkg ."
   },
@@ -34,7 +36,7 @@
       "ts"
     ],
     "require": [
-      "ts-node/register"
+      "ts-node/register/transpile-only"
     ]
   },
   "dependencies": {
