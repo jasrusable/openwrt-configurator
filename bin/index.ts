@@ -5,6 +5,7 @@ import { program } from "commander";
 import { provisionConfig } from "../src/provisionConfig";
 import { getDeviceSchema } from "../src/getDeviceSchema";
 import { parseSchema } from "../src/utils";
+import { getOpenWrtConfig } from "../src/getOpenWrtConfig";
 
 export const main = async () => {
   program.name("ONC").description("Open Network Controller").version("0.0.1");
@@ -17,18 +18,7 @@ export const main = async () => {
       const oncConfigString = readFileSync(args.config, "utf-8");
       const oncJson = JSON.parse(oncConfigString);
       const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
-      const deviceConfigs = oncConfig.devices.filter(
-        (device) => device.enabled !== false
-      );
-
-      const deviceSchemas = await Promise.all(
-        deviceConfigs.map(async (deviceConfig) => {
-          const deviceSchema = await getDeviceSchema({ deviceConfig });
-          return deviceSchema;
-        })
-      );
-
-      await provisionConfig({ oncConfig, deviceSchemas });
+      await provisionConfig({ oncConfig });
     });
 
   program
@@ -59,11 +49,12 @@ export const main = async () => {
             `Device schema not found for device model: ${deviceConfig.model_id}`
           );
         }
-        const commands = getDeviceScript({
+        const openWrtConfig = getOpenWrtConfig({
           oncConfig: oncConfig,
-          deviceConfig: deviceConfig,
+          deviceConfig,
           deviceSchema,
         });
+        const commands = getDeviceScript({ openWrtConfig });
         console.log(`#device ${deviceConfig.hostname}`);
         console.log(commands.join("\n"));
       }

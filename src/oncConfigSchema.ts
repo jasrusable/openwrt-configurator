@@ -4,6 +4,7 @@ import { oncFirewallSchema } from "./configSchemas/firewall";
 import { oncNetworkSchema } from "./configSchemas/network";
 import { oncSystemSchema } from "./configSchemas/system";
 import { oncWirelessSchema } from "./configSchemas/wireless";
+import { targetSchema } from "./utils";
 
 export const configConfigSchema = z.object({
   system: oncSystemSchema.optional(),
@@ -20,7 +21,6 @@ export const oncConfigSchema = z
         .object({
           enabled: z.boolean().optional(),
           model_id: z.string(),
-          version: z.string(),
           ipaddr: z.string(),
           hostname: z.string(),
           tags: z.record(z.union([z.string(), z.array(z.string())])),
@@ -35,6 +35,16 @@ export const oncConfigSchema = z
         })
         .strict()
     ),
+    package_profiles: z
+      .array(
+        z
+          .object({
+            target: targetSchema,
+            packages: z.array(z.string()),
+          })
+          .strict()
+      )
+      .optional(),
     config: configConfigSchema,
   })
   .strict();

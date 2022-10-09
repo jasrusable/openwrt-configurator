@@ -1,20 +1,25 @@
-import { DeviceSchema } from "./deviceSchema";
+import { getDeviceSchema } from "./getDeviceSchema";
 import { getOpenWrtConfig } from "./getOpenWrtConfig";
 import { ONCConfig } from "./oncConfigSchema";
 import { provisionOpenWRTDevice } from "./provisionOpenWrtDevice";
 
 export const provisionConfig = async ({
   oncConfig,
-  deviceSchemas,
 }: {
   oncConfig: ONCConfig;
-  deviceSchemas: DeviceSchema[];
 }) => {
-  const enabledDeviceConfigs = oncConfig.devices.filter(
+  const deviceConfigs = oncConfig.devices.filter(
     (device) => device.enabled !== false
   );
 
-  for (const deviceConfig of enabledDeviceConfigs) {
+  const deviceSchemas = await Promise.all(
+    deviceConfigs.map(async (deviceConfig) => {
+      const deviceSchema = await getDeviceSchema({ deviceConfig });
+      return deviceSchema;
+    })
+  );
+
+  for (const deviceConfig of deviceConfigs) {
     if (deviceConfig.ipaddr && deviceConfig.provisioning_config?.ssh_auth) {
       const deviceSchema = deviceSchemas.find(
         (schema) => schema.name === deviceConfig.model_id
@@ -32,8 +37,7 @@ export const provisionConfig = async ({
       });
 
       await provisionOpenWRTDevice({
-        deviceId: deviceConfig.model_id,
-        deviceVersion: deviceConfig.version,
+        deviceModelId: deviceConfig.model_id,
         ipAddress: deviceConfig.ipaddr,
         auth: deviceConfig.provisioning_config.ssh_auth,
         openWrtConfig: openWRTConfig,

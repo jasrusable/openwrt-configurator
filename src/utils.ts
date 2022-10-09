@@ -143,6 +143,30 @@ export const getRadios = async (ssh: NodeSSH) => {
   return radios;
 };
 
+export const getInstalledPackages = async (ssh: NodeSSH) => {
+  const command = await ssh.execCommand(`opkg list-installed`);
+  if (!command.stdout || command.code !== 0) {
+    if (command.stderr === "Command failed: Not found") {
+      return [];
+    } else {
+      console.error(command.stderr);
+      throw new Error("Failed to get wireless status");
+    }
+  }
+
+  const packageLines = command.stdout.split("\n");
+
+  const packages = packageLines.map((line) => {
+    const [packageName, version] = line.split(" - ");
+    return {
+      packageName,
+      version,
+    };
+  });
+
+  return packages;
+};
+
 export const getDeviceVersion = async (ssh: NodeSSH) => {
   const versionResult = await ssh.execCommand("cat /etc/openwrt_release");
   const lines = versionResult.stdout.split("\n");

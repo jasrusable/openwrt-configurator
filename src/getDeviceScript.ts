@@ -3,10 +3,8 @@ import { firewallSectionsToReset } from "./configSchemas/firewall";
 import { networkSectionsToReset } from "./configSchemas/network";
 import { systemSectionsToReset } from "./configSchemas/system";
 import { wirelessSectionsToReset } from "./configSchemas/wireless";
-import { DeviceSchema } from "./deviceSchema";
-import { getLuciCommands } from "./getLuciCommands";
-import { getOpenWrtConfig } from "./getOpenWrtConfig";
-import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
+import { getUciCommands } from "./getUciCommands";
+import { OpenWrtConfig } from "./openWrtConfigSchema";
 
 const sectionsToReset: any = {
   ...dhcpSectionsToReset,
@@ -26,7 +24,7 @@ const configSectionMapping = Object.keys(sectionsToReset).reduce<any[]>(
   []
 );
 
-export const buildInResetCommands = configSectionMapping.map(
+export const builtInResetCommands = configSectionMapping.map(
   ([configKey, sectionKey]) => {
     return `while uci -q delete ${configKey}.@${sectionKey}[0]; do :; done`;
   }
@@ -39,20 +37,16 @@ export const builtInRevertCommands = Object.keys(sectionsToReset).map(
 );
 
 export const getDeviceScript = ({
-  oncConfig,
-  deviceConfig,
-  deviceSchema,
+  openWrtConfig,
 }: {
-  oncConfig: ONCConfig;
-  deviceConfig: ONCDeviceConfig;
-  deviceSchema: DeviceSchema;
+  openWrtConfig: OpenWrtConfig;
 }) => {
-  const openWRTConfig = getOpenWrtConfig({
-    oncConfig: oncConfig,
-    deviceConfig,
-    deviceSchema,
-  });
-  const luciCommands = getLuciCommands({ openWRTConfig });
+  const uciCommands = getUciCommands({ openWrtConfig });
 
-  return [...buildInResetCommands, ...luciCommands];
+  return [
+    ...builtInResetCommands,
+    ...uciCommands,
+    "uci commit",
+    "reload_config",
+  ];
 };

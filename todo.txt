@@ -1,8 +1,6 @@
 DOING:
-5. Fix wifi things
+2. Implement packages
 
 TODO:
 1. Readme.md
-2. Test OpenWrt config -> luci
-3. Test provisioning functions
 4. Implement conditional logic in targets

@@ -1,23 +1,20 @@
 import { OpenWrtConfig } from "./openWrtConfigSchema";
 import { NodeSSH } from "node-ssh";
-import { getLuciCommands } from "./getLuciCommands";
-import { buildInResetCommands, builtInRevertCommands } from "./getDeviceScript";
-import { getBoardJson, getDeviceVersion } from "./utils";
+import { builtInRevertCommands, getDeviceScript } from "./getDeviceScript";
+import { getBoardJson, getInstalledPackages } from "./utils";
 
 export const provisionOpenWRTDevice = async ({
-  deviceId,
-  deviceVersion,
-  auth,
+  deviceModelId,
   ipAddress,
+  auth,
   openWrtConfig,
 }: {
-  deviceId: string;
-  deviceVersion: string;
+  deviceModelId: string;
+  ipAddress: string;
   auth: {
     username: string;
     password: string;
   };
-  ipAddress: string;
   openWrtConfig: OpenWrtConfig;
 }) => {
   console.log(`Provisioning ${auth.username}@${ipAddress}...`);
@@ -31,42 +28,27 @@ export const provisionOpenWRTDevice = async ({
   });
   console.log(`Connected.`);
 
-  console.log(`Verifying device version...`);
-  const version = await getDeviceVersion(connectedSsh);
-  if (version !== deviceVersion) {
-    throw new Error(
-      `Mismatching device version Expected ${deviceVersion} but found ${version}`
-    );
-  }
-  console.log("Verified.");
-
   console.log(`Verifying device... `);
   const boardJson = await getBoardJson(connectedSsh);
-  if (boardJson.model.id !== deviceId) {
+  if (boardJson.model.id !== deviceModelId) {
     throw new Error(
-      `Mismatching device id. Expected ${deviceId} but found ${boardJson.model.id} in /etc/board.json`
+      `Mismatching device model id. Expected ${deviceModelId} but found ${boardJson.model.id} in /etc/board.json`
     );
   }
   console.log("Verified.");
 
-  const luciCommands = getLuciCommands({ openWRTConfig: openWrtConfig });
+  const installedPackages = await getInstalledPackages(connectedSsh);
+  console.log(installedPackages);
 
-  const commandsToRun = [
-    ...buildInResetCommands,
-    ...luciCommands,
-    "uci commit",
-    "reload_config",
-  ];
-
+  const commands = getDeviceScript({ openWrtConfig });
   console.log("Provisioning...");
-  for (const command of commandsToRun) {
+  for (const command of commands) {
     const result = await connectedSsh.execCommand(command);
     if (result.code !== 0) {
       console.error(
         `Command failed with exit code: ${result.code}: ${command}`
       );
       console.error(`${result.stderr}`);
-
       console.error(`Reverting...`);
       for (const revertCommand of builtInRevertCommands) {
         const revertResult = await connectedSsh.execCommand(revertCommand);
@@ -76,7 +58,6 @@ export const provisionOpenWRTDevice = async ({
         }
       }
       console.error(`Reverted.`);
-
       throw new Error(
         `Failed to provision. Command ${command} failed. Aborting and rolling back.`
       );
