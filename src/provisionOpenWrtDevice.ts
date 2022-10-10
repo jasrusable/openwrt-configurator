@@ -41,7 +41,7 @@ export const provisionOpenWRTDevice = async ({
   console.log("Verified.");
 
   const installedPackages = await getInstalledPackages(connectedSsh);
-  console.log(installedPackages);
+  console.log(state.packages);
 
   const commands = getDeviceScript({ openWrtConfig: state.config });
   console.log("Provisioning...");

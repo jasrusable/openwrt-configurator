@@ -23,7 +23,7 @@ export const getOpenWrtState = ({
       });
     })
     .reduce<string[]>((acc, packageProfile) => {
-      return [...acc, ...packageProfile.packages];
+      return [...new Set([...acc, ...packageProfile.packages])];
     }, []);
 
   return { config, packages };
