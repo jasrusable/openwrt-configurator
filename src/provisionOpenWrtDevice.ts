@@ -17,7 +17,8 @@ export const provisionOpenWRTDevice = async ({
   };
   state: {
     config: OpenWrtConfig;
-    packages?: string[];
+    packagesToInstall?: { packageName: string; version?: string }[];
+    packagesToUninstall?: string[];
   };
 }) => {
   console.log(`Provisioning ${auth.username}@${ipAddress}...`);
@@ -41,10 +42,48 @@ export const provisionOpenWRTDevice = async ({
   console.log("Verified.");
 
   const installedPackages = await getInstalledPackages(connectedSsh);
-  console.log(state.packages);
+  const packagesToUninstall = installedPackages
+    .filter((packageName) =>
+      state.packagesToUninstall?.includes(packageName.packageName)
+    )
+    .map(({ packageName }) => packageName);
+  if (packagesToUninstall.length > 0) {
+    console.log("Removing packages...");
+    const removeResult = await connectedSsh.execCommand(
+      `opkg remove --force-removal-of-dependent-packages ${packagesToUninstall.join(
+        " "
+      )}`
+    );
+    if (!removeResult.stdout || removeResult.code !== 0) {
+      console.error(removeResult.stderr);
+      throw new Error("Failed to remove packages");
+    }
+    console.log("Removed packages.");
+  }
+
+  const packagesToInstall = (state.packagesToInstall || []).filter(
+    (package_) => {
+      return !installedPackages
+        .map((p) => p.packageName)
+        ?.includes(package_.packageName);
+    }
+  );
+  if (packagesToInstall.length > 0) {
+    console.log("Installing packages...");
+    const installResult = await connectedSsh.execCommand(
+      `opkg update; opkg install ${packagesToInstall
+        .map((p) => p.packageName)
+        .join(" ")}`
+    );
+    if (!installResult.stdout || installResult.code !== 0) {
+      console.error(installResult.stderr);
+      throw new Error("Failed to install packages");
+    }
+    console.log("Installed packages.");
+  }
 
   const commands = getDeviceScript({ openWrtConfig: state.config });
-  console.log("Provisioning...");
+  console.log("Setting configuration...");
   for (const command of commands) {
     const result = await connectedSsh.execCommand(command);
     if (result.code !== 0) {
@@ -66,6 +105,7 @@ export const provisionOpenWRTDevice = async ({
       );
     }
   }
+  console.log("Configuration set.");
 
   console.log("Provisioning completed.");
 };

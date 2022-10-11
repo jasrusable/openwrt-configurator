@@ -26,5 +26,19 @@ export const getOpenWrtState = ({
       return [...new Set([...acc, ...packageProfile.packages])];
     }, []);
 
-  return { config, packages };
+  const packagesToInstall = packages
+    .filter((packageName) => !packageName.startsWith("-"))
+    .map((packageLine) => {
+      const [packageName, version] = packageLine.split("@");
+      return {
+        packageName,
+        version,
+      };
+    });
+
+  const packagesToUninstall = packages
+    .filter((packageName) => packageName.startsWith("-"))
+    .map((name) => name.slice(1));
+
+  return { config, packagesToInstall, packagesToUninstall };
 };
