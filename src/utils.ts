@@ -7,7 +7,7 @@ import { allHtModes, wifiBands, wifiTypes } from "./openWrtValues";
 
 const profileSchema = z.object({
   id: z.string(),
-  target: z.string(),
+  condition: z.string(),
 });
 
 const getProfilesResponseSchema = z.object({
@@ -57,7 +57,7 @@ export const requestBuild = async ({
     url: "https://sysupgrade.openwrt.org/api/v1/build",
     data: {
       profile: deviceId,
-      target: profile.target,
+      target: profile.condition,
       version,
       packages,
     },
@@ -247,17 +247,17 @@ export const getNetworkDevices = ({
   return parsedDevices;
 };
 
-export const targetSchema = z.string();
+export const conditionSchema = z.string();
 
-export type Target = z.infer<typeof targetSchema>;
+export type Condition = z.infer<typeof conditionSchema>;
 
 export const getExtensionSchema = (schema?: z.ZodObject<any>) => {
   const extensionSchema = z.object({
-    target: targetSchema.optional(),
-    target_overrides: z
+    condition: conditionSchema.optional(),
+    conditional_overrides: z
       .array(
         z.object({
-          target: targetSchema,
+          condition: conditionSchema,
           overrides: schema ? schema.partial() : z.any(),
         })
       )
@@ -271,7 +271,7 @@ const temp = getExtensionSchema();
 
 export type ExtensionSchema = z.infer<typeof temp>;
 
-export const getTargetsExtension = (schema?: z.ZodObject<any, any>) => ({
+export const getConditionalExtension = (schema?: z.ZodObject<any, any>) => ({
   ".": getExtensionSchema(schema).optional(),
 });
 
@@ -294,7 +294,7 @@ export const oncSectionSchema = <T extends ZodRawShape>(
   schema: ZodObject<T, any>
 ) => {
   return z
-    .array(schema.partial().extend(getTargetsExtension(schema)).strict())
+    .array(schema.partial().extend(getConditionalExtension(schema)).strict())
     .optional();
 };
 
@@ -307,5 +307,5 @@ export const configSchema = <T extends ZodRawShape>(
 export const makeOncConfigSchema = <T extends ZodRawShape>(
   schema: ZodObject<T, any>
 ) => {
-  return schema.extend(getTargetsExtension(schema)).strict();
+  return schema.extend(getConditionalExtension(schema)).strict();
 };

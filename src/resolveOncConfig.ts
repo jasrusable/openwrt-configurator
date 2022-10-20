@@ -1,17 +1,17 @@
 import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig, oncConfigSchema, ONCDeviceConfig } from "./oncConfigSchema";
-import { ExtensionSchema, Target } from "./utils";
+import { ExtensionSchema, Condition } from "./utils";
 
-export const targetMatches = ({
-  target,
+export const conditionMatches = ({
+  condition: condition,
   deviceConfig,
   deviceSchema,
 }: {
-  target?: Target;
+  condition?: Condition;
   deviceConfig: ONCDeviceConfig;
   deviceSchema: DeviceSchema;
 }) => {
-  if (!target) {
+  if (!condition) {
     return true;
   }
 
@@ -27,7 +27,7 @@ export const targetMatches = ({
     { sw_config: useSwConfig }
   );
 
-  const equals = target.split(" == ");
+  const equals = condition.split(" == ");
   if (equals.length === 2) {
     const [lhs, rhs] = equals;
     const value = lhsMapping[lhs];
@@ -38,7 +38,7 @@ export const targetMatches = ({
     return value === parsedRhs;
   }
 
-  const notEquals = target.split(" != ");
+  const notEquals = condition.split(" != ");
   if (notEquals.length === 2) {
     const [lhs, rhs] = notEquals;
     const value = lhsMapping[lhs];
@@ -49,7 +49,7 @@ export const targetMatches = ({
     return value !== parsedRhs;
   }
 
-  throw new Error(`Unable to parse target: ${target}`);
+  throw new Error(`Unable to parse condition: ${condition}`);
 };
 
 export const resolveOncConfig = ({
@@ -65,12 +65,16 @@ export const resolveOncConfig = ({
 
   const applyObject = <S extends Record<string, any>>(object: S) => {
     const sectionConfig = object["."] as ExtensionSchema | undefined;
-    const target = sectionConfig?.target;
-    const matches = targetMatches({ target, deviceConfig, deviceSchema });
-    const overrides = (sectionConfig?.target_overrides || [])
+    const condition = sectionConfig?.condition;
+    const matches = conditionMatches({
+      condition: condition,
+      deviceConfig,
+      deviceSchema,
+    });
+    const overrides = (sectionConfig?.conditional_overrides || [])
       .filter((override) => {
-        return targetMatches({
-          target: override.target,
+        return conditionMatches({
+          condition: override.condition,
           deviceConfig,
           deviceSchema,
         });

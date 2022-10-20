@@ -1,7 +1,7 @@
 import { DeviceSchema } from "./deviceSchema";
 import { getOpenWrtConfig } from "./getOpenWrtConfig";
 import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
-import { targetMatches } from "./resolveOncConfig";
+import { conditionMatches } from "./resolveOncConfig";
 
 export const getOpenWrtState = ({
   oncConfig,
@@ -16,8 +16,8 @@ export const getOpenWrtState = ({
 
   const packages = (oncConfig.package_profiles || [])
     .filter((packageProfile) => {
-      return targetMatches({
-        target: packageProfile.target,
+      return conditionMatches({
+        condition: packageProfile.condition,
         deviceConfig,
         deviceSchema,
       });

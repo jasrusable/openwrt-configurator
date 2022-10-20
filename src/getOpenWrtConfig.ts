@@ -2,7 +2,7 @@ import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
 import { OpenWrtConfig, openWrtConfigSchema } from "./openWrtConfigSchema";
 import { parseSchema } from "./utils";
-import { resolveOncConfig, targetMatches } from "./resolveOncConfig";
+import { resolveOncConfig, conditionMatches } from "./resolveOncConfig";
 
 export const getOpenWrtConfig = ({
   oncConfig,
@@ -85,12 +85,9 @@ export const getOpenWrtConfig = ({
 
     return (
       typeof deviceSection.ports === "string"
-        ? (deviceSection.ports === "*"
-            ? physicalPorts
-            : deviceSection.ports === "&*"
-            ? unusedPhysicalPorts
-            : []
-          ).map((port) => port.name)
+        ? (deviceSection.ports === "*" ? unusedPhysicalPorts : []).map(
+            (port) => port.name
+          )
         : deviceSection.ports
     ).map((portName: string) => {
       const vlan = portName.split(".")[1];
@@ -160,6 +157,7 @@ export const getOpenWrtConfig = ({
                             ? `${port}:t`
                             : "";
                         } else {
+                          // TODO: Test this case.
                           return resolvedSection.ports;
                         }
                       }
@@ -171,13 +169,9 @@ export const getOpenWrtConfig = ({
                   configKey === "network" &&
                   sectionKey === "switch_vlan" && {
                     ports: [
-                      ...[expectCpuPort()].map((port) => {
-                        return `${port.name}:t`;
-                      }),
+                      `${expectCpuPort().name}:t`,
                       ...(typeof resolvedSection.ports === "string"
                         ? (resolvedSection.ports.startsWith("*")
-                            ? physicalPorts
-                            : resolvedSection.ports.startsWith("&*")
                             ? swConfigPortsWhichCanBeUntagged
                             : []
                           ).map(

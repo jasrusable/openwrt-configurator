@@ -4,7 +4,7 @@ import { oncFirewallSchema } from "./configSchemas/firewall";
 import { oncNetworkSchema } from "./configSchemas/network";
 import { oncSystemSchema } from "./configSchemas/system";
 import { oncWirelessSchema } from "./configSchemas/wireless";
-import { targetSchema } from "./utils";
+import { conditionSchema } from "./utils";
 
 export const configConfigSchema = z.object({
   system: oncSystemSchema.optional(),
@@ -39,7 +39,7 @@ export const oncConfigSchema = z
       .array(
         z
           .object({
-            target: targetSchema,
+            condition: conditionSchema,
             packages: z.array(z.string()),
           })
           .strict()
