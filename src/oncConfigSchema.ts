@@ -39,7 +39,7 @@ export const oncConfigSchema = z
       .array(
         z
           .object({
-            condition: conditionSchema,
+            ".condition": conditionSchema,
             packages: z.array(z.string()),
           })
           .strict()

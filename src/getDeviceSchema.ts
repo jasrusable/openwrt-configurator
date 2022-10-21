@@ -4,7 +4,7 @@ import { DeviceSchema, deviceSchemaSchema } from "./deviceSchema";
 import { ONCDeviceConfig } from "./oncConfigSchema";
 import { getBoardJson, getRadios, parseSchema } from "./utils";
 
-const useLocalOverride = false;
+const useLocalOverride = true;
 
 export const getDeviceSchema = async ({
   deviceConfig,

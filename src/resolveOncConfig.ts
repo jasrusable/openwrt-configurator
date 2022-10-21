@@ -3,7 +3,7 @@ import { ONCConfig, oncConfigSchema, ONCDeviceConfig } from "./oncConfigSchema";
 import { ExtensionSchema, Condition } from "./utils";
 
 export const conditionMatches = ({
-  condition: condition,
+  condition,
   deviceConfig,
   deviceSchema,
 }: {
@@ -61,20 +61,18 @@ export const resolveOncConfig = ({
   deviceSchema: DeviceSchema;
   oncConfig: ONCConfig;
 }) => {
-  const useSwConfig = deviceSchema.swConfig;
-
   const applyObject = <S extends Record<string, any>>(object: S) => {
-    const sectionConfig = object["."] as ExtensionSchema | undefined;
-    const condition = sectionConfig?.condition;
+    const sectionConfig = object as ExtensionSchema | undefined;
+    const condition = sectionConfig?.[".condition"];
     const matches = conditionMatches({
       condition: condition,
       deviceConfig,
       deviceSchema,
     });
-    const overrides = (sectionConfig?.conditional_overrides || [])
+    const overrides = (sectionConfig?.[".conditional_overrides"] || [])
       .filter((override) => {
         return conditionMatches({
-          condition: override.condition,
+          condition: override[".condition"],
           deviceConfig,
           deviceSchema,
         });
@@ -82,9 +80,14 @@ export const resolveOncConfig = ({
       .reduce((acc, override) => {
         return { ...acc, ...override.overrides };
       }, {});
+
+    // Strip off conditional things.
     const data = Object.fromEntries(
-      Object.entries({ ...object, ...overrides }).filter((e) => e[0] != ".")
+      Object.entries({ ...object, ...overrides }).filter(
+        (e) => ![".condition", ".conditional_overrides"].includes(e[0])
+      )
     );
+
     return matches ? data : {};
   };
 

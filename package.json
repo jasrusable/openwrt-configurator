@@ -10,6 +10,8 @@
     "provision": "ts-node --transpile-only ./bin/index.ts provision",
     "print-uci-commands": "ts-node --transpile-only ./bin/index.ts print-uci-commands",
     "build": "tsc",
+    "test": "ava",
+    "test:watch": "ava --watch",
     "package": "pkg ."
   },
   "repository": {

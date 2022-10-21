@@ -251,19 +251,24 @@ export const conditionSchema = z.string();
 
 export type Condition = z.infer<typeof conditionSchema>;
 
-export const getExtensionSchema = (schema?: z.ZodObject<any>) => {
-  const extensionSchema = z.object({
-    condition: conditionSchema.optional(),
-    conditional_overrides: z
+export const getExtensionObject = (schema?: z.ZodObject<any>) => {
+  const extensionObject = {
+    ".condition": conditionSchema.optional(),
+    ".conditional_overrides": z
       .array(
         z.object({
-          condition: conditionSchema,
+          ".condition": conditionSchema,
           overrides: schema ? schema.partial() : z.any(),
         })
       )
       .optional(),
-  });
+  };
 
+  return extensionObject;
+};
+
+export const getExtensionSchema = (schema?: z.ZodObject<any>) => {
+  const extensionSchema = z.object(getExtensionObject(schema));
   return extensionSchema;
 };
 
@@ -271,9 +276,8 @@ const temp = getExtensionSchema();
 
 export type ExtensionSchema = z.infer<typeof temp>;
 
-export const getConditionalExtension = (schema?: z.ZodObject<any, any>) => ({
-  ".": getExtensionSchema(schema).optional(),
-});
+export const getConditionalExtension = (schema?: z.ZodObject<any, any>) =>
+  getExtensionSchema(schema).optional();
 
 export const sectionSchema = <T extends ZodRawShape>(
   schema: ZodObject<T, any>
@@ -294,7 +298,7 @@ export const oncSectionSchema = <T extends ZodRawShape>(
   schema: ZodObject<T, any>
 ) => {
   return z
-    .array(schema.partial().extend(getConditionalExtension(schema)).strict())
+    .array(schema.partial().extend(getExtensionObject(schema)).strict())
     .optional();
 };
 
@@ -307,5 +311,5 @@ export const configSchema = <T extends ZodRawShape>(
 export const makeOncConfigSchema = <T extends ZodRawShape>(
   schema: ZodObject<T, any>
 ) => {
-  return schema.extend(getConditionalExtension(schema)).strict();
+  return schema.extend(getExtensionObject(schema)).strict();
 };

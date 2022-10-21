@@ -1,6 +1,6 @@
 import { NodeSSH } from "node-ssh";
 
-const parseConfigString = (configString: string) => {
+const parseSections = (configString: string) => {
   const configLines = configString.split("\n");
   const parsedLines = [
     ...new Set(
@@ -27,28 +27,11 @@ const parseConfigString = (configString: string) => {
     }
   });
 
-  console.log({ sections });
+  return sections;
 };
 
-export const getConfigFromDevice = async ({
-  ipAddress,
-  auth,
-}: {
-  ipAddress: string;
-  auth: {
-    username: string;
-    password: string;
-  };
-}) => {
-  const ssh = new NodeSSH();
-
-  const connectedSsh = await ssh.connect({
-    host: ipAddress,
-    username: auth.username,
-    password: auth.password,
-  });
-
-  const command = await connectedSsh.execCommand(`uci export`);
+export const getSectionsToReset = async (ssh: NodeSSH) => {
+  const command = await ssh.execCommand(`uci export`);
   if (!command.stdout || command.code !== 0) {
     if (command.stderr === "Command failed: Not found") {
       return [];
@@ -60,16 +43,21 @@ export const getConfigFromDevice = async ({
 
   const configString = command.stdout;
 
-  const config = parseConfigString(configString);
+  const config = parseSections(configString);
 
   return config;
 };
 
 (async () => {
-  await getConfigFromDevice({
-    ipAddress: "10.0.0.155",
-    auth: { username: "root", password: "Jason101!!@@" },
+  const ssh = new NodeSSH();
+
+  const connectedSsh = await ssh.connect({
+    host: "10.0.0.155",
+    username: "root",
+    password: "test",
   });
+
+  await getSectionsToReset(connectedSsh);
 
   process.exit();
 })();

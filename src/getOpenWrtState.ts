@@ -17,7 +17,7 @@ export const getOpenWrtState = ({
   const packages = (oncConfig.package_profiles || [])
     .filter((packageProfile) => {
       return conditionMatches({
-        condition: packageProfile.condition,
+        condition: packageProfile[".condition"],
         deviceConfig,
         deviceSchema,
       });
