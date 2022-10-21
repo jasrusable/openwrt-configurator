@@ -1,6 +1,8 @@
 import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig, oncConfigSchema, ONCDeviceConfig } from "./oncConfigSchema";
 import { ExtensionSchema, Condition } from "./utils";
+// @ts-ignore
+import booleanParser from "boolean-parser";
 
 export const conditionMatches = ({
   condition,
@@ -24,32 +26,42 @@ export const conditionMatches = ({
         [`tag.${tagKey}`]: deviceConfig.tags[tagKey],
       };
     },
-    { sw_config: useSwConfig }
+    {
+      sw_config: useSwConfig,
+      hostname: deviceConfig.hostname,
+      ipaddr: deviceConfig.ipaddr,
+    }
   );
 
-  const equals = condition.split(" == ");
-  if (equals.length === 2) {
-    const [lhs, rhs] = equals;
-    const value = lhsMapping[lhs];
-    const parsedRhs = JSON.parse(rhs.replace(/\'/g, `"`));
-    if (Array.isArray(value)) {
-      return value.includes(parsedRhs);
-    }
-    return value === parsedRhs;
-  }
+  const query: string[][] = booleanParser.parseBooleanQuery(condition);
 
-  const notEquals = condition.split(" != ");
-  if (notEquals.length === 2) {
-    const [lhs, rhs] = notEquals;
-    const value = lhsMapping[lhs];
-    const parsedRhs = JSON.parse(rhs.replace(/\'/g, `"`));
-    if (Array.isArray(value)) {
-      return !value.includes(parsedRhs);
-    }
-    return value !== parsedRhs;
-  }
+  return query.some((q) => {
+    return q.every((s) => {
+      const equals = s.replace(/\s/g, "").split("==");
+      if (equals.length === 2) {
+        const [lhs, rhs] = equals;
+        const value = lhsMapping[lhs];
+        const parsedRhs = JSON.parse(rhs.replace(/\'/g, `"`));
+        if (Array.isArray(value)) {
+          return value.includes(parsedRhs);
+        }
+        return value === parsedRhs;
+      }
 
-  throw new Error(`Unable to parse condition: ${condition}`);
+      const notEquals = s.replace(/\s/g, "").split("!=");
+      if (notEquals.length === 2) {
+        const [lhs, rhs] = notEquals;
+        const value = lhsMapping[lhs];
+        const parsedRhs = JSON.parse(rhs.replace(/\'/g, `"`));
+        if (Array.isArray(value)) {
+          return !value.includes(parsedRhs);
+        }
+        return value !== parsedRhs;
+      }
+
+      throw new Error(`Unable to parse condition: ${condition}`);
+    });
+  });
 };
 
 export const resolveOncConfig = ({

@@ -43,6 +43,7 @@
   },
   "dependencies": {
     "axios": "^0.27.2",
+    "boolean-parser": "^0.0.2",
     "commander": "^9.4.0",
     "is-valid-hostname": "^1.0.2",
     "node-ssh": "^13.0.0",
