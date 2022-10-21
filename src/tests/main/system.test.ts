@@ -31,12 +31,9 @@ test("system", async (t) => {
     deviceConfig: routerDeviceConfig,
     deviceSchema: routerDeviceSchema,
   });
+  t.is(routerOpenWrtConfig.system?.system?.[0]?.hostname, "my-router");
   t.is(
-    routerOpenWrtConfig.system?.system?.[0]?.properties.hostname,
-    "my-router"
-  );
-  t.is(
-    routerOpenWrtConfig.system?.system?.[0]?.properties.timezone,
+    routerOpenWrtConfig.system?.system?.[0]?.timezone,
     "Africa/Johannesburg"
   );
 
@@ -47,9 +44,6 @@ test("system", async (t) => {
     deviceConfig: apDeviceConfig,
     deviceSchema: apDeviceSchema,
   });
-  t.is(apOpenWrtConfig.system?.system?.[0]?.properties.hostname, "my-ap-1");
-  t.is(
-    apOpenWrtConfig.system?.system?.[0]?.properties.timezone,
-    "Africa/Johannesburg"
-  );
+  t.is(apOpenWrtConfig.system?.system?.[0]?.hostname, "my-ap-1");
+  t.is(apOpenWrtConfig.system?.system?.[0]?.timezone, "Africa/Johannesburg");
 });

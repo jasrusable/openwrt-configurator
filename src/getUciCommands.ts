@@ -11,13 +11,17 @@ export const getUciCommands = ({
     const sectionsCommands = sectionKeys.reduce<any[]>((acc, sectionKey) => {
       const sections = (openWrtConfig as any)[configKey][sectionKey] as any[];
       const sectionCommands = sections.reduce((acc, section, sectionIndex) => {
-        const { name, properties } = section;
-        const sectionName = name;
+        const sectionName = section[".name"];
+        const resolvedSection = Object.fromEntries(
+          Object.entries({ ...section }).filter(
+            (e) => ![".name"].includes(e[0])
+          )
+        );
         const identifier = `${configKey}.${sectionName}`;
         const commands = [
           `uci set ${identifier}=${sectionKey}`,
-          ...Object.keys(properties).reduce<string[]>((acc, key) => {
-            const value = properties[key];
+          ...Object.keys(resolvedSection).reduce<string[]>((acc, key) => {
+            const value = resolvedSection[key];
             const coercedValue =
               typeof value === "boolean" ? (value === true ? "1" : "0") : value;
             return [

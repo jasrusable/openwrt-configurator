@@ -283,16 +283,11 @@ export const sectionSchema = <T extends ZodRawShape>(
   schema: ZodObject<T, any>
 ) => {
   return z
-    .array(
-      z
-        .object({
-          name: z.string().optional(),
-          properties: schema,
-        })
-        .strict()
-    )
+    .array(schema.extend({ ".name": nameValidation }).strict())
     .optional();
 };
+
+export const nameValidation = z.string().regex(/[0-9a-z]/gi);
 
 export const oncSectionSchema = <T extends ZodRawShape>(
   schema: ZodObject<T, any>
@@ -302,10 +297,7 @@ export const oncSectionSchema = <T extends ZodRawShape>(
       schema
         .partial()
         .extend({
-          ".name": z
-            .string()
-            .regex(/[0-9a-z]/gi)
-            .optional(),
+          ".name": nameValidation.optional(),
           ...getExtensionObject(schema),
         })
         .strict()
