@@ -2,7 +2,7 @@ import { getDeviceSchema } from "./getDeviceSchema";
 import { getOpenWrtConfig } from "./getOpenWrtConfig";
 import { getOpenWrtState } from "./getOpenWrtState";
 import { ONCConfig } from "./oncConfigSchema";
-import { provisionOpenWRTDevice } from "./provisionOpenWrtDevice";
+import { provisionOpenWrtDevice } from "./provisionOpenWrtDevice";
 
 export const provisionConfig = async ({
   oncConfig,
@@ -27,7 +27,7 @@ export const provisionConfig = async ({
       );
       if (!deviceSchema) {
         throw new Error(
-          `Device schema not found for device model: ${deviceConfig.model_id}`
+          `Device schema not found for device: ${deviceConfig.model_id}@${deviceConfig.ipaddr}`
         );
       }
 
@@ -37,7 +37,7 @@ export const provisionConfig = async ({
         deviceSchema,
       });
 
-      await provisionOpenWRTDevice({
+      await provisionOpenWrtDevice({
         deviceModelId: deviceConfig.model_id,
         ipAddress: deviceConfig.ipaddr,
         auth: deviceConfig.provisioning_config.ssh_auth,

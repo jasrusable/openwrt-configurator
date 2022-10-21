@@ -3,7 +3,7 @@ import { NodeSSH } from "node-ssh";
 import { builtInRevertCommands, getDeviceScript } from "./getDeviceScript";
 import { getBoardJson, getInstalledPackages } from "./utils";
 
-export const provisionOpenWRTDevice = async ({
+export const provisionOpenWrtDevice = async ({
   deviceModelId,
   ipAddress,
   auth,
