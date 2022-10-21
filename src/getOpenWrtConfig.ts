@@ -97,15 +97,6 @@ export const getOpenWrtConfig = ({
     });
   };
 
-  const unnamedSections: any = {
-    network: {
-      device: true,
-    },
-    firewall: {
-      rule: true,
-    },
-  };
-
   const sanitizeName = (name: string) => {
     return name.replace(/[^0-9a-z]/gi, "");
   };
@@ -119,16 +110,16 @@ export const getOpenWrtConfig = ({
         const sections: any[] =
           (resolvedOncConfig as any)[configKey][sectionKey] || [];
         const resolvedSections = sections.map(
-          (resolvedSection: any, sectionIndex) => {
-            const namer = unnamedSections?.[configKey]?.[sectionKey];
-            const defaultName = `${sectionKey}${sectionIndex}`;
-            const name =
-              namer !== true
-                ? resolvedSection.name || defaultName
-                : defaultName;
-            const sanitizedName = sanitizeName(name);
+          (oncSection: any, sectionIndex) => {
+            const defaultName = sanitizeName(`${sectionKey}${sectionIndex}`);
+            const name = oncSection[".name"] || defaultName;
+            const resolvedSection: any = Object.fromEntries(
+              Object.entries({ ...oncSection }).filter(
+                (e) => ![".name"].includes(e[0])
+              )
+            );
             return {
-              name: sanitizedName,
+              name: name,
               properties: {
                 ...resolvedSection,
 

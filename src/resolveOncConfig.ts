@@ -69,7 +69,7 @@ export const resolveOncConfig = ({
       deviceConfig,
       deviceSchema,
     });
-    const overrides = (sectionConfig?.[".conditional_overrides"] || [])
+    const overrides = (sectionConfig?.[".overrides"] || [])
       .filter((override) => {
         return conditionMatches({
           condition: override[".condition"],
@@ -78,13 +78,13 @@ export const resolveOncConfig = ({
         });
       })
       .reduce((acc, override) => {
-        return { ...acc, ...override.overrides };
+        return { ...acc, ...override.override };
       }, {});
 
     // Strip off conditional things.
     const data = Object.fromEntries(
       Object.entries({ ...object, ...overrides }).filter(
-        (e) => ![".condition", ".conditional_overrides"].includes(e[0])
+        (e) => ![".condition", ".overrides"].includes(e[0])
       )
     );
 
