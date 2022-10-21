@@ -1,7 +1,8 @@
-import { OpenWrtConfig } from "./openWrtConfigSchema";
+import { OpenWrtConfig, OpenWrtState } from "./openWrtConfigSchema";
 import { NodeSSH } from "node-ssh";
 import { builtInRevertCommands, getDeviceScript } from "./getDeviceScript";
 import { getBoardJson, getInstalledPackages } from "./utils";
+import { getDeviceSchema } from "./getDeviceSchema";
 
 export const provisionOpenWrtDevice = async ({
   deviceModelId,
@@ -15,11 +16,7 @@ export const provisionOpenWrtDevice = async ({
     username: string;
     password: string;
   };
-  state: {
-    config: OpenWrtConfig;
-    packagesToInstall?: { packageName: string; version?: string }[];
-    packagesToUninstall?: string[];
-  };
+  state: OpenWrtState;
 }) => {
   console.log(`Provisioning ${auth.username}@${ipAddress}...`);
   const ssh = new NodeSSH();
@@ -41,48 +38,7 @@ export const provisionOpenWrtDevice = async ({
   }
   console.log("Verified.");
 
-  const installedPackages = await getInstalledPackages(connectedSsh);
-  const packagesToUninstall = installedPackages
-    .filter((packageName) =>
-      state.packagesToUninstall?.includes(packageName.packageName)
-    )
-    .map(({ packageName }) => packageName);
-  if (packagesToUninstall.length > 0) {
-    console.log("Removing packages...");
-    const removeResult = await connectedSsh.execCommand(
-      `opkg remove --force-removal-of-dependent-packages ${packagesToUninstall.join(
-        " "
-      )}`
-    );
-    if (!removeResult.stdout || removeResult.code !== 0) {
-      console.error(removeResult.stderr);
-      throw new Error("Failed to remove packages");
-    }
-    console.log("Removed packages.");
-  }
-
-  const packagesToInstall = (state.packagesToInstall || []).filter(
-    (package_) => {
-      return !installedPackages
-        .map((p) => p.packageName)
-        ?.includes(package_.packageName);
-    }
-  );
-  if (packagesToInstall.length > 0) {
-    console.log("Installing packages...");
-    const installResult = await connectedSsh.execCommand(
-      `opkg update; opkg install ${packagesToInstall
-        .map((p) => p.packageName)
-        .join(" ")}`
-    );
-    if (!installResult.stdout || installResult.code !== 0) {
-      console.error(installResult.stderr);
-      throw new Error("Failed to install packages");
-    }
-    console.log("Installed packages.");
-  }
-
-  const commands = getDeviceScript({ openWrtConfig: state.config });
+  const commands = getDeviceScript({ state });
   console.log("Setting configuration...");
   for (const command of commands) {
     const result = await connectedSsh.execCommand(command);

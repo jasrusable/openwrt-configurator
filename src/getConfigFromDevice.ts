@@ -14,7 +14,7 @@ const parseSections = (configString: string) => {
     ),
   ];
 
-  const sections: any = {};
+  const sections: Record<string, string[]> = {};
 
   let config: any = undefined;
 
@@ -43,9 +43,20 @@ export const getSectionsToReset = async (ssh: NodeSSH) => {
 
   const configString = command.stdout;
 
-  const config = parseSections(configString);
+  const sectionsObject = parseSections(configString);
 
-  return config;
+  const configSections = Object.keys(sectionsObject).reduce<string[][]>(
+    (acc, configKey) => {
+      const sections = sectionsObject[configKey].map((sectionKey) => [
+        configKey,
+        sectionKey,
+      ]);
+      return [...acc, ...sections];
+    },
+    []
+  );
+
+  return configSections;
 };
 
 (async () => {

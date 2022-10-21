@@ -76,3 +76,9 @@ export const openWrtConfigSchema = z.object({
 });
 
 export type OpenWrtConfig = z.infer<typeof openWrtConfigSchema>;
+
+export type OpenWrtState = {
+  config: OpenWrtConfig;
+  packagesToInstall?: { packageName: string; version?: string }[];
+  packagesToUninstall?: string[];
+};
