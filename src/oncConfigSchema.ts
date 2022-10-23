@@ -6,13 +6,15 @@ import { oncSystemSchema } from "./configSchemas/system";
 import { oncWirelessSchema } from "./configSchemas/wireless";
 import { conditionSchema } from "./utils";
 
-export const configConfigSchema = z.object({
-  system: oncSystemSchema.optional(),
-  network: oncNetworkSchema.optional(),
-  firewall: oncFirewallSchema.optional(),
-  dhcp: oncDhcpSchema.optional(),
-  wireless: oncWirelessSchema.optional(),
-});
+export const configConfigSchema = z
+  .object({
+    system: oncSystemSchema.optional(),
+    network: oncNetworkSchema.optional(),
+    firewall: oncFirewallSchema.optional(),
+    dhcp: oncDhcpSchema.optional(),
+    wireless: oncWirelessSchema.optional(),
+  })
+  .catchall(z.record(z.array(z.record(z.any()))));
 
 export const oncConfigSchema = z
   .object({

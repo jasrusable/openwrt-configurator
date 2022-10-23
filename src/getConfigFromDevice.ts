@@ -30,14 +30,14 @@ const parseSections = (configString: string) => {
   return sections;
 };
 
-export const getSectionsToReset = async (ssh: NodeSSH) => {
+export const getSectionsMapping = async (ssh: NodeSSH) => {
   const command = await ssh.execCommand(`uci export`);
   if (!command.stdout || command.code !== 0) {
     if (command.stderr === "Command failed: Not found") {
       return [];
     } else {
       console.error(command.stderr);
-      throw new Error("Failed to get config");
+      throw new Error("Failed to export uci config");
     }
   }
 
@@ -56,6 +56,8 @@ export const getSectionsToReset = async (ssh: NodeSSH) => {
     []
   );
 
+  console.log(configSections)
+
   return configSections;
 };
 
@@ -63,12 +65,12 @@ export const getSectionsToReset = async (ssh: NodeSSH) => {
   const ssh = new NodeSSH();
 
   const connectedSsh = await ssh.connect({
-    host: "10.0.0.155",
+    host: "10.0.0.218",
     username: "root",
-    password: "test",
+    password: "",
   });
 
-  await getSectionsToReset(connectedSsh);
+  await getSectionsMapping(connectedSsh);
 
   process.exit();
 })();

@@ -67,13 +67,15 @@ const schema: SchemaSchema = [
   },
 ];
 
-export const openWrtConfigSchema = z.object({
-  system: systemSchema,
-  network: networkSchema,
-  firewall: firewallSchema,
-  dhcp: dhcpSchema,
-  wireless: wirelessSchema,
-});
+export const openWrtConfigSchema = z
+  .object({
+    system: systemSchema,
+    network: networkSchema,
+    firewall: firewallSchema,
+    dhcp: dhcpSchema,
+    wireless: wirelessSchema,
+  })
+  .catchall(z.record(z.array(z.record(z.any()))));
 
 export type OpenWrtConfig = z.infer<typeof openWrtConfigSchema>;
 
