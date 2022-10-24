@@ -1,7 +1,7 @@
 DOING:
+1. Readme.md
 
 TODO:
-1. Readme.md
 2. Move to personal GH account
 3. Sample config generation
 4. Use .catchall instead of .passthrough
