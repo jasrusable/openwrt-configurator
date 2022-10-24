@@ -30,6 +30,7 @@ A CLI to provision configuration onto OpenWrt devices.
 - Improve README.md and add more documentation.
 - Add more configuration validation and error checking.
 - Improve error handling and messages.
+- Add more sample configurations.
 - Support firmware building and flashing.
 - Reduce CLI executable size.
 
