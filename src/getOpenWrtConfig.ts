@@ -20,10 +20,9 @@ export const getOpenWrtConfig = ({
     if (!cpuPort?.sw_config_cpu_name) {
       throw new Error(`CPU port not defined`);
     }
-    return cpuPort as { name: string; swConfigCpuName: string };
+    return cpuPort as Required<NonNullable<DeviceSchema["ports"]>[number]>;
   };
   const physicalPorts = ports.filter((port) => !port.sw_config_cpu_name);
-  const radios = deviceSchema.radios || [];
 
   const resolvedOncConfig = resolveOncConfig({
     deviceConfig,
@@ -37,7 +36,7 @@ export const getOpenWrtConfig = ({
       const devices = (Array.isArray(device.ports) ? device.ports : []).map(
         (device) =>
           device.startsWith("@cpu_port")
-            ? device.replace("@cpu_port", expectCpuPort().swConfigCpuName)
+            ? device.replace("@cpu_port", expectCpuPort().sw_config_cpu_name)
             : device
       );
       return [...new Set([...acc, ...devices])];
@@ -92,7 +91,7 @@ export const getOpenWrtConfig = ({
     ).map((portName: string) => {
       const vlan = portName.split(".")[1];
       return portName.startsWith("@cpu_port")
-        ? `${expectCpuPort().swConfigCpuName}${vlan ? `.${vlan}` : ""}`
+        ? `${expectCpuPort().sw_config_cpu_name}${vlan ? `.${vlan}` : ""}`
         : portName;
     });
   };
@@ -190,22 +189,41 @@ export const getOpenWrtConfig = ({
     "60g": 36,
   };
 
-  const wifiDevices: NonNullable<
-    NonNullable<OpenWrtConfig["wireless"]>["wifi-device"]
-  > = radios.map((radio, radioIndex) => {
-    const wifiDeviceConfig =
-      (resolvedOncConfig.wireless?.["wifi-device"] || []).find(
-        (wifiDevice) => wifiDevice.band === radio.band
-      ) || {};
+  const radios = deviceSchema.radios || [];
+
+  const radiosAndDevices = radios.map((radio) => {
+    const wifiDevice = (resolvedOncConfig.wireless?.["wifi-device"] || []).find(
+      (wifiDevice) => {
+        return wifiDevice.band === radio.band;
+      }
+    );
+
     return {
-      ".name": `radio${radioIndex}`,
-      ...wifiDeviceConfig,
-      channel: wifiDeviceConfig.channel || defaultChannels[radio.band],
-      type: radio.type,
-      band: radio.band,
-      path: radio.path,
+      radio,
+      wifiDevice,
     };
   });
+
+  const wifiDevices: NonNullable<
+    NonNullable<OpenWrtConfig["wireless"]>["wifi-device"]
+  > = radiosAndDevices.reduce<any[]>((acc, { radio, wifiDevice }, index) => {
+    const name = wifiDevice?.[".name"] || `unused${index}`;
+    if (!name) {
+      throw new Error(`Name not defined.`);
+    }
+
+    return [
+      ...acc,
+      {
+        ...wifiDevice,
+        ".name": name,
+        channel: wifiDevice?.channel || defaultChannels[radio.band],
+        type: radio.type,
+        band: radio.band,
+        path: radio.path,
+      },
+    ];
+  }, []);
 
   type WifiInterface = NonNullable<
     NonNullable<OpenWrtConfig["wireless"]>["wifi-iface"]
@@ -213,26 +231,20 @@ export const getOpenWrtConfig = ({
 
   const wifiInterfaces: WifiInterface = (
     resolvedOncConfig.wireless?.["wifi-iface"] || []
-  ).reduce<any[]>((acc, { band, ...wifiIface }, wifiIfaceIndex) => {
-    const radioBands = radios.map((radio) => radio.band);
-    const bands =
-      (typeof band === "string"
-        ? band === "all"
-          ? radioBands
-          : [band]
-        : band) || radioBands;
+  ).reduce<any[]>((acc, { device, ...wifiIface }, wifiIfaceIndex) => {
+    const radioDeviceNames = wifiDevices.map((device) => device[".name"]);
 
-    const radiosAndBands = bands
-      .map((band) => {
-        const device = radios.find((radio) => radio.band === band);
-        return { band, device };
-      })
-      .filter((a) => !!a.device);
+    const devices =
+      (typeof device === "string"
+        ? device === "*"
+          ? radioDeviceNames
+          : [device]
+        : device) || radioDeviceNames;
 
-    const interfaces = radiosAndBands.map(({ device, band }) => {
+    const interfaces = devices.map((deviceName, deviceIndex) => {
       return {
-        ".name": `wifinet${wifiIfaceIndex}${band}`,
-        device: device!.name,
+        ".name": `wifinet${wifiIfaceIndex}${deviceIndex}`,
+        device: deviceName,
         ...wifiIface,
       };
     });

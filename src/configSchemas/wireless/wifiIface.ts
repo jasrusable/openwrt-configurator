@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { wifiBands } from "../../openWrtValues";
 
 export const wirelessWifiIfaceSchema = z
   .object({
@@ -13,12 +12,7 @@ export const wirelessWifiIfaceSchema = z
   .passthrough();
 
 export const oncWirelessWifiIfaceSchema = wirelessWifiIfaceSchema
-  .omit({ device: true })
   .extend({
-    band: z.union([
-      z.enum(wifiBands),
-      z.enum(["all"]),
-      z.array(z.enum(wifiBands)),
-    ]),
+    device: z.union([z.string(), z.enum(["*"]), z.array(z.string())]),
   })
   .passthrough();

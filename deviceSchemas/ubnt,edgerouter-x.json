@@ -1,11 +1,12 @@
 {
   "name": "ubnt,edgerouter-x",
-  "swConfig": false,
+  "version": "21.02.4",
+  "sw_config": false,
   "ports": [
-    { "name": "eth0", "defaultRole": "wan" },
-    { "name": "eth1", "defaultRole": "lan" },
-    { "name": "eth2", "defaultRole": "lan" },
-    { "name": "eth3", "defaultRole": "lan" },
-    { "name": "eth4", "defaultRole": "lan" }
+    { "name": "eth0", "default_role": "wan" },
+    { "name": "eth1", "default_role": "lan" },
+    { "name": "eth2", "default_role": "lan" },
+    { "name": "eth3", "default_role": "lan" },
+    { "name": "eth4", "default_role": "lan" }
   ]
 }

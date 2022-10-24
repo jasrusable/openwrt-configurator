@@ -42,14 +42,14 @@ test("wireless", async (t) => {
   });
 
   // Test wifi-device
-  t.is(apOpenWrtConfig.wireless?.["wifi-device"]?.[0][".name"], "radio0");
+  t.is(apOpenWrtConfig.wireless?.["wifi-device"]?.[0][".name"], "unused0");
   t.is(apOpenWrtConfig.wireless?.["wifi-device"]?.[0].band, "2g");
   t.is(
     apOpenWrtConfig.wireless?.["wifi-device"]?.[0].path,
     "platform/10300000.wmac"
   );
   t.is(apOpenWrtConfig.wireless?.["wifi-device"]?.[0].type, "mac80211");
-  t.is(apOpenWrtConfig.wireless?.["wifi-device"]?.[1][".name"], "radio1");
+  t.is(apOpenWrtConfig.wireless?.["wifi-device"]?.[1][".name"], "unused1");
   t.is(apOpenWrtConfig.wireless?.["wifi-device"]?.[1].band, "5g");
   t.is(
     apOpenWrtConfig.wireless?.["wifi-device"]?.[1].path,
@@ -58,7 +58,11 @@ test("wireless", async (t) => {
   t.is(apOpenWrtConfig.wireless?.["wifi-device"]?.[0].type, "mac80211");
 
   // Test wifi-face
-  t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[0][".name"], "wifinet02g");
-  t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[0].device, "radio0");
+  t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[0][".name"], "wifinet00");
+  t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[0].device, "unused0");
   t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[0].network, "lan");
+
+  t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[1][".name"], "wifinet01");
+  t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[1].device, "unused1");
+  t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[1].network, "lan");
 });

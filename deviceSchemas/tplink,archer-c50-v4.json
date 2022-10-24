@@ -1,13 +1,14 @@
 {
   "name": "tplink,archer-c50-v4",
-  "swConfig": true,
+  "sw_config": true,
+  "version": "21.02.4",
   "ports": [
-    { "name": "eth0", "defaultRole": "wan" },
-    { "name": "eth1", "defaultRole": "lan" },
-    { "name": "eth2", "defaultRole": "lan" },
-    { "name": "eth3", "defaultRole": "lan" },
-    { "name": "eth4", "defaultRole": "lan" },
-    { "name": "eth6", "swConfigCpuName": "eth0" }
+    { "name": "eth0", "default_role": "wan" },
+    { "name": "eth1", "default_role": "lan" },
+    { "name": "eth2", "default_role": "lan" },
+    { "name": "eth3", "default_role": "lan" },
+    { "name": "eth4", "default_role": "lan" },
+    { "name": "eth6", "sw_config_cpu_name": "eth0" }
   ],
   "radios": [
     {
