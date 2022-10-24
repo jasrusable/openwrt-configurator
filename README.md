@@ -17,8 +17,22 @@ A CLI to provision configuration onto OpenWrt devices.
 
 ## Getting started
 
-1. Download OpenWrt Configurator from the GitHub Releases page.
+1. Download OpenWrt Configurator from the [GitHub Releases page](https://github.com/jasrusable/openwrt-configurator/releases).
 2. Download a sample configuration file.
 3. Adjust your configuration file as needed.
-4. Print your device uci commands: `oc print-uci-commands -c ./config.json`
-5. Provision configuration to your devices: `oc provision -c ./config.json`
+4. Print your device uci commands: `./openwrt-configurator print-uci-commands -c ./config.json`
+5. Provision configuration to your devices: `./openwrt-configurator provision -c ./config.json`
+
+## Roadmap
+
+### Short-term
+
+- Improve README.md and add more documentation.
+- Add more configuration validation and error checking.
+- Improve error handling and messages.
+- Support firmware building and flashing.
+- Reduce CLI executable size.
+
+### Long-term
+
+- Web UI for building configuration.
