@@ -2,7 +2,7 @@
 
 This directory contains a collection of sample configuration files. These configurations can be used for reference and can be downloaded and adjusted as needed.
 
-## [Basic]()
+## [basic.json](https://github.com/jasrusable/openwrt-configurator/blob/main/sampleConfigs/basic.json)
 
 ### Configuration description
 
