@@ -203,10 +203,10 @@ export const getNetworkDevices = ({
   deviceSchema: DeviceSchema;
 }) => {
   const ports = deviceSchema.ports || [];
-  const cpuPort = ports.find((port) => !!port.swConfigCpuName);
+  const cpuPort = ports.find((port) => !!port.sw_config_cpu_name);
 
   const expectCpuPort = () => {
-    if (!cpuPort?.swConfigCpuName) {
+    if (!cpuPort?.sw_config_cpu_name) {
       throw new Error(`CPU port not defined`);
     }
 
@@ -219,7 +219,7 @@ export const getNetworkDevices = ({
   });
 
   const allDevices = [
-    ...(!deviceSchema.swConfig
+    ...(!deviceSchema.sw_config
       ? ports.map((port) => ({ name: port.name, type: "network" }))
       : []),
     ...(oncConfigConfig?.network?.device || []).map((device) => ({
@@ -237,7 +237,7 @@ export const getNetworkDevices = ({
         type: "network",
       };
     }),
-    ...(deviceSchema.swConfig
+    ...(deviceSchema.sw_config
       ? [{ name: expectCpuPort().swConfigCpuName, type: "network" }]
       : []),
   ];
