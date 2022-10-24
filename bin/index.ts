@@ -8,7 +8,10 @@ import { parseJson, parseSchema } from "../src/utils";
 import { getOpenWrtState } from "../src/getOpenWrtState";
 
 export const main = async () => {
-  program.name("ONC").description("Open Network Controller").version("0.0.1");
+  program
+    .name("openwrt-configurator")
+    .description("OpenWrt Configurator")
+    .version("0.0.1");
 
   program
     .command("provision")

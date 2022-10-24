@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "description": "A CLI to provision configuration onto OpenWrt devices.",
   "bin": {
-    "onc": "./dist/bin/index.js"
+    "oc": "./dist/bin/index.js"
   },
   "scripts": {
     "start": "ts-node ./src/index.ts",
@@ -16,14 +16,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OpenNetworkController/onc-cli.git"
+    "url": "git+https://github.com/jasrusable/openwrt-configurator.git"
   },
   "author": "Jason Russell",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/OpenNetworkController/onc-cli/issues"
+    "url": "https://github.com/jasrusable/openwrt-configurator/issues"
   },
-  "homepage": "https://github.com/OpenNetworkController/onc-cli#readme",
+  "homepage": "https://github.com/jasrusable/openwrt-configurator#readme",
   "pkg": {
     "scripts": "dist/**/*.js",
     "targets": [
