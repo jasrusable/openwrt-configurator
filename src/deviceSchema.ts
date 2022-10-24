@@ -3,14 +3,15 @@ import { allHtModes, wifiBands, wifiTypes } from "./openWrtValues";
 
 export const deviceSchemaSchema = z.object({
   name: z.string(),
-  swConfig: z.boolean().optional(),
+  sw_config: z.boolean().optional(),
+  version: z.string(),
   config_sections: z.record(z.array(z.string())).optional(),
   ports: z
     .array(
       z.object({
         name: z.string(),
-        defaultRole: z.enum(["lan", "wan"]).optional(),
-        swConfigCpuName: z.string().optional(),
+        default_role: z.enum(["lan", "wan"]).optional(),
+        sw_config_cpu_name: z.string().optional(),
       })
     )
     .optional(),

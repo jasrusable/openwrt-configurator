@@ -13,16 +13,16 @@ export const getOpenWrtConfig = ({
   deviceConfig: ONCDeviceConfig;
   deviceSchema: DeviceSchema;
 }) => {
-  const useSwConfig = deviceSchema.swConfig;
+  const useSwConfig = deviceSchema.sw_config;
   const ports = deviceSchema.ports || [];
-  const cpuPort = ports.find((port) => !!port.swConfigCpuName);
+  const cpuPort = ports.find((port) => !!port.sw_config_cpu_name);
   const expectCpuPort = () => {
-    if (!cpuPort?.swConfigCpuName) {
+    if (!cpuPort?.sw_config_cpu_name) {
       throw new Error(`CPU port not defined`);
     }
     return cpuPort as { name: string; swConfigCpuName: string };
   };
-  const physicalPorts = ports.filter((port) => !port.swConfigCpuName);
+  const physicalPorts = ports.filter((port) => !port.sw_config_cpu_name);
   const radios = deviceSchema.radios || [];
 
   const resolvedOncConfig = resolveOncConfig({

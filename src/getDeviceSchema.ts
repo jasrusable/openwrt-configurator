@@ -3,7 +3,12 @@ import { NodeSSH } from "node-ssh";
 import { DeviceSchema, deviceSchemaSchema } from "./deviceSchema";
 import { getConfigSections } from "./getConfigSections";
 import { ONCDeviceConfig } from "./oncConfigSchema";
-import { getBoardJson, getRadios, parseSchema } from "./utils";
+import {
+  getBoardJson,
+  getDeviceVersion,
+  getRadios,
+  parseSchema,
+} from "./utils";
 
 const useLocalOverride = false;
 
@@ -29,45 +34,47 @@ export const getDeviceSchema = async ({
       password: deviceConfig.provisioning_config?.ssh_auth.password,
     });
 
-    const [boardJson, radios, configSections] = await Promise.all([
+    const [boardJson, radios, configSections, version] = await Promise.all([
       getBoardJson(connectedSsh),
       getRadios(connectedSsh),
       getConfigSections(connectedSsh),
+      getDeviceVersion(connectedSsh),
     ]);
 
     const isSwConfig = !!boardJson.switch;
 
     const deviceSchemaTmp: DeviceSchema = {
       name: deviceConfig.model_id,
-      swConfig: isSwConfig,
+      version,
+      sw_config: isSwConfig,
       config_sections: configSections,
       ports: isSwConfig
         ? (boardJson.switch || {}).switch0.ports.map((port) => {
             return {
               name: `eth${port.num}`,
               defaultRole: port.role,
-              swConfigCpuName: port.device,
+              sw_config_cpu_name: port.device,
             };
           })
         : [
             ...(boardJson.network.lan.ports || []).map((port) => {
               return {
                 name: port,
-                defaultRole: "lan",
+                default_role: "lan",
               } as const;
             }),
             ...(boardJson.network.wan.device
               ? [
                   {
                     name: boardJson.network.wan.device,
-                    defaultRole: "wan",
+                    default_role: "wan",
                   } as const,
                 ]
               : []),
             ...(boardJson.network.wan.ports || []).map((port) => {
               return {
                 name: port,
-                defaultRole: "wan",
+                default_role: "wan",
               } as const;
             }),
           ],
@@ -91,9 +98,9 @@ export const getDeviceSchema = async ({
       );
     }
 
-    if (deviceSchema.swConfig) {
+    if (deviceSchema.sw_config) {
       const cpuPort = (deviceSchema.ports || []).find(
-        (port) => !!port.swConfigCpuName
+        (port) => !!port.sw_config_cpu_name
       );
       if (!cpuPort) {
         throw new Error(

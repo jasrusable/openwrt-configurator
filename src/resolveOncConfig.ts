@@ -17,19 +17,21 @@ export const conditionMatches = ({
     return true;
   }
 
-  const useSwConfig = deviceSchema.swConfig;
+  const useSwConfig = deviceSchema.sw_config;
 
   const lhsMapping: any = Object.keys(deviceConfig.tags).reduce(
     (acc, tagKey) => {
       return {
         ...acc,
-        [`tag.${tagKey}`]: deviceConfig.tags[tagKey],
+        [`device.tag.${tagKey}`]: deviceConfig.tags[tagKey],
       };
     },
     {
-      sw_config: useSwConfig,
-      hostname: deviceConfig.hostname,
-      ipaddr: deviceConfig.ipaddr,
+      [`device.sw_config`]: useSwConfig,
+      [`device.hostname`]: deviceConfig.hostname,
+      ["device.ipaddr"]: deviceConfig.ipaddr,
+      ["device.model_id"]: deviceConfig.model_id,
+      ["device.version"]: deviceSchema.version,
     }
   );
 
@@ -41,6 +43,13 @@ export const conditionMatches = ({
       if (equals.length === 2) {
         const [lhs, rhs] = equals;
         const value = lhsMapping[lhs];
+        if (value === undefined) {
+          throw new Error(
+            `Invalid conditional parameter defined: ${lhs}. Must be one of ${Object.keys(
+              lhsMapping
+            ).join(" ")}.`
+          );
+        }
         const parsedRhs = JSON.parse(rhs.replace(/\'/g, `"`));
         if (Array.isArray(value)) {
           return value.includes(parsedRhs);
@@ -52,6 +61,13 @@ export const conditionMatches = ({
       if (notEquals.length === 2) {
         const [lhs, rhs] = notEquals;
         const value = lhsMapping[lhs];
+        if (value === undefined) {
+          throw new Error(
+            `Invalid conditional parameter defined: ${lhs}. Must be one of ${Object.keys(
+              lhsMapping
+            ).join(" ")}.`
+          );
+        }
         const parsedRhs = JSON.parse(rhs.replace(/\'/g, `"`));
         if (Array.isArray(value)) {
           return !value.includes(parsedRhs);
