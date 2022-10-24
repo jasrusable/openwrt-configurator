@@ -52,8 +52,9 @@ $ openwrt-configurator provision -c my-network-config.json
 - Improve error handling and messages.
 - Add more sample configurations.
 - Support firmware building and flashing.
-- Reduce CLI executable size.
 
 ### Long-term
 
+- Configuration migrations.
+- Reduce CLI executable size.
 - Web UI for building configuration.
