@@ -207,10 +207,7 @@ export const getOpenWrtConfig = ({
   const wifiDevices: NonNullable<
     NonNullable<OpenWrtConfig["wireless"]>["wifi-device"]
   > = radiosAndDevices.reduce<any[]>((acc, { radio, wifiDevice }, index) => {
-    const name = wifiDevice?.[".name"] || `unused${index}`;
-    if (!name) {
-      throw new Error(`Name not defined.`);
-    }
+    const name = wifiDevice?.[".name"] || sanitizeName(`wifidevice${index}`);
 
     return [
       ...acc,

@@ -1,5 +1,4 @@
 DOING:
-5. Wifi radio config
 
 TODO:
 1. Readme.md
@@ -10,3 +9,4 @@ TODO:
 DONE:
 2. Implement packages
 3. Implement config resetting
+5. Fix wifi device naming

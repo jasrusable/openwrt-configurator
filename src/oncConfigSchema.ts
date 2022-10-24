@@ -47,7 +47,7 @@ export const oncConfigSchema = z
           .strict()
       )
       .optional(),
-    configs_to_ignore: z
+    configs_to_not_reset: z
       .array(
         z
           .object({

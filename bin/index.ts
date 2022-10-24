@@ -4,7 +4,7 @@ import { getDeviceScript } from "../src/getDeviceScript";
 import { program } from "commander";
 import { provisionConfig } from "../src/provisionConfig";
 import { getDeviceSchema } from "../src/getDeviceSchema";
-import { parseSchema } from "../src/utils";
+import { parseJson, parseSchema } from "../src/utils";
 import { getOpenWrtState } from "../src/getOpenWrtState";
 
 export const main = async () => {
@@ -15,8 +15,9 @@ export const main = async () => {
     .description("provision configuration to devices")
     .requiredOption("-c, --config <config>")
     .action(async (args) => {
-      const oncConfigString = readFileSync(args.config, "utf-8");
-      const oncJson = JSON.parse(oncConfigString);
+      const configPath = args.config;
+      const oncConfigString = readFileSync(configPath, "utf-8");
+      const oncJson = parseJson(oncConfigString, configPath);
       const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
       await provisionConfig({ oncConfig });
     });
@@ -26,8 +27,9 @@ export const main = async () => {
     .description("print uci commands for configuration")
     .requiredOption("-c, --config <config>")
     .action(async (args) => {
-      const oncConfigString = readFileSync(args.config, "utf-8");
-      const oncJson = JSON.parse(oncConfigString);
+      const configPath = args.config;
+      const oncConfigString = readFileSync(configPath, "utf-8");
+      const oncJson = parseJson(oncConfigString, configPath);
       const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
       const deviceConfigs = oncConfig.devices.filter(
         (device) => device.enabled !== false

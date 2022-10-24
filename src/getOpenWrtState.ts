@@ -47,7 +47,7 @@ export const getOpenWrtState = ({
 
   const a = deviceSchema.config_sections || {};
 
-  const configsToIgnore = (oncConfig.configs_to_ignore || [])
+  const configsToNotReset = (oncConfig.configs_to_not_reset || [])
     .filter((a) => {
       return conditionMatches({
         condition: a[".condition"],
@@ -60,11 +60,11 @@ export const getOpenWrtState = ({
     }, []);
 
   const configSectionsToReset = Object.keys(a).reduce((acc, configKey) => {
-    if (configsToIgnore.includes(`${configKey}.*`)) {
+    if (configsToNotReset.includes(`${configKey}.*`)) {
       return acc;
     }
     const sectionKeys = a[configKey].filter((sectionKey) => {
-      return !configsToIgnore.includes(`${configKey}.${sectionKey}`);
+      return !configsToNotReset.includes(`${configKey}.${sectionKey}`);
     });
     return { ...acc, [configKey]: [...(acc[configKey] || []), ...sectionKeys] };
   }, {} as any);

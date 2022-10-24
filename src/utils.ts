@@ -4,6 +4,7 @@ import { z, ZodError, ZodObject, ZodRawShape, ZodSchema } from "zod";
 import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig } from "./oncConfigSchema";
 import { allHtModes, wifiBands, wifiTypes } from "./openWrtValues";
+import parseJsonF from "parse-json";
 
 const profileSchema = z.object({
   id: z.string(),
@@ -98,13 +99,14 @@ export const boardJsonSchema = z.object({
 });
 
 export const getBoardJson = async (ssh: NodeSSH) => {
-  const boardJsonResult = await ssh.execCommand("cat /etc/board.json");
+  const boardJsonPath = "/etc/board.json";
+  const boardJsonResult = await ssh.execCommand(`cat ${boardJsonPath}`);
   if (!boardJsonResult.stdout || boardJsonResult.code !== 0) {
-    throw new Error("Failed to verify /etc/board.json file.");
+    throw new Error(`Failed to verify ${boardJsonPath} file.`);
   }
   const boardJson = parseSchema(
     boardJsonSchema,
-    JSON.parse(boardJsonResult.stdout)
+    parseJson(boardJsonResult.stdout, boardJsonPath)
   );
   return boardJson;
 };
@@ -137,7 +139,7 @@ export const getRadios = async (ssh: NodeSSH) => {
   }
   const parsedWirelessStatus = parseSchema(
     wirelessConfigSchema,
-    JSON.parse(wirelessStatus.stdout)
+    parseJson(wirelessStatus.stdout)
   );
   const radios = Object.values(parsedWirelessStatus.values);
   return radios;
@@ -189,9 +191,21 @@ export const parseSchema = <D>(schema: ZodSchema<D>, data: any) => {
   try {
     return schema.parse(data);
   } catch (e: any) {
-    console.error(`Failed to parse schema.`);
-    console.error(JSON.stringify(e?.issues, null, 4));
-    throw new Error(`Failed to parse schema.`);
+    const issues = e?.issues;
+    const parsedIssues = issues
+      ? issues.map((issue: any) => ({
+          message: issue.message,
+          path: issue.path.join("."),
+          code: issue.code,
+        }))
+      : undefined;
+    throw new Error(
+      `Failed to parse schema. ${
+        parsedIssues
+          ? `Parsing issues: ${JSON.stringify(parsedIssues, null, 4)}`
+          : ""
+      }`
+    );
   }
 };
 
@@ -315,4 +329,8 @@ export const makeOncConfigSchema = <T extends ZodRawShape>(
   schema: ZodObject<T, any>
 ) => {
   return schema.extend(getExtensionObject(schema)).strict();
+};
+
+export const parseJson = (jsonString: string, filepath?: string) => {
+  return parseJsonF(jsonString, filepath);
 };

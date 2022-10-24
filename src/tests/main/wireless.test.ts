@@ -4,10 +4,10 @@ import { readFileSync } from "fs";
 import { getDeviceSchema } from "../../getDeviceSchema";
 import { getOpenWrtConfig } from "../../getOpenWrtConfig";
 import { ONCConfig, oncConfigSchema } from "../../oncConfigSchema";
-import { parseSchema } from "../../utils";
+import { parseJson, parseSchema } from "../../utils";
 
 const oncConfigString = readFileSync(join(__dirname, "./config.json"), "utf-8");
-const oncJson = JSON.parse(oncConfigString);
+const oncJson = parseJson(oncConfigString);
 const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
 const deviceConfigs = oncConfig.devices.filter(
   (device) => device.enabled !== false
@@ -42,14 +42,14 @@ test("wireless", async (t) => {
   });
 
   // Test wifi-device
-  t.is(apOpenWrtConfig.wireless?.["wifi-device"]?.[0][".name"], "unused0");
+  t.is(apOpenWrtConfig.wireless?.["wifi-device"]?.[0][".name"], "wifidevice0");
   t.is(apOpenWrtConfig.wireless?.["wifi-device"]?.[0].band, "2g");
   t.is(
     apOpenWrtConfig.wireless?.["wifi-device"]?.[0].path,
     "platform/10300000.wmac"
   );
   t.is(apOpenWrtConfig.wireless?.["wifi-device"]?.[0].type, "mac80211");
-  t.is(apOpenWrtConfig.wireless?.["wifi-device"]?.[1][".name"], "unused1");
+  t.is(apOpenWrtConfig.wireless?.["wifi-device"]?.[1][".name"], "wifidevice1");
   t.is(apOpenWrtConfig.wireless?.["wifi-device"]?.[1].band, "5g");
   t.is(
     apOpenWrtConfig.wireless?.["wifi-device"]?.[1].path,
@@ -59,10 +59,10 @@ test("wireless", async (t) => {
 
   // Test wifi-face
   t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[0][".name"], "wifinet00");
-  t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[0].device, "unused0");
+  t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[0].device, "wifidevice0");
   t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[0].network, "lan");
 
   t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[1][".name"], "wifinet01");
-  t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[1].device, "unused1");
+  t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[1].device, "wifidevice1");
   t.is(apOpenWrtConfig.wireless?.["wifi-iface"]?.[1].network, "lan");
 });

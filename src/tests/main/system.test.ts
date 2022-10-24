@@ -4,10 +4,10 @@ import { readFileSync } from "fs";
 import { getDeviceSchema } from "../../getDeviceSchema";
 import { getOpenWrtConfig } from "../../getOpenWrtConfig";
 import { ONCConfig, oncConfigSchema } from "../../oncConfigSchema";
-import { parseSchema } from "../../utils";
+import { parseJson, parseSchema } from "../../utils";
 
 const oncConfigString = readFileSync(join(__dirname, "./config.json"), "utf-8");
-const oncJson = JSON.parse(oncConfigString);
+const oncJson = parseJson(oncConfigString);
 const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
 const deviceConfigs = oncConfig.devices.filter(
   (device) => device.enabled !== false

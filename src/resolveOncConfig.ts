@@ -1,6 +1,6 @@
 import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig, oncConfigSchema, ONCDeviceConfig } from "./oncConfigSchema";
-import { ExtensionSchema, Condition } from "./utils";
+import { ExtensionSchema, Condition, parseJson } from "./utils";
 // @ts-ignore
 import booleanParser from "boolean-parser";
 
@@ -50,7 +50,7 @@ export const conditionMatches = ({
             ).join(" ")}.`
           );
         }
-        const parsedRhs = JSON.parse(rhs.replace(/\'/g, `"`));
+        const parsedRhs = parseJson(rhs.replace(/\'/g, `"`));
         if (Array.isArray(value)) {
           return value.includes(parsedRhs);
         }
@@ -68,7 +68,7 @@ export const conditionMatches = ({
             ).join(" ")}.`
           );
         }
-        const parsedRhs = JSON.parse(rhs.replace(/\'/g, `"`));
+        const parsedRhs = parseJson(rhs.replace(/\'/g, `"`));
         if (Array.isArray(value)) {
           return !value.includes(parsedRhs);
         }

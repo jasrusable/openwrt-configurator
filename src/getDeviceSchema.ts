@@ -7,6 +7,7 @@ import {
   getBoardJson,
   getDeviceVersion,
   getRadios,
+  parseJson,
   parseSchema,
 } from "./utils";
 
@@ -21,7 +22,7 @@ export const getDeviceSchema = async ({
 }) => {
   // For local testing:
   if (useLocalOverride || useLocal) {
-    const schema = JSON.parse(
+    const schema = parseJson(
       readFileSync(`./deviceSchemas/${deviceConfig.model_id}.json`, "utf-8")
     );
     const deviceSchema = parseSchema(deviceSchemaSchema, schema);
