@@ -1,0 +1,439 @@
+{
+  "devices": [
+    {
+      "model_id": "ubnt,edgerouter-x",
+      "ipaddr": "10.0.0.1",
+      "tags": { "role": "router" },
+      "hostname": "my-router",
+      "provisioning_config": {
+        "ssh_auth": {
+          "username": "root",
+          "password": "123"
+        }
+      }
+    },
+    {
+      "model_id": "tplink,eap245-v3",
+      "ipaddr": "10.0.0.218",
+      "tags": { "role": "ap" },
+      "hostname": "my-ap-2",
+      "provisioning_config": {
+        "ssh_auth": {
+          "username": "root",
+          "password": "123"
+        }
+      }
+    }
+  ],
+  "package_profiles": [
+    {
+      ".condition": "device.tag.role == 'router'",
+      "packages": [
+        "sqm-scripts",
+        "luci-app-sqm",
+        "https-dns-proxy",
+        "luci-app-https-dns-proxy"
+      ]
+    },
+    {
+      ".condition": "device.tag.role == 'ap'",
+      "packages": ["-firewall", "-firewall4"]
+    }
+  ],
+  "configs_to_not_reset": [
+    {
+      ".condition": "*",
+      "configs": [
+        "luci.*",
+        "rpcd.*",
+        "ucitrack.*",
+        "uhttpd.*",
+        "system.led",
+        "network.globals"
+      ]
+    }
+  ],
+  "config": {
+    "dropbear": {
+      "dropbear": [
+        {
+          "PasswordAuth": "on",
+          "RootPasswordAuth": "on",
+          "Port": 22,
+          "BannerFile": "/etc/banner"
+        }
+      ]
+    },
+    "system": {
+      "system": [
+        {
+          "timezone": "Africa/Johannesburg"
+        }
+      ]
+    },
+    "network": {
+      ".overrides": [
+        {
+          ".condition": "device.sw_config == true",
+          "override": {
+            "switch": [
+              {
+                "name": "switch0",
+                "reset": true,
+                "enable_vlan": true
+              }
+            ],
+            "switch_vlan": [
+              {
+                "device": "switch0",
+                "vlan": 1,
+                "ports": "*"
+              },
+              {
+                "device": "switch0",
+                "vlan": 2,
+                "ports": "*t"
+              }
+            ],
+            "device": [
+              {
+                "name": "br-lan.1",
+                "type": "bridge",
+                "ports": ["@cpu_port.1"]
+              },
+              {
+                "name": "br-lan.2",
+                "type": "bridge",
+                "ports": ["@cpu_port.2"]
+              }
+            ]
+          }
+        },
+        {
+          ".condition": "device.sw_config == false",
+          "override": {
+            "device": [
+              {
+                "name": "br-lan",
+                "type": "bridge",
+                "ports": "*"
+              }
+            ],
+            "bridge-vlan": [
+              {
+                "device": "br-lan",
+                "vlan": 1,
+                "ports": "*"
+              },
+              {
+                "device": "br-lan",
+                "vlan": 2,
+                "ports": "*t"
+              }
+            ]
+          }
+        }
+      ],
+      "interface": [
+        {
+          ".name": "loopback",
+          "device": "lo",
+          "proto": "static",
+          "ipaddr": "127.0.0.1",
+          "netmask": "255.0.0.0"
+        },
+        {
+          ".condition": "device.tag.role == 'router'",
+          ".name": "wan",
+          "device": "eth0",
+          "proto": "pppoe",
+          "username": "me@pppoe.com",
+          "password": "123"
+        },
+        {
+          ".name": "lan",
+          "device": "br-lan.1",
+          ".overrides": [
+            {
+              ".condition": "device.tag.role == 'router'",
+              "override": {
+                "proto": "static",
+                "ipaddr": "10.0.0.1",
+                "netmask": "255.255.0.0"
+              }
+            },
+            {
+              ".condition": "device.tag.role != 'router'",
+              "override": {
+                "proto": "dhcp"
+              }
+            }
+          ]
+        },
+        {
+          ".name": "guest",
+          "device": "br-lan.2",
+          ".overrides": [
+            {
+              ".condition": "device.tag.role == 'router'",
+              "override": {
+                "proto": "static",
+                "ipaddr": "10.1.0.1",
+                "netmask": "255.255.0.0"
+              }
+            },
+            {
+              ".condition": "device.tag.role != 'router'",
+              "override": {
+                "proto": "dhcp"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "firewall": {
+      ".condition": "device.tag.role == 'router'",
+      "defaults": [
+        {
+          "input": "ACCEPT",
+          "output": "ACCEPT",
+          "forward": "REJECT",
+          "synflood_protect": true
+        }
+      ],
+      "zone": [
+        {
+          "name": "wan",
+          "input": "REJECT",
+          "output": "ACCEPT",
+          "forward": "REJECT",
+          "masq": true,
+          "mtu_fix": true,
+          "network": ["wan"]
+        },
+        {
+          "name": "lan",
+          "input": "ACCEPT",
+          "output": "ACCEPT",
+          "forward": "ACCEPT",
+          "network": ["lan"]
+        },
+        {
+          "name": "guest",
+          "input": "REJECT",
+          "output": "ACCEPT",
+          "forward": "REJECT",
+          "network": ["guest"]
+        }
+      ],
+      "forwarding": [
+        {
+          "src": "lan",
+          "dest": "wan"
+        },
+        {
+          "src": "guest",
+          "dest": "wan"
+        },
+        {
+          "src": "lan",
+          "dest": "guest"
+        }
+      ],
+      "rule": [
+        {
+          "name": "Allow-DHCP-Renew",
+          "proto": ["udp"],
+          "family": "ipv4",
+          "src": "wan",
+          "dest_port": [68],
+          "target": "ACCEPT"
+        },
+        {
+          "name": "Allow-Ping",
+          "src": "wan",
+          "proto": ["icmp"],
+          "icmp_type": ["echo-request"],
+          "family": "ipv4",
+          "target": "ACCEPT"
+        },
+        {
+          "name": "Allow-IGMP",
+          "src": "wan",
+          "family": "ipv4",
+          "proto": ["igmp"],
+          "target": "ACCEPT"
+        },
+        {
+          "name": "Allow-DHCPv6",
+          "src": "wan",
+          "proto": ["udp"],
+          "family": "ipv6",
+          "src_ip": ["fc00::/6"],
+          "dest_ip": ["fc00::/6"],
+          "dest_port": [546],
+          "target": "ACCEPT"
+        },
+        {
+          "name": "Allow-MLD",
+          "proto": ["icmp"],
+          "family": "ipv6",
+          "src": "wan",
+          "src_ip": ["fe80::/10"],
+          "icmp_type": ["130/0", "131/0", "132/0", "143/0"],
+          "target": "ACCEPT"
+        },
+        {
+          "name": "Allow-ICMPv6-Input",
+          "proto": ["icmp"],
+          "icmp_type": [
+            "echo-request",
+            "echo-reply",
+            "destination-unreachable",
+            "packet-too-big",
+            "time-exceeded",
+            "bad-header",
+            "unknown-header-type",
+            "router-solicitation",
+            "neighbour-solicitation",
+            "router-advertisement",
+            "neighbour-advertisement"
+          ],
+          "family": "ipv6",
+          "src": "wan",
+          "limit": "1000/sec",
+          "target": "ACCEPT"
+        },
+        {
+          "name": "Allow-ICMPv6-Forward",
+          "src": "wan",
+          "dest": "*",
+          "proto": ["icmp"],
+          "icmp_type": [
+            "echo-request",
+            "echo-reply",
+            "destination-unreachable",
+            "packet-too-big",
+            "time-exceeded",
+            "bad-header",
+            "unknown-header-type"
+          ],
+          "limit": "1000/sec",
+          "family": "ipv6",
+          "target": "ACCEPT"
+        },
+        {
+          "name": "Allow-IPSec-ESP",
+          "src": "wan",
+          "dest": "lan",
+          "proto": ["esp"],
+          "target": "ACCEPT"
+        },
+        {
+          "name": "Allow-ISAKMP",
+          "src": "wan",
+          "dest": "lan",
+          "dest_port": [500],
+          "proto": ["udp"],
+          "target": "ACCEPT"
+        },
+        {
+          "name": "Support-UDP-Traceroute",
+          "src": "wan",
+          "dest_port": "33434:33689",
+          "proto": ["udp"],
+          "family": "ipv4",
+          "target": "REJECT",
+          "enabled": false
+        },
+        {
+          "name": "Guest DHCP and DNS",
+          "src": "guest",
+          "dest_port": [53, 67, 68],
+          "target": "ACCEPT"
+        }
+      ]
+    },
+    "dhcp": {
+      ".condition": "device.tag.role == 'router'",
+      "dnsmasq": [
+        {
+          "domainneeded": true,
+          "localise_queries": true,
+          "rebind_localhost": true,
+          "local": "/lan/",
+          "expandhosts": true,
+          "authoritative": true,
+          "readethers": true,
+          "leasefile": "/tmp/dhcp.leases",
+          "localservice": true,
+          "ednspacket_max": 1232,
+          "dnsforwardmax": 300,
+          "domain": "lan",
+          "noresolv": true
+        }
+      ],
+      "dhcp": [
+        {
+          "interface": "lan",
+          "start": 100,
+          "limit": 100,
+          "dhcpv4": "server",
+          "dhcpv6": "server",
+          "ra_flags": ["managed-config", "other-config"],
+          "force": true,
+          "leasetime": "1d"
+        },
+        {
+          "interface": "guest",
+          "start": 100,
+          "limit": 100,
+          "dhcpv4": "server",
+          "dhcpv6": "server",
+          "ra_flags": ["managed-config", "other-config"],
+          "force": true,
+          "leasetime": "1d"
+        }
+      ],
+      "odhcpd": [
+        {
+          "maindhcp": false,
+          "leasefile": "/tmp/hosts/odhcpd",
+          "leasetrigger": "/usr/sbin/odhcpd-update",
+          "loglevel": 4
+        }
+      ]
+    },
+    "wireless": {
+      ".condition": "device.tag.role == 'ap'",
+      "wifi-device": [
+        {
+          ".name": "radio0",
+          "band": "2g"
+        },
+        {
+          ".name": "radio1",
+          "band": "5g"
+        }
+      ],
+      "wifi-iface": [
+        {
+          "mode": "ap",
+          "device": ["radio0", "radio1"],
+          "network": "lan",
+          "ssid": "my-ssid",
+          "encryption": "psk2",
+          "key": "123456789"
+        },
+        {
+          "mode": "ap",
+          "device": ["radio0", "radio1"],
+          "network": "guest",
+          "ssid": "my-ssid-guest",
+          "encryption": "none"
+        }
+      ]
+    }
+  }
+}
