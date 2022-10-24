@@ -2,6 +2,10 @@
 
 A CLI to provision configuration onto OpenWrt devices.
 
+```sh
+$ openwrt-configurator provision -c my-network-config.json
+```
+
 ## Features
 
 - Declaratively define your entire network configuration in a single JSON file.
