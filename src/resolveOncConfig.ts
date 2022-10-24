@@ -13,7 +13,7 @@ export const conditionMatches = ({
   deviceConfig: ONCDeviceConfig;
   deviceSchema: DeviceSchema;
 }) => {
-  if (!condition) {
+  if (!condition || condition === "*") {
     return true;
   }
 

@@ -30,47 +30,13 @@ const parseSections = (configString: string) => {
   return sections;
 };
 
-export const getSectionsMapping = async (ssh: NodeSSH) => {
+export const getConfigSections = async (ssh: NodeSSH) => {
   const command = await ssh.execCommand(`uci export`);
   if (!command.stdout || command.code !== 0) {
-    if (command.stderr === "Command failed: Not found") {
-      return [];
-    } else {
-      console.error(command.stderr);
-      throw new Error("Failed to export uci config");
-    }
+    console.error(command.stderr);
+    throw new Error("Failed to export uci config");
   }
-
   const configString = command.stdout;
-
-  const sectionsObject = parseSections(configString);
-
-  const configSections = Object.keys(sectionsObject).reduce<string[][]>(
-    (acc, configKey) => {
-      const sections = sectionsObject[configKey].map((sectionKey) => [
-        configKey,
-        sectionKey,
-      ]);
-      return [...acc, ...sections];
-    },
-    []
-  );
-
-  console.log(configSections)
-
+  const configSections = parseSections(configString);
   return configSections;
 };
-
-(async () => {
-  const ssh = new NodeSSH();
-
-  const connectedSsh = await ssh.connect({
-    host: "10.0.0.218",
-    username: "root",
-    password: "",
-  });
-
-  await getSectionsMapping(connectedSsh);
-
-  process.exit();
-})();

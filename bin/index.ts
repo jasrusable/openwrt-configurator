@@ -5,7 +5,6 @@ import { program } from "commander";
 import { provisionConfig } from "../src/provisionConfig";
 import { getDeviceSchema } from "../src/getDeviceSchema";
 import { parseSchema } from "../src/utils";
-import { getOpenWrtConfig } from "../src/getOpenWrtConfig";
 import { getOpenWrtState } from "../src/getOpenWrtState";
 
 export const main = async () => {
@@ -56,7 +55,7 @@ export const main = async () => {
           deviceSchema,
         });
 
-        const commands = getDeviceScript({ state });
+        const commands = await getDeviceScript({ state });
         console.log(`#device ${deviceConfig.hostname}`);
         console.log(commands.join("\n"));
       }

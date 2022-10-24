@@ -1,8 +1,7 @@
-import { OpenWrtConfig, OpenWrtState } from "./openWrtConfigSchema";
+import { OpenWrtState } from "./openWrtConfigSchema";
 import { NodeSSH } from "node-ssh";
 import { builtInRevertCommands, getDeviceScript } from "./getDeviceScript";
-import { getBoardJson, getInstalledPackages } from "./utils";
-import { getDeviceSchema } from "./getDeviceSchema";
+import { getBoardJson } from "./utils";
 
 export const provisionOpenWrtDevice = async ({
   deviceModelId,
@@ -38,7 +37,7 @@ export const provisionOpenWrtDevice = async ({
   }
   console.log("Verified.");
 
-  const commands = getDeviceScript({ state });
+  const commands = await getDeviceScript({ state });
   console.log("Setting configuration...");
   for (const command of commands) {
     const result = await connectedSsh.execCommand(command);

@@ -47,6 +47,16 @@ export const oncConfigSchema = z
           .strict()
       )
       .optional(),
+    configs_to_ignore: z
+      .array(
+        z
+          .object({
+            ".condition": conditionSchema,
+            configs: z.array(z.string()),
+          })
+          .strict()
+      )
+      .optional(),
     config: configConfigSchema,
   })
   .strict();

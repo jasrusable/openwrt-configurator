@@ -3,9 +3,8 @@ import { firewallSectionsToReset } from "./configSchemas/firewall";
 import { networkSectionsToReset } from "./configSchemas/network";
 import { systemSectionsToReset } from "./configSchemas/system";
 import { wirelessSectionsToReset } from "./configSchemas/wireless";
-import { DeviceSchema } from "./deviceSchema";
 import { getUciCommands } from "./getUciCommands";
-import { OpenWrtConfig, OpenWrtState } from "./openWrtConfigSchema";
+import { OpenWrtState } from "./openWrtConfigSchema";
 
 const sectionsToReset: any = {
   ...dhcpSectionsToReset,
@@ -37,10 +36,28 @@ export const builtInRevertCommands = Object.keys(sectionsToReset).map(
   }
 );
 
-export const getDeviceScript = ({ state }: { state: OpenWrtState }) => {
+export const getDeviceScript = async ({ state }: { state: OpenWrtState }) => {
   const uciCommands = getUciCommands({ openWrtConfig: state.config });
 
-  return [
+  const configSections =
+    state.configSectionsToReset &&
+    Object.keys(state.configSectionsToReset).reduce<string[][]>(
+      (acc, configKey) => {
+        const sections = (state.configSectionsToReset?.[configKey] || []).map(
+          (sectionKey) => [configKey, sectionKey]
+        );
+        return [...acc, ...sections];
+      },
+      []
+    );
+
+  const resetCommands = configSections
+    ? configSections.map(([configKey, sectionKey]) => {
+        return `while uci -q delete ${configKey}.@${sectionKey}[0]; do :; done`;
+      })
+    : [];
+
+  const opkgCommands = [
     ...(state.packagesToUninstall && state.packagesToUninstall.length > 0
       ? [
           `opkg remove --force-removal-of-dependent-packages ${state.packagesToUninstall.join(
@@ -56,7 +73,11 @@ export const getDeviceScript = ({ state }: { state: OpenWrtState }) => {
             .join(" ")}`,
         ]
       : []),
-    ...builtInResetCommands,
+  ];
+
+  return [
+    ...opkgCommands,
+    ...resetCommands,
     ...uciCommands,
     "uci commit",
     "reload_config",

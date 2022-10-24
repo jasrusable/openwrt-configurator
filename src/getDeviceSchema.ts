@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import { NodeSSH } from "node-ssh";
 import { DeviceSchema, deviceSchemaSchema } from "./deviceSchema";
+import { getConfigSections } from "./getConfigSections";
 import { ONCDeviceConfig } from "./oncConfigSchema";
 import { getBoardJson, getRadios, parseSchema } from "./utils";
 
@@ -28,9 +29,10 @@ export const getDeviceSchema = async ({
       password: deviceConfig.provisioning_config?.ssh_auth.password,
     });
 
-    const [boardJson, radios] = await Promise.all([
+    const [boardJson, radios, configSections] = await Promise.all([
       getBoardJson(connectedSsh),
       getRadios(connectedSsh),
+      getConfigSections(connectedSsh),
     ]);
 
     const isSwConfig = !!boardJson.switch;
@@ -38,6 +40,7 @@ export const getDeviceSchema = async ({
     const deviceSchemaTmp: DeviceSchema = {
       name: deviceConfig.model_id,
       swConfig: isSwConfig,
+      config_sections: configSections,
       ports: isSwConfig
         ? (boardJson.switch || {}).switch0.ports.map((port) => {
             return {

@@ -4,6 +4,7 @@ import { allHtModes, wifiBands, wifiTypes } from "./openWrtValues";
 export const deviceSchemaSchema = z.object({
   name: z.string(),
   swConfig: z.boolean().optional(),
+  config_sections: z.record(z.array(z.string())).optional(),
   ports: z
     .array(
       z.object({
