@@ -6,7 +6,7 @@ OpenWrt Configurator is a CLI tool and corresponding JSON config file which lets
 $ openwrt-configurator provision ./network-config.json
 ```
 
-The JSON config file can be conditionally composed and implements light abstractions over device ethernet ports and Wi-Fi radios to seamlessly support configuration for multiple devices, different device models/types, as well as different device roles (Router, switch, dump-ap etc) from a single JSON config file.
+The JSON config file can be conditionally composed with `.if` and/or `.overrides` keys, and implements light abstractions over device ethernet ports and Wi-Fi radios to seamlessly support configuration for multiple devices, different device models/types, as well as different device roles (Router, switch, dump-ap etc) from a single JSON config file.
 
 ```json
   "interface": [
@@ -157,7 +157,7 @@ Provisioning completed.
   ],
 ```
 
-3. Specify you UCI configuration in JSON syntax, and add `.if` statements to apply configuration conditionally.
+3. Specify your UCI configuration in JSON, and add `.if` and/or `.overrides` keys to apply configuration conditionally.
 
 ```json
   "config": {
@@ -187,7 +187,7 @@ Provisioning completed.
         "netmask": "255.0.0.0"
       },
       {
-        ".if": "device.tag.role == 'router'",
+        ".if": "device.tag.role == 'router'", // Apply the pppoe interface to only the router.
         ".name": "wan",
         "device": "eth0",
         "proto": "pppoe",
@@ -199,7 +199,7 @@ Provisioning completed.
         "device": "br-lan.1",
         ".overrides": [
           {
-            ".if": "device.tag.role == 'router'",
+            ".if": "device.tag.role == 'router'", // Apply a static ip to only the router.
             "override": {
               "proto": "static",
               "ipaddr": "10.0.0.1",
@@ -207,7 +207,7 @@ Provisioning completed.
             }
           },
           {
-            ".if": "device.tag.role != 'router'",
+            ".if": "device.tag.role != 'router'", // Apply dhcp to all non-router devices.
             "override": {
               "proto": "dhcp"
             }
@@ -216,7 +216,7 @@ Provisioning completed.
       }
     ],
     "wireless": {
-      ".if": "device.tag.role == 'ap'",
+      ".if": "device.tag.role == 'ap'", // Applies the entire "wireless" object to only devices with the "ap" tag set.
       "wifi-device": [
         {
           ".name": "radio0",
