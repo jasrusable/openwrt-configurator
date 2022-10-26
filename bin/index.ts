@@ -16,9 +16,8 @@ export const main = async () => {
   program
     .command("provision")
     .description("provision configuration to devices")
-    .requiredOption("-c, --config <config>")
-    .action(async (args) => {
-      const configPath = args.config;
+    .argument("<config-file>", "config file to provision")
+    .action(async (configPath) => {
       const oncConfigString = readFileSync(configPath, "utf-8");
       const oncJson = parseJson(oncConfigString, configPath);
       const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
@@ -28,9 +27,8 @@ export const main = async () => {
   program
     .command("print-uci-commands")
     .description("print uci commands for configuration")
-    .requiredOption("-c, --config <config>")
-    .action(async (args) => {
-      const configPath = args.config;
+    .argument("<config-file>", "config file to print uci commands for")
+    .action(async (configPath) => {
       const oncConfigString = readFileSync(configPath, "utf-8");
       const oncJson = parseJson(oncConfigString, configPath);
       const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
