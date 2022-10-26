@@ -20,7 +20,7 @@ export const provisionOpenWrtDevice = async ({
   console.log(`Provisioning ${auth.username}@${ipAddress}...`);
   const ssh = new NodeSSH();
 
-  console.log(`Connecting...`);
+  console.log(`Connecting over SSH...`);
   const connectedSsh = await ssh.connect({
     host: ipAddress,
     username: auth.username,
@@ -28,7 +28,7 @@ export const provisionOpenWrtDevice = async ({
   });
   console.log(`Connected.`);
 
-  console.log(`Verifying device... `);
+  console.log(`Verifying device...`);
   const boardJson = await getBoardJson(connectedSsh);
   if (boardJson.model.id !== deviceModelId) {
     throw new Error(
