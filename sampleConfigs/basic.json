@@ -27,7 +27,7 @@
   ],
   "package_profiles": [
     {
-      ".condition": "device.tag.role == 'router'",
+      ".if": "device.tag.role == 'router'",
       "packages": [
         "sqm-scripts",
         "luci-app-sqm",
@@ -36,13 +36,13 @@
       ]
     },
     {
-      ".condition": "device.tag.role == 'ap'",
+      ".if": "device.tag.role == 'ap'",
       "packages": ["-firewall", "-firewall4"]
     }
   ],
   "configs_to_not_reset": [
     {
-      ".condition": "*",
+      ".if": "*",
       "configs": [
         "luci.*",
         "rpcd.*",
@@ -74,7 +74,7 @@
     "network": {
       ".overrides": [
         {
-          ".condition": "device.sw_config == true",
+          ".if": "device.sw_config == true",
           "override": {
             "switch": [
               {
@@ -110,7 +110,7 @@
           }
         },
         {
-          ".condition": "device.sw_config == false",
+          ".if": "device.sw_config == false",
           "override": {
             "device": [
               {
@@ -143,7 +143,7 @@
           "netmask": "255.0.0.0"
         },
         {
-          ".condition": "device.tag.role == 'router'",
+          ".if": "device.tag.role == 'router'",
           ".name": "wan",
           "device": "eth0",
           "proto": "pppoe",
@@ -155,7 +155,7 @@
           "device": "br-lan.1",
           ".overrides": [
             {
-              ".condition": "device.tag.role == 'router'",
+              ".if": "device.tag.role == 'router'",
               "override": {
                 "proto": "static",
                 "ipaddr": "10.0.0.1",
@@ -163,7 +163,7 @@
               }
             },
             {
-              ".condition": "device.tag.role != 'router'",
+              ".if": "device.tag.role != 'router'",
               "override": {
                 "proto": "dhcp"
               }
@@ -175,7 +175,7 @@
           "device": "br-lan.2",
           ".overrides": [
             {
-              ".condition": "device.tag.role == 'router'",
+              ".if": "device.tag.role == 'router'",
               "override": {
                 "proto": "static",
                 "ipaddr": "10.1.0.1",
@@ -183,7 +183,7 @@
               }
             },
             {
-              ".condition": "device.tag.role != 'router'",
+              ".if": "device.tag.role != 'router'",
               "override": {
                 "proto": "dhcp"
               }
@@ -193,7 +193,7 @@
       ]
     },
     "firewall": {
-      ".condition": "device.tag.role == 'router'",
+      ".if": "device.tag.role == 'router'",
       "defaults": [
         {
           "input": "ACCEPT",
@@ -356,7 +356,7 @@
       ]
     },
     "dhcp": {
-      ".condition": "device.tag.role == 'router'",
+      ".if": "device.tag.role == 'router'",
       "dnsmasq": [
         {
           "domainneeded": true,
@@ -406,7 +406,7 @@
       ]
     },
     "wireless": {
-      ".condition": "device.tag.role == 'ap'",
+      ".if": "device.tag.role == 'ap'",
       "wifi-device": [
         {
           ".name": "radio0",

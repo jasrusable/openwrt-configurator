@@ -91,7 +91,7 @@ export const resolveOncConfig = ({
 }) => {
   const applyObject = <S extends Record<string, any>>(object: S) => {
     const sectionConfig = object as ExtensionSchema | undefined;
-    const condition = sectionConfig?.[".condition"];
+    const condition = sectionConfig?.[".if"];
     const matches = conditionMatches({
       condition: condition,
       deviceConfig,
@@ -100,7 +100,7 @@ export const resolveOncConfig = ({
     const overrides = (sectionConfig?.[".overrides"] || [])
       .filter((override) => {
         return conditionMatches({
-          condition: override[".condition"],
+          condition: override[".if"],
           deviceConfig,
           deviceSchema,
         });
@@ -112,7 +112,7 @@ export const resolveOncConfig = ({
     // Strip off conditional things.
     const data = Object.fromEntries(
       Object.entries({ ...object, ...overrides }).filter(
-        (e) => ![".condition", ".overrides"].includes(e[0])
+        (e) => ![".if", ".overrides"].includes(e[0])
       )
     );
 

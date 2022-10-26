@@ -22,7 +22,7 @@ export const getOpenWrtState = ({
   const packages = (oncConfig.package_profiles || [])
     .filter((packageProfile) => {
       return conditionMatches({
-        condition: packageProfile[".condition"],
+        condition: packageProfile[".if"],
         deviceConfig,
         deviceSchema,
       });
@@ -50,7 +50,7 @@ export const getOpenWrtState = ({
   const configsToNotReset = (oncConfig.configs_to_not_reset || [])
     .filter((a) => {
       return conditionMatches({
-        condition: a[".condition"],
+        condition: a[".if"],
         deviceConfig,
         deviceSchema,
       });

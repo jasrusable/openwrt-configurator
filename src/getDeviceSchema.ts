@@ -11,7 +11,7 @@ import {
   parseSchema,
 } from "./utils";
 
-const useLocalOverride = false;
+const useLocalOverride = true;
 
 export const getDeviceSchema = async ({
   deviceConfig,

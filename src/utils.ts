@@ -267,11 +267,11 @@ export type Condition = z.infer<typeof conditionSchema>;
 
 export const getExtensionObject = (schema?: z.ZodObject<any>) => {
   const extensionObject = {
-    ".condition": conditionSchema.optional(),
+    ".if": conditionSchema.optional(),
     ".overrides": z
       .array(
         z.object({
-          ".condition": conditionSchema,
+          ".if": conditionSchema,
           override: schema ? schema.partial() : z.any(),
         })
       )
