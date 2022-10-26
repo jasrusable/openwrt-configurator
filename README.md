@@ -64,11 +64,6 @@ The JSON config file can be conditionally composed with `.if` and/or `.overrides
 
 ```sh
 $ openwrt-configurator print-uci-commands ./network-config.json
-```
-
-Outputs:
-
-```sh
 # device my-ap
 opkg remove --force-removal-of-dependent-packages firewall firewall4
 uci set system.system0=system
@@ -87,11 +82,6 @@ uci set network.switch0.enable_vlan='1'
 
 ```sh
 $ openwrt-configurator provision ./network-config.json
-```
-
-Outputs:
-
-```sh
 Provisioning device "my-ap" @ root@10.0.0.218
 Connecting over SSH...
 Connected.
@@ -100,6 +90,7 @@ Verified.
 Setting configuration...
 Configuration set.
 Provisioning completed.
+...
 ```
 
 > Note: For this command to work, SSH details need to be correctly configured in the `provisioning_config` sections for each of your devices.
