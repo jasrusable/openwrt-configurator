@@ -11,7 +11,7 @@ The JSON config file can be conditionally composed with `.if` and/or `.overrides
 ```json
   "interface": [
     {
-      ".if": "device.tag.role == 'router'",
+      ".if": "device.tag.role == 'router'", // Apply the pppoe interface to only the router.
       ".name": "wan",
       "device": "eth0",
       "proto": "pppoe",
@@ -23,7 +23,7 @@ The JSON config file can be conditionally composed with `.if` and/or `.overrides
       "device": "br-lan.1",
       ".overrides": [
         {
-          ".if": "device.tag.role == 'router'",
+          ".if": "device.tag.role == 'router'", // Apply a static ip to only the router.
           "override": {
             "proto": "static",
             "ipaddr": "10.0.0.1",
@@ -31,7 +31,7 @@ The JSON config file can be conditionally composed with `.if` and/or `.overrides
           }
         },
         {
-          ".if": "device.tag.role != 'router'",
+          ".if": "device.tag.role != 'router'", // Apply dhcp to all non-router devices.
           "override": {
             "proto": "dhcp"
           }
@@ -113,7 +113,7 @@ Provisioning completed.
     {
       "model_id": "ubnt,edgerouter-x",
       "ipaddr": "10.0.0.1",
-      "tags": { "role": "router" },
+      "tags": { "role": "router" }, // Give the Edgerouter a tag with role of "router".
       "hostname": "my-router",
       "provisioning_config": {
         "ssh_auth": {
@@ -125,7 +125,7 @@ Provisioning completed.
     {
       "model_id": "tplink,eap245-v3",
       "ipaddr": "10.0.0.218",
-      "tags": { "role": "ap" },
+      "tags": { "role": "ap" }, // Give the EAP245 a tag with role of "ap".
       "hostname": "my-ap",
       "provisioning_config": {
         "ssh_auth": {
@@ -142,7 +142,7 @@ Provisioning completed.
 ```json
   "package_profiles": [
     {
-      ".if": "device.tag.role == 'router'",
+      ".if": "device.tag.role == 'router'", // Install sqm and https-dns-proxy on the router.
       "packages": [
         "sqm-scripts",
         "luci-app-sqm",
@@ -151,7 +151,7 @@ Provisioning completed.
       ]
     },
     {
-      ".if": "device.tag.role == 'ap'",
+      ".if": "device.tag.role == 'ap'", // Uninstall firewall packages from ap's.
       "packages": ["-firewall", "-firewall4"]
     }
   ],
