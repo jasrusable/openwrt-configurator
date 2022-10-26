@@ -44,7 +44,7 @@ The JSON config file can be conditionally composed with `.if` and/or `.overrides
 ## Features
 
 - Store all network config for all devices in a single UCI-like JSON config file (UCI config, packages, firmware versions and more).
-- Conditionally compose your JSON file to support multiple OpenWrt devices, different devices models, and different roles (Routers, switches and dump-ap's etc).
+- Conditionally compose your JSON file to support multiple OpenWrt devices, different device models/types, and different roles (Routers, switches and dump-ap's etc).
 - Light abstractions over ethernet ports and WiFi radios to keep multi-device configuration simple.
 - Strict config syntax validation and logical error checking for configuration to prevent invalid configuration.
 - Convert your JSON file into UCI commands for each of your OpenWrt devices.
