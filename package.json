@@ -3,7 +3,7 @@
   "version": "0.0.2",
   "description": "A CLI to provision configuration onto OpenWrt devices.",
   "bin": {
-    "oc": "./dist/bin/index.js"
+    "openwrt-configurator": "./dist/bin/index.js"
   },
   "scripts": {
     "start": "ts-node ./src/index.ts",
