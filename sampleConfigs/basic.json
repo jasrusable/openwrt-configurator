@@ -8,19 +8,31 @@
       "provisioning_config": {
         "ssh_auth": {
           "username": "root",
-          "password": "123"
+          "password": "some-password"
         }
       }
     },
     {
       "model_id": "tplink,eap245-v3",
-      "ipaddr": "10.0.0.218",
+      "ipaddr": "10.0.0.105",
+      "tags": { "role": "ap" },
+      "hostname": "my-ap-1",
+      "provisioning_config": {
+        "ssh_auth": {
+          "username": "root",
+          "password": "some-password"
+        }
+      }
+    },
+    {
+      "model_id": "tplink,eap245-v3",
+      "ipaddr": "10.0.0.192",
       "tags": { "role": "ap" },
       "hostname": "my-ap-2",
       "provisioning_config": {
         "ssh_auth": {
           "username": "root",
-          "password": "123"
+          "password": "some-password"
         }
       }
     }
@@ -147,8 +159,10 @@
           ".name": "wan",
           "device": "eth0",
           "proto": "pppoe",
-          "username": "me@pppoe.com",
-          "password": "123"
+          "username": "my-pppoe-username",
+          "password": "my-pppoe-password",
+          "ipv6": "auto",
+          "peerdns": false
         },
         {
           ".name": "lan",
@@ -159,7 +173,8 @@
               "override": {
                 "proto": "static",
                 "ipaddr": "10.0.0.1",
-                "netmask": "255.255.0.0"
+                "netmask": "255.255.0.0",
+                "ip6assign": "64"
               }
             },
             {
@@ -179,7 +194,8 @@
               "override": {
                 "proto": "static",
                 "ipaddr": "10.1.0.1",
-                "netmask": "255.255.0.0"
+                "netmask": "255.255.0.0",
+                "ip6assign": "64"
               }
             },
             {
@@ -371,7 +387,8 @@
           "ednspacket_max": 1232,
           "dnsforwardmax": 300,
           "domain": "lan",
-          "noresolv": true
+          "noresolv": true,
+          "notinterface": ["pppoe-wan"]
         }
       ],
       "dhcp": [
@@ -405,16 +422,73 @@
         }
       ]
     },
+    "https-dns-proxy": {
+      ".if": "device.tag.role == 'router'",
+      "main": [
+        {
+          ".name": "config",
+          "update_dnsmasq_config": "*",
+          "force_dns": true,
+          "force_dns_port": [53, 853]
+        }
+      ],
+      "https-dns-proxy": [
+        {
+          "bootstrap_dns": "1.1.1.2,1.0.0.2,2606:4700:4700::1112,2606:4700:4700::1002",
+          "resolver_url": "https://security.cloudflare-dns.com/dns-query"
+        }
+      ]
+    },
+    "sqm": {
+      ".if": "device.tag.role == 'router'",
+      "queue": [
+        {
+          ".name": "eth1",
+          "qdisc": "cake",
+          "script": "piece_of_cake.qos",
+          "enabled": true,
+          "interface": "eth0",
+          "debug_logging": false,
+          "verbosity": 5,
+          "linklayer": "ethernet",
+          "overhead": 44,
+          "download": 97000,
+          "upload": 97000
+        }
+      ]
+    },
     "wireless": {
       ".if": "device.tag.role == 'ap'",
       "wifi-device": [
         {
           ".name": "radio0",
-          "band": "2g"
+          "band": "2g",
+          "htmode": "HT20",
+          "cell_density": 0,
+          "channel": 5,
+          ".overrides": [
+            {
+              ".if": "device.hostname == 'my-ap-2'",
+              "override": {
+                "channel": "auto"
+              }
+            }
+          ]
         },
         {
           ".name": "radio1",
-          "band": "5g"
+          "band": "5g",
+          "htmode": "VHT40",
+          "cell_density": 0,
+          "channel": 48,
+          ".overrides": [
+            {
+              ".if": "device.hostname == 'my-ap-2'",
+              "override": {
+                "channel": "auto"
+              }
+            }
+          ]
         }
       ],
       "wifi-iface": [
@@ -424,14 +498,7 @@
           "network": "lan",
           "ssid": "my-ssid",
           "encryption": "psk2",
-          "key": "123456789"
-        },
-        {
-          "mode": "ap",
-          "device": ["radio0", "radio1"],
-          "network": "guest",
-          "ssid": "my-ssid-guest",
-          "encryption": "none"
+          "key": "my-password"
         }
       ]
     }
