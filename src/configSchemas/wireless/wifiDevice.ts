@@ -6,7 +6,7 @@ export const wirelessWifiDeviceSchema = z
     type: z.enum(wifiTypes),
     path: z.string(),
     band: z.enum(wifiBands),
-    channel: z.number().optional(),
+    channel: z.union([z.enum(["auto"]), z.number()]).optional(),
     htmode: z.enum(allHtModes).optional(),
   })
   .passthrough();
