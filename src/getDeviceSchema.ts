@@ -64,7 +64,7 @@ export const getDeviceSchema = async ({
                 default_role: "lan",
               } as const;
             }),
-            ...(boardJson.network.wan.device
+            ...(boardJson.network.wan?.device
               ? [
                   {
                     name: boardJson.network.wan.device,
@@ -72,7 +72,7 @@ export const getDeviceSchema = async ({
                   } as const,
                 ]
               : []),
-            ...(boardJson.network.wan.ports || []).map((port) => {
+            ...(boardJson.network.wan?.ports || []).map((port) => {
               return {
                 name: port,
                 default_role: "wan",
