@@ -79,7 +79,8 @@
     "system": {
       "system": [
         {
-          "timezone": "Africa/Johannesburg"
+          "zonename": "Africa/Johannesburg",
+          "timezone": "SAST-2"
         }
       ]
     },
