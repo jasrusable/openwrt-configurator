@@ -14,7 +14,7 @@ export const configConfigSchema = z
     dhcp: oncDhcpSchema.optional(),
     wireless: oncWirelessSchema.optional(),
   })
-  .catchall(z.record(z.array(z.record(z.any()))));
+  .passthrough();
 
 export const oncConfigSchema = z
   .object({
