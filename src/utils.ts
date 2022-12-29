@@ -90,11 +90,13 @@ export const boardJsonSchema = z.object({
       device: z.string().optional(),
       protocol: z.string(),
     }),
-    wan: z.object({
-      device: z.string().optional(),
-      protocol: z.string(),
-      ports: z.array(z.string()).optional(),
-    }),
+    wan: z
+      .object({
+        device: z.string().optional(),
+        protocol: z.string(),
+        ports: z.array(z.string()).optional(),
+      })
+      .optional(),
   }),
 });
 
@@ -130,7 +132,10 @@ export const getRadios = async (ssh: NodeSSH) => {
     `ubus call uci get '{"config": "wireless", "type": "wifi-device"}'`
   );
   if (!wirelessStatus.stdout || wirelessStatus.code !== 0) {
-    if (wirelessStatus.stderr === "Command failed: Not found") {
+    if (
+      wirelessStatus.stderr === "Command failed: Not found" ||
+      `Command failed: ubus call uci get {"config": "wireless", "type": "wifi-device"} (Not found)`
+    ) {
       return [];
     } else {
       console.error(wirelessStatus.stderr);
