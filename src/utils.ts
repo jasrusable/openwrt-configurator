@@ -301,9 +301,7 @@ export const getConditionalExtension = (schema?: z.ZodObject<any, any>) =>
 export const sectionSchema = <T extends ZodRawShape>(
   schema: ZodObject<T, any>
 ) => {
-  return z
-    .array(schema.extend({ ".name": nameValidation }).strict())
-    .optional();
+  return z.array(schema.extend({ ".name": nameValidation })).optional();
 };
 
 export const nameValidation = z.string().regex(/[0-9a-z]/gi);
@@ -313,13 +311,10 @@ export const oncSectionSchema = <T extends ZodRawShape>(
 ) => {
   return z
     .array(
-      schema
-        .partial()
-        .extend({
-          ".name": nameValidation.optional(),
-          ...getExtensionObject(schema),
-        })
-        .strict()
+      schema.partial().extend({
+        ".name": nameValidation.optional(),
+        ...getExtensionObject(schema),
+      })
     )
     .optional();
 };
