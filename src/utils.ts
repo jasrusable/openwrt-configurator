@@ -328,7 +328,7 @@ export const configSchema = <T extends ZodRawShape>(
 export const makeOncConfigSchema = <T extends ZodRawShape>(
   schema: ZodObject<T, any>
 ) => {
-  return schema.extend(getExtensionObject(schema)).strict();
+  return schema.extend(getExtensionObject(schema));
 };
 
 export const parseJson = (jsonString: string, filepath?: string) => {
