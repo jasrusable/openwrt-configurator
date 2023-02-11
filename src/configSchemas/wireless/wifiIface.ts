@@ -3,7 +3,7 @@ import { z } from "zod";
 export const wirelessWifiIfaceSchema = z
   .object({
     device: z.string(),
-    mode: z.enum(["ap"]),
+    mode: z.enum(["ap", "mesh"]),
     network: z.string().optional(),
     ssid: z.string().optional(),
     encryption: z.string().optional(),

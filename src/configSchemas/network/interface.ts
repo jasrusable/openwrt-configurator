@@ -4,8 +4,8 @@ import { nameValidation } from "../../utils";
 export const networkInterfaceSchema = z
   .object({
     ".name": nameValidation,
-    device: z.string(),
-    proto: z.enum(["static", "dhcp", "pppoe"]),
+    device: z.string().optional(),
+    proto: z.enum(["static", "dhcp", "pppoe", "batadv", "batadv_hardif"]),
     ipaddr: z.string().optional(),
     netmask: z.string().optional(),
   })
