@@ -8,4 +8,6 @@ export const networkSwitchVlanSchema = z
   })
   .passthrough();
 
-export const oncNetworkSwitchVlanSchema = networkSwitchVlanSchema;
+export const oncNetworkSwitchVlanSchema = networkSwitchVlanSchema.extend({
+  ports: z.union([z.array(z.string()), z.enum(["*", "*t"])]),
+});
