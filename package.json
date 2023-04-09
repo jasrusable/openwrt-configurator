@@ -1,6 +1,6 @@
 {
   "name": "openwrt-configurator",
-  "version": "0.0.2",
+  "version": "0.0.4",
   "description": "A CLI to provision configuration onto OpenWrt devices.",
   "bin": {
     "openwrt-configurator": "./dist/bin/index.js"
