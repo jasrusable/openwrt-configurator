@@ -2,9 +2,9 @@ import { z } from "zod";
 
 export const dhcpDhcpSchema = z
   .object({
-    interface: z.string(),
-    start: z.number(),
-    limit: z.number(),
+    interface: z.string().optional(),
+    start: z.number().optional(),
+    limit: z.number().optional(),
     dhcpv4: z.enum(["server"]).optional(),
     dhcpv6: z.enum(["server", "hybrid"]).optional(),
     ra: z.enum(["server", "hybrid"]).optional(),

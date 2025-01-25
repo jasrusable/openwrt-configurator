@@ -108,3 +108,5 @@ dist
 artifacts
 
 .DS_store
+
+configs
