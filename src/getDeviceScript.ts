@@ -1,3 +1,4 @@
+import { NodeSSH } from "node-ssh";
 import { dhcpSectionsToReset } from "./configSchemas/dhcp";
 import { firewallSectionsToReset } from "./configSchemas/firewall";
 import { networkSectionsToReset } from "./configSchemas/network";
@@ -5,6 +6,7 @@ import { systemSectionsToReset } from "./configSchemas/system";
 import { wirelessSectionsToReset } from "./configSchemas/wireless";
 import { getUciCommands } from "./getUciCommands";
 import { OpenWrtState } from "./openWrtConfigSchema";
+import { getInstalledPackages } from "./utils";
 
 const sectionsToReset: any = {
   ...dhcpSectionsToReset,
@@ -36,7 +38,13 @@ export const builtInRevertCommands = Object.keys(sectionsToReset).map(
   }
 );
 
-export const getDeviceScript = async ({ state }: { state: OpenWrtState }) => {
+export const getDeviceScript = async ({
+  state,
+  ssh,
+}: {
+  state: OpenWrtState;
+  ssh?: NodeSSH;
+}) => {
   const uciCommands = getUciCommands({ openWrtConfig: state.config });
 
   const configSections =
@@ -57,18 +65,32 @@ export const getDeviceScript = async ({ state }: { state: OpenWrtState }) => {
       })
     : [];
 
+  const installedPackages = ssh ? await getInstalledPackages(ssh) : undefined;
+
+  const packagesToUninstall = installedPackages
+    ? (state.packagesToUninstall || []).filter((p) =>
+        installedPackages.find((pk) => pk.packageName === p)
+      )
+    : state.packagesToUninstall;
+
+  const packagesToInstall = installedPackages
+    ? (state.packagesToInstall || []).filter(
+        (p) => !installedPackages.find((pk) => pk.packageName === p.packageName)
+      )
+    : state.packagesToInstall;
+
   const opkgCommands = [
-    ...(state.packagesToUninstall && state.packagesToUninstall.length > 0
+    ...(packagesToUninstall && packagesToUninstall.length > 0
       ? [
-          `opkg remove --force-removal-of-dependent-packages ${state.packagesToUninstall.join(
+          `opkg remove --force-removal-of-dependent-packages ${packagesToUninstall.join(
             " "
           )}`,
         ]
       : []),
-    ...(state.packagesToInstall && state.packagesToInstall.length > 0
+    ...(packagesToInstall && packagesToInstall.length > 0
       ? [
           `opkg update;`,
-          `opkg install ${state.packagesToInstall
+          `opkg install ${packagesToInstall
             .map((p) => p.packageName)
             .join(" ")}`,
         ]

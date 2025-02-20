@@ -37,7 +37,7 @@ export const provisionOpenWrtDevice = async ({
   }
   console.log("Verified.");
 
-  const commands = await getDeviceScript({ state });
+  const commands = await getDeviceScript({ state, ssh: connectedSsh });
   console.log("Setting configuration...");
   for (const command of commands) {
     const result = await connectedSsh.execCommand(command);
