@@ -25,6 +25,7 @@ export const networkSchema = configSchema(
       device: sectionSchema(networkDeviceSchema),
       "bridge-vlan": sectionSchema(networkBridgeVlanSchema),
       interface: sectionSchema(networkInterfaceSchema),
+      globals: z.any()
     })
     .strict()
 );
@@ -37,6 +38,7 @@ export const oncNetworkSchema = makeOncConfigSchema(
       device: oncSectionSchema(oncNetworkDeviceSchema),
       "bridge-vlan": oncSectionSchema(oncNetworkBridgeVlanSchema),
       interface: oncSectionSchema(oncNetworkInterfaceSchema),
+      globals: z.any()
     })
     .strict()
 );
