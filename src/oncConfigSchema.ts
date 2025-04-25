@@ -41,7 +41,7 @@ export const oncConfigSchema = z
       .array(
         z
           .object({
-            ".if": conditionSchema,
+            ".if": conditionSchema.optional(),
             packages: z.array(z.string()),
           })
           .strict()
@@ -51,7 +51,7 @@ export const oncConfigSchema = z
       .array(
         z
           .object({
-            ".if": conditionSchema,
+            ".if": conditionSchema.optional(),
             configs: z.array(z.string()),
           })
           .strict()
