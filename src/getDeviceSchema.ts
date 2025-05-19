@@ -64,6 +64,15 @@ export const getDeviceSchema = async ({
                 default_role: "lan",
               } as const;
             }),
+            ...(!boardJson.network.lan.ports &&
+            boardJson.network.lan.device === "lan"
+              ? [
+                  {
+                    name: boardJson.network.lan.device,
+                    default_role: "lan",
+                  } as const,
+                ]
+              : []),
             ...(boardJson.network.wan?.device
               ? [
                   {
