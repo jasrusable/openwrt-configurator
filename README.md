@@ -65,7 +65,7 @@ The JSON config file can be conditionally composed with `.if` and/or `.overrides
 ```sh
 $ openwrt-configurator print-uci-commands ./network-config.json
 # device my-ap
-opkg remove --force-removal-of-dependent-packages firewall firewall4
+apk del --rdepends firewall firewall4
 uci set system.system0=system
 uci set system.system0.hostname='my-ap'
 uci set system.system0.timezone='Africa/Johannesburg'

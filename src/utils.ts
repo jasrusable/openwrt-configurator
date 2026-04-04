@@ -151,24 +151,26 @@ export const getRadios = async (ssh: NodeSSH) => {
 };
 
 export const getInstalledPackages = async (ssh: NodeSSH) => {
-  const command = await ssh.execCommand(`opkg list-installed`);
+  const command = await ssh.execCommand(`apk list --installed`);
   if (!command.stdout || command.code !== 0) {
     if (command.stderr === "Command failed: Not found") {
       return [];
     } else {
       console.error(command.stderr);
-      throw new Error("Failed to get wireless status");
+      throw new Error("Failed to get installed packages");
     }
   }
 
-  const packageLines = command.stdout.split("\n");
+  const packageLines = command.stdout.split("\n").filter((line) => line.trim());
 
+  // apk output format: "name-version arch {origin} (license) [installed]"
   const packages = packageLines.map((line) => {
-    const [packageName, version] = line.split(" - ");
-    return {
-      packageName,
-      version,
-    };
+    const firstSpace = line.indexOf(" ");
+    const nameVersion = firstSpace > -1 ? line.slice(0, firstSpace) : line;
+    const lastDash = nameVersion.lastIndexOf("-");
+    const packageName = nameVersion.slice(0, lastDash);
+    const version = nameVersion.slice(lastDash + 1);
+    return { packageName, version };
   });
 
   return packages;

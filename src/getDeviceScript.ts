@@ -79,18 +79,15 @@ export const getDeviceScript = async ({
       )
     : state.packagesToInstall;
 
-  const opkgCommands = [
+  const packageCommands = [
     ...(packagesToUninstall && packagesToUninstall.length > 0
       ? [
-          `opkg remove --force-removal-of-dependent-packages ${packagesToUninstall.join(
-            " "
-          )}`,
+          `apk del --rdepends ${packagesToUninstall.join(" ")}`,
         ]
       : []),
     ...(packagesToInstall && packagesToInstall.length > 0
       ? [
-          `opkg update;`,
-          `opkg install ${packagesToInstall
+          `apk add --update-cache ${packagesToInstall
             .map((p) => p.packageName)
             .join(" ")}`,
         ]
@@ -98,7 +95,7 @@ export const getDeviceScript = async ({
   ];
 
   return [
-    ...opkgCommands,
+    ...packageCommands,
     ...resetCommands,
     ...uciCommands,
     "uci commit",
