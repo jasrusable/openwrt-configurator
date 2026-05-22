@@ -110,3 +110,8 @@ artifacts
 .DS_store
 
 configs
+
+# Built sysupgrade images from `openwrt-configurator build-images`.
+# These bake your network topology (hostnames, lan IPs) into the artifact
+# so they should not be committed.
+images/

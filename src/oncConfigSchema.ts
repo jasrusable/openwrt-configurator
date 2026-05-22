@@ -16,8 +16,28 @@ export const configConfigSchema = z
   })
   .passthrough();
 
+export const versionSchema = z.union([
+  z.string(),
+  z
+    .object({
+      ".value": z.string(),
+      ".overrides": z
+        .array(
+          z
+            .object({
+              ".if": conditionSchema,
+              override: z.object({ ".value": z.string() }).strict(),
+            })
+            .strict()
+        )
+        .optional(),
+    })
+    .strict(),
+]);
+
 export const oncConfigSchema = z
   .object({
+    version: versionSchema.optional(),
     devices: z.array(
       z
         .object({

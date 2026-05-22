@@ -8,6 +8,7 @@
   "scripts": {
     "start": "ts-node ./src/index.ts",
     "provision": "ts-node --transpile-only ./bin/index.ts provision",
+    "build-images": "ts-node --transpile-only ./bin/index.ts build-images",
     "print-uci-commands": "ts-node --transpile-only ./bin/index.ts print-uci-commands",
     "build": "tsc",
     "test": "ava",
