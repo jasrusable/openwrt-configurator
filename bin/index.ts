@@ -23,7 +23,7 @@ export const main = async () => {
   program
     .name("openwrt-configurator")
     .description("OpenWrt Configurator")
-    .version("0.0.5");
+    .version("0.0.6");
 
   program
     .command("provision")
