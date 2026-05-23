@@ -6,8 +6,9 @@
     "forceConsistentCasingInFileNames": true,
     "strict": true,
     "skipLibCheck": true,
+    "rootDir": "./",
     "outDir": "./dist"
   },
-  "include": ["./"],
+  "include": ["./bin", "./src"],
   "exclude": ["**/*.test.ts"]
 }
