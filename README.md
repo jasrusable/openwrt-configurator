@@ -1,3 +1,35 @@
+
+<div align="right">
+  <details>
+    <summary >🌐 Language</summary>
+    <div>
+      <div align="center">
+        <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=en">English</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=zh-CN">简体中文</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=zh-TW">繁體中文</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=ja">日本語</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=ko">한국어</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=hi">हिन्दी</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=th">ไทย</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=fr">Français</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=de">Deutsch</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=es">Español</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=it">Italiano</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=ru">Русский</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=pt">Português</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=nl">Nederlands</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=pl">Polski</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=ar">العربية</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=fa">فارسی</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=tr">Türkçe</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=vi">Tiếng Việt</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=id">Bahasa Indonesia</a>
+        | <a href="https://openaitx.github.io/view.html?user=jasrusable&project=openwrt-configurator&lang=as">অসমীয়া</
+      </div>
+    </div>
+  </details>
+</div>
+
 # OpenWrt Configurator
 
 OpenWrt Configurator is a CLI tool and corresponding JSON config file which lets you specify the entire state of your network including UCI configuration, packages and firmware versions in a single UCI-like JSON config file which can be provisioned to your OpenWrt devices using OpenWrt Configurator.
