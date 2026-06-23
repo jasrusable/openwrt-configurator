@@ -1,29 +1,26 @@
 import { NodeSSH } from "node-ssh";
 
-const parseSections = (configString: string) => {
-  const configLines = configString.split("\n");
-  const parsedLines = [
-    ...new Set(
-      configLines
-        .map((line) => line.replace("\t", ""))
-        .filter((line) => line.length > 0)
-        .filter(
-          (line) => line.startsWith("package") || line.startsWith("config")
-        )
-        .map((line) => line.split(" ").slice(0, 2).join(" "))
-    ),
-  ];
-
+export const parseSections = (configString: string) => {
   const sections: Record<string, string[]> = {};
 
-  let config: any = undefined;
+  let config: string | undefined = undefined;
 
-  parsedLines.forEach((line) => {
-    const [type, name] = line.split(" ");
-    if (type === "package") {
-      config = name;
-    } else {
-      sections[config] = [...(sections[config] || []), name];
+  configString.split("\n").forEach((rawLine) => {
+    const [keyword, value] = rawLine.replace(/^\t/, "").split(" ");
+    if (keyword === "package") {
+      config = value?.replace(/'/g, "");
+    } else if (keyword === "config" && config && value) {
+      // Dedupe section types per-package, not globally. A global dedupe
+      // attributes a type shared across packages (e.g. `defaults` in both
+      // firewall and qosify, or `interface`/`device` in both network and
+      // qosify) to whichever package it appears in first, silently dropping
+      // it from later ones — so qosify.@defaults[0] never gets reset and the
+      // package-shipped anonymous section duplicates on every provision.
+      const sectionType = value.replace(/'/g, "");
+      const seen = sections[config] || [];
+      if (!seen.includes(sectionType)) {
+        sections[config] = [...seen, sectionType];
+      }
     }
   });
 
