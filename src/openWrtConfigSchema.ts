@@ -84,4 +84,10 @@ export type OpenWrtState = {
   packagesToInstall?: { packageName: string; version?: string }[];
   packagesToUninstall?: string[];
   configSectionsToReset?: Record<string, string[]>;
+  files?: {
+    path: string;
+    content: string;
+    mode?: string;
+    run_after?: string;
+  }[];
 };

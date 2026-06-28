@@ -67,6 +67,19 @@ export const oncConfigSchema = z
           .strict()
       )
       .optional(),
+    files: z
+      .array(
+        z
+          .object({
+            ".if": conditionSchema.optional(),
+            path: z.string(),
+            content: z.string(),
+            mode: z.string().optional(),
+            run_after: z.string().optional(),
+          })
+          .strict()
+      )
+      .optional(),
     configs_to_not_reset: z
       .array(
         z

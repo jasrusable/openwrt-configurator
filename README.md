@@ -44,6 +44,7 @@ The JSON config file can be conditionally composed with `.if` and/or `.overrides
 ## Features
 
 - Store all network config for all devices in a single UCI-like JSON config file (UCI config, packages, firmware versions and more).
+- Provision arbitrary files (e.g. hotplug scripts) for config that UCI can't express, removed from devices when removed from config.
 - Conditionally compose your JSON file to support multiple OpenWrt devices, different device models/types, and different roles (Routers, switches and dump-ap's etc).
 - Light abstractions over ethernet ports and WiFi radios to keep multi-device configuration simple.
 - Strict config syntax validation and logical error checking for configuration to prevent invalid configuration.
@@ -148,7 +149,21 @@ Provisioning completed.
   ],
 ```
 
-3. Specify your UCI configuration in JSON, and add `.if` and/or `.overrides` keys to apply configuration conditionally.
+3. Optionally provision arbitrary files for configuration that UCI cannot express (e.g. a hotplug script to set a debugfs value). Files are written on provision and tracked in a manifest (`/etc/onc/managed_files`), so a file removed from your config is removed from the device on the next provision. Use `.if` to target specific devices. An optional `run_after` command is run immediately after the file is written (e.g. to trigger a freshly-written hotplug script so it applies without a reboot).
+
+```json
+  "files": [
+    {
+      ".if": "device.tag.role == 'ap'", // Lower mac80211 AQL on the AP's for lower wifi latency under load.
+      "path": "/etc/hotplug.d/net/20-aql",
+      "mode": "0755",
+      "content": "#!/bin/sh\n[ \"$ACTION\" = \"add\" ] || exit 0\ncase \"$INTERFACE\" in phy*-ap*|wlan*) ;; *) exit 0 ;; esac\nfor phy in /sys/kernel/debug/ieee80211/phy*; do\n  [ -e \"$phy/aql_txq_limit\" ] || continue\n  for ac in 0 1 2 3; do echo \"$ac 3000 6000\" > \"$phy/aql_txq_limit\"; done\ndone\n",
+      "run_after": "ACTION=add INTERFACE=phy1-ap0 sh /etc/hotplug.d/net/20-aql" // Apply immediately, without waiting for a reboot.
+    }
+  ],
+```
+
+4. Specify your UCI configuration in JSON, and add `.if` and/or `.overrides` keys to apply configuration conditionally.
 
 ```json
   "config": {

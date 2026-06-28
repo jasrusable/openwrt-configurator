@@ -69,11 +69,35 @@ export const getOpenWrtState = ({
     return { ...acc, [configKey]: [...(acc[configKey] || []), ...sectionKeys] };
   }, {} as any);
 
+  // Resolve files (conditional via `.if`), de-duped by path with last-one-wins.
+  const filesMap = new Map<
+    string,
+    { path: string; content: string; mode?: string; run_after?: string }
+  >();
+  (oncConfig.files || [])
+    .filter((file) => {
+      return conditionMatches({
+        condition: file[".if"],
+        deviceConfig,
+        deviceSchema,
+      });
+    })
+    .forEach((file) => {
+      filesMap.set(file.path, {
+        path: file.path,
+        content: file.content,
+        mode: file.mode,
+        run_after: file.run_after,
+      });
+    });
+  const files = [...filesMap.values()];
+
   const openWrtState: OpenWrtState = {
     config: openWrtConfig,
     packagesToInstall,
     packagesToUninstall,
     configSectionsToReset,
+    files,
   };
 
   return openWrtState;

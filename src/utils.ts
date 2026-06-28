@@ -116,6 +116,17 @@ export const getInstalledPackages = async (ssh: NodeSSH) => {
   return packages;
 };
 
+export const getManagedFiles = async (ssh: NodeSSH, manifestPath: string) => {
+  const result = await ssh.execCommand(`cat ${manifestPath} 2>/dev/null`);
+  if (result.code !== 0) {
+    return [];
+  }
+  return result.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+};
+
 export const getDeviceVersion = async (ssh: NodeSSH) => {
   const versionResult = await ssh.execCommand("cat /etc/openwrt_release");
   const lines = versionResult.stdout.split("\n");
