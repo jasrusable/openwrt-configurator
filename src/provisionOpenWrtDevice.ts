@@ -131,6 +131,12 @@ export const armWatchdogCommands = ({
   ];
 };
 
+/** Clear and recreate the rollback directory before anything is staged into it. */
+const prepareRollbackCommands = (runId: string) => {
+  const { rollbackDir, confirmFlag } = runPaths(runId);
+  return [`rm -rf ${rollbackDir} ${confirmFlag}`, `mkdir -p ${rollbackDir}`];
+};
+
 /**
  * Download the .apk files for packages this run is about to remove.
  *
@@ -144,12 +150,6 @@ export const armWatchdogCommands = ({
  * that fast-moving feeds drop older builds, so a package whose exact installed
  * version is no longer published is fetched at the newest available instead.
  */
-/** Clear and recreate the rollback directory before anything is staged into it. */
-const prepareRollbackCommands = (runId: string) => {
-  const { rollbackDir, confirmFlag } = runPaths(runId);
-  return [`rm -rf ${rollbackDir} ${confirmFlag}`, `mkdir -p ${rollbackDir}`];
-};
-
 const stagePackagesForRollback = async ({
   ssh,
   rollbackDir,
@@ -485,7 +485,7 @@ export const provisionOpenWrtDevice = async ({
   // The staged script is normally removed by the run that executes it, but a
   // run cut short by the commit severing the connection leaves it behind, and
   // it embeds config values.
-  const { pidFile, rollbackDir } = runPaths(runId);
+  const { pidFile, rollbackDir, watchdogPath } = runPaths(runId);
   const disarmed = await confirmSession.execCommand(
     [
       `touch ${confirmFlag}`,
@@ -496,8 +496,11 @@ export const provisionOpenWrtDevice = async ({
   );
 
   if (disarmed.stdout.includes("ONC_DISARMED")) {
-    // Nothing left to roll back to, so reclaim the snapshot and staged packages.
-    await confirmSession.execCommand(`rm -rf ${rollbackDir} ${pidFile}`);
+    // Killing the watchdog means it never reaches its own cleanup branch, so
+    // everything it would have removed has to be removed here instead.
+    await confirmSession.execCommand(
+      `rm -rf ${rollbackDir} ${pidFile} ${confirmFlag} ${watchdogPath}`
+    );
     console.log("Confirmed. Provisioning completed.");
   } else {
     console.warn(
