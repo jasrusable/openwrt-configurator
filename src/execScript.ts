@@ -18,7 +18,12 @@ export type ScriptResult =
     };
 
 const MARKER = "__ONC_OK__";
-export const stagedScriptPath = "/tmp/.onc-provision.sh";
+/**
+ * Per-process so two runs against one device cannot clobber each other's
+ * script. It embeds config values, so it is written 0600 and trapped for
+ * removal even if the connection drops mid-run.
+ */
+export const stagedScriptPath = `/tmp/.onc-provision-${process.pid}.sh`;
 
 /**
  * Run a list of commands on the device as one script.
@@ -54,6 +59,9 @@ export const execScript = async ({
 
   const script = [
     "set -e",
+    // The `rm -f` in the run command only fires if the exec completes; a
+    // dropped connection sends HUP to the script instead, so clean up here too.
+    `trap 'rm -f ${stagedScriptPath}' EXIT INT TERM HUP`,
     ...commands.flatMap((command, index) => [
       command,
       // Leading newline: a command that prints without a trailing newline
@@ -84,12 +92,14 @@ export const execScript = async ({
     `sh ${stagedScriptPath} < /dev/null; __onc_code=$?; rm -f ${stagedScriptPath}; exit $__onc_code`
   );
 
+  const markerPattern = new RegExp(`^${MARKER}(\\d+)$`);
   const seen = new Set(
     result.stdout
       .split("\n")
-      .filter((line) => line.startsWith(MARKER))
-      .map((line) => Number(line.slice(MARKER.length)))
-      .filter((index) => Number.isInteger(index))
+      .flatMap((line) => {
+        const match = line.trim().match(markerPattern);
+        return match ? [Number(match[1])] : [];
+      })
   );
 
   // Count the unbroken run from 0 rather than taking the highest marker seen,

@@ -19,7 +19,7 @@ const uciErrFile = "/tmp/.onc-uci-err";
 export const finaliseCommands = ["uci commit", "reload_config"];
 
 // Pick a heredoc delimiter guaranteed not to occur in the content.
-const heredocDelimiter = (content: string, base = "ONC_EOF") => {
+export const heredocDelimiter = (content: string, base = "ONC_EOF") => {
   let delimiter = base;
   while (content.includes(delimiter)) {
     delimiter = `${delimiter}_`;
@@ -85,32 +85,47 @@ export const getRevertCommands = (state: OpenWrtState) => {
  * where a missing section is expected rather than an error.
  *
  * The batch is line-oriented, so an operation carrying an embedded newline
- * would be split across lines and misparsed. Those stay as standalone `uci`
- * commands, where the shell's quoting keeps the value intact.
+ * would be split across lines and misparsed. Those are issued as standalone
+ * `uci` commands, where the shell's quoting keeps the value intact — and the
+ * batch is flushed around them rather than partitioned, because UCI lists are
+ * ordered and hoisting every batchable operation ahead of a multi-line one
+ * would silently move a list element relative to its siblings.
  */
 const uciBatchCommands = (uciCommands: string[]) => {
-  const batchable = uciCommands.filter((command) => !command.includes("\n"));
-  const standalone = uciCommands.filter((command) => command.includes("\n"));
+  const commands: string[] = [];
+  let pending: string[] = [];
 
-  if (batchable.length === 0) {
-    return standalone;
+  const flush = () => {
+    if (pending.length === 0) {
+      return;
+    }
+    const operations = pending
+      .map((command) => command.replace(/^uci /, ""))
+      .join("\n");
+    const delimiter = heredocDelimiter(operations, "ONC_UCI");
+    commands.push(
+      [
+        `uci batch 2>${uciErrFile} <<'${delimiter}'`,
+        operations,
+        delimiter,
+        `if [ -s ${uciErrFile} ]; then cat ${uciErrFile} >&2; rm -f ${uciErrFile}; exit 1; fi`,
+        `rm -f ${uciErrFile}`,
+      ].join("\n")
+    );
+    pending = [];
+  };
+
+  for (const command of uciCommands) {
+    if (command.includes("\n")) {
+      flush();
+      commands.push(command);
+    } else {
+      pending.push(command);
+    }
   }
+  flush();
 
-  const operations = batchable
-    .map((command) => command.replace(/^uci /, ""))
-    .join("\n");
-  const delimiter = heredocDelimiter(operations, "ONC_UCI");
-
-  return [
-    [
-      `uci batch 2>${uciErrFile} <<'${delimiter}'`,
-      operations,
-      delimiter,
-      `if [ -s ${uciErrFile} ]; then cat ${uciErrFile} >&2; rm -f ${uciErrFile}; exit 1; fi`,
-      `rm -f ${uciErrFile}`,
-    ].join("\n"),
-    ...standalone,
-  ];
+  return commands;
 };
 
 export const getDeviceScript = async ({

@@ -271,7 +271,19 @@ export const sectionSchema = <T extends ZodRawShape>(
   return z.array(schema.extend({ ".name": nameValidation })).optional();
 };
 
-export const nameValidation = z.string().regex(/[0-9a-z]/gi);
+/**
+ * A section name reaches `uci batch` as an unquoted identifier, and uci's
+ * tokenizer terminates unquoted tokens at whitespace and at `#`. The previous
+ * pattern was unanchored, so it only required the name to *contain* one
+ * alphanumeric — `foo bar` and `foo#bar` passed here and failed mid-provision
+ * instead of at parse time with a usable message.
+ */
+export const nameValidation = z
+  .string()
+  .regex(
+    /^[0-9a-zA-Z_-]+$/,
+    "must contain only letters, digits, underscores or hyphens"
+  );
 
 export const oncSectionSchema = <T extends ZodRawShape>(
   schema: ZodObject<T, any>

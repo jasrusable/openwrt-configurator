@@ -1,5 +1,5 @@
 import test from "ava";
-import { execScript } from "../../execScript";
+import { execScript, stagedScriptPath } from "../../execScript";
 
 /**
  * execScript stages the script with one exec and runs it with another, so the
@@ -30,17 +30,21 @@ test("execScript stages the script to a file and runs it with stdin detached", a
   await execScript({ ssh, commands: ["echo a", "echo b"] });
 
   t.is(calls.length, 2);
-  t.true(calls[0].command.includes("cat > /tmp/.onc-provision.sh"));
+  t.true(calls[0].command.includes(`cat > ${stagedScriptPath}`));
+  // Per-process, so concurrent runs cannot clobber each other.
+  t.true(stagedScriptPath.includes(String(process.pid)));
   // Written with a restrictive umask: the script embeds config values.
   t.true(calls[0].command.includes("umask 077"));
   t.true(calls[0].stdin!.startsWith("set -e"));
   t.true(calls[0].stdin!.includes("echo a"));
   t.true(calls[0].stdin!.includes("echo b"));
 
-  t.true(calls[1].command.includes("sh /tmp/.onc-provision.sh"));
+  t.true(calls[1].command.includes(`sh ${stagedScriptPath}`));
   t.true(calls[1].command.includes("< /dev/null"));
   // Removed after running, and the script's exit code is preserved.
-  t.true(calls[1].command.includes("rm -f /tmp/.onc-provision.sh"));
+  t.true(calls[1].command.includes(`rm -f ${stagedScriptPath}`));
+  // ...and a trap inside the script covers a connection dropping mid-run.
+  t.true(calls[0].stdin!.includes(`trap 'rm -f ${stagedScriptPath}' EXIT INT TERM HUP`));
   t.true(calls[1].command.includes("exit $__onc_code"));
   t.is(calls[1].stdin, undefined);
 });

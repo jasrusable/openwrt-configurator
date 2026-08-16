@@ -6,6 +6,7 @@ import {
   getPackagesToRemove,
   getRemovalCascade,
   getRevertCommands,
+  heredocDelimiter,
   managedFilesManifest,
 } from "./getDeviceScript";
 import { execScript, stagedScriptPath } from "./execScript";
@@ -28,6 +29,7 @@ const runPaths = (runId: string) => ({
   rollbackDir: `/tmp/onc-rollback-${runId}`,
   confirmFlag: `/tmp/onc-confirmed-${runId}`,
   watchdogPath: `/tmp/onc-watchdog-${runId}.sh`,
+  pidFile: `/tmp/onc-watchdog-${runId}.pid`,
 });
 
 /**
@@ -66,9 +68,15 @@ export const armWatchdogCommands = ({
   filesToDelete: string[];
   packagesToUninstallOnRollback: string[];
 }) => {
-  const { rollbackDir, confirmFlag, watchdogPath } = runPaths(runId);
+  const { rollbackDir, confirmFlag, watchdogPath, pidFile } = runPaths(runId);
   const filesArchive = `${rollbackDir}/files.tar`;
   const quote = (path: string) => `'${path.replace(/'/g, `'\\''`)}'`;
+  // Derived rather than hardcoded, for the same reason the file writer derives
+  // its own: a caller-supplied path could otherwise close the heredoc early.
+  const watchdogDelimiter = heredocDelimiter(
+    [...filesToDelete, ...packagesToUninstallOnRollback].join("\n"),
+    "ONC_WATCHDOG"
+  );
 
   return [
     `cp -a /etc/config ${rollbackDir}/config`,
@@ -82,10 +90,13 @@ export const armWatchdogCommands = ({
         ]
       : []),
     [
-      `cat > ${watchdogPath} <<'ONC_WATCHDOG'`,
+      `cat > ${watchdogPath} <<'${watchdogDelimiter}'`,
       `#!/bin/sh`,
+      // Recorded by the watchdog itself, so confirming can kill it during its
+      // sleep rather than relying on it noticing a flag afterwards.
+      `echo $$ > ${pidFile}`,
       `sleep ${timeoutSeconds}`,
-      `if [ -f ${confirmFlag} ]; then rm -rf ${rollbackDir} ${confirmFlag} ${watchdogPath}; exit 0; fi`,
+      `if [ -f ${confirmFlag} ]; then rm -rf ${rollbackDir} ${confirmFlag} ${watchdogPath} ${pidFile}; exit 0; fi`,
       `logger -t onc "provision not confirmed within ${timeoutSeconds}s, rolling back and rebooting"`,
       // Stage the restored copy first, then swap. Doing `mv` before `cp`
       // meant a failed copy — an overlay full from `apk add`, which is exactly
@@ -113,7 +124,7 @@ export const armWatchdogCommands = ({
       `if ls ${rollbackDir}/packages/*.apk >/dev/null 2>&1; then apk add --allow-untrusted --repositories-file /dev/null ${rollbackDir}/packages/*.apk >/dev/null 2>&1 || logger -t onc "rollback could not reinstall removed packages"; fi`,
       `sync`,
       `reboot`,
-      `ONC_WATCHDOG`,
+      watchdogDelimiter,
     ].join("\n"),
     `chmod 0755 ${watchdogPath}`,
     `setsid ${watchdogPath} </dev/null >/dev/null 2>&1 &`,
@@ -466,13 +477,34 @@ export const provisionOpenWrtDevice = async ({
     );
   }
 
-  // The staged script is removed by the run that executes it, but a run cut
-  // short by the commit severing the connection leaves it behind. It is mode
-  // 0600 on tmpfs, but it embeds config values, so clear it now that we are
-  // back in.
-  await confirmSession.execCommand(
-    `touch ${confirmFlag}; rm -f ${stagedScriptPath}`
+  // Touch the flag first so the watchdog disarms even if the kill fails, then
+  // kill it outright: the flag is only read after its sleep ends, which leaves
+  // a window where it could fire between the check and the touch. Killing it
+  // mid-sleep is decisive rather than advisory.
+  //
+  // The staged script is normally removed by the run that executes it, but a
+  // run cut short by the commit severing the connection leaves it behind, and
+  // it embeds config values.
+  const { pidFile, rollbackDir } = runPaths(runId);
+  const disarmed = await confirmSession.execCommand(
+    [
+      `touch ${confirmFlag}`,
+      `kill "$(cat ${pidFile} 2>/dev/null)" 2>/dev/null`,
+      `rm -f ${stagedScriptPath}`,
+      `if [ -f ${pidFile} ] && kill -0 "$(cat ${pidFile})" 2>/dev/null; then echo ONC_ARMED; else echo ONC_DISARMED; fi`,
+    ].join("; ")
   );
-  console.log("Confirmed. Provisioning completed.");
+
+  if (disarmed.stdout.includes("ONC_DISARMED")) {
+    // Nothing left to roll back to, so reclaim the snapshot and staged packages.
+    await confirmSession.execCommand(`rm -rf ${rollbackDir} ${pidFile}`);
+    console.log("Confirmed. Provisioning completed.");
+  } else {
+    console.warn(
+      `Confirmed, but could not verify the rollback watchdog stopped on ${hostname}. ` +
+        `The confirm flag is set, so it should exit on its own within ${confirmTimeoutSeconds}s — ` +
+        `check that the device does not reboot.`
+    );
+  }
   confirmSession.dispose();
 };

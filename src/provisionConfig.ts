@@ -91,8 +91,30 @@ export const provisionConfig = async ({
     );
   }
 
-  for (const { deviceConfig, deviceSchema, ssh } of ready) {
+  for (const { deviceConfig, deviceSchema, ssh: introspected } of ready) {
     const state = getOpenWrtState({ oncConfig, deviceConfig, deviceSchema });
+
+    // Sessions are opened for every device up front so the run can abort before
+    // changing anything. By the time this device's turn comes, an earlier
+    // device's network changes may have killed its session — an AP behind a
+    // freshly reconfigured router is the obvious case. Check, and reconnect if
+    // it has gone, rather than provisioning over a stale session.
+    let ssh = introspected;
+    const alive = await introspected
+      .execCommand("true")
+      .then((r) => r.code === 0)
+      .catch(() => false);
+    if (!alive) {
+      console.log(
+        `Session to ${deviceConfig.hostname} did not survive; reconnecting...`
+      );
+      try {
+        introspected.dispose();
+      } catch {
+        // Already gone.
+      }
+      ssh = await connectToDevice(deviceConfig);
+    }
 
     try {
       await provisionOpenWrtDevice({

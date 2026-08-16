@@ -110,6 +110,38 @@ test("uci values containing newlines stay out of the batch", async (t) => {
   t.false(batch.includes("line two"));
 });
 
+// UCI lists are ordered. Hoisting every batchable operation ahead of a
+// multi-line one would silently move a list element relative to its siblings,
+// so the batch is flushed around multi-line commands instead of partitioned.
+test("a multi-line value does not reorder the operations around it", async (t) => {
+  const state: OpenWrtState = {
+    config: {
+      system: {
+        system: [
+          {
+            ".name": "system0",
+            first: "a",
+            multi: "line one\nline two",
+            last: "z",
+          },
+        ],
+      },
+    } as any,
+  };
+
+  const commands = await getDeviceScript({ state });
+  const relevant = commands.filter(
+    (c) => c.startsWith("uci batch") || c.startsWith("uci set")
+  );
+
+  // batch(first) -> standalone(multi) -> batch(last): original order preserved
+  t.is(relevant.length, 3);
+  t.true(relevant[0].includes("first='a'"));
+  t.true(relevant[1].startsWith("uci set") && relevant[1].includes("line one"));
+  t.true(relevant[2].includes("last='z'"));
+  t.false(relevant[0].includes("last='z'"));
+});
+
 test("getDeviceScript reuses a provided installed-package list", async (t) => {
   let apkCalls = 0;
   const ssh = {
