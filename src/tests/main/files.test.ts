@@ -1,5 +1,9 @@
 import test from "ava";
-import { getDeviceScript } from "../../getDeviceScript";
+import {
+  getDeviceScript,
+  getFinaliseCommands,
+  getPostReloadCommands,
+} from "../../getDeviceScript";
 import { OpenWrtState } from "../../openWrtConfigSchema";
 
 test("getDeviceScript writes managed files + manifest before commit", async (t) => {
@@ -78,6 +82,43 @@ test("run_after_reload runs after the config is live, run_after before", async (
   t.true(early > -1 && late > -1, "both hooks are emitted");
   t.true(early < commitIdx, "run_after fires before the commit");
   t.true(late > reloadIdx, "run_after_reload fires after the reload");
+});
+
+// `reload_config` is the step that can sever the link, and once dropbear exits
+// the next marker printf in execScript takes SIGPIPE and kills the script. A
+// hook sitting after the reload in that same script would be dropped on
+// exactly the runs that reshape networking, while the tool reported success.
+// So provision runs them separately, over a reconnected session — which means
+// the three segments have to partition the script exactly.
+test("post-reload hooks are split out of the finalise segment", async (t) => {
+  const state: OpenWrtState = {
+    config: { network: { interface: [{ ".name": "lan" }] } } as any,
+    files: [
+      { path: "/etc/a", content: "x", run_after_reload: "HOOK-A" },
+      { path: "/etc/b", content: "y" },
+      { path: "/etc/c", content: "z", run_after_reload: "HOOK-C" },
+    ],
+  };
+
+  const all = await getDeviceScript({ state });
+  const finalise = getFinaliseCommands(state);
+  const postReload = getPostReloadCommands(state);
+
+  // The finalise segment stops at the reload.
+  t.is(finalise[finalise.length - 1], "reload_config");
+  t.false(finalise.some((c) => c.startsWith("HOOK-")));
+  // Only files that declare one contribute, in file order.
+  t.deepEqual(postReload, ["HOOK-A", "HOOK-C"]);
+  // The dry run still shows the whole sequence...
+  t.deepEqual(all.slice(all.length - postReload.length), postReload);
+  // ...and the segments partition it exactly, which is what provision's
+  // configure/finalise/post-reload split depends on.
+  const configure = all.slice(
+    0,
+    all.length - finalise.length - postReload.length
+  );
+  t.deepEqual([...configure, ...finalise, ...postReload], all);
+  t.false(configure.some((c) => c.startsWith("HOOK-")));
 });
 
 test("a file with no run_after_reload adds nothing after the reload", async (t) => {

@@ -154,7 +154,7 @@ Provisioning completed.
    Two optional hooks run a command for you, and which one you want depends on what it needs:
 
    - **`run_after`** runs immediately after the file is written, which is *before* the UCI config is committed and reloaded. Use it when the command only needs the file itself.
-   - **`run_after_reload`** runs after `uci commit` and `reload_config`, once the new config is actually live. Use it when the command depends on something this provision creates — an interface, a bridge, a restarted service. A hotplug script pointed at `phy1-ap0` will silently do nothing under `run_after` if *this* provision is what creates that interface.
+   - **`run_after_reload`** runs after `uci commit` and `reload_config`, once the new config is actually live. Use it when the command depends on something this provision creates — an interface, a bridge, a restarted service. A hotplug script pointed at `phy1-ap0` will silently do nothing under `run_after` if *this* provision is what creates that interface. `provision` runs these over a reconnected session, after the device has been confirmed reachable, so they cannot be lost when committing drops the link. If one fails the run fails loudly, but the configuration stays committed and live — only the immediate application of it did not happen.
 
    Note that `files` is not the way to create a UCI config: write to `/etc/config/<pkg>` through the `config` key instead, or the new config will not be reloaded on the run that creates it.
 

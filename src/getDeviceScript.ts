@@ -84,17 +84,34 @@ export const getStartCleanCommands = (state: OpenWrtState) =>
  * tool did not make. That swept up whatever a LuCI session happened to have
  * pending, and leftovers from an earlier failed run.
  *
- * `run_after_reload` hooks come last: unlike `run_after`, which fires as soon
- * as its file is written, these run once the config is actually live, so they
- * can rely on interfaces and services the new config creates.
+ * Stops at the reload. `run_after_reload` hooks follow, but `provision` runs
+ * them as their own step rather than as part of this one — see
+ * `getPostReloadCommands`.
  */
 export const getFinaliseCommands = (state: OpenWrtState) => [
   ...forEachExistingConfig(touchedConfigs(state), "commit"),
   "reload_config",
-  ...(state.files || []).flatMap((file) =>
-    file.run_after_reload ? [file.run_after_reload] : []
-  ),
 ];
+
+/**
+ * Hooks that must not run until the new config is actually live.
+ *
+ * Unlike `run_after`, which fires as soon as its file is written, these run
+ * after `uci commit` and `reload_config`, so they can rely on interfaces and
+ * services the new config creates.
+ *
+ * `provision` runs them over a *reconnected* session rather than appending
+ * them to the finalise script. `reload_config` is the step that can sever the
+ * link, and once dropbear exits, the next marker `printf` in `execScript`
+ * takes SIGPIPE and kills the script — so a hook sitting after the reload in
+ * the same script would be silently dropped on exactly the runs that reshape
+ * networking, while the tool still reported success. Running them once the
+ * device has been reconnected to makes that impossible.
+ */
+export const getPostReloadCommands = (state: OpenWrtState) =>
+  (state.files || []).flatMap((file) =>
+    file.run_after_reload ? [file.run_after_reload] : []
+  );
 
 /**
  * Enter every existing config into procd's change baseline, before staging.
@@ -331,6 +348,10 @@ export const getDeviceScript = async ({
     ...uciBatchCommands(uciCommands),
     ...fileCommands,
     ...getFinaliseCommands(state),
+    // Printed as part of the script so a dry run shows the whole sequence,
+    // but `provision` splits these off and runs them over a reconnected
+    // session. See `getPostReloadCommands`.
+    ...getPostReloadCommands(state),
   ];
 };
 

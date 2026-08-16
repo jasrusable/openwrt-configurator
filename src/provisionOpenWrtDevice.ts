@@ -2,6 +2,7 @@ import { OpenWrtState } from "./openWrtConfigSchema";
 import { NodeSSH } from "node-ssh";
 import {
   getFinaliseCommands,
+  getPostReloadCommands,
   getDeviceScript,
   getPackagesToRemove,
   getRemovalCascade,
@@ -341,9 +342,13 @@ export const provisionOpenWrtDevice = async ({
   // commands the finalise segment turns out to be: the commit now names each
   // touched config, and `run_after_reload` hooks are appended after the reload.
   const finaliseCommands = getFinaliseCommands(state);
+  // Split off, not appended to the finalise script: `reload_config` is what
+  // can sever the link, and a hook after it in the same script dies to SIGPIPE
+  // the moment dropbear exits. These run over the reconnected session instead.
+  const postReloadCommands = getPostReloadCommands(state);
   const configureCommands = allCommands.slice(
     0,
-    allCommands.length - finaliseCommands.length
+    allCommands.length - finaliseCommands.length - postReloadCommands.length
   );
 
   // The watchdog counts from the moment it starts sleeping, so every deadline
@@ -559,7 +564,39 @@ export const provisionOpenWrtDevice = async ({
     throw new Error(`Failed to commit configuration on ${hostname}.`);
   }
 
+  /**
+   * Run the `run_after_reload` hooks over a session known to be alive.
+   *
+   * A hook failing does not invalidate the provision: the config is committed
+   * and live, and only the immediate application of it did not happen (a
+   * reboot would apply it). So this reports loudly and fails the run rather
+   * than rolling back a device that is correctly configured.
+   */
+  const runPostReloadHooks = async (session: NodeSSH) => {
+    if (postReloadCommands.length === 0) {
+      return;
+    }
+    console.log(
+      `Running ${postReloadCommands.length} post-reload hook(s)...`
+    );
+    const hooked = await execScript({
+      ssh: session,
+      commands: postReloadCommands,
+    });
+    if (!hooked.ok) {
+      throw new Error(
+        `${hostname} was provisioned and its configuration is live, but a ` +
+          `run_after_reload hook failed: ${hooked.command}\n${hooked.stderr}`
+      );
+    }
+    console.log("Post-reload hooks completed.");
+  };
+
   if (!confirm) {
+    // No reconnect happens in this mode, so the best available session is the
+    // one we already hold — which the commit may have severed. That is the
+    // trade-off --no-confirm asks for; the hooks still cannot fail silently.
+    await runPostReloadHooks(ssh);
     console.log("Provisioning completed (unconfirmed).");
     return;
   }
@@ -637,7 +674,7 @@ export const provisionOpenWrtDevice = async ({
     await confirmSession.execCommand(
       `rm -rf ${rollbackDir} ${pidFile} ${confirmFlag} ${watchdogPath}`
     );
-    console.log("Confirmed. Provisioning completed.");
+    console.log("Confirmed.");
   } else {
     console.warn(
       `Confirmed, but could not verify the rollback watchdog stopped on ${hostname}. ` +
@@ -645,5 +682,14 @@ export const provisionOpenWrtDevice = async ({
         `check that the device does not reboot.`
     );
   }
-  confirmSession.dispose();
+
+  // After disarming: the device is confirmed reachable and the config is live,
+  // which is exactly what these hooks need, and a hook failing should not put
+  // an otherwise healthy device through a rollback.
+  try {
+    await runPostReloadHooks(confirmSession);
+  } finally {
+    confirmSession.dispose();
+  }
+  console.log("Provisioning completed.");
 };
