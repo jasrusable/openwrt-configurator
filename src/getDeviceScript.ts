@@ -15,8 +15,113 @@ export const managedFilesManifest = "/etc/onc/managed_files";
 
 const uciErrFile = "/tmp/.onc-uci-err";
 
-/** The trailing commands that make staged UCI changes take effect. */
-export const finaliseCommands = ["uci commit", "reload_config"];
+/**
+ * A per-config `uci` operation that tolerates the config not being there.
+ *
+ * `uci commit <pkg>` and `uci revert <pkg>` both exit 1 when the config file
+ * does not exist (verified on 25.12.5), and this script runs under `set -e`. A
+ * config can legitimately be absent — a built-in this image does not ship, or
+ * one whose package `apk del` removed earlier in this same run — and a missing
+ * config must not abort the provision or, worse, stop the remaining reverts
+ * partway through a rollback.
+ */
+const forEachExistingConfig = (configKeys: string[], operation: string) =>
+  configKeys.map(
+    (configKey) =>
+      `if [ -f /etc/config/${configKey} ]; then uci ${operation} ${configKey}; fi`
+  );
+
+/**
+ * Every config this run stages changes in: what it sets, plus what it resets.
+ *
+ * Only configs with at least one real operation count. Resolving a config for a
+ * device routinely leaves a package behind with no sections — one whose
+ * sections were all filtered out by `.if`, so it applies to other devices but
+ * not this one. Committing those would defeat the point of naming configs
+ * explicitly, since it would commit whatever staged changes happened to be
+ * sitting in a package this run never touches, and reverting them would discard
+ * someone else's staged edits for no reason.
+ */
+const touchedConfigs = (state: OpenWrtState) => {
+  const written = Object.keys(state.config || {}).filter((configKey) =>
+    Object.values((state.config as any)[configKey] || {}).some(
+      (sections) => ((sections as any[]) || []).length > 0
+    )
+  );
+  const reset = Object.keys(state.configSectionsToReset || {}).filter(
+    (configKey) => (state.configSectionsToReset?.[configKey] || []).length > 0
+  );
+  return [...new Set([...written, ...reset])].sort();
+};
+
+/**
+ * Discard any staged UCI changes in the configs this run is about to write.
+ *
+ * A run that dies without being able to revert — the link drops mid-configure,
+ * so the tool's own `uci revert` never reaches the device — leaves its staged
+ * deltas in /tmp/.uci. The watchdog restores /etc/config but does not touch the
+ * delta directory, so those changes survive the rollback and the next run's
+ * commit would pick them up, silently re-applying part of a provision that was
+ * deliberately rolled back.
+ *
+ * Clearing the staging area up front fixes that deterministically, without
+ * racing an abandoned script that may still be running. Only the configs this
+ * run writes are reverted, so unrelated staged changes (a half-finished LuCI
+ * edit, say) are left alone rather than discarded.
+ *
+ * This runs before the packages step because `default_postinst` ends with a
+ * bare `uci commit` for any package shipping /etc/uci-defaults — which would
+ * otherwise commit the very leftovers we are trying to drop.
+ */
+export const getStartCleanCommands = (state: OpenWrtState) =>
+  forEachExistingConfig(touchedConfigs(state), "revert");
+
+/**
+ * The trailing commands that make staged UCI changes take effect.
+ *
+ * The commit names each config explicitly rather than being a bare
+ * `uci commit`, which commits *every* package — including staged changes this
+ * tool did not make. That swept up whatever a LuCI session happened to have
+ * pending, and leftovers from an earlier failed run.
+ *
+ * `run_after_reload` hooks come last: unlike `run_after`, which fires as soon
+ * as its file is written, these run once the config is actually live, so they
+ * can rely on interfaces and services the new config creates.
+ */
+export const getFinaliseCommands = (state: OpenWrtState) => [
+  ...forEachExistingConfig(touchedConfigs(state), "commit"),
+  "reload_config",
+  ...(state.files || []).flatMap((file) =>
+    file.run_after_reload ? [file.run_after_reload] : []
+  ),
+];
+
+/**
+ * Enter every existing config into procd's change baseline, before staging.
+ *
+ * `reload_config` fires `config.change` only for configs listed in
+ * /var/run/config.md5 — it diffs with `md5sum -c`, which never looks at a file
+ * that is not already in that list. The list is written by /etc/init.d/boot and
+ * by `reload_config` itself; those are the only callers in the whole OpenWrt
+ * tree. Installing a package does **not** refresh it, because `default_postinst`
+ * runs `kmodloader`, `sysctl restart`, uci-defaults and `<init> enable/start`,
+ * but never `reload_config`.
+ *
+ * So without this, a package installed by this run ships /etc/config/<pkg>, apk
+ * starts its service on the shipped defaults, we configure it, and the closing
+ * `reload_config` fires nothing for it: the service keeps its defaults until a
+ * reboot or the next provision, while `uci show` reports the intended config.
+ *
+ * This has to run *before* anything is staged. `reload_config` compares
+ * `uci show`, which includes uncommitted deltas, so refreshing the baseline
+ * after staging would record our own changes as the baseline and the closing
+ * reload would then fire nothing at all.
+ *
+ * It also applies any drift since boot, but the closing `reload_config` would
+ * have applied that same drift anyway — this only makes it happen earlier, with
+ * the rollback watchdog already armed.
+ */
+export const baselineRefreshCommands = ["reload_config"];
 
 // Pick a heredoc delimiter guaranteed not to occur in the content.
 export const heredocDelimiter = (content: string, base = "ONC_EOF") => {
@@ -68,7 +173,10 @@ export const getRevertCommands = (state: OpenWrtState) => {
     ]),
   ].sort();
 
-  return touched.map((configKey) => `uci revert ${configKey}`);
+  // Guarded, because `uci revert` exits 1 on a config that is not present and
+  // the revert script runs under `set -e` — one absent config would otherwise
+  // abort every remaining revert, which is the worst possible moment for it.
+  return forEachExistingConfig(touched, "revert");
 };
 
 /**
@@ -216,11 +324,13 @@ export const getDeviceScript = async ({
   // the UCI changes are committed (the revert is then effective), and so a
   // freshly-written hotplug script is in place when reload_config runs.
   return [
+    ...getStartCleanCommands(state),
     ...packageCommands,
+    ...baselineRefreshCommands,
     ...resetCommands,
     ...uciBatchCommands(uciCommands),
     ...fileCommands,
-    ...finaliseCommands,
+    ...getFinaliseCommands(state),
   ];
 };
 

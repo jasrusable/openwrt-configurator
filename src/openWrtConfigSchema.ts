@@ -88,6 +88,9 @@ export type OpenWrtState = {
     path: string;
     content: string;
     mode?: string;
+    /** Runs as soon as the file is written — before `uci commit`. */
     run_after?: string;
+    /** Runs after `uci commit` and `reload_config`, so the config is live. */
+    run_after_reload?: string;
   }[];
 };

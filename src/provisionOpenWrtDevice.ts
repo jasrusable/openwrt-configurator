@@ -1,7 +1,7 @@
 import { OpenWrtState } from "./openWrtConfigSchema";
 import { NodeSSH } from "node-ssh";
 import {
-  finaliseCommands,
+  getFinaliseCommands,
   getDeviceScript,
   getPackagesToRemove,
   getRemovalCascade,
@@ -48,7 +48,12 @@ export type RollbackMode = "reload" | "reboot" | "reload-then-reboot";
  *
  * `at` and `nohup` are both absent from a stock OpenWrt image; `setsid` is
  * present and a process started this way was verified to outlive the SSH
- * session that spawned it.
+ * session that spawned it. Note that survival is not what `setsid` buys here —
+ * dropbear never signals its children on disconnect, so a plain child outlives
+ * the session too (measured: a remote loop writing only to a file completed
+ * 12/12 iterations after its client was killed). What kills a command is
+ * SIGPIPE on writing to the closed stdout pipe, which `setsid` plus redirecting
+ * to /dev/null avoids entirely.
  *
  * Scope, in order of how well it rewinds:
  *  - /etc/config: snapshotted and restored wholesale.
@@ -318,6 +323,10 @@ export const provisionOpenWrtDevice = async ({
   }
 
   const allCommands = await getDeviceScript({ state, ssh, installedPackages });
+  // Derived from the same state, so the split stays correct however many
+  // commands the finalise segment turns out to be: the commit now names each
+  // touched config, and `run_after_reload` hooks are appended after the reload.
+  const finaliseCommands = getFinaliseCommands(state);
   const configureCommands = allCommands.slice(
     0,
     allCommands.length - finaliseCommands.length
@@ -444,6 +453,11 @@ export const provisionOpenWrtDevice = async ({
         mode: rollbackMode,
         recoverSeconds,
         // procd's triggers cover the rest, but wireless usually needs telling.
+        // Belt and braces only: netifd registers `procd_add_reload_trigger
+        // network wireless`, and `wifi reload` is literally `ubus call network
+        // reload` — the same call netifd's own reload_service makes. So
+        // reload_config already covers wireless; this just makes the rollback
+        // path independent of that trigger still being registered.
         reloadWireless: Object.keys(state.config || {}).includes("wireless"),
       }),
     });

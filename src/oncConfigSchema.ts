@@ -76,6 +76,7 @@ export const oncConfigSchema = z
             content: z.string(),
             mode: z.string().optional(),
             run_after: z.string().optional(),
+            run_after_reload: z.string().optional(),
           })
           .strict()
       )

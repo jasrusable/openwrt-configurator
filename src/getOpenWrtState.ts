@@ -72,7 +72,13 @@ export const getOpenWrtState = ({
   // Resolve files (conditional via `.if`), de-duped by path with last-one-wins.
   const filesMap = new Map<
     string,
-    { path: string; content: string; mode?: string; run_after?: string }
+    {
+      path: string;
+      content: string;
+      mode?: string;
+      run_after?: string;
+      run_after_reload?: string;
+    }
   >();
   (oncConfig.files || [])
     .filter((file) => {
@@ -88,6 +94,7 @@ export const getOpenWrtState = ({
         content: file.content,
         mode: file.mode,
         run_after: file.run_after,
+        run_after_reload: file.run_after_reload,
       });
     });
   const files = [...filesMap.values()];

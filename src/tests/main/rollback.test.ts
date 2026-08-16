@@ -130,7 +130,10 @@ test("mode=reload never reboots", (t) => {
   t.true(watchdog.includes("forbids rebooting"));
 });
 
-test("wireless gets an explicit reload, since procd triggers do not cover it", (t) => {
+// Redundant with reload_config in practice — netifd triggers on `wireless` and
+// `wifi reload` is just `ubus call network reload` — but it keeps the rollback
+// path from depending on that trigger still being registered.
+test("wireless gets an explicit reload on top of reload_config", (t) => {
   t.false(watchdogOf(arm()).includes("wifi reload"));
   t.true(watchdogOf(arm({ reloadWireless: true })).includes("wifi reload"));
 });

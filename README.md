@@ -149,7 +149,14 @@ Provisioning completed.
   ],
 ```
 
-3. Optionally provision arbitrary files for configuration that UCI cannot express (e.g. a hotplug script to set a debugfs value). Files are written on provision and tracked in a manifest (`/etc/onc/managed_files`), so a file removed from your config is removed from the device on the next provision. Use `.if` to target specific devices. An optional `run_after` command is run immediately after the file is written (e.g. to trigger a freshly-written hotplug script so it applies without a reboot).
+3. Optionally provision arbitrary files for configuration that UCI cannot express (e.g. a hotplug script to set a debugfs value). Files are written on provision and tracked in a manifest (`/etc/onc/managed_files`), so a file removed from your config is removed from the device on the next provision. Use `.if` to target specific devices.
+
+   Two optional hooks run a command for you, and which one you want depends on what it needs:
+
+   - **`run_after`** runs immediately after the file is written, which is *before* the UCI config is committed and reloaded. Use it when the command only needs the file itself.
+   - **`run_after_reload`** runs after `uci commit` and `reload_config`, once the new config is actually live. Use it when the command depends on something this provision creates — an interface, a bridge, a restarted service. A hotplug script pointed at `phy1-ap0` will silently do nothing under `run_after` if *this* provision is what creates that interface.
+
+   Note that `files` is not the way to create a UCI config: write to `/etc/config/<pkg>` through the `config` key instead, or the new config will not be reloaded on the run that creates it.
 
 ```json
   "files": [
@@ -158,7 +165,7 @@ Provisioning completed.
       "path": "/etc/hotplug.d/net/20-aql",
       "mode": "0755",
       "content": "#!/bin/sh\n[ \"$ACTION\" = \"add\" ] || exit 0\ncase \"$INTERFACE\" in phy*-ap*|wlan*) ;; *) exit 0 ;; esac\nfor phy in /sys/kernel/debug/ieee80211/phy*; do\n  [ -e \"$phy/aql_txq_limit\" ] || continue\n  for ac in 0 1 2 3; do echo \"$ac 3000 6000\" > \"$phy/aql_txq_limit\"; done\ndone\n",
-      "run_after": "ACTION=add INTERFACE=phy1-ap0 sh /etc/hotplug.d/net/20-aql" // Apply immediately, without waiting for a reboot.
+      "run_after_reload": "ACTION=add INTERFACE=phy1-ap0 sh /etc/hotplug.d/net/20-aql" // Apply immediately, without waiting for a reboot. After the reload, so the interface exists.
     }
   ],
 ```

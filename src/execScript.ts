@@ -59,8 +59,15 @@ export const execScript = async ({
 
   const script = [
     "set -e",
-    // The `rm -f` in the run command only fires if the exec completes; a
-    // dropped connection sends HUP to the script instead, so clean up here too.
+    // The `rm -f` in the run command only fires if the exec completes. Dropbear
+    // never signals the command when the connection drops (its only kill() is
+    // for an explicit client signal request, and a non-pty exec has no
+    // controlling terminal), so what actually stops the script is SIGPIPE on
+    // the next marker write, once dropbear exits and the stdout pipe closes.
+    // SIGPIPE is deliberately NOT trapped: trapping it would run the handler
+    // and let the script carry on, so an abandoned run would keep reconfiguring
+    // the device while the rollback watchdog was already restoring it. The
+    // staged script it leaves behind is removed by the confirm step instead.
     `trap 'rm -f ${stagedScriptPath}' EXIT INT TERM HUP`,
     ...commands.flatMap((command, index) => [
       command,

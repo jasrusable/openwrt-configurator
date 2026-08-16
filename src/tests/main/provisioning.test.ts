@@ -53,13 +53,21 @@ test("getRevertCommands covers configs outside the built-in set", (t) => {
     config: { network: {}, sqm: {}, dropbear: {}, usteer: {} } as any,
   };
   const reverts = getRevertCommands(state);
+  const reverted = (config: string) =>
+    reverts.includes(
+      `if [ -f /etc/config/${config} ]; then uci revert ${config}; fi`
+    );
 
-  t.true(reverts.includes("uci revert sqm"));
-  t.true(reverts.includes("uci revert dropbear"));
-  t.true(reverts.includes("uci revert usteer"));
+  t.true(reverted("sqm"));
+  t.true(reverted("dropbear"));
+  t.true(reverted("usteer"));
   // Built-ins are still covered even when the config does not mention them.
-  t.true(reverts.includes("uci revert firewall"));
-  t.true(reverts.includes("uci revert wireless"));
+  t.true(reverted("firewall"));
+  t.true(reverted("wireless"));
+  // `uci revert` exits 1 on a config that is not present, and the revert script
+  // runs under `set -e` — unguarded, one absent config would abort every
+  // remaining revert, at the worst possible moment.
+  t.true(reverts.every((c) => c.startsWith("if [ -f /etc/config/")));
 });
 
 test("uci set operations are collapsed into a single uci batch", async (t) => {
@@ -161,11 +169,125 @@ test("getDeviceScript reuses a provided installed-package list", async (t) => {
   t.is(apkCalls, 0);
 });
 
+// `reload_config` only fires config.change for configs already listed in
+// /var/run/config.md5, and installing a package does not refresh that list. So
+// a package installed by this run shipped /etc/config/<pkg>, we configured it,
+// and the closing reload fired nothing for it — the service kept its shipped
+// defaults. Refreshing the baseline after the install puts the new config in
+// the list, so the closing reload sees a real diff.
+test("the config baseline is refreshed after installs and before staging", async (t) => {
+  const state: OpenWrtState = {
+    config: {
+      system: { system: [{ ".name": "system0", hostname: "r1" }] },
+    } as any,
+    packagesToInstall: [{ packageName: "sqm-scripts" }],
+  };
+  const ssh = fakeSsh([
+    { match: "apk info", stdout: apkInfo },
+    { match: "managed_files", stdout: "", code: 1 },
+  ]);
+
+  const commands = await getDeviceScript({ state, ssh });
+  const install = commands.findIndex((c) => c.startsWith("apk add"));
+  const refresh = commands.indexOf("reload_config");
+  // The first command that actually stages something. Not just any `uci`
+  // command — the clean-start reverts run earlier and stage nothing.
+  const firstStaged = commands.findIndex(
+    (c) => c.startsWith("uci batch") || c.startsWith("while uci -q delete")
+  );
+
+  t.true(install > -1, "the package is installed");
+  t.true(firstStaged > -1, "something is staged");
+  // After the install, so the newly shipped /etc/config/<pkg> exists by then.
+  t.true(refresh > install, "the baseline is refreshed after the install");
+  // Before staging: reload_config compares `uci show`, which includes
+  // uncommitted deltas, so refreshing later would bake our own changes into
+  // the baseline and the closing reload would fire nothing at all.
+  t.true(refresh < firstStaged, "the baseline is refreshed before staging");
+});
+
 test("the script still ends with commit then reload", async (t) => {
   const state: OpenWrtState = {
     config: { system: { system: [{ ".name": "system0", hostname: "r1" }] } } as any,
   };
   const commands = await getDeviceScript({ state });
-  t.is(commands[commands.length - 2], "uci commit");
+  t.is(
+    commands[commands.length - 2],
+    "if [ -f /etc/config/system ]; then uci commit system; fi"
+  );
   t.is(commands[commands.length - 1], "reload_config");
+});
+
+// A bare `uci commit` commits *every* package, so it swept up staged changes
+// this tool never made — a half-finished LuCI edit, or leftovers from an
+// earlier run that failed and was rolled back.
+test("the commit names only the configs this run touched", async (t) => {
+  const state: OpenWrtState = {
+    config: { network: { interface: [{ ".name": "lan", proto: "static" }] } } as any,
+    configSectionsToReset: { firewall: ["zone"] },
+  };
+
+  const commands = await getDeviceScript({ state });
+  const commits = commands.filter((c) => c.includes("uci commit"));
+
+  t.is(commits.length, 2);
+  // Both the config it writes and the config it resets are committed...
+  t.true(
+    commits.includes("if [ -f /etc/config/network ]; then uci commit network; fi")
+  );
+  t.true(
+    commits.includes("if [ -f /etc/config/firewall ]; then uci commit firewall; fi")
+  );
+  // ...and nothing commits every package wholesale.
+  t.false(commands.includes("uci commit"));
+});
+
+// Resolving a config for one device leaves packages behind with no sections —
+// ones whose sections were all filtered out by `.if` for this device. Naming
+// those in the commit would reintroduce exactly what the narrow commit avoids:
+// committing staged changes in a package this run never touches.
+test("configs with no operations are neither reverted nor committed", async (t) => {
+  const state: OpenWrtState = {
+    config: {
+      network: { interface: [{ ".name": "lan", proto: "static" }] },
+      // Applies to other devices; every section filtered out for this one.
+      usteer: {},
+      radius: { radius: [] },
+    } as any,
+    // Present on the device, but nothing of it is being reset.
+    configSectionsToReset: { network: ["interface"], dropbear: [] },
+  };
+
+  const commands = await getDeviceScript({ state });
+  const mentions = (config: string) =>
+    commands.some((c) => c.includes(`/etc/config/${config}`));
+
+  t.true(mentions("network"), "a config with real operations is handled");
+  t.false(mentions("usteer"), "an empty package is skipped");
+  t.false(mentions("radius"), "a package whose sections are all gone is skipped");
+  t.false(mentions("dropbear"), "a config with nothing to reset is skipped");
+});
+
+// A run that dies before it can revert leaves staged deltas in /tmp/.uci. The
+// watchdog restores /etc/config but never touches the delta directory, so those
+// changes survive the rollback and the next run's commit would apply them.
+test("staged changes are discarded before this run stages its own", async (t) => {
+  const state: OpenWrtState = {
+    config: { network: { interface: [{ ".name": "lan" }] } } as any,
+    packagesToInstall: [{ packageName: "sqm-scripts" }],
+  };
+
+  const commands = await getDeviceScript({ state });
+  const revert = commands.indexOf(
+    "if [ -f /etc/config/network ]; then uci revert network; fi"
+  );
+  const install = commands.findIndex((c) => c.startsWith("apk add"));
+  const firstStaged = commands.findIndex((c) => c.startsWith("uci batch"));
+
+  t.true(revert > -1, "the touched config is reverted first");
+  // Before the packages step: `default_postinst` ends with a bare `uci commit`
+  // for any package shipping /etc/uci-defaults, which would commit the very
+  // leftovers being dropped here.
+  t.true(revert < install, "the clean start precedes package installs");
+  t.true(revert < firstStaged, "the clean start precedes staging");
 });

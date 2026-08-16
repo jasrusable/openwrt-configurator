@@ -95,23 +95,36 @@ export const main = async () => {
           const ssh = await connectToDevice(deviceConfig);
           try {
             const deviceSchema = await getDeviceSchema({ deviceConfig, ssh });
-            return { deviceConfig, deviceSchema };
-          } finally {
+            // The session stays open: the script is built against it below.
+            return { deviceConfig, deviceSchema, ssh };
+          } catch (e) {
             ssh.dispose();
+            throw e;
           }
         })
       );
 
-      for (const { deviceConfig, deviceSchema } of devices) {
-        const state = getOpenWrtState({
-          oncConfig: oncConfig,
-          deviceConfig,
-          deviceSchema,
-        });
+      for (const { deviceConfig, deviceSchema, ssh } of devices) {
+        try {
+          const state = getOpenWrtState({
+            oncConfig: oncConfig,
+            deviceConfig,
+            deviceSchema,
+          });
 
-        const commands = await getDeviceScript({ state });
-        console.log(`#device ${deviceConfig.hostname}`);
-        console.log(commands.join("\n"));
+          // Build against the live session so package diffing and the managed
+          // file manifest are resolved the same way `provision` resolves them.
+          // Without it, every package the config names is listed as an install
+          // and every removal it names as a removal, regardless of what is
+          // actually on the device — which badly overstates the change. It
+          // printed a 21-package `apk del` cascade for packages that were not
+          // even installed, and a dry run nobody can trust is worse than none.
+          const commands = await getDeviceScript({ state, ssh });
+          console.log(`#device ${deviceConfig.hostname}`);
+          console.log(commands.join("\n"));
+        } finally {
+          ssh.dispose();
+        }
       }
     });
 
