@@ -305,7 +305,7 @@ export const provisionOpenWrtDevice = async ({
   console.log(`Provisioning ${hostname} @ ${ipAddress}...`);
 
   const runId = `${Date.now().toString(36)}`;
-  const { confirmFlag } = runPaths(runId);
+  const { confirmFlag, recoveredFlag } = runPaths(runId);
 
   console.log(`Verifying device...`);
   const boardJson = await getBoardJson(ssh);
@@ -381,10 +381,21 @@ export const provisionOpenWrtDevice = async ({
         await session.execCommand(`touch ${confirmFlag}`);
         console.error(`Reverted.`);
       } else {
+        // The rollback has to stay armed, because only the watchdog can put
+        // the packages and files back. The *reboot* is a different question:
+        // it exists to recover a device we can no longer reach, and we are
+        // plainly still connected — this failure was a command exiting
+        // non-zero, not a loss of access. Touching the recovered flag now
+        // means the watchdog restores, reloads, finds the flag already set
+        // and exits, rather than sitting out the recovery wait and rebooting
+        // a device that was reachable the whole time. A genuine loss of
+        // access still escalates, since it leaves us unable to touch anything.
+        await session.execCommand(`touch ${recoveredFlag}`);
         console.error(
-          `Reverted staged UCI changes. Packages and files cannot be undone ` +
-            `from here, so the rollback is being left armed — the device will ` +
-            `restore itself and reboot within ${confirmTimeoutSeconds}s.`
+          `Reverted staged UCI changes. Packages and files can only be undone ` +
+            `by the rollback, so it is being left armed — within ` +
+            `${confirmTimeoutSeconds}s the device will restore itself and reload. ` +
+            `It will not reboot: this session is still up, so access never went away.`
         );
       }
     } catch (e) {
