@@ -67,53 +67,84 @@ const wirelessConfigSchema = z.object({
   ),
 });
 
-export const getRadios = async (ssh: NodeSSH) => {
-  const wirelessStatus = await ssh.execCommand(
-    `ubus call uci get '{"config": "wireless", "type": "wifi-device"}'`
+
+/**
+ * Everything `getDeviceSchema` needs, in a single SSH exec.
+ *
+ * Each exec is a separate SSH channel (~59ms against a LAN device), so issuing
+ * these four separately costs four round trips even when wrapped in
+ * `Promise.all` — they share one connection and cannot overlap.
+ */
+export const getDeviceFacts = async (ssh: NodeSSH) => {
+  const sep = "__ONC_FACT__";
+  const result = await ssh.execCommand(
+    [
+      `cat /etc/board.json`,
+      `echo "${sep}"`,
+      `ubus call uci get '{"config": "wireless", "type": "wifi-device"}' 2>/dev/null || echo '{"values":{}}'`,
+      `echo "${sep}"`,
+      `uci export`,
+      `echo "${sep}"`,
+      `cat /etc/openwrt_release`,
+    ].join("\n")
   );
-  if (!wirelessStatus.stdout || wirelessStatus.code !== 0) {
-    if (
-      wirelessStatus.stderr === "Command failed: Not found" ||
-      `Command failed: ubus call uci get {"config": "wireless", "type": "wifi-device"} (Not found)`
-    ) {
-      return [];
-    } else {
-      console.error(wirelessStatus.stderr);
-      throw new Error("Failed to get wireless status");
-    }
+
+  const parts = result.stdout.split(`${sep}\n`);
+  if (parts.length !== 4) {
+    console.error(result.stderr);
+    throw new Error(
+      `Failed to read device facts (expected 4 sections, got ${parts.length}).`
+    );
   }
-  const parsedWirelessStatus = parseSchema(
-    wirelessConfigSchema,
-    parseJson(wirelessStatus.stdout)
+
+  const [boardJsonRaw, radiosRaw, uciExport, releaseRaw] = parts;
+
+  const boardJson = parseSchema(
+    boardJsonSchema,
+    parseJson(boardJsonRaw, "/etc/board.json")
   );
-  const radios = Object.values(parsedWirelessStatus.values);
-  return radios;
+
+  const parsedRadios = parseSchema(wirelessConfigSchema, parseJson(radiosRaw));
+  const radios = Object.values(parsedRadios.values);
+
+  const distribReleaseLine = releaseRaw
+    .split("\n")
+    .find((line) => line.startsWith("DISTRIB_RELEASE"));
+  if (!distribReleaseLine) {
+    throw new Error(
+      "Failed to determine device version in /etc/openwrt_release"
+    );
+  }
+  const version = distribReleaseLine.split("=")[1].replace(/'/g, "");
+
+  return { boardJson, radios, uciExport, version };
 };
 
+/**
+ * Names of the packages installed on the device.
+ *
+ * Uses `apk info`, which prints one bare package name per line. The previous
+ * approach parsed `apk list --installed` by splitting on the last "-", which
+ * silently mangled any name carrying an apk release suffix: `curl-8.19.0-r2`
+ * parsed as name "curl-8.19.0", version "r2". That mis-parsed 86% of packages
+ * on a stock 25.12 install, so the installed-set comparisons below it never
+ * matched: removals were filtered away entirely and installs were re-issued on
+ * every provision.
+ */
 export const getInstalledPackages = async (ssh: NodeSSH) => {
-  const command = await ssh.execCommand(`apk list --installed`);
-  if (!command.stdout || command.code !== 0) {
+  const command = await ssh.execCommand(`apk info`);
+  if (command.code !== 0) {
     if (command.stderr === "Command failed: Not found") {
       return [];
-    } else {
-      console.error(command.stderr);
-      throw new Error("Failed to get installed packages");
     }
+    console.error(command.stderr);
+    throw new Error("Failed to get installed packages");
   }
 
-  const packageLines = command.stdout.split("\n").filter((line) => line.trim());
-
-  // apk output format: "name-version arch {origin} (license) [installed]"
-  const packages = packageLines.map((line) => {
-    const firstSpace = line.indexOf(" ");
-    const nameVersion = firstSpace > -1 ? line.slice(0, firstSpace) : line;
-    const lastDash = nameVersion.lastIndexOf("-");
-    const packageName = nameVersion.slice(0, lastDash);
-    const version = nameVersion.slice(lastDash + 1);
-    return { packageName, version };
-  });
-
-  return packages;
+  return command.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
 };
 
 export const getManagedFiles = async (ssh: NodeSSH, manifestPath: string) => {
@@ -127,23 +158,6 @@ export const getManagedFiles = async (ssh: NodeSSH, manifestPath: string) => {
     .filter((line) => line.length > 0);
 };
 
-export const getDeviceVersion = async (ssh: NodeSSH) => {
-  const versionResult = await ssh.execCommand("cat /etc/openwrt_release");
-  const lines = versionResult.stdout.split("\n");
-  const distribReleaseLine = lines.find((line) =>
-    line.startsWith("DISTRIB_RELEASE")
-  );
-  if (!distribReleaseLine) {
-    throw new Error(
-      "Failed to determine device version in /etc/openwrt_release"
-    );
-  }
-  const version = distribReleaseLine
-    .split("=")[1]
-    .replace(`'`, "")
-    .replace(`'`, "");
-  return version;
-};
 
 export const parseSchema = <D>(schema: ZodSchema<D>, data: any) => {
   try {

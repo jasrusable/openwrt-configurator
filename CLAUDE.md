@@ -64,8 +64,35 @@ The pipeline, in dependency order:
 4. **`src/resolveOncConfig.ts`** — collapses `.if` / `.overrides` for one device. `conditionMatches` evaluates conditions against `device.tag.*`, `device.hostname`, `device.ipaddr`, `device.model_id`, `device.version`, `device.sw_config`, using `boolean-parser` for `AND`/`OR` and hand-rolled `==` / `!=`.
 5. **`src/getOpenWrtConfig.ts`** — the interesting one. Turns abstractions into concrete UCI: expands `@cpu_port`, resolves `"*"` / `"*t"` port wildcards to actual unused physical ports, maps `bridge-vlan` (DSA) vs `switch_vlan` (legacy swconfig) depending on `deviceSchema.sw_config`, assigns `.name`s, injects the hostname, and expands `wifi-iface` across radios by band.
 6. **`src/getOpenWrtState.ts`** — adds packages to install/uninstall, which config sections to reset, and resolved `files`.
-7. **`src/getUciCommands.ts`** + **`src/getDeviceScript.ts`** — emit the shell script. Fixed order: package install/removal → section resets → `uci set` → file writes → `uci commit` → `reload_config`.
-8. **`src/provisionOpenWrtDevice.ts`** — executes commands one at a time over `node-ssh`; on any non-zero exit it runs `builtInRevertCommands` (`uci revert <config>`) and aborts. Files are deliberately written *before* `uci commit` so a write failure leaves the revert effective.
+7. **`src/getUciCommands.ts`** + **`src/getDeviceScript.ts`** — emit the shell script. Fixed order: package install/removal → section resets → one `uci batch` carrying every `set`/`add_list` → file writes → `uci commit` → `reload_config`.
+8. **`src/execScript.ts`** — runs the whole command list as one script piped to `sh` over **stdin**. Do not "simplify" this into a single joined exec string: dropbear rejects exec requests over ~9 KB and drops the connection on larger ones, while a real provision script is comfortably past that. `set -e` plus a marker echoed after each command preserves per-command failure granularity.
+9. **`src/provisionOpenWrtDevice.ts`** — verifies the board id, warns about package removals, arms a commit-confirm watchdog, runs the script, commits, then reconnects to confirm. On failure it runs `getRevertCommands(state)` (`uci revert` for *every* config the state touches, not just the built-in five) and aborts. Files are deliberately written *before* `uci commit` so a write failure leaves the revert effective.
+
+### Commit-confirm
+
+Because committing `network`/`firewall` can sever the connection doing the provisioning, `provision` snapshots state, starts a detached `setsid` watchdog, commits, then reconnects (retrying, since `reload_config` briefly drops the network) and touches its confirm flag to disarm it. If the tool cannot get back in, the device rolls back and reboots itself. `--no-confirm` disables it; `--confirm-timeout` changes the 90 s window.
+
+What the rollback covers, best to worst:
+
+| | Rewound? |
+|---|---|
+| `/etc/config` | Yes — snapshotted and restored wholesale |
+| Managed files that existed before | Yes — archived with `tar`, restored |
+| Managed files this run creates | Yes — deleted |
+| Packages this run installs | Yes — `apk del` needs no network |
+| Packages this run removes | Usually — staged beforehand, see below |
+
+**Package staging.** Before removing anything — while the link is still up — `provision` runs `apk fetch` over the whole `apk del --simulate --rdepends` cascade into the rollback directory. A rollback then reinstalls with `apk add --allow-untrusted --repositories-file /dev/null`, which resolves with **no repositories configured at all** (verified on-device), so it works with the network down.
+
+Package changes are undone in reverse: newly installed packages are removed *first*, then removed ones reinstalled, because the two can conflict (`wpad-mbedtls` and `wpad-basic-mbedtls` do).
+
+Fast-moving feeds drop old builds, so where the exact installed version is no longer published `apk fetch` takes the newest available — LuCI especially. A rollback therefore restores a working package set, not necessarily byte-identical versions. The `firewall4` cascade is 21 packages / 380 KB / ~3s on the test device.
+
+`provision` prints the full removal cascade before acting: on a stock image, removing `firewall4` takes 21 packages with it, `uhttpd` and all of LuCI included, because `luci-light` depends on `luci-app-firewall`.
+
+Rollback paths are per-run (`/tmp/onc-*-<runId>`). With fixed paths, a second provision inside the confirm window would clear the flag that had already disarmed an earlier watchdog, which would then wake and restore a stale snapshot over a healthy device.
+
+`at` and `nohup` are **not** present on a stock OpenWrt image — `setsid` is, and a process started that way outlives the SSH session. Note that killing the CLI between arming and confirming will let the watchdog fire.
 
 `src/getBuildPlan.ts` + `src/buildImage.ts` are a separate branch off step 2: they resolve version/packages/LAN/timezone into an ASU (firmware-selector) build request with a generated UCI-defaults bootstrap script, poll the build, and download + sha256-verify the sysupgrade image.
 
@@ -108,5 +135,7 @@ Most tests are golden-ish: load `config.json` / `config2.json`, build the OpenWr
 - **`npm start` is dead.** It points at `./src/index.ts`, which does not exist.
 - **`src/config.json` is a stray scratch config**, not used by the tests or the CLI.
 - **`images/` is gitignored** — built sysupgrade images bake hostnames and LAN IPs into the artifact.
+- **`uci batch` exits 0 even when an operation fails**, reporting the error only on stderr. `getDeviceScript` therefore captures stderr and fails the step if it is non-empty. Don't switch that back to checking the exit code. Only `set`/`add_list` go through the batch — the reset loops stay outside it, because a delete of a missing section is expected there rather than an error.
+- **`getInstalledPackages` uses `apk info`**, which prints bare names. It previously parsed `apk list --installed` by splitting on the last `-`, which mangled 86% of names (`curl-8.19.0-r2` → `curl-8.19.0`) so nothing ever matched: removals were silently dropped and installs re-ran every provision.
 - **`parseSections` dedupes section types per-package, not globally** (see the comment in `src/getConfigSections.ts`). A global dedupe silently breaks packages that share a section type name, e.g. `defaults` in both `firewall` and `qosify`. Don't "simplify" it back.
 - **Code style:** heavy functional composition — `reduce`/spread over mutation, arrow-function exports, object-destructured named parameters (`({ oncConfig, deviceConfig })`). Match it. Comments are sparse and explain *why*, usually a device-level quirk worth preserving.

@@ -5,7 +5,7 @@ import { DeviceBuildPlan } from "../src/getBuildPlan";
 import { ONCConfig, oncConfigSchema } from "../src/oncConfigSchema";
 import { getDeviceScript } from "../src/getDeviceScript";
 import { program } from "commander";
-import { provisionConfig } from "../src/provisionConfig";
+import { connectToDevice, provisionConfig } from "../src/provisionConfig";
 import { getDeviceSchema } from "../src/getDeviceSchema";
 import { parseJson, parseSchema } from "../src/utils";
 import { getOpenWrtState } from "../src/getOpenWrtState";
@@ -29,11 +29,34 @@ export const main = async () => {
     .command("provision")
     .description("provision configuration to devices")
     .argument("<config-file>", "config file to provision")
-    .action(async (configPath) => {
+    .option(
+      "--no-confirm",
+      "skip the commit-confirm rollback (the device will not restore itself if the new config cuts it off)"
+    )
+    .option(
+      "--confirm-timeout <seconds>",
+      "seconds to reconnect and confirm before the device rolls back",
+      (v) => {
+        const seconds = parseInt(v, 10);
+        // An unparsed value would reach the device as `sleep NaN`.
+        if (!Number.isFinite(seconds) || seconds < 30) {
+          throw new Error(
+            `--confirm-timeout must be a whole number of seconds, at least 30 (got "${v}").`
+          );
+        }
+        return seconds;
+      },
+      90
+    )
+    .action(async (configPath, options) => {
       const oncConfigString = readFileSync(configPath, "utf-8");
       const oncJson = parseJson(oncConfigString, configPath);
       const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
-      await provisionConfig({ oncConfig });
+      await provisionConfig({
+        oncConfig,
+        confirm: options.confirm,
+        confirmTimeoutSeconds: options.confirmTimeout,
+      });
     });
 
   program
@@ -48,22 +71,22 @@ export const main = async () => {
         (device) => device.enabled !== false
       );
 
-      const deviceSchemas = await Promise.all(
+      // Each device keeps its own schema. Looking it up by model_id meant two
+      // devices of the same model shared one schema, so the second was built
+      // against the first device's UCI sections and firmware version.
+      const devices = await Promise.all(
         deviceConfigs.map(async (deviceConfig) => {
-          const deviceSchema = await getDeviceSchema({ deviceConfig });
-          return deviceSchema;
+          const ssh = await connectToDevice(deviceConfig);
+          try {
+            const deviceSchema = await getDeviceSchema({ deviceConfig, ssh });
+            return { deviceConfig, deviceSchema };
+          } finally {
+            ssh.dispose();
+          }
         })
       );
 
-      for (const deviceConfig of deviceConfigs) {
-        const deviceSchema = deviceSchemas.find(
-          (schema) => schema.name === deviceConfig.model_id
-        );
-        if (!deviceSchema) {
-          throw new Error(
-            `Device schema not found for device model: ${deviceConfig.model_id}`
-          );
-        }
+      for (const { deviceConfig, deviceSchema } of devices) {
         const state = getOpenWrtState({
           oncConfig: oncConfig,
           deviceConfig,
@@ -376,4 +399,9 @@ export const main = async () => {
   process.exit(0);
 };
 
-main();
+main().catch((e) => {
+  // Without this a failure surfaces as an unhandled rejection and a stack
+  // trace rather than a readable message.
+  console.error(`\nError: ${(e as Error)?.message ?? e}`);
+  process.exit(1);
+});

@@ -1,5 +1,3 @@
-import { NodeSSH } from "node-ssh";
-
 export const parseSections = (configString: string) => {
   const sections: Record<string, string[]> = {};
 
@@ -25,15 +23,4 @@ export const parseSections = (configString: string) => {
   });
 
   return sections;
-};
-
-export const getConfigSections = async (ssh: NodeSSH) => {
-  const command = await ssh.execCommand(`uci export`);
-  if (!command.stdout || command.code !== 0) {
-    console.error(command.stderr);
-    throw new Error("Failed to export uci config");
-  }
-  const configString = command.stdout;
-  const configSections = parseSections(configString);
-  return configSections;
 };
