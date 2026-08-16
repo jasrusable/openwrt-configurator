@@ -70,6 +70,29 @@ test("rollback restores config, files and newly installed packages", (t) => {
   t.true(watchdog.includes("cp -a /tmp/onc-rollback-abc123/config /etc/config"));
 });
 
+// Doing `mv /etc/config` before the copy meant a failed copy — an overlay full
+// from `apk add`, which is exactly when rollbacks fire — rebooted the device
+// with no /etc/config at all, the one failure needing physical recovery.
+test("the restored config is staged before the live one is moved aside", (t) => {
+  const watchdog = watchdogOf(arm());
+  const swap = watchdog.split("\n").find((l) => l.startsWith("if cp -a"))!;
+  t.truthy(swap);
+  t.true(swap.includes("/etc/config.onc-new"));
+  // the move only happens inside the success branch of the copy
+  t.true(swap.indexOf("cp -a") < swap.indexOf("mv /etc/config"));
+  t.true(swap.includes("else"));
+  // and no unguarded move survives
+  t.false(watchdog.split("\n").some((l) => l.trim().startsWith("mv /etc/config /etc/config.onc-failed")));
+});
+
+// Staging packages is network-bound, so it happens before the watchdog starts
+// counting; clearing the directory therefore cannot be part of arming.
+test("arming does not clear the rollback directory", (t) => {
+  const commands = arm();
+  t.false(commands.some((c) => c.startsWith("rm -rf /tmp/onc-rollback-abc123 ")));
+  t.false(commands.some((c) => c.startsWith("mkdir -p /tmp/onc-rollback-abc123")));
+});
+
 test("paths containing quotes are escaped", (t) => {
   const watchdog = watchdogOf(arm({ filesToDelete: ["/etc/other's file"] }));
   t.true(watchdog.includes(`rm -f '/etc/other'\\''s file'`));

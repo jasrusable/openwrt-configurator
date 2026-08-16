@@ -8,10 +8,17 @@ export type ScriptResult =
       command: string;
       stderr: string;
       code: number | null;
+      /**
+       * The channel closed without an exit status, which node-ssh reports as a
+       * resolved promise with `code: null` rather than by rejecting. For steps
+       * that can legitimately sever the link (commit, reload_config) this is
+       * expected rather than a failure.
+       */
+      disconnected: boolean;
     };
 
 const MARKER = "__ONC_OK__";
-const scriptPath = "/tmp/.onc-provision.sh";
+export const stagedScriptPath = "/tmp/.onc-provision.sh";
 
 /**
  * Run a list of commands on the device as one script.
@@ -49,14 +56,17 @@ export const execScript = async ({
     "set -e",
     ...commands.flatMap((command, index) => [
       command,
-      `echo "${MARKER}${index}"`,
+      // Leading newline: a command that prints without a trailing newline
+      // would otherwise glue its output to the marker ("x__ONC_OK__0") and the
+      // marker would no longer start a line, turning a success into a failure.
+      `printf '\\n${MARKER}${index}\\n'`,
     ]),
     "",
   ].join("\n");
 
   // The script embeds config values, so keep it unreadable to other users and
   // remove it as soon as it has run.
-  const written = await ssh.execCommand(`umask 077 && cat > ${scriptPath}`, {
+  const written = await ssh.execCommand(`umask 077 && cat > ${stagedScriptPath}`, {
     stdin: script,
   });
   if (written.code !== 0) {
@@ -66,11 +76,12 @@ export const execScript = async ({
       command: commands[0],
       stderr: `Failed to stage the provisioning script: ${written.stderr}`,
       code: written.code,
+      disconnected: written.code === null,
     };
   }
 
   const result = await ssh.execCommand(
-    `sh ${scriptPath} < /dev/null; __onc_code=$?; rm -f ${scriptPath}; exit $__onc_code`
+    `sh ${stagedScriptPath} < /dev/null; __onc_code=$?; rm -f ${stagedScriptPath}; exit $__onc_code`
   );
 
   const seen = new Set(
@@ -100,5 +111,6 @@ export const execScript = async ({
     command: commands[failedIndex],
     stderr: result.stderr,
     code: result.code,
+    disconnected: result.code === null,
   };
 };

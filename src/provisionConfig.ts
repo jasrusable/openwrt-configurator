@@ -12,9 +12,20 @@ export const connectToDevice = async (deviceConfig: ONCDeviceConfig) => {
     host: deviceConfig.ipaddr,
     username: deviceConfig.provisioning_config?.ssh_auth.username,
     password: deviceConfig.provisioning_config?.ssh_auth.password,
-    // Without this an unreachable device hangs the whole run indefinitely.
+    // readyTimeout only covers the handshake. Committing network config can
+    // blackhole the socket mid-command, and with no keepalive that hangs until
+    // the kernel gives up (~13 minutes) — long past the rollback window, so the
+    // device would reboot while we waited. Keepalives surface it in ~15s.
     readyTimeout: connectTimeoutMs,
+    keepaliveInterval: 5000,
+    keepaliveCountMax: 3,
   });
+
+  // Once a command is in flight node-ssh drops its own 'error' listener, so an
+  // RST arriving mid-command would emit 'error' with nothing attached and kill
+  // the process. The command still settles via the channel closing.
+  ssh.connection?.on("error", () => {});
+
   return ssh;
 };
 

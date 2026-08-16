@@ -99,6 +99,36 @@ test("execScript reports a failure to stage the script", async (t) => {
   t.true(result.stderr.includes("Read-only file system"));
 });
 
+// A command printing without a trailing newline used to glue its output to the
+// marker ("x__ONC_OK__0"), so the marker no longer started a line and a
+// SUCCESSFUL script was reported as a failure at the wrong command.
+test("a marker is emitted on its own line even after unterminated output", async (t) => {
+  const { ssh, calls } = fakeSsh({ code: 0, stdout: markers(0, 1) });
+  await execScript({ ssh, commands: ["printf x", "true"] });
+  t.true(calls[0].stdin!.includes(`printf '\\n__ONC_OK__0\\n'`));
+  t.false(calls[0].stdin!.includes(`echo "__ONC_OK__0"`));
+});
+
+// node-ssh removes its 'error' listener once a command is in flight, so an
+// abrupt close resolves with code null instead of rejecting. Steps that can
+// legitimately sever the link need to tell that apart from a failed command.
+test("a channel closed without an exit status is reported as disconnected", async (t) => {
+  const { ssh } = fakeSsh({ code: null as any, stdout: markers(0) });
+  const result = await execScript({ ssh, commands: ["a", "b"] });
+  t.false(result.ok);
+  if (result.ok) return;
+  t.true(result.disconnected);
+  t.is(result.code, null);
+});
+
+test("a genuine non-zero exit is not reported as disconnected", async (t) => {
+  const { ssh } = fakeSsh({ code: 1, stdout: markers(0), stderr: "boom" });
+  const result = await execScript({ ssh, commands: ["a", "b"] });
+  t.false(result.ok);
+  if (result.ok) return;
+  t.false(result.disconnected);
+});
+
 test("execScript issues no command for an empty script", async (t) => {
   let called = false;
   const ssh = {
