@@ -30,7 +30,13 @@ const runPaths = (runId: string) => ({
   confirmFlag: `/tmp/onc-confirmed-${runId}`,
   watchdogPath: `/tmp/onc-watchdog-${runId}.sh`,
   pidFile: `/tmp/onc-watchdog-${runId}.pid`,
+  /** Touched once the tool gets back in *after* a rollback, so the device
+   *  knows the revert restored access and it need not reboot. */
+  recoveredFlag: `/tmp/onc-recovered-${runId}`,
 });
+
+/** How the device recovers if a provision is never confirmed. */
+export type RollbackMode = "reload" | "reboot" | "reload-then-reboot";
 
 /**
  * Arm a rollback that fires unless the provision is confirmed.
@@ -52,8 +58,15 @@ const runPaths = (runId: string) => ({
  *  - Packages REMOVED by this run: reinstalled from .apk files staged before
  *    the removal, offline.
  *
+ * Recovery is graduated rather than an unconditional reboot: after restoring,
+ * the device reloads the affected services and then waits for us to reconnect
+ * and confirm access came back. Only if that never happens does it reboot —
+ * a reload that worked should not cost an outage, but a reload is not proof
+ * the operator can reach the device, so the reboot has to stay as the
+ * fallback. `mode` selects between reload-only, reboot-only and both.
+ *
  * Killing the CLI between arming and confirming leaves the watchdog running,
- * so the device will restore and reboot on its own.
+ * so the device will restore and recover on its own.
  */
 export const armWatchdogCommands = ({
   runId,
@@ -61,14 +74,22 @@ export const armWatchdogCommands = ({
   filesToRestore,
   filesToDelete,
   packagesToUninstallOnRollback,
+  mode = "reload-then-reboot",
+  recoverSeconds = 60,
+  reloadWireless = false,
 }: {
   runId: string;
   timeoutSeconds: number;
   filesToRestore: string[];
   filesToDelete: string[];
   packagesToUninstallOnRollback: string[];
+  mode?: RollbackMode;
+  /** How long to wait for the tool to reconnect after reverting. */
+  recoverSeconds?: number;
+  reloadWireless?: boolean;
 }) => {
-  const { rollbackDir, confirmFlag, watchdogPath, pidFile } = runPaths(runId);
+  const { rollbackDir, confirmFlag, watchdogPath, pidFile, recoveredFlag } =
+    runPaths(runId);
   const filesArchive = `${rollbackDir}/files.tar`;
   const quote = (path: string) => `'${path.replace(/'/g, `'\\''`)}'`;
   // Derived rather than hardcoded, for the same reason the file writer derives
@@ -96,8 +117,8 @@ export const armWatchdogCommands = ({
       // sleep rather than relying on it noticing a flag afterwards.
       `echo $$ > ${pidFile}`,
       `sleep ${timeoutSeconds}`,
-      `if [ -f ${confirmFlag} ]; then rm -rf ${rollbackDir} ${confirmFlag} ${watchdogPath} ${pidFile}; exit 0; fi`,
-      `logger -t onc "provision not confirmed within ${timeoutSeconds}s, rolling back and rebooting"`,
+      `if [ -f ${confirmFlag} ]; then rm -rf ${rollbackDir} ${confirmFlag} ${recoveredFlag} ${watchdogPath} ${pidFile}; exit 0; fi`,
+      `logger -t onc "provision not confirmed within ${timeoutSeconds}s, rolling back [${mode}]"`,
       // Stage the restored copy first, then swap. Doing `mv` before `cp`
       // meant a failed copy — an overlay full from `apk add`, which is exactly
       // when rollbacks fire — rebooted the device with no /etc/config at all,
@@ -123,7 +144,39 @@ export const armWatchdogCommands = ({
       // --repositories-file /dev/null keeps this entirely offline.
       `if ls ${rollbackDir}/packages/*.apk >/dev/null 2>&1; then apk add --allow-untrusted --repositories-file /dev/null ${rollbackDir}/packages/*.apk >/dev/null 2>&1 || logger -t onc "rollback could not reinstall removed packages"; fi`,
       `sync`,
-      `reboot`,
+      ...(mode === "reboot"
+        ? [`reboot`]
+        : [
+            // Reverting the config is not the same as putting the device back
+            // in service: procd only re-reads what it is told to. reload_config
+            // fires the triggers for every package whose config changed.
+            `reload_config`,
+            ...(reloadWireless ? [`wifi reload`] : []),
+            // A reload is not proof the operator can reach the device again, so
+            // wait for them to get back in and say so. Rebooting without this
+            // check would make the reload pointless; skipping the reboot
+            // without it would remove the only guaranteed recovery.
+            `i=0`,
+            `while [ $i -lt ${recoverSeconds} ]; do`,
+            `  if [ -f ${recoveredFlag} ]; then`,
+            `    logger -t onc "revert restored access, no reboot needed"`,
+            `    rm -rf ${rollbackDir} ${confirmFlag} ${recoveredFlag} ${watchdogPath} ${pidFile}`,
+            `    exit 0`,
+            `  fi`,
+            `  sleep 5`,
+            `  i=$((i+5))`,
+            `done`,
+            ...(mode === "reload"
+              ? [
+                  `logger -t onc "revert did not restore access, but --rollback=reload forbids rebooting"`,
+                  `exit 1`,
+                ]
+              : [
+                  `logger -t onc "revert did not restore access within ${recoverSeconds}s, rebooting"`,
+                  `sync`,
+                  `reboot`,
+                ]),
+          ]),
       watchdogDelimiter,
     ].join("\n"),
     `chmod 0755 ${watchdogPath}`,
@@ -212,6 +265,8 @@ export const provisionOpenWrtDevice = async ({
   state,
   confirm = true,
   confirmTimeoutSeconds = 90,
+  rollbackMode = "reload-then-reboot",
+  recoverSeconds = 60,
 }: {
   deviceModelId: string;
   ipAddress: string;
@@ -223,6 +278,10 @@ export const provisionOpenWrtDevice = async ({
   state: OpenWrtState;
   confirm?: boolean;
   confirmTimeoutSeconds?: number;
+  /** How the device recovers if the provision is never confirmed. */
+  rollbackMode?: RollbackMode;
+  /** How long the device waits, after reverting, for us to reconnect. */
+  recoverSeconds?: number;
 }) => {
   console.log(`Provisioning ${hostname} @ ${ipAddress}...`);
 
@@ -369,7 +428,7 @@ export const provisionOpenWrtDevice = async ({
     }
 
     console.log(
-      `Arming rollback (restores /etc/config` +
+      `Arming rollback [${rollbackMode}] (restores /etc/config` +
         `${filesToRestore.length > 1 ? ` + ${filesToRestore.length - 1} managed file(s)` : ""}` +
         `${packagesToUninstallOnRollback.length > 0 ? `, removes ${packagesToUninstallOnRollback.length} newly installed package(s)` : ""}` +
         ` and reboots if not confirmed within ${confirmTimeoutSeconds}s)...`
@@ -382,6 +441,10 @@ export const provisionOpenWrtDevice = async ({
         filesToRestore,
         filesToDelete,
         packagesToUninstallOnRollback,
+        mode: rollbackMode,
+        recoverSeconds,
+        // procd's triggers cover the rest, but wireless usually needs telling.
+        reloadWireless: Object.keys(state.config || {}).includes("wireless"),
       }),
     });
     if (!armed.ok) {
@@ -471,9 +534,42 @@ export const provisionOpenWrtDevice = async ({
   try {
     confirmSession = await reconnectUntil({ connect, deadline });
   } catch (e) {
+    // The window has closed, so the watchdog is now reverting. Whether the
+    // device has to reboot depends on whether the revert actually restored
+    // access — which only we can tell it. Keep trying, and if we get back in,
+    // say so; a reload that worked should not cost a reboot.
+    if (rollbackMode === "reboot") {
+      throw new Error(
+        `Could not reconnect to ${hostname} after commit. The device will restore ` +
+          `its previous configuration and reboot shortly.`
+      );
+    }
+
+    console.error(
+      `Could not reconnect to ${hostname} within the confirm window; the device ` +
+        `is rolling back. Waiting up to ${recoverSeconds}s to see if the revert restores access...`
+    );
+
+    let recoveredSession: NodeSSH | undefined;
+    try {
+      recoveredSession = await reconnectUntil({
+        connect,
+        deadline: Date.now() + recoverSeconds * 1000,
+      });
+    } catch {
+      throw new Error(
+        `Could not reach ${hostname} after its rollback either. ` +
+          (rollbackMode === "reload"
+            ? `--rollback=reload forbids rebooting, so the device needs manual recovery.`
+            : `The device will reboot to finish recovering.`)
+      );
+    }
+
+    await recoveredSession.execCommand(`touch ${runPaths(runId).recoveredFlag}`);
+    recoveredSession.dispose();
     throw new Error(
-      `Could not reconnect to ${hostname} after commit. The device will restore ` +
-        `its previous configuration and reboot shortly.`
+      `Provisioning ${hostname} was rolled back: the new configuration cut off access. ` +
+        `The previous configuration was restored and the device recovered without rebooting.`
     );
   }
 

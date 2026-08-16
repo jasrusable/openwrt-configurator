@@ -93,6 +93,48 @@ test("arming does not clear the rollback directory", (t) => {
   t.false(commands.some((c) => c.startsWith("mkdir -p /tmp/onc-rollback-abc123")));
 });
 
+// Recovery is graduated: a reload that restores access should not cost an
+// outage, but a reload is not proof the operator can reach the device, so the
+// reboot stays as the fallback.
+test("the default mode reverts, reloads, then reboots only if access does not return", (t) => {
+  const watchdog = watchdogOf(arm());
+  const reload = watchdog.indexOf("reload_config");
+  // The recovered flag is also named in the early cleanup line, so anchor on
+  // the wait loop itself rather than the first mention of the path.
+  const wait = watchdog.indexOf("while [ $i -lt");
+  const reboot = watchdog.lastIndexOf("\nreboot");
+
+  t.true(reload > -1, "reloads services");
+  t.true(wait > reload, "waits for the recovered flag after reloading");
+  t.true(reboot > wait, "reboots only after the wait");
+  // The wait exits early and cleanly when access comes back.
+  t.true(watchdog.includes('logger -t onc "revert restored access, no reboot needed"'));
+});
+
+test("mode=reboot skips the reload and reboots straight away", (t) => {
+  const watchdog = watchdogOf(arm({ mode: "reboot" }));
+  t.false(watchdog.includes("reload_config"));
+  t.false(watchdog.includes("while [ $i -lt"), "no wait loop");
+  // The element wraps the script in a heredoc, so the delimiter is last; the
+  // final actual command should be the reboot.
+  const body = watchdog.trimEnd().split("\n").slice(0, -1);
+  t.is(body[body.length - 1], "reboot");
+});
+
+test("mode=reload never reboots", (t) => {
+  const watchdog = watchdogOf(arm({ mode: "reload" }));
+  t.true(watchdog.includes("reload_config"));
+  t.true(watchdog.includes("while [ $i -lt"), "waits for the recovered flag");
+  // `reboot` must not appear as a command anywhere in this mode.
+  t.false(watchdog.split("\n").some((l) => l.trim() === "reboot"));
+  t.true(watchdog.includes("forbids rebooting"));
+});
+
+test("wireless gets an explicit reload, since procd triggers do not cover it", (t) => {
+  t.false(watchdogOf(arm()).includes("wifi reload"));
+  t.true(watchdogOf(arm({ reloadWireless: true })).includes("wifi reload"));
+});
+
 test("paths containing quotes are escaped", (t) => {
   const watchdog = watchdogOf(arm({ filesToDelete: ["/etc/other's file"] }));
   t.true(watchdog.includes(`rm -f '/etc/other'\\''s file'`));

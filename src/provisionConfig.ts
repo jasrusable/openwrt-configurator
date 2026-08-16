@@ -2,7 +2,10 @@ import { NodeSSH } from "node-ssh";
 import { getDeviceSchema } from "./getDeviceSchema";
 import { getOpenWrtState } from "./getOpenWrtState";
 import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
-import { provisionOpenWrtDevice } from "./provisionOpenWrtDevice";
+import {
+  provisionOpenWrtDevice,
+  RollbackMode,
+} from "./provisionOpenWrtDevice";
 
 const connectTimeoutMs = 15000;
 
@@ -33,10 +36,12 @@ export const provisionConfig = async ({
   oncConfig,
   confirm = true,
   confirmTimeoutSeconds = 90,
+  rollbackMode = "reload-then-reboot",
 }: {
   oncConfig: ONCConfig;
   confirm?: boolean;
   confirmTimeoutSeconds?: number;
+  rollbackMode?: RollbackMode;
 }) => {
   const deviceConfigs = oncConfig.devices.filter(
     (device) =>
@@ -126,6 +131,7 @@ export const provisionConfig = async ({
         state,
         confirm,
         confirmTimeoutSeconds,
+        rollbackMode,
       });
     } finally {
       try {

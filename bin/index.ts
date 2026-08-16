@@ -34,6 +34,21 @@ export const main = async () => {
       "skip the commit-confirm rollback (the device will not restore itself if the new config cuts it off)"
     )
     .option(
+      "--rollback <mode>",
+      "how a device recovers if a provision is never confirmed: " +
+        "reload-then-reboot (revert, reload services, reboot only if access does not come back), " +
+        "reload (never reboot), or reboot (always reboot)",
+      (v) => {
+        if (!["reload", "reboot", "reload-then-reboot"].includes(v)) {
+          throw new Error(
+            `--rollback must be one of reload, reboot, reload-then-reboot (got "${v}").`
+          );
+        }
+        return v;
+      },
+      "reload-then-reboot"
+    )
+    .option(
       "--confirm-timeout <seconds>",
       "seconds to reconnect and confirm before the device rolls back",
       (v) => {
@@ -56,6 +71,7 @@ export const main = async () => {
         oncConfig,
         confirm: options.confirm,
         confirmTimeoutSeconds: options.confirmTimeout,
+        rollbackMode: options.rollback,
       });
     });
 
