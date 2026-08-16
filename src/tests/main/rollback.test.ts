@@ -111,6 +111,27 @@ test("the default mode reverts, reloads, then reboots only if access does not re
   t.true(watchdog.includes('logger -t onc "revert restored access, no reboot needed"'));
 });
 
+// Restoring /etc/config is not enough on its own. Every UCI read applies the
+// deltas in /tmp/.uci on top of the files, so a run that died mid-configure
+// with changes staged would have the watchdog's own reload_config read the new
+// values straight back out and re-apply the config it just rolled back.
+test("the rollback discards staged uci changes before it reloads", (t) => {
+  const revertCommands = [
+    "if [ -f /etc/config/network ]; then uci revert network; fi",
+    "if [ -f /etc/config/wireless ]; then uci revert wireless; fi",
+  ];
+  const watchdog = watchdogOf(arm({ revertCommands }));
+
+  for (const command of revertCommands) {
+    t.true(watchdog.includes(command), `watchdog reverts: ${command}`);
+  }
+  // Ordering is the whole point: reverting after the reload would be useless.
+  t.true(
+    watchdog.indexOf(revertCommands[0]) < watchdog.indexOf("reload_config"),
+    "staged changes are dropped before the reload reads them"
+  );
+});
+
 test("mode=reboot skips the reload and reboots straight away", (t) => {
   const watchdog = watchdogOf(arm({ mode: "reboot" }));
   t.false(watchdog.includes("reload_config"));

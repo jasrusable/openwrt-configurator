@@ -79,6 +79,7 @@ export const armWatchdogCommands = ({
   filesToRestore,
   filesToDelete,
   packagesToUninstallOnRollback,
+  revertCommands = [],
   mode = "reload-then-reboot",
   recoverSeconds = 60,
   reloadWireless = false,
@@ -88,6 +89,14 @@ export const armWatchdogCommands = ({
   filesToRestore: string[];
   filesToDelete: string[];
   packagesToUninstallOnRollback: string[];
+  /**
+   * Discards staged UCI changes as part of the rollback. Restoring
+   * /etc/config is not enough on its own: every UCI read applies the deltas in
+   * /tmp/.uci, so a run that died mid-configure with changes staged would have
+   * its `reload_config` below read the *new* values straight back out and
+   * re-apply the config the rollback just undid.
+   */
+  revertCommands?: string[];
   mode?: RollbackMode;
   /** How long to wait for the tool to reconnect after reverting. */
   recoverSeconds?: number;
@@ -148,6 +157,11 @@ export const armWatchdogCommands = ({
       // Reinstall from the .apk files staged before anything was removed.
       // --repositories-file /dev/null keeps this entirely offline.
       `if ls ${rollbackDir}/packages/*.apk >/dev/null 2>&1; then apk add --allow-untrusted --repositories-file /dev/null ${rollbackDir}/packages/*.apk >/dev/null 2>&1 || logger -t onc "rollback could not reinstall removed packages"; fi`,
+      // Drop staged UCI changes too. The restore above only puts the files
+      // back, but every UCI read applies the deltas in /tmp/.uci on top, so
+      // without this the reload below reads the new values straight back out
+      // and re-applies exactly the config being rolled back.
+      ...revertCommands,
       `sync`,
       ...(mode === "reboot"
         ? [`reboot`]
@@ -450,6 +464,7 @@ export const provisionOpenWrtDevice = async ({
         filesToRestore,
         filesToDelete,
         packagesToUninstallOnRollback,
+        revertCommands,
         mode: rollbackMode,
         recoverSeconds,
         // procd's triggers cover the rest, but wireless usually needs telling.
