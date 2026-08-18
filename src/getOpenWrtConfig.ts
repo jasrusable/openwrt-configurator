@@ -222,32 +222,45 @@ export const getOpenWrtConfig = ({
     ];
   }, []);
 
-  type WifiInterface = NonNullable<
-    NonNullable<OpenWrtConfig["wireless"]>["wifi-iface"]
-  >;
-
-  const wifiInterfaces: WifiInterface = (
+  const { wifiInterfaces, wifiStations } = (
     resolvedOncConfig.wireless?.["wifi-iface"] || []
-  ).reduce<any[]>((acc, { device, ...wifiIface }, wifiIfaceIndex) => {
-    const radioDeviceNames = wifiDevices.map((device) => device[".name"]);
+  ).reduce(
+    (acc, { device, stations, ...wifiIface }, wifiIfaceIndex) => {
+      const radioDeviceNames = wifiDevices.map((device) => device[".name"]);
 
-    const devices =
-      (typeof device === "string"
-        ? device === "*"
-          ? radioDeviceNames
-          : [device]
-        : device) || radioDeviceNames;
+      const devices =
+        (typeof device === "string"
+          ? device === "*"
+            ? radioDeviceNames
+            : [device]
+          : device) || radioDeviceNames;
 
-    const interfaces = devices.map((deviceName, deviceIndex) => {
+      const interfaces = devices.map((deviceName, deviceIndex) => {
+        return {
+          ".name": `wifinet${wifiIfaceIndex}${deviceIndex}`,
+          device: deviceName,
+          ...wifiIface,
+        };
+      });
+
+      // Any-MAC wildcard so hostapd accepts the PSK from every client.
+      // iface must be set: an empty wifi-station.iface matches every SSID.
+      const stationSections = interfaces.flatMap((iface, deviceIndex) =>
+        (stations || []).map((station, stationIndex) => ({
+          ".name": `wifistation${wifiIfaceIndex}${deviceIndex}${stationIndex}`,
+          iface: iface[".name"],
+          key: station.key,
+          mac: "00:00:00:00:00:00",
+        }))
+      );
+
       return {
-        ".name": `wifinet${wifiIfaceIndex}${deviceIndex}`,
-        device: deviceName,
-        ...wifiIface,
+        wifiInterfaces: [...acc.wifiInterfaces, ...interfaces],
+        wifiStations: [...acc.wifiStations, ...stationSections],
       };
-    });
-
-    return [...acc, ...interfaces];
-  }, []);
+    },
+    { wifiInterfaces: [] as any[], wifiStations: [] as any[] }
+  );
 
   const final: OpenWrtConfig = {
     ...resolvedOpenWrtConfig,
@@ -255,6 +268,7 @@ export const getOpenWrtConfig = ({
       wireless: {
         "wifi-device": wifiDevices,
         "wifi-iface": wifiInterfaces,
+        ...(wifiStations.length > 0 && { "wifi-station": wifiStations }),
       },
     }),
   };

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { oncWirelessWifiStationSchema, wifiPskSchema } from "./wifiStation";
 
 export const wirelessWifiIfaceSchema = z
   .object({
@@ -7,12 +8,13 @@ export const wirelessWifiIfaceSchema = z
     network: z.string().optional(),
     ssid: z.string().optional(),
     encryption: z.string().optional(),
-    key: z.string().optional(),
+    key: wifiPskSchema.optional(),
   })
   .passthrough();
 
 export const oncWirelessWifiIfaceSchema = wirelessWifiIfaceSchema
   .extend({
     device: z.union([z.string(), z.enum(["*"]), z.array(z.string())]),
+    stations: z.array(oncWirelessWifiStationSchema).optional(),
   })
   .passthrough();

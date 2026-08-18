@@ -13,12 +13,14 @@ import {
   oncWirelessWifiIfaceSchema,
   wirelessWifiIfaceSchema,
 } from "./wifiIface";
+import { wirelessWifiStationSchema } from "./wifiStation";
 
 export const wirelessSchema = configSchema(
   z
     .object({
       "wifi-device": sectionSchema(wirelessWifiDeviceSchema),
       "wifi-iface": sectionSchema(wirelessWifiIfaceSchema),
+      "wifi-station": sectionSchema(wirelessWifiStationSchema),
     })
     .strict()
 );
@@ -36,5 +38,6 @@ export const wirelessSectionsToReset = {
   wireless: {
     "wifi-device": true,
     "wifi-iface": true,
+    "wifi-station": true,
   },
 };

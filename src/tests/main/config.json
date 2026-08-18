@@ -149,7 +149,11 @@
           "ssid": "test_wifi",
           "network": "lan",
           "key": "test123456",
-          "encryption": "psk2"
+          "encryption": "psk2",
+          "stations": [
+            { "key": "housekey123" },
+            { "key": "guestkey123" }
+          ]
         }
       ]
     }
