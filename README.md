@@ -77,7 +77,7 @@ uci set network.switch0.enable_vlan='1'
 ...
 ```
 
-> Note: For this command to work, SSH details need to be correctly configured in the `provisioning_config` sections for each of your devices.
+> Note: SSH auth is `provisioning_config.ssh_auth` (`username`, optional `password` and/or `private_key_path`). Or pass `--identity ~/.ssh/id_ed25519` (like `ssh -i`). With neither password nor key, the SSH agent is used if `SSH_AUTH_SOCK` is set.
 
 5. Provision configuration to your devices (Implemented with SSH).
 
@@ -94,7 +94,7 @@ Provisioning completed.
 ...
 ```
 
-> Note: For this command to work, SSH details need to be correctly configured in the `provisioning_config` sections for each of your devices.
+> Note: SSH auth is `provisioning_config.ssh_auth` (`username`, optional `password` and/or `private_key_path`). Or pass `--identity ~/.ssh/id_ed25519` (like `ssh -i`). With neither password nor key, the SSH agent is used if `SSH_AUTH_SOCK` is set.
 
 ## How it works
 
@@ -110,7 +110,7 @@ Provisioning completed.
       "provisioning_config": {
         "ssh_auth": {
           "username": "root",
-          "password": "123"
+          "private_key_path": "~/.ssh/id_ed25519"
         }
       }
     },

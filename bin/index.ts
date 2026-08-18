@@ -63,6 +63,10 @@ export const main = async () => {
       },
       90
     )
+    .option(
+      "--identity <path>",
+      "SSH private key (like ssh -i). Overrides ssh_auth.private_key_path. Password is optional when a key or agent is used."
+    )
     .action(async (configPath, options) => {
       const oncConfigString = readFileSync(configPath, "utf-8");
       const oncJson = parseJson(oncConfigString, configPath);
@@ -72,6 +76,7 @@ export const main = async () => {
         confirm: options.confirm,
         confirmTimeoutSeconds: options.confirmTimeout,
         rollbackMode: options.rollback,
+        identityPath: options.identity,
       });
     });
 
@@ -79,7 +84,11 @@ export const main = async () => {
     .command("print-uci-commands")
     .description("print uci commands for configuration")
     .argument("<config-file>", "config file to print uci commands for")
-    .action(async (configPath) => {
+    .option(
+      "--identity <path>",
+      "SSH private key (like ssh -i). Overrides ssh_auth.private_key_path."
+    )
+    .action(async (configPath, options) => {
       const oncConfigString = readFileSync(configPath, "utf-8");
       const oncJson = parseJson(oncConfigString, configPath);
       const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
@@ -92,7 +101,9 @@ export const main = async () => {
       // against the first device's UCI sections and firmware version.
       const devices = await Promise.all(
         deviceConfigs.map(async (deviceConfig) => {
-          const ssh = await connectToDevice(deviceConfig);
+          const ssh = await connectToDevice(deviceConfig, {
+            identityPath: options.identity,
+          });
           try {
             const deviceSchema = await getDeviceSchema({ deviceConfig, ssh });
             // The session stays open: the script is built against it below.

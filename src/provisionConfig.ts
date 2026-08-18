@@ -1,3 +1,5 @@
+import { homedir } from "os";
+import { join } from "path";
 import { NodeSSH } from "node-ssh";
 import { getDeviceSchema } from "./getDeviceSchema";
 import { getOpenWrtState } from "./getOpenWrtState";
@@ -9,12 +11,25 @@ import {
 
 const connectTimeoutMs = 15000;
 
-export const connectToDevice = async (deviceConfig: ONCDeviceConfig) => {
-  const ssh = new NodeSSH();
-  await ssh.connect({
+const expandHome = (path: string) =>
+  path === "~" ? homedir() : path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+
+export const sshConnectOptions = ({
+  deviceConfig,
+  identityPath,
+  agentSocket,
+}: {
+  deviceConfig: ONCDeviceConfig;
+  identityPath?: string;
+  agentSocket?: string;
+}) => {
+  const auth = deviceConfig.provisioning_config?.ssh_auth;
+  const keyPath = identityPath || auth?.private_key_path;
+  const password = auth?.password;
+
+  return {
     host: deviceConfig.ipaddr,
-    username: deviceConfig.provisioning_config?.ssh_auth.username,
-    password: deviceConfig.provisioning_config?.ssh_auth.password,
+    username: auth?.username,
     // readyTimeout only covers the handshake. Committing network config can
     // blackhole the socket mid-command, and with no keepalive that hangs until
     // the kernel gives up (~13 minutes) — long past the rollback window, so the
@@ -22,7 +37,24 @@ export const connectToDevice = async (deviceConfig: ONCDeviceConfig) => {
     readyTimeout: connectTimeoutMs,
     keepaliveInterval: 5000,
     keepaliveCountMax: 3,
-  });
+    ...(keyPath ? { privateKeyPath: expandHome(keyPath) } : {}),
+    ...(password ? { password } : {}),
+    ...(!keyPath && !password && agentSocket ? { agent: agentSocket } : {}),
+  };
+};
+
+export const connectToDevice = async (
+  deviceConfig: ONCDeviceConfig,
+  options?: { identityPath?: string }
+) => {
+  const ssh = new NodeSSH();
+  await ssh.connect(
+    sshConnectOptions({
+      deviceConfig,
+      identityPath: options?.identityPath,
+      agentSocket: process.env.SSH_AUTH_SOCK,
+    })
+  );
 
   // Once a command is in flight node-ssh drops its own 'error' listener, so an
   // RST arriving mid-command would emit 'error' with nothing attached and kill
@@ -37,11 +69,13 @@ export const provisionConfig = async ({
   confirm = true,
   confirmTimeoutSeconds = 90,
   rollbackMode = "reload-then-reboot",
+  identityPath,
 }: {
   oncConfig: ONCConfig;
   confirm?: boolean;
   confirmTimeoutSeconds?: number;
   rollbackMode?: RollbackMode;
+  identityPath?: string;
 }) => {
   const deviceConfigs = oncConfig.devices.filter(
     (device) =>
@@ -55,7 +89,7 @@ export const provisionConfig = async ({
   // session was ever disposed.
   const connections = await Promise.allSettled(
     deviceConfigs.map(async (deviceConfig) => {
-      const ssh = await connectToDevice(deviceConfig);
+      const ssh = await connectToDevice(deviceConfig, { identityPath });
       try {
         const deviceSchema = await getDeviceSchema({ deviceConfig, ssh });
         // Paired with its own device. Looking the schema up by model_id meant
@@ -118,7 +152,7 @@ export const provisionConfig = async ({
       } catch {
         // Already gone.
       }
-      ssh = await connectToDevice(deviceConfig);
+      ssh = await connectToDevice(deviceConfig, { identityPath });
     }
 
     try {
@@ -127,7 +161,7 @@ export const provisionConfig = async ({
         ipAddress: deviceConfig.ipaddr,
         hostname: deviceConfig.hostname,
         ssh,
-        connect: () => connectToDevice(deviceConfig),
+        connect: () => connectToDevice(deviceConfig, { identityPath }),
         state,
         confirm,
         confirmTimeoutSeconds,

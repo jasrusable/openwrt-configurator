@@ -50,7 +50,8 @@ export const oncConfigSchema = z
             .object({
               ssh_auth: z.object({
                 username: z.string(),
-                password: z.string(),
+                password: z.string().optional(),
+                private_key_path: z.string().optional(),
               }),
             })
             .optional(),

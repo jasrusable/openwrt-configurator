@@ -32,7 +32,7 @@
       "provisioning_config": {
         "ssh_auth": {
           "username": "root",
-          "password": "some-password"
+          "private_key_path": "~/.ssh/id_ed25519"
         }
       }
     }
