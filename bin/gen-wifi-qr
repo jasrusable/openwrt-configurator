@@ -1,0 +1,105 @@
+#!/bin/sh
+# Print a WPA/WPA2 Wi-Fi join QR for an SSID + password.
+# Usage:
+#   ./bin/gen-wifi-qr "Russell Family"           # prompts for password (not in history)
+#   ./bin/gen-wifi-qr "Russell Family" --stdin   # password on stdin
+#   ./bin/gen-wifi-qr "Russell Family" 'the-psk' # arg form — lands in zsh history
+#   ./bin/gen-wifi-qr "Russell Family" --out /tmp/wifi.png
+set -eu
+
+usage() {
+  echo "usage: $0 <ssid> [password|--stdin] [--hidden] [--out file.png]" >&2
+  exit 2
+}
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required" >&2
+  exit 1
+fi
+
+ssid=""
+password=""
+password_set=0
+hidden=0
+out=""
+stdin=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --hidden) hidden=1 ;;
+    --stdin) stdin=1 ;;
+    --out)
+      [ "$#" -ge 2 ] || usage
+      out=$2
+      shift
+      ;;
+    --help|-h) usage ;;
+    --*) usage ;;
+    *)
+      if [ -z "$ssid" ]; then
+        ssid=$1
+      elif [ "$password_set" -eq 0 ]; then
+        password=$1
+        password_set=1
+      else
+        usage
+      fi
+      ;;
+  esac
+  shift
+done
+
+[ -n "$ssid" ] || usage
+
+if [ "$stdin" -eq 1 ]; then
+  password=$(cat)
+  password_set=1
+elif [ "$password_set" -eq 0 ]; then
+  if [ -t 0 ]; then
+    password=$(python3 -c 'import getpass; print(getpass.getpass("Wi-Fi password: "))')
+    password_set=1
+  else
+    echo "pass a password, use --stdin, or run on a tty" >&2
+    exit 1
+  fi
+else
+  echo "warning: password was on the command line; it is in this shell's history" >&2
+fi
+
+uri=$(SSID="$ssid" PASSWORD="$password" HIDDEN="$hidden" python3 - <<'PY'
+import os
+
+def escape(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+        .replace(":", "\\:")
+        .replace('"', '\\"')
+    )
+
+ssid = os.environ["SSID"]
+password = os.environ["PASSWORD"]
+hidden = os.environ.get("HIDDEN") == "1"
+parts = ["WIFI:T:WPA", f"S:{escape(ssid)}", f"P:{escape(password)}"]
+if hidden:
+    parts.append("H:true")
+print(";".join(parts) + ";;")
+PY
+)
+
+if command -v qrencode >/dev/null 2>&1; then
+  if [ -n "$out" ]; then
+    qrencode -o "$out" -s 8 "$uri"
+    echo "wrote $out" >&2
+  else
+    qrencode -t ansiutf8 "$uri"
+  fi
+else
+  echo "$uri"
+  echo >&2
+  echo "install qrencode for a terminal/PNG QR: brew install qrencode" >&2
+  if [ -n "$out" ]; then
+    exit 1
+  fi
+fi

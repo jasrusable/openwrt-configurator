@@ -1,0 +1,19 @@
+#!/bin/sh
+# Generate a WPA2-PSK (8–63 chars). Prints one line to stdout.
+# Save it in a password manager. Do not put it on a shell command line
+# (that is what lands in zsh history).
+#
+# Share with a QR (does not weaken the key). WIFI: URI:
+#   WIFI:T:WPA;S:<ssid>;P:<password>;;
+# Then: qrencode -t ansiutf8 'WIFI:T:WPA;S:Russell Family;P:…;;'
+set -eu
+
+if ! command -v openssl >/dev/null 2>&1; then
+  echo "openssl is required" >&2
+  exit 1
+fi
+
+# 24 random chars in 4 groups of 6. Hyphens are separators only (~143 bits).
+raw=$(openssl rand -base64 32 | tr -d '/+=' | tr -d '\n' | cut -c1-24)
+echo "${raw}" | sed 's/.\{6\}/&-/g' | sed 's/-$//'
+echo
