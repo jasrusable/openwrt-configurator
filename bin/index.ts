@@ -2,12 +2,15 @@ import { createHash } from "crypto";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { DeviceBuildPlan } from "../src/getBuildPlan";
-import { ONCConfig, oncConfigSchema } from "../src/oncConfigSchema";
 import { getDeviceScript } from "../src/getDeviceScript";
 import { program } from "commander";
 import { connectToDevice, provisionConfig } from "../src/provisionConfig";
 import { getDeviceSchema } from "../src/getDeviceSchema";
-import { parseJson, parseSchema } from "../src/utils";
+import { loadOncConfig } from "../src/loadConfig";
+import {
+  redactValue,
+  setKeychainSecret,
+} from "../src/resolveSecrets";
 import { getOpenWrtState } from "../src/getOpenWrtState";
 import { getDeviceBuildPlan } from "../src/getBuildPlan";
 import {
@@ -68,9 +71,7 @@ export const main = async () => {
       "SSH private key (like ssh -i). Overrides ssh_auth.private_key_path. Password is optional when a key or agent is used."
     )
     .action(async (configPath, options) => {
-      const oncConfigString = readFileSync(configPath, "utf-8");
-      const oncJson = parseJson(oncConfigString, configPath);
-      const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
+      const { oncConfig } = await loadOncConfig(configPath);
       await provisionConfig({
         oncConfig,
         confirm: options.confirm,
@@ -88,10 +89,12 @@ export const main = async () => {
       "--identity <path>",
       "SSH private key (like ssh -i). Overrides ssh_auth.private_key_path."
     )
+    .option(
+      "--show-secrets",
+      "print resolved secret values (default: redact as { $secret: name })"
+    )
     .action(async (configPath, options) => {
-      const oncConfigString = readFileSync(configPath, "utf-8");
-      const oncJson = parseJson(oncConfigString, configPath);
-      const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
+      const { oncConfig, secrets } = await loadOncConfig(configPath);
       const deviceConfigs = oncConfig.devices.filter(
         (device) => device.enabled !== false
       );
@@ -130,7 +133,13 @@ export const main = async () => {
           // actually on the device — which badly overstates the change. It
           // printed a 21-package `apk del` cascade for packages that were not
           // even installed, and a dry run nobody can trust is worse than none.
-          const commands = await getDeviceScript({ state, ssh });
+          const commands = await getDeviceScript({
+            state,
+            ssh,
+            redact: options.showSecrets
+              ? undefined
+              : (value) => redactValue(value, secrets),
+          });
           console.log(`#device ${deviceConfig.hostname}`);
           console.log(commands.join("\n"));
         } finally {
@@ -156,10 +165,12 @@ export const main = async () => {
       (v) => parseInt(v, 10),
       3
     )
+    .option(
+      "--show-secrets",
+      "print resolved secret values in --dry-run output (default: redact)"
+    )
     .action(async (configPath, options) => {
-      const oncConfigString = readFileSync(configPath, "utf-8");
-      const oncJson = parseJson(oncConfigString, configPath);
-      const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
+      const { oncConfig, secrets } = await loadOncConfig(configPath);
       const deviceConfigs = oncConfig.devices.filter(
         (device) => device.enabled !== false
       );
@@ -230,7 +241,15 @@ export const main = async () => {
             )
           );
           console.log("# --- UCI defaults script ---");
-          console.log(plan.uciDefaults);
+          console.log(
+            options.showSecrets
+              ? plan.uciDefaults
+              : getDeviceBuildPlan({
+                  oncConfig,
+                  deviceConfig: plan.deviceConfig,
+                  redact: (value) => redactValue(value, secrets),
+                }).uciDefaults
+          );
           console.log("# --- end ---\n");
         }
         return;
@@ -433,6 +452,20 @@ export const main = async () => {
         process.exit(1);
       }
       console.log(`\nall ${manifest.length} image(s) verified`);
+    });
+
+  program
+    .command("secrets")
+    .description(
+      'store secrets in the macOS keychain for { "$secret": "name" } refs'
+    )
+    .command("set")
+    .description(
+      "prompt for a value and store it (the value is never printed)"
+    )
+    .argument("<name>", "secret name matching the $secret field in the config")
+    .action(async (name) => {
+      await setKeychainSecret(name);
     });
 
   await program.parseAsync();

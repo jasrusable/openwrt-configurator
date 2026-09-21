@@ -16,7 +16,7 @@ The JSON config file can be conditionally composed with `.if` and/or `.overrides
       "device": "eth0",
       "proto": "pppoe",
       "username": "me@pppoe.com",
-      "password": "123"
+      "password": { "$secret": "pppoe" }
     },
     {
       ".name": "lan",
@@ -44,6 +44,7 @@ The JSON config file can be conditionally composed with `.if` and/or `.overrides
 ## Features
 
 - Store all network config for all devices in a single UCI-like JSON config file (UCI config, packages, firmware versions and more).
+- Keep Wi-Fi / PPPoE / SSH secrets out of that file with `{ "$secret": "name" }` refs, resolved from the macOS keychain at provision time.
 - Provision arbitrary files (e.g. hotplug scripts) for config that UCI can't express, removed from devices when removed from config.
 - Conditionally compose your JSON file to support multiple OpenWrt devices, different device models/types, and different roles (Routers, switches and dump-ap's etc).
 - Light abstractions over ethernet ports and WiFi radios to keep multi-device configuration simple.
@@ -78,6 +79,18 @@ uci set network.switch0.enable_vlan='1'
 ```
 
 > Note: SSH auth is `provisioning_config.ssh_auth` (`username`, optional `password` and/or `private_key_path`). Or pass `--identity ~/.ssh/id_ed25519` (like `ssh -i`). With neither password nor key, the SSH agent is used if `SSH_AUTH_SOCK` is set.
+
+Secrets (Wi-Fi PSK, PPPoE password, SSH password, …) should not live in the JSON file. Use a whole-value ref and store the value in the macOS keychain:
+
+```json
+"key": { "$secret": "wifi/home" }
+```
+
+```sh
+$ openwrt-configurator secrets set wifi/home
+```
+
+`provision`, `print-uci-commands` and `build-images` resolve refs at load. `print-uci-commands` and `build-images --dry-run` redact resolved values as `{ $secret: wifi/home }` unless you pass `--show-secrets`. After provision the device still has the secret in UCI — OpenWrt needs it to run.
 
 5. Provision configuration to your devices (Implemented with SSH).
 
@@ -122,7 +135,7 @@ Provisioning completed.
       "provisioning_config": {
         "ssh_auth": {
           "username": "root",
-          "password": "123"
+          "password": { "$secret": "ssh/root" }
         }
       }
     }
@@ -205,7 +218,7 @@ Provisioning completed.
         "device": "eth0",
         "proto": "pppoe",
         "username": "me@pppoe.com",
-        "password": "123"
+        "password": { "$secret": "pppoe" }
       },
       {
         ".name": "lan",
@@ -247,7 +260,7 @@ Provisioning completed.
           "network": "lan",
           "ssid": "my-ssid",
           "encryption": "psk2",
-          "key": "123456789"
+          "key": { "$secret": "wifi/home" }
         },
         {
           "mode": "ap",

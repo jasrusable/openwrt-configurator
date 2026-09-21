@@ -6,7 +6,7 @@ Guidance for Claude Code when working in this repository.
 
 **This is the highest-priority rule in this file. It overrides convenience, debugging, and "I just need to see the shape of it."**
 
-Real network config files in this repo contain live credentials: SSH root passwords (`provisioning_config.ssh_auth.password`), Wi-Fi PSKs (`key` on `wifi-iface` sections), PPPoE credentials (`username`/`password` on `interface` sections), and DDNS/VPN tokens.
+Real network config files in this repo may still contain live credentials: SSH root passwords (`provisioning_config.ssh_auth.password`), Wi-Fi PSKs (`key` on `wifi-iface` sections), PPPoE credentials (`username`/`password` on `interface` sections), and DDNS/VPN tokens. Prefer `{ "$secret": "wifi/home" }` refs (resolved from the macOS keychain at load) so a grep of the file is not a leak.
 
 Do **not** open, `cat`, `grep`, print, or otherwise pull the contents of:
 
@@ -22,7 +22,7 @@ If you need to understand config *structure*, use the committed fixtures instead
 
 If a task genuinely cannot proceed without something in a real config file, stop and ask the user to paste the specific non-secret value. Never dump the file to find it.
 
-Corollaries: don't echo a secret you happened to encounter, don't write one into a test fixture, commit message, log line, or scratch file, and don't add code that logs `ssh_auth` or wireless `key` values.
+Corollaries: don't echo a secret you happened to encounter, don't write one into a test fixture, commit message, log line, or scratch file, and don't add code that logs `ssh_auth` or wireless `key` values. Do not resolve `$secret` refs or pass `--show-secrets` just to inspect values. Do not dump UCI `wireless`/`network` password fields off a live device either — after provision those values live in UCI because OpenWrt needs them.
 
 ## Never provision without being asked
 
@@ -58,7 +58,7 @@ Node 24 (`.node-version`), TypeScript 6, CommonJS. `ts-node --transpile-only` fo
 
 The pipeline, in dependency order:
 
-1. **`bin/index.ts`** — commander CLI. Reads the config file, `parseJson` (via `parse-json`, for good error positions), then `parseSchema(oncConfigSchema, ...)`.
+1. **`bin/index.ts`** — commander CLI. Reads the config file via `loadOncConfig`: `parseJson` (via `parse-json`, for good error positions), resolve `{ "$secret": "name" }` from the macOS keychain (`src/resolveSecrets.ts`), then `parseSchema(oncConfigSchema, ...)`. `print-uci-commands` and `build-images --dry-run` redact resolved values unless `--show-secrets`.
 2. **`src/oncConfigSchema.ts`** — zod schema for the *input* JSON ("ONC config"): `version`, `devices`, `package_profiles`, `files`, `configs_to_not_reset`, `config`. `.strict()` throughout, so unknown keys are hard errors by design.
 3. **`src/getDeviceSchema.ts`** — builds a `DeviceSchema` (ports, radios, CPU port, existing UCI section types, firmware version) for each device.
 4. **`src/resolveOncConfig.ts`** — collapses `.if` / `.overrides` for one device. `conditionMatches` evaluates conditions against `device.tag.*`, `device.hostname`, `device.ipaddr`, `device.model_id`, `device.version`, `device.sw_config`, using `boolean-parser` for `AND`/`OR` and hand-rolled `==` / `!=`.
@@ -150,13 +150,14 @@ The checked-in `deviceSchemas/*.json` files are only used when `useLocal` is pas
 
 `ava` with `ts-node/register/transpile-only`, in `src/tests/main/`. Note ava's default glob picks up **everything** under a `tests/` directory, so `network2.ts` is a test file despite the missing `.test` suffix.
 
-Most tests are golden-ish: load `config.json` / `config2.json`, build the OpenWrt config against a local device schema, and assert on the resulting structure. `files.test.ts` and `getConfigSections.test.ts` are focused unit tests. All are offline — no test touches the network.
+Most tests are golden-ish: load `config.json` / `config2.json`, build the OpenWrt config against a local device schema, and assert on the resulting structure. `files.test.ts`, `getConfigSections.test.ts` and `resolveSecrets.test.ts` are focused unit tests. All are offline — no test touches the network or the keychain (lookups are injected).
 
 ## Gotchas
 
 - **The CLI version is duplicated.** `package.json` `version` and the hardcoded `.version("0.0.6")` in `bin/index.ts` must be bumped together.
 - **Releases are tag-driven.** `.github/workflows/release.yml` fires on a pushed `X.Y.Z` or `vX.Y.Z` tag, runs build + package, and publishes binaries with sha256 sums. Nothing runs on push to `main` — there is no CI test run, so run `npm test` yourself.
-- **`print-uci-commands` builds against the live SSH session**, the same as `provision`. It used to call `getDeviceScript({ state })` with no session, so package diffing never ran: every package the config named was printed as an install and every removal as a removal, regardless of what was on the device. That reported a 21-package `apk del` cascade for packages that were not installed at all. Keep the session open until the script is built, or the dry run stops matching what a provision would do.
+- **`print-uci-commands` builds against the live SSH session**, the same as `provision`. It used to call `getDeviceScript({ state })` with no session, so package diffing never ran: every package the config named was printed as an install and every removal as a removal, regardless of what was on the device. That reported a 21-package `apk del` cascade for packages that were not installed at all. Keep the session open until the script is built, or the dry run stops matching what a provision would do. Resolved `$secret` values are redacted in the printed script; `--show-secrets` turns that off — don't pass it unless the user asks.
+- **`$secret` refs are resolved once at load** (`loadOncConfig`), before schema parse. The rest of the pipeline still sees plaintext strings. `secrets set` prompts for a value and stores it; there is no `get`.
 - **`npm start` is dead.** It points at `./src/index.ts`, which does not exist.
 - **`src/config.json` is a stray scratch config**, not used by the tests or the CLI.
 - **`images/` is gitignored** — built sysupgrade images bake hostnames and LAN IPs into the artifact.

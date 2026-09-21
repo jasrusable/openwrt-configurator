@@ -8,7 +8,7 @@
       "provisioning_config": {
         "ssh_auth": {
           "username": "root",
-          "password": "some-password"
+          "password": { "$secret": "ssh/root" }
         }
       }
     },
@@ -20,7 +20,7 @@
       "provisioning_config": {
         "ssh_auth": {
           "username": "root",
-          "password": "some-password"
+          "password": { "$secret": "ssh/root" }
         }
       }
     },
@@ -161,7 +161,7 @@
           "device": "eth0",
           "proto": "pppoe",
           "username": "my-pppoe-username",
-          "password": "my-pppoe-password",
+          "password": { "$secret": "pppoe" },
           "ipv6": "auto",
           "peerdns": false
         },
@@ -399,6 +399,8 @@
           "limit": 100,
           "dhcpv4": "server",
           "dhcpv6": "server",
+          "ra": "server",
+          "ra_default": 2,
           "ra_flags": ["managed-config", "other-config"],
           "force": true,
           "leasetime": "1d"
@@ -409,6 +411,8 @@
           "limit": 100,
           "dhcpv4": "server",
           "dhcpv6": "server",
+          "ra": "server",
+          "ra_default": 2,
           "ra_flags": ["managed-config", "other-config"],
           "force": true,
           "leasetime": "1d"
@@ -499,7 +503,7 @@
           "network": "lan",
           "ssid": "my-ssid",
           "encryption": "psk2",
-          "key": "my-password"
+          "key": { "$secret": "wifi/home" }
         }
       ]
     }

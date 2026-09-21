@@ -2,9 +2,19 @@ import { OpenWrtConfig } from "./openWrtConfigSchema";
 
 export const getUciCommands = ({
   openWrtConfig,
+  redact,
 }: {
   openWrtConfig: OpenWrtConfig;
+  /** Replace a resolved secret before it is quoted into the script. */
+  redact?: (value: string) => string;
 }) => {
+  // Booleans become 0/1 here. Only original strings are secrets, so a secret
+  // whose text is "1" must not blank every flag.
+  const render = (value: unknown) => {
+    if (typeof value === "boolean") return value ? "1" : "0";
+    if (typeof value === "string" && redact) return redact(value);
+    return value;
+  };
   const configKeys = Object.keys(openWrtConfig);
   const configCommands = configKeys.reduce<string[]>((acc, configKey) => {
     const sectionKeys = Object.keys((openWrtConfig as any)[configKey]);
@@ -22,21 +32,14 @@ export const getUciCommands = ({
           `uci set ${identifier}=${sectionKey}`,
           ...Object.keys(resolvedSection).reduce<string[]>((acc, key) => {
             const value = resolvedSection[key];
-            const coercedValue =
-              typeof value === "boolean" ? (value === true ? "1" : "0") : value;
             return [
               ...acc,
               ...(Array.isArray(value)
-                ? value.map((item) => {
-                    const coercedValue =
-                      typeof item === "boolean"
-                        ? item === true
-                          ? "1"
-                          : "0"
-                        : item;
-                    return `uci add_list ${identifier}.${key}='${coercedValue}'`;
-                  })
-                : [`uci set ${identifier}.${key}='${coercedValue}'`]),
+                ? value.map(
+                    (item) =>
+                      `uci add_list ${identifier}.${key}='${render(item)}'`
+                  )
+                : [`uci set ${identifier}.${key}='${render(value)}'`]),
             ];
           }, []),
         ];

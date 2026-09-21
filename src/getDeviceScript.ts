@@ -257,13 +257,17 @@ export const getDeviceScript = async ({
   state,
   ssh,
   installedPackages: providedInstalledPackages,
+  redact,
 }: {
   state: OpenWrtState;
   ssh?: NodeSSH;
   /** Pass an already-fetched list to avoid a second `apk info` round trip. */
   installedPackages?: string[];
+  /** Replace a resolved secret before it is written into the script. */
+  redact?: (value: string) => string;
 }) => {
-  const uciCommands = getUciCommands({ openWrtConfig: state.config });
+  const hide = (value: string) => (redact ? redact(value) : value);
+  const uciCommands = getUciCommands({ openWrtConfig: state.config, redact });
 
   const configSections =
     state.configSectionsToReset &&
@@ -325,10 +329,10 @@ export const getDeviceScript = async ({
       ? [
           ...staleFiles.map((path) => `rm -f '${path}'`),
           ...files.flatMap((file) => [
-            writeFileCommand(file.path, file.content, file.mode),
+            writeFileCommand(file.path, hide(file.content), file.mode),
             // Optional command run immediately after the file is written (e.g.
             // trigger a freshly-written hotplug script so it applies now).
-            ...(file.run_after ? [file.run_after] : []),
+            ...(file.run_after ? [hide(file.run_after)] : []),
           ]),
           writeFileCommand(
             managedFilesManifest,
@@ -351,7 +355,7 @@ export const getDeviceScript = async ({
     // Printed as part of the script so a dry run shows the whole sequence,
     // but `provision` splits these off and runs them over a reconnected
     // session. See `getPostReloadCommands`.
-    ...getPostReloadCommands(state),
+    ...getPostReloadCommands(state).map(hide),
   ];
 };
 
