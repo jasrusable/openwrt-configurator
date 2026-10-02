@@ -1,6 +1,6 @@
 import test from "ava";
 import { armWatchdogCommands } from "../../provisionOpenWrtDevice";
-import { getRemovalCascade } from "../../getDeviceScript";
+import { getRemovalCascade } from "../../deviceFacts";
 
 const arm = (overrides: Partial<Parameters<typeof armWatchdogCommands>[0]> = {}) =>
   armWatchdogCommands({

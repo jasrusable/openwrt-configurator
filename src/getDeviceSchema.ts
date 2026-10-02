@@ -3,7 +3,8 @@ import { NodeSSH } from "node-ssh";
 import { DeviceSchema, deviceSchemaSchema } from "./deviceSchema";
 import { parseSections } from "./getConfigSections";
 import { ONCDeviceConfig } from "./oncConfigSchema";
-import { getDeviceFacts, parseJson, parseSchema } from "./utils";
+import { getDeviceFacts } from "./deviceFacts";
+import { parseJson, parseSchema } from "./utils";
 
 const useLocalOverride = false;
 

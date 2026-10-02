@@ -2,7 +2,8 @@ import { createHash } from "crypto";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { DeviceBuildPlan } from "../src/getBuildPlan";
-import { getDeviceScript } from "../src/getDeviceScript";
+import { getDeviceScript, managedFilesManifest } from "../src/getDeviceScript";
+import { getInstalledPackages, getManagedFiles } from "../src/deviceFacts";
 import { program } from "commander";
 import { connectToDevice, provisionConfig } from "../src/provisionConfig";
 import { getDeviceSchema } from "../src/getDeviceSchema";
@@ -133,9 +134,10 @@ export const main = async () => {
           // actually on the device — which badly overstates the change. It
           // printed a 21-package `apk del` cascade for packages that were not
           // even installed, and a dry run nobody can trust is worse than none.
-          const commands = await getDeviceScript({
+          const commands = getDeviceScript({
             state,
-            ssh,
+            installedPackages: await getInstalledPackages(ssh),
+            managedFiles: await getManagedFiles(ssh, managedFilesManifest),
             redact: options.showSecrets
               ? undefined
               : (value) => redactValue(value, secrets),

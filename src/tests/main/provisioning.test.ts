@@ -1,6 +1,6 @@
 import test from "ava";
 import { getDeviceScript, getRevertCommands } from "../../getDeviceScript";
-import { getInstalledPackages } from "../../utils";
+import { getInstalledPackages } from "../../deviceFacts";
 import { OpenWrtState } from "../../openWrtConfigSchema";
 
 /** Routes canned responses by command, like a device would. */
@@ -30,12 +30,10 @@ test("package removals survive the installed-set filter", async (t) => {
     packagesToUninstall: ["firewall4", "not-installed-pkg"],
     packagesToInstall: [{ packageName: "curl" }, { packageName: "sqm-scripts" }],
   };
-  const ssh = fakeSsh([
-    { match: "apk info", stdout: apkInfo },
-    { match: "managed_files", stdout: "", code: 1 },
-  ]);
-
-  const commands = await getDeviceScript({ state, ssh });
+  const commands = getDeviceScript({
+    state,
+    installedPackages: apkInfo.split("\n"),
+  });
   const del = commands.find((c) => c.startsWith("apk del"));
   const add = commands.find((c) => c.startsWith("apk add"));
 
@@ -150,23 +148,18 @@ test("a multi-line value does not reorder the operations around it", async (t) =
   t.false(relevant[0].includes("last='z'"));
 });
 
-test("getDeviceScript reuses a provided installed-package list", async (t) => {
-  let apkCalls = 0;
-  const ssh = {
-    execCommand: async (command: string) => {
-      if (command.includes("apk info")) apkCalls += 1;
-      return { code: 1, stdout: "", stderr: "" };
-    },
-  } as any;
-
-  await getDeviceScript({
-    state: { config: {} as any, packagesToUninstall: ["firewall4"] },
-    ssh,
-    installedPackages: ["firewall4"],
+test("files dropped from the config are removed from the device", (t) => {
+  const state: OpenWrtState = {
+    config: {} as any,
+    files: [{ path: "/etc/kept", content: "x" }],
+  };
+  const commands = getDeviceScript({
+    state,
+    managedFiles: ["/etc/kept", "/etc/dropped"],
   });
 
-  // provisionOpenWrtDevice already fetched the list to warn about removals.
-  t.is(apkCalls, 0);
+  t.true(commands.includes("rm -f '/etc/dropped'"));
+  t.false(commands.includes("rm -f '/etc/kept'"));
 });
 
 // `reload_config` only fires config.change for configs already listed in
@@ -182,12 +175,10 @@ test("the config baseline is refreshed after installs and before staging", async
     } as any,
     packagesToInstall: [{ packageName: "sqm-scripts" }],
   };
-  const ssh = fakeSsh([
-    { match: "apk info", stdout: apkInfo },
-    { match: "managed_files", stdout: "", code: 1 },
-  ]);
-
-  const commands = await getDeviceScript({ state, ssh });
+  const commands = getDeviceScript({
+    state,
+    installedPackages: apkInfo.split("\n"),
+  });
   const install = commands.findIndex((c) => c.startsWith("apk add"));
   const refresh = commands.indexOf("reload_config");
   // The first command that actually stages something. Not just any `uci`

@@ -1,5 +1,4 @@
 import { posix as posixPath } from "path";
-import { NodeSSH } from "node-ssh";
 import { dhcpSectionsToReset } from "./configSchemas/dhcp";
 import { firewallSectionsToReset } from "./configSchemas/firewall";
 import { networkSectionsToReset } from "./configSchemas/network";
@@ -7,7 +6,6 @@ import { systemSectionsToReset } from "./configSchemas/system";
 import { wirelessSectionsToReset } from "./configSchemas/wireless";
 import { getUciCommands } from "./getUciCommands";
 import { OpenWrtState } from "./openWrtConfigSchema";
-import { getInstalledPackages, getManagedFiles } from "./utils";
 
 // Manifest of files written by this tool, so files removed from config are
 // removed from the device on the next provision (declarative, like UCI resets).
@@ -253,16 +251,22 @@ const uciBatchCommands = (uciCommands: string[]) => {
   return commands;
 };
 
-export const getDeviceScript = async ({
+/**
+ * Pure: everything read off the device is passed in. Leaving `installedPackages`
+ * out installs and removes every package the state names, unfiltered; leaving
+ * `managedFiles` out prunes nothing.
+ */
+export const getDeviceScript = ({
   state,
-  ssh,
-  installedPackages: providedInstalledPackages,
+  installedPackages,
+  managedFiles,
   redact,
 }: {
   state: OpenWrtState;
-  ssh?: NodeSSH;
-  /** Pass an already-fetched list to avoid a second `apk info` round trip. */
+  /** From `getInstalledPackages`. */
   installedPackages?: string[];
+  /** From `getManagedFiles`: what the previous provision wrote. */
+  managedFiles?: string[];
   /** Replace a resolved secret before it is written into the script. */
   redact?: (value: string) => string;
 }) => {
@@ -286,10 +290,6 @@ export const getDeviceScript = async ({
         return `while uci -q delete ${configKey}.@${sectionKey}[0]; do :; done`;
       })
     : [];
-
-  const installedPackages =
-    providedInstalledPackages ??
-    (ssh ? await getInstalledPackages(ssh) : undefined);
 
   const packagesToUninstall = installedPackages
     ? (state.packagesToUninstall || []).filter((p) =>
@@ -317,10 +317,7 @@ export const getDeviceScript = async ({
   ];
 
   const files = state.files || [];
-  const previouslyManagedFiles = ssh
-    ? await getManagedFiles(ssh, managedFilesManifest)
-    : undefined;
-  const staleFiles = (previouslyManagedFiles || []).filter(
+  const staleFiles = (managedFiles || []).filter(
     (path) => !files.find((file) => file.path === path)
   );
 
@@ -370,36 +367,3 @@ export const getPackagesToRemove = ({
   (state.packagesToUninstall || []).filter((p) =>
     installedPackages.includes(p)
   );
-
-/**
- * Everything `apk del --rdepends` would actually take with it.
- *
- * The named packages are only the start: `--rdepends` also removes whatever
- * depends on them. Removing `firewall4` on a stock image pulls 21 packages,
- * `uhttpd` and the whole LuCI stack among them. Reporting only what the config
- * names would understate that badly, so ask apk to simulate it.
- */
-export const getRemovalCascade = async ({
-  ssh,
-  packages,
-}: {
-  ssh: NodeSSH;
-  packages: string[];
-}) => {
-  if (packages.length === 0) {
-    return [];
-  }
-
-  const result = await ssh.execCommand(
-    `apk del --simulate --rdepends ${packages.join(" ")}`
-  );
-
-  const cascade = result.stdout
-    .split("\n")
-    .map((line) => line.match(/^\(\s*\d+\/\d+\)\s+Purging\s+(\S+)\s/))
-    .flatMap((match) => (match ? [match[1]] : []));
-
-  // If the simulation could not be parsed, fall back to the named packages
-  // rather than reporting an empty, falsely reassuring list.
-  return cascade.length > 0 ? cascade : packages;
-};

@@ -5,13 +5,17 @@ import {
   getPostReloadCommands,
   getDeviceScript,
   getPackagesToRemove,
-  getRemovalCascade,
   getRevertCommands,
   heredocDelimiter,
   managedFilesManifest,
 } from "./getDeviceScript";
 import { execScript, stagedScriptPath } from "./execScript";
-import { getBoardJson, getInstalledPackages, getManagedFiles } from "./utils";
+import {
+  getBoardJson,
+  getInstalledPackages,
+  getManagedFiles,
+  getRemovalCascade,
+} from "./deviceFacts";
 
 const reconnectIntervalMs = 3000;
 
@@ -337,7 +341,8 @@ export const provisionOpenWrtDevice = async ({
     );
   }
 
-  const allCommands = await getDeviceScript({ state, ssh, installedPackages });
+  const managedFiles = await getManagedFiles(ssh, managedFilesManifest);
+  const allCommands = getDeviceScript({ state, installedPackages, managedFiles });
   // Derived from the same state, so the split stays correct however many
   // commands the finalise segment turns out to be: the commit now names each
   // touched config, and `run_after_reload` hooks are appended after the reload.
@@ -413,23 +418,19 @@ export const provisionOpenWrtDevice = async ({
 
   if (confirm) {
     // Work out what a rollback would have to put back, before anything changes.
-    const previouslyManagedFiles = await getManagedFiles(
-      ssh,
-      managedFilesManifest
-    );
     const newFilePaths = (state.files || []).map((file) => file.path);
     // The watchdog deletes `filesToDelete` and then extracts this archive, so
     // archiving every path the run touches means one that already existed is
     // restored rather than lost. `tar` skips paths that do not exist.
     const filesToRestore = [
       ...new Set([
-        ...previouslyManagedFiles,
+        ...managedFiles,
         ...newFilePaths,
         managedFilesManifest,
       ]),
     ];
     const filesToDelete = newFilePaths.filter(
-      (path) => !previouslyManagedFiles.includes(path)
+      (path) => !managedFiles.includes(path)
     );
     const packagesToUninstallOnRollback = (state.packagesToInstall || [])
       .map((p) => p.packageName)
