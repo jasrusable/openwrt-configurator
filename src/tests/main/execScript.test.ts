@@ -32,7 +32,7 @@ test("execScript stages the script to a file and runs it with stdin detached", a
   t.is(calls.length, 2);
   t.true(calls[0].command.includes(`cat > ${stagedScriptPath}`));
   // Per-process, so concurrent runs cannot clobber each other.
-  t.true(stagedScriptPath.includes(String(process.pid)));
+  t.regex(stagedScriptPath, /^\/tmp\/\.onc-provision-[0-9a-z]+\.sh$/);
   // Written with a restrictive umask: the script embeds config values.
   t.true(calls[0].command.includes("umask 077"));
   t.true(calls[0].stdin!.startsWith("set -e"));

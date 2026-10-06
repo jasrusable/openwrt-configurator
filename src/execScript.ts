@@ -1,4 +1,4 @@
-import { NodeSSH } from "node-ssh";
+import { Session } from "./platform";
 
 export type ScriptResult =
   | { ok: true }
@@ -19,11 +19,15 @@ export type ScriptResult =
 
 const MARKER = "__ONC_OK__";
 /**
- * Per-process so two runs against one device cannot clobber each other's
- * script. It embeds config values, so it is written 0600 and trapped for
- * removal even if the connection drops mid-run.
+ * Unique per run of the tool so two runs against one device cannot clobber
+ * each other's script. Random rather than the pid: pids from two workstations
+ * can collide on the same device, and the pid is not known at import time on
+ * every platform. It embeds config values, so it is written 0600 and trapped
+ * for removal even if the connection drops mid-run.
  */
-export const stagedScriptPath = `/tmp/.onc-provision-${process.pid}.sh`;
+export const stagedScriptPath = `/tmp/.onc-provision-${Math.random()
+  .toString(36)
+  .slice(2, 10)}.sh`;
 
 /**
  * Run a list of commands on the device as one script.
@@ -50,7 +54,7 @@ export const execScript = async ({
   ssh,
   commands,
 }: {
-  ssh: NodeSSH;
+  ssh: Session;
   commands: string[];
 }): Promise<ScriptResult> => {
   if (commands.length === 0) {

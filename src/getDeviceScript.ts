@@ -1,4 +1,3 @@
-import { posix as posixPath } from "path";
 import { dhcpSectionsToReset } from "./configSchemas/dhcp";
 import { firewallSectionsToReset } from "./configSchemas/firewall";
 import { networkSectionsToReset } from "./configSchemas/network";
@@ -6,6 +5,7 @@ import { systemSectionsToReset } from "./configSchemas/system";
 import { wirelessSectionsToReset } from "./configSchemas/wireless";
 import { getUciCommands } from "./getUciCommands";
 import { OpenWrtState } from "./openWrtConfigSchema";
+import { dirname } from "./paths";
 
 // Manifest of files written by this tool, so files removed from config are
 // removed from the device on the next provision (declarative, like UCI resets).
@@ -155,7 +155,7 @@ const writeFileCommand = (path: string, content: string, mode?: string) => {
   const delimiter = heredocDelimiter(content);
   const body = content.endsWith("\n") ? content : `${content}\n`;
   return [
-    `mkdir -p '${posixPath.dirname(path)}'`,
+    `mkdir -p '${dirname(path)}'`,
     `cat > '${path}' <<'${delimiter}'`,
     `${body}${delimiter}`,
     ...(mode ? [`chmod ${mode} '${path}'`] : []),

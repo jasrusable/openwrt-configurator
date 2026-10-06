@@ -1,4 +1,3 @@
-import { readFileSync } from "fs";
 import { ONCConfig, oncConfigSchema } from "./oncConfigSchema";
 import {
   findPlaintextSecrets,
@@ -6,13 +5,14 @@ import {
   resolveSecrets,
   SecretLookup,
 } from "./resolveSecrets";
+import { platform } from "./platform";
 import { parseJson, parseSchema } from "./utils";
 
 export const loadOncConfig = async (
   configPath: string,
   options?: { lookup?: SecretLookup }
 ) => {
-  const oncJson = parseJson(readFileSync(configPath, "utf-8"), configPath);
+  const oncJson = parseJson(platform().readTextFile(configPath), configPath);
   for (const path of findPlaintextSecrets(oncJson)) {
     console.warn(
       `Warning: ${path} is stored in plaintext; use { "$secret": "name" } and \`openwrt-configurator secrets set <name>\`.`

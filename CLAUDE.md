@@ -41,7 +41,7 @@ Published to GitHub Releases as standalone binaries (macOS/Linux/Windows) via `@
 ## Commands
 
 ```sh
-npm test                 # ava; 8 tests, all offline
+npm test                 # ava; all offline
 npm run test:watch
 npm run build            # tsc -> ./dist
 npm run package          # pkg -> ./artifacts (needs npm run build first)
@@ -58,15 +58,19 @@ Node 24 (`.node-version`), TypeScript 6, CommonJS. `ts-node --transpile-only` fo
 
 The pipeline, in dependency order:
 
-1. **`bin/index.ts`** — commander CLI. Reads the config file via `loadOncConfig`: `parseJson` (via `parse-json`, for good error positions), resolve `{ "$secret": "name" }` from the macOS keychain (`src/resolveSecrets.ts`), then `parseSchema(oncConfigSchema, ...)`. `print-uci-commands` and `build-images --dry-run` redact resolved values unless `--show-secrets`.
+1. **`bin/index.ts`** → **`src/cli.ts`** — `bin/index.ts` is only the Node entry point: it installs the Node platform (see "The platform boundary") and calls `run(argv)`. The commander CLI lives in `src/cli.ts`. It reads the config file via `loadOncConfig`: `parseJson` (via `parse-json`, for good error positions), resolve `{ "$secret": "name" }` from the macOS keychain (`src/resolveSecrets.ts`), then `parseSchema(oncConfigSchema, ...)`. `print-uci-commands` and `build-images --dry-run` redact resolved values unless `--show-secrets`.
 2. **`src/oncConfigSchema.ts`** — zod schema for the *input* JSON ("ONC config"): `version`, `devices`, `package_profiles`, `files`, `configs_to_not_reset`, `config`. `.strict()` throughout, so unknown keys are hard errors by design.
 3. **`src/getDeviceSchema.ts`** — builds a `DeviceSchema` (ports, radios, CPU port, existing UCI section types, firmware version) for each device.
 4. **`src/resolveOncConfig.ts`** — collapses `.if` / `.overrides` for one device. `conditionMatches` evaluates conditions against `device.tag.*`, `device.hostname`, `device.ipaddr`, `device.model_id`, `device.version`, `device.sw_config`, using `boolean-parser` for `AND`/`OR` and hand-rolled `==` / `!=`.
 5. **`src/getOpenWrtConfig.ts`** — the interesting one. Turns abstractions into concrete UCI: expands `@cpu_port`, resolves `"*"` / `"*t"` port wildcards to actual unused physical ports, maps `bridge-vlan` (DSA) vs `switch_vlan` (legacy swconfig) depending on `deviceSchema.sw_config`, assigns `.name`s, injects the hostname, and expands `wifi-iface` across radios by band.
 6. **`src/getOpenWrtState.ts`** — adds packages to install/uninstall, which config sections to reset, and resolved `files`.
 7. **`src/getUciCommands.ts`** + **`src/getDeviceScript.ts`** — emit the shell script. Fixed order: `uci revert` of every touched config (clean start, see below) → package install/removal → `reload_config` (baseline refresh, see below) → section resets → one `uci batch` carrying every `set`/`add_list` → file writes (each with its optional `run_after`) → `uci commit` per touched config → `reload_config` → each `run_after_reload`. `getDeviceScript` returns all of it so a dry run shows the whole sequence, but `provision` runs it as **three** segments — configure, finalise, post-reload — split by `getFinaliseCommands(state).length` and `getPostReloadCommands(state).length`. The post-reload hooks run over the *reconnected* session: `reload_config` is what can sever the link, and once dropbear exits the next marker `printf` in `execScript` takes SIGPIPE and kills the script, so a hook after the reload in that same script would be silently dropped on exactly the runs that reshape networking. The three segments must partition the script exactly — there is a test for it.
-8. **`src/execScript.ts`** — runs the whole command list as one script piped to `sh` over **stdin**. Do not "simplify" this into a single joined exec string: dropbear rejects exec requests over ~9 KB and drops the connection on larger ones, while a real provision script is comfortably past that. `set -e` plus a marker echoed after each command preserves per-command failure granularity.
+8. **`src/execScript.ts`** — runs the whole command list as one script: it is written to a `0600` file in `/tmp` over stdin (`cat >`), then run as `sh <file> < /dev/null`. Do not "simplify" this into a single joined exec string: dropbear rejects exec requests over ~9 KB and drops the connection on larger ones, while a real provision script is comfortably past that. Nor pipe it straight into `sh`: commands that read stdin then swallow the rest of the script. `set -e` plus a marker echoed after each command preserves per-command failure granularity.
 9. **`src/provisionOpenWrtDevice.ts`** — verifies the board id, warns about package removals, arms a commit-confirm watchdog, runs the script, commits, then reconnects to confirm. On failure it runs `getRevertCommands(state)` (`uci revert` for *every* config the state touches, not just the built-in five) and aborts. Files are deliberately written *before* `uci commit` so a write failure leaves the revert effective.
+
+### The platform boundary
+
+Nothing in `src/` outside `src/platforms/` may import a Node built-in or a Node-only package (`node-ssh`), or touch `process` — a test enforces it (`platformBoundary.test.ts`). The goal is one bundle that runs under Node on a workstation and under QuickJS on an OpenWrt device. All runtime access goes through `platform()` from `src/platform.ts`: files, `sha256`, HTTP, local processes, `connect` (returns a `Session`, shaped like node-ssh's `execCommand`/`dispose`), env, sleep and exit. An entry point installs the implementation once with `setPlatform` before anything runs; `src/platforms/node.ts` is the Node one, and ava loads it via `src/platforms/registerNode.ts`. Because of that ordering, never call `platform()` at module load time.
 
 ### Commit-confirm
 
@@ -154,7 +158,7 @@ Most tests are golden-ish: load `config.json` / `config2.json`, build the OpenWr
 
 ## Gotchas
 
-- **The CLI version is duplicated.** `package.json` `version` and the hardcoded `.version("0.0.6")` in `bin/index.ts` must be bumped together.
+- **The CLI version is duplicated.** `package.json` `version` and the hardcoded `.version("0.0.6")` in `src/cli.ts` must be bumped together.
 - **Releases are tag-driven.** `.github/workflows/release.yml` fires on a pushed `X.Y.Z` or `vX.Y.Z` tag, runs build + package, and publishes binaries with sha256 sums. Nothing runs on push to `main` — there is no CI test run, so run `npm test` yourself.
 - **`print-uci-commands` builds against the live SSH session**, the same as `provision`. It used to call `getDeviceScript({ state })` with no session, so package diffing never ran: every package the config named was printed as an install and every removal as a removal, regardless of what was on the device. That reported a 21-package `apk del` cascade for packages that were not installed at all. Keep the session open until the script is built, or the dry run stops matching what a provision would do. Resolved `$secret` values are redacted in the printed script; `--show-secrets` turns that off — don't pass it unless the user asks.
 - **`$secret` refs are resolved once at load** (`loadOncConfig`), before schema parse. The rest of the pipeline still sees plaintext strings. `secrets set` prompts for a value and stores it; there is no `get`.

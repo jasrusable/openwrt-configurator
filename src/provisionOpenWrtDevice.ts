@@ -1,5 +1,4 @@
 import { OpenWrtState } from "./openWrtConfigSchema";
-import { NodeSSH } from "node-ssh";
 import {
   getFinaliseCommands,
   getPostReloadCommands,
@@ -10,6 +9,7 @@ import {
   managedFilesManifest,
 } from "./getDeviceScript";
 import { execScript, stagedScriptPath } from "./execScript";
+import { platform, Session } from "./platform";
 import {
   getBoardJson,
   getInstalledPackages,
@@ -232,7 +232,7 @@ const stagePackagesForRollback = async ({
   rollbackDir,
   packages,
 }: {
-  ssh: NodeSSH;
+  ssh: Session;
   rollbackDir: string;
   packages: string[];
 }) => {
@@ -250,7 +250,7 @@ const stagePackagesForRollback = async ({
   return { staged: Number(counted.stdout.trim()) || 0 };
 };
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number) => platform().sleep(ms);
 
 /**
  * Reconnect, retrying until the deadline.
@@ -264,7 +264,7 @@ const reconnectUntil = async ({
   connect,
   deadline,
 }: {
-  connect: () => Promise<NodeSSH>;
+  connect: () => Promise<Session>;
   deadline: number;
 }) => {
   let lastError: unknown;
@@ -296,9 +296,9 @@ export const provisionOpenWrtDevice = async ({
   ipAddress: string;
   hostname: string;
   /** An already-connected session, reused from device introspection. */
-  ssh: NodeSSH;
+  ssh: Session;
   /** Re-establishes a session after the commit, to confirm the device is alive. */
-  connect: () => Promise<NodeSSH>;
+  connect: () => Promise<Session>;
   state: OpenWrtState;
   confirm?: boolean;
   confirmTimeoutSeconds?: number;
@@ -374,7 +374,7 @@ export const provisionOpenWrtDevice = async ({
    *   alone restores the device — otherwise the watchdog is the one thing that
    *   can put the packages and files back, and cancelling it strands them.
    */
-  const revert = async (session: NodeSSH, { disarm }: { disarm: boolean }) => {
+  const revert = async (session: Session, { disarm }: { disarm: boolean }) => {
     // Never let a problem in here replace the failure that caused the revert;
     // that original error is what the user needs to see.
     try {
@@ -573,7 +573,7 @@ export const provisionOpenWrtDevice = async ({
    * reboot would apply it). So this reports loudly and fails the run rather
    * than rolling back a device that is correctly configured.
    */
-  const runPostReloadHooks = async (session: NodeSSH) => {
+  const runPostReloadHooks = async (session: Session) => {
     if (postReloadCommands.length === 0) {
       return;
     }
@@ -608,7 +608,7 @@ export const provisionOpenWrtDevice = async ({
   // Leave a margin so the last attempt still has time to land before the
   // watchdog fires.
   const deadline = confirmDeadline - reconnectIntervalMs * 2;
-  let confirmSession: NodeSSH;
+  let confirmSession: Session;
   try {
     confirmSession = await reconnectUntil({ connect, deadline });
   } catch (e) {
@@ -628,7 +628,7 @@ export const provisionOpenWrtDevice = async ({
         `is rolling back. Waiting up to ${recoverSeconds}s to see if the revert restores access...`
     );
 
-    let recoveredSession: NodeSSH | undefined;
+    let recoveredSession: Session | undefined;
     try {
       recoveredSession = await reconnectUntil({
         connect,

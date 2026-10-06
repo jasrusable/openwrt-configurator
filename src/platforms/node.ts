@@ -1,0 +1,147 @@
+import { spawn } from "child_process";
+import { createHash } from "crypto";
+import {
+  closeSync,
+  createReadStream,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
+import { homedir } from "os";
+import { NodeSSH } from "node-ssh";
+import { NetworkError, Platform } from "../platform";
+
+const transientCodes = new Set([
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "ECONNABORTED",
+  "EAI_AGAIN",
+  "UND_ERR_SOCKET",
+  "UND_ERR_CONNECT_TIMEOUT",
+]);
+
+// fetch rejects with a bare "fetch failed" TypeError; the useful code is on
+// its cause.
+const networkError = (e: unknown, url: string): NetworkError => {
+  const code = (e as { cause?: { code?: string } })?.cause?.code;
+  return Object.assign(
+    new Error(`${url}: ${code ?? (e as Error)?.message ?? e}`),
+    { transient: code !== undefined && transientCodes.has(code) }
+  );
+};
+
+const headersOf = (response: Response) => {
+  const headers: Record<string, string> = {};
+  response.headers.forEach((value, key) => {
+    headers[key.toLowerCase()] = value;
+  });
+  return headers;
+};
+
+export const nodePlatform: Platform = {
+  os: process.platform,
+  env: (name) => process.env[name],
+  homedir,
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  exit: (code) => process.exit(code),
+
+  readTextFile: (path) => readFileSync(path, "utf-8"),
+  writeTextFile: (path, data) => writeFileSync(path, data),
+  mkdirp: (path) => {
+    mkdirSync(path, { recursive: true });
+  },
+  removeFile: (path) => rmSync(path, { force: true }),
+  readFileHead: (path, bytes) => {
+    const head = Buffer.alloc(bytes);
+    const fd = openSync(path, "r");
+    try {
+      return head.subarray(0, readSync(fd, head, 0, bytes, 0));
+    } finally {
+      closeSync(fd);
+    }
+  },
+  sha256: (text) => createHash("sha256").update(text).digest("hex"),
+  sha256File: (path) =>
+    new Promise((resolve, reject) => {
+      const hash = createHash("sha256");
+      createReadStream(path)
+        .on("data", (chunk) => hash.update(chunk))
+        .on("end", () => resolve(hash.digest("hex")))
+        .on("error", reject);
+    }),
+
+  http: {
+    request: async ({ method, url, json }) => {
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method,
+          ...(json === undefined
+            ? {}
+            : {
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(json),
+              }),
+        });
+      } catch (e) {
+        throw networkError(e, url);
+      }
+      return {
+        status: response.status,
+        headers: headersOf(response),
+        body: await response.text(),
+      };
+    },
+    download: async (url, path) => {
+      let response: Response;
+      try {
+        response = await fetch(url);
+      } catch (e) {
+        throw networkError(e, url);
+      }
+      if (!response.ok) {
+        throw new Error(`${url}: HTTP ${response.status}`);
+      }
+      const body = Buffer.from(await response.arrayBuffer());
+      writeFileSync(path, body);
+      const declared = response.headers.get("content-length");
+      return {
+        bytes: body.length,
+        contentLength: declared ? parseInt(declared, 10) : undefined,
+      };
+    },
+  },
+
+  run: (argv, options) =>
+    new Promise((resolve, reject) => {
+      const child = spawn(argv[0], argv.slice(1), {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.setEncoding("utf8").on("data", (d) => (stdout += d));
+      child.stderr.setEncoding("utf8").on("data", (d) => (stderr += d));
+      child.on("error", reject);
+      child.on("close", (code) => resolve({ stdout, stderr, code }));
+      child.stdin.end(options?.stdin ?? "");
+    }),
+  runInteractive: (argv) =>
+    new Promise((resolve, reject) => {
+      const child = spawn(argv[0], argv.slice(1), { stdio: "inherit" });
+      child.on("error", reject);
+      child.on("close", (code) => resolve(code));
+    }),
+
+  connect: async (target) => {
+    const ssh = new NodeSSH();
+    await ssh.connect(target);
+    // Once a command is in flight node-ssh drops its own 'error' listener, so an
+    // RST arriving mid-command would emit 'error' with nothing attached and kill
+    // the process. The command still settles via the channel closing.
+    ssh.connection?.on("error", () => {});
+    return ssh;
+  },
+};

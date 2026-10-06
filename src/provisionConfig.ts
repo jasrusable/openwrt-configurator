@@ -1,9 +1,8 @@
-import { homedir } from "os";
-import { join } from "path";
-import { NodeSSH } from "node-ssh";
 import { getDeviceSchema } from "./getDeviceSchema";
 import { getOpenWrtState } from "./getOpenWrtState";
 import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
+import { join } from "./paths";
+import { platform, SshTarget } from "./platform";
 import {
   provisionOpenWrtDevice,
   RollbackMode,
@@ -12,7 +11,11 @@ import {
 const connectTimeoutMs = 15000;
 
 const expandHome = (path: string) =>
-  path === "~" ? homedir() : path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+  path === "~"
+    ? platform().homedir()
+    : path.startsWith("~/")
+      ? join(platform().homedir(), path.slice(2))
+      : path;
 
 export const sshConnectOptions = ({
   deviceConfig,
@@ -22,7 +25,7 @@ export const sshConnectOptions = ({
   deviceConfig: ONCDeviceConfig;
   identityPath?: string;
   agentSocket?: string;
-}) => {
+}): SshTarget => {
   const auth = deviceConfig.provisioning_config?.ssh_auth;
   const keyPath = identityPath || auth?.private_key_path;
   const password = auth?.password;
@@ -47,21 +50,13 @@ export const connectToDevice = async (
   deviceConfig: ONCDeviceConfig,
   options?: { identityPath?: string }
 ) => {
-  const ssh = new NodeSSH();
-  await ssh.connect(
+  return platform().connect(
     sshConnectOptions({
       deviceConfig,
       identityPath: options?.identityPath,
-      agentSocket: process.env.SSH_AUTH_SOCK,
+      agentSocket: platform().env("SSH_AUTH_SOCK"),
     })
   );
-
-  // Once a command is in flight node-ssh drops its own 'error' listener, so an
-  // RST arriving mid-command would emit 'error' with nothing attached and kill
-  // the process. The command still settles via the channel closing.
-  ssh.connection?.on("error", () => {});
-
-  return ssh;
 };
 
 export const provisionConfig = async ({

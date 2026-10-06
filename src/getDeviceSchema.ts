@@ -1,9 +1,8 @@
-import { readFileSync } from "fs";
-import { NodeSSH } from "node-ssh";
 import { DeviceSchema, deviceSchemaSchema } from "./deviceSchema";
 import { parseSections } from "./getConfigSections";
 import { ONCDeviceConfig } from "./oncConfigSchema";
 import { getDeviceFacts } from "./deviceFacts";
+import { platform, Session } from "./platform";
 import { parseJson, parseSchema } from "./utils";
 
 const useLocalOverride = false;
@@ -15,13 +14,13 @@ export const getDeviceSchema = async ({
 }: {
   deviceConfig: ONCDeviceConfig;
   /** An already-connected session. Reused so provisioning need not reconnect. */
-  ssh?: NodeSSH;
+  ssh?: Session;
   useLocal?: boolean;
 }) => {
   // For local testing:
   if (useLocalOverride || useLocal) {
     const schema = parseJson(
-      readFileSync(`./deviceSchemas/${deviceConfig.model_id}.json`, "utf-8")
+      platform().readTextFile(`./deviceSchemas/${deviceConfig.model_id}.json`)
     );
     const deviceSchema = parseSchema(deviceSchemaSchema, schema);
     return deviceSchema;

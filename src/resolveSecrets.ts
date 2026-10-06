@@ -1,7 +1,4 @@
-import { execFile, spawn } from "child_process";
-import { promisify } from "util";
-
-const execFileAsync = promisify(execFile);
+import { ExecResult, platform } from "./platform";
 
 export const KEYCHAIN_SERVICE = "openwrt-configurator";
 export const SECURITY_PATH = "/usr/bin/security";
@@ -254,40 +251,37 @@ export const findPlaintextSecrets = (
 };
 
 export const lookupKeychain: SecretLookup = async (name) => {
-  if (process.platform !== "darwin") {
+  if (platform().os !== "darwin") {
     throw new Error(
       `Keychain secret "${name}" cannot be resolved: keychain lookup is only supported on macOS.`
     );
   }
-  let stdout = "";
-  let stderr = "";
+  let result: ExecResult;
   try {
-    const result = await execFileAsync(
+    result = await platform().run([
       SECURITY_PATH,
-      ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", name, "-g"],
-      { encoding: "utf8" }
+      "find-generic-password",
+      "-s",
+      KEYCHAIN_SERVICE,
+      "-a",
+      name,
+      "-g",
+    ]);
+  } catch {
+    throw new Error(
+      `Failed to read keychain secret "${name}": ${SECURITY_PATH} not found.`
     );
-    stdout = result.stdout ?? "";
-    stderr = result.stderr ?? "";
-  } catch (e: unknown) {
-    const err = e as {
-      code?: number | string;
-      stderr?: string;
-      message?: string;
-    };
-    const failure = typeof err.stderr === "string" ? err.stderr : "";
+  }
+  const { stdout, stderr } = result;
+  if (result.code !== 0) {
     // 44 is errSecItemNotFound. The message is the portable signal. `-g`
     // prints the secret on stderr, so a failure that got that far must not
     // carry stderr into this error.
-    if (err.code === 44 || /could not be found/i.test(failure)) {
+    if (result.code === 44 || /could not be found/i.test(stderr)) {
       return undefined;
     }
-    if (err.code === "ENOENT") {
-      throw new Error(
-        `Failed to read keychain secret "${name}": ${SECURITY_PATH} not found.`
-      );
-    }
-    const raw = failure.trim() || err.message || "unknown error";
+    const raw =
+      stderr.trim() || `security exited ${result.code ?? "without a status"}`;
     const detail = /^password: /m.test(raw)
       ? "security failed after printing a password"
       : raw;
@@ -311,37 +305,25 @@ export const lookupKeychain: SecretLookup = async (name) => {
 
 export const setKeychainSecret = async (name: string) => {
   assertSecretName(name);
-  if (process.platform !== "darwin") {
+  if (platform().os !== "darwin") {
     throw new Error("Keychain secrets are only supported on macOS.");
   }
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(
-      SECURITY_PATH,
-      [
-        "add-generic-password",
-        "-U",
-        "-s",
-        KEYCHAIN_SERVICE,
-        "-a",
-        name,
-        "-w",
-      ],
-      { stdio: "inherit" }
+  const code = await platform().runInteractive([
+    SECURITY_PATH,
+    "add-generic-password",
+    "-U",
+    "-s",
+    KEYCHAIN_SERVICE,
+    "-a",
+    name,
+    "-w",
+  ]);
+  if (code !== 0) {
+    throw new Error(
+      `Failed to store secret "${name}" (security exited ${code ?? "null"}).`
     );
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0) {
-        console.log(
-          `Stored secret "${name}" in the keychain (service ${KEYCHAIN_SERVICE}).`
-        );
-        resolve();
-        return;
-      }
-      reject(
-        new Error(
-          `Failed to store secret "${name}" (security exited ${code ?? "null"}).`
-        )
-      );
-    });
-  });
+  }
+  console.log(
+    `Stored secret "${name}" in the keychain (service ${KEYCHAIN_SERVICE}).`
+  );
 };

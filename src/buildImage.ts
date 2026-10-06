@@ -1,13 +1,8 @@
-import axios, { AxiosError, AxiosResponse } from "axios";
-import { createHash } from "crypto";
-import { createReadStream, createWriteStream } from "fs";
-import { mkdir, unlink } from "fs/promises";
-import { dirname } from "path";
 import { z } from "zod";
+import { dirname } from "./paths";
+import { HttpResponse, platform } from "./platform";
 
 const TRANSIENT_STATUSES = new Set([502, 503, 504, 529]);
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const withRetry = async <T>(
   fn: () => Promise<T>,
@@ -36,26 +31,57 @@ const withRetry = async <T>(
           (e as Error).message
         } — retrying in ${wait}ms`
       );
-      await sleep(wait);
+      await platform().sleep(wait);
     }
   }
   throw lastErr;
 };
 
-const axiosStatus = (e: unknown): number | undefined =>
-  (e as AxiosError)?.response?.status;
-
-const isTransientAxiosError = (e: unknown): boolean => {
-  const status = axiosStatus(e);
-  if (status !== undefined && TRANSIENT_STATUSES.has(status)) return true;
-  const code = (e as AxiosError)?.code;
-  return (
-    code === "ECONNRESET" ||
-    code === "ETIMEDOUT" ||
-    code === "ECONNABORTED" ||
-    code === "EAI_AGAIN"
-  );
+type HttpError = Error & {
+  transient: boolean;
+  status?: number;
+  data?: unknown;
 };
+
+const parseBody = (body: string): unknown => {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return body;
+  }
+};
+
+/**
+ * One HTTP call. A status outside `accept` throws, and is retryable only if it
+ * is one of `TRANSIENT_STATUSES`; network failures carry their own flag.
+ */
+const request = async ({
+  method,
+  url,
+  json,
+  accept,
+}: {
+  method: "GET" | "POST";
+  url: string;
+  json?: unknown;
+  accept: number[];
+}): Promise<HttpResponse & { data: unknown }> => {
+  const response = await platform().http.request({ method, url, json });
+  const data = parseBody(response.body);
+  if (!accept.includes(response.status)) {
+    throw Object.assign(
+      new Error(`${method} ${url} failed with status ${response.status}`),
+      {
+        transient: TRANSIENT_STATUSES.has(response.status),
+        status: response.status,
+        data,
+      }
+    );
+  }
+  return { ...response, data };
+};
+
+const isTransient = (e: unknown) => (e as HttpError)?.transient === true;
 
 const ASU_BASE = "https://sysupgrade.openwrt.org";
 const DOWNLOADS_BASE = "https://downloads.openwrt.org";
@@ -79,10 +105,11 @@ export const getProfileTarget = async ({
   modelId: string;
 }): Promise<{ profile: string; target: string }> => {
   if (!overviewCache[version]) {
-    const response = await axios.get(
-      `${DOWNLOADS_BASE}/releases/${version}/.overview.json`,
-      { responseType: "json" }
-    );
+    const response = await request({
+      method: "GET",
+      url: `${DOWNLOADS_BASE}/releases/${version}/.overview.json`,
+      accept: [200],
+    });
     const parsed = overviewSchema.parse(response.data);
     overviewCache[version] = parsed.profiles.reduce<Record<string, string>>(
       (acc, p) => ({ ...acc, [p.id]: p.target }),
@@ -124,18 +151,22 @@ export type BuildRequest = {
 export const requestBuild = async (
   req: BuildRequest
 ): Promise<{ requestHash: string }> => {
-  const post = async (): Promise<AxiosResponse> =>
-    axios.post(`${ASU_BASE}/api/v1/build`, req, {
-      validateStatus: (s) => s === 200 || s === 202,
+  const post = () =>
+    request({
+      method: "POST",
+      url: `${ASU_BASE}/api/v1/build`,
+      json: req,
+      accept: [200, 202],
     });
 
   try {
     const response = await withRetry(post, {
-      isTransient: isTransientAxiosError,
+      isTransient,
       label: "asu build",
     });
     const requestHash =
-      response.data?.request_hash || response.headers["x-request-hash"];
+      (response.data as { request_hash?: string })?.request_hash ||
+      response.headers["x-request-hash"];
     if (!requestHash) {
       throw new Error(
         `ASU build response missing request_hash: ${JSON.stringify(response.data)}`
@@ -143,9 +174,9 @@ export const requestBuild = async (
     }
     return { requestHash };
   } catch (e) {
-    const ae = e as AxiosError;
-    const status = ae.response?.status;
-    const data = ae.response?.data;
+    const he = e as HttpError;
+    const status = he.status;
+    const data = he.status === undefined ? he.message : he.data;
     const dataStr =
       typeof data === "string" ? data : JSON.stringify(data);
     if (
@@ -176,11 +207,12 @@ export const pollBuild = async ({
   while (Date.now() - start < timeoutMs) {
     const response = await withRetry(
       () =>
-        axios.get(`${ASU_BASE}/api/v1/build/${requestHash}`, {
-          validateStatus: (s) =>
-            s === 200 || s === 202 || s === 400 || s === 500,
+        request({
+          method: "GET",
+          url: `${ASU_BASE}/api/v1/build/${requestHash}`,
+          accept: [200, 202, 400, 500],
         }),
-      { isTransient: isTransientAxiosError, label: `asu poll ${requestHash}` }
+      { isTransient, label: `asu poll ${requestHash}` }
     );
     if (response.status === 200) {
       return buildResultSchema.parse(response.data);
@@ -194,7 +226,7 @@ export const pollBuild = async ({
         }`
       );
     }
-    await sleep(intervalMs);
+    await platform().sleep(intervalMs);
   }
   throw new Error(
     `ASU build did not complete within ${timeoutMs}ms (request_hash=${requestHash})`
@@ -213,7 +245,7 @@ const KNOWN_IMAGE_MAGICS: { name: string; offset: number; bytes: number[] }[] = 
   { name: "tar", offset: 257, bytes: [0x75, 0x73, 0x74, 0x61, 0x72] },
 ];
 
-const identifyMagic = (head: Buffer): string | undefined => {
+const identifyMagic = (head: Uint8Array): string | undefined => {
   for (const { name, offset, bytes } of KNOWN_IMAGE_MAGICS) {
     if (
       head.length >= offset + bytes.length &&
@@ -238,67 +270,43 @@ export const downloadImage = async ({
   expectedSha256: string;
   expectedSize?: number;
 }): Promise<{ sha256: string; size: number; magic: string }> => {
-  await mkdir(dirname(outPath), { recursive: true });
+  platform().mkdirp(dirname(outPath));
   const url = `${ASU_BASE}/store/${binDir}/${name}`;
-  const response = await axios.get(url, { responseType: "stream" });
-  const contentLength = response.headers["content-length"]
-    ? parseInt(response.headers["content-length"], 10)
-    : undefined;
-  const declaredSize = expectedSize ?? contentLength;
-
-  const hash = createHash("sha256");
-  let bytesWritten = 0;
-  const head = Buffer.alloc(HEAD_BYTES);
-  let headBytes = 0;
 
   try {
-    await new Promise<void>((resolve, reject) => {
-      const stream = createWriteStream(outPath);
-      response.data.on("data", (chunk: Buffer) => {
-        hash.update(chunk);
-        bytesWritten += chunk.length;
-        if (headBytes < HEAD_BYTES) {
-          const room = HEAD_BYTES - headBytes;
-          const copyLen = Math.min(room, chunk.length);
-          chunk.copy(head, headBytes, 0, copyLen);
-          headBytes += copyLen;
-        }
-      });
-      response.data.pipe(stream);
-      stream.on("finish", () => resolve());
-      stream.on("error", reject);
-      response.data.on("error", reject);
-    });
+    const { bytes, contentLength } = await platform().http.download(
+      url,
+      outPath
+    );
+    const declaredSize = expectedSize ?? contentLength;
 
-    if (declaredSize !== undefined && bytesWritten !== declaredSize) {
+    if (declaredSize !== undefined && bytes !== declaredSize) {
       throw new Error(
-        `size mismatch for ${name}: expected ${declaredSize} bytes, got ${bytesWritten}`
+        `size mismatch for ${name}: expected ${declaredSize} bytes, got ${bytes}`
       );
     }
 
-    const sha256 = hash.digest("hex");
+    const sha256 = await platform().sha256File(outPath);
     if (sha256 !== expectedSha256) {
       throw new Error(
         `sha256 mismatch for ${name}: expected ${expectedSha256}, got ${sha256}`
       );
     }
 
-    const headSlice = head.subarray(0, headBytes);
-    const magic = identifyMagic(headSlice);
+    const head = platform().readFileHead(outPath, HEAD_BYTES);
+    const magic = identifyMagic(head);
     if (!magic) {
-      const firstHex = headSlice
-        .subarray(0, 16)
-        .toString("hex")
-        .match(/.{1,2}/g)
-        ?.join(" ");
+      const firstHex = Array.from(head.subarray(0, 16))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join(" ");
       console.warn(
         `[downloadImage] ${name}: unrecognized format (first 16 bytes = ${firstHex}). sha256 verified, keeping file.`
       );
     }
 
-    return { sha256, size: bytesWritten, magic: magic ?? "unknown" };
+    return { sha256, size: bytes, magic: magic ?? "unknown" };
   } catch (e) {
-    await unlink(outPath).catch(() => {});
+    platform().removeFile(outPath);
     throw e;
   }
 };
@@ -310,14 +318,7 @@ export const verifyImageFile = async ({
   path: string;
   expectedSha256: string;
 }): Promise<{ ok: boolean; actualSha256: string }> => {
-  const hash = createHash("sha256");
-  await new Promise<void>((resolve, reject) => {
-    const stream = createReadStream(path);
-    stream.on("data", (chunk) => hash.update(chunk));
-    stream.on("end", () => resolve());
-    stream.on("error", reject);
-  });
-  const actualSha256 = hash.digest("hex");
+  const actualSha256 = await platform().sha256File(path);
   return { ok: actualSha256 === expectedSha256, actualSha256 };
 };
 

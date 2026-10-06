@@ -1,6 +1,6 @@
-import { NodeSSH } from "node-ssh";
 import { z } from "zod";
 import { allHtModes, wifiBands, wifiTypes } from "./openWrtValues";
+import { Session } from "./platform";
 import { parseJson, parseSchema } from "./utils";
 
 export const boardJsonSchema = z.object({
@@ -38,7 +38,7 @@ export const boardJsonSchema = z.object({
   }),
 });
 
-export const getBoardJson = async (ssh: NodeSSH) => {
+export const getBoardJson = async (ssh: Session) => {
   const boardJsonPath = "/etc/board.json";
   const boardJsonResult = await ssh.execCommand(`cat ${boardJsonPath}`);
   if (!boardJsonResult.stdout || boardJsonResult.code !== 0) {
@@ -72,7 +72,7 @@ const wirelessConfigSchema = z.object({
  * these four separately costs four round trips even when wrapped in
  * `Promise.all` — they share one connection and cannot overlap.
  */
-export const getDeviceFacts = async (ssh: NodeSSH) => {
+export const getDeviceFacts = async (ssh: Session) => {
   const sep = "__ONC_FACT__";
   const result = await ssh.execCommand(
     [
@@ -128,7 +128,7 @@ export const getDeviceFacts = async (ssh: NodeSSH) => {
  * matched: removals were filtered away entirely and installs were re-issued on
  * every provision.
  */
-export const getInstalledPackages = async (ssh: NodeSSH) => {
+export const getInstalledPackages = async (ssh: Session) => {
   const command = await ssh.execCommand(`apk info`);
   if (command.code !== 0) {
     if (command.stderr === "Command failed: Not found") {
@@ -144,7 +144,7 @@ export const getInstalledPackages = async (ssh: NodeSSH) => {
     .filter((line) => line.length > 0);
 };
 
-export const getManagedFiles = async (ssh: NodeSSH, manifestPath: string) => {
+export const getManagedFiles = async (ssh: Session, manifestPath: string) => {
   const result = await ssh.execCommand(`cat ${manifestPath} 2>/dev/null`);
   if (result.code !== 0) {
     return [];
@@ -167,7 +167,7 @@ export const getRemovalCascade = async ({
   ssh,
   packages,
 }: {
-  ssh: NodeSSH;
+  ssh: Session;
   packages: string[];
 }) => {
   if (packages.length === 0) {
