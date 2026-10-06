@@ -1,14 +1,18 @@
 import test from "ava";
-import { chmodSync, mkdtempSync, writeFileSync } from "fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { resolveSecrets, secretsFileSource } from "../../resolveSecrets";
 
+const dirs: string[] = [];
+test.after.always(() =>
+  dirs.forEach((dir) => rmSync(dir, { recursive: true }))
+);
+
 const secretsFile = (content: string, mode = 0o600) => {
-  const path = join(
-    mkdtempSync(join(tmpdir(), "onc-secrets-")),
-    "secrets.json"
-  );
+  const dir = mkdtempSync(join(tmpdir(), "onc-secrets-"));
+  dirs.push(dir);
+  const path = join(dir, "secrets.json");
   writeFileSync(path, content);
   chmodSync(path, mode);
   return path;

@@ -21,6 +21,8 @@ export type Session = {
     options?: { stdin?: string }
   ) => Promise<ExecResult>;
   dispose: () => void;
+  /** Commands run on this machine itself, not over SSH (a device provisioning itself). */
+  local?: boolean;
 };
 
 export type SshTarget = {

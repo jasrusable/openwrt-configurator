@@ -13,11 +13,29 @@ const os = osModule as unknown as QuickJsOs;
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => os.setTimeout(resolve, ms));
 
-const tmpDir = () => std.getenv("TMPDIR") || "/tmp";
+let privateDir: string | undefined;
+/**
+ * A directory only this process can use, for the few temp files that need a
+ * name (curl's header and body output, the askpass helper). mkdir fails if the
+ * name exists, so a planted file or symlink cannot be reused; on a router this
+ * runs as root, where following one would be an arbitrary write.
+ */
+const tmpDir = () => {
+  while (!privateDir) {
+    const base = (std.getenv("TMPDIR") || "/tmp").replace(/\/$/, "");
+    const candidate = `${base}/onc-${Math.random().toString(36).slice(2, 12)}`;
+    if (os.mkdir(candidate, 0o700) === 0) privateDir = candidate;
+  }
+  return privateDir;
+};
 const tmpPath = (label: string) =>
-  `${tmpDir().replace(/\/$/, "")}/onc-${label}-${Math.random()
-    .toString(36)
-    .slice(2, 10)}`;
+  `${tmpDir()}/${label}-${Math.random().toString(36).slice(2, 10)}`;
+
+const removeTmpDir = () => {
+  if (!privateDir) return;
+  spawnSync(["rm", "-rf", privateDir]);
+  privateDir = undefined;
+};
 
 const tmpFileWith = (text = "") => {
   const file = std.tmpfile();
@@ -278,10 +296,11 @@ const transport = (
     ),
 });
 
-const sessionOver = ({ exec }: Transport): Session => ({
+const sessionOver = ({ exec }: Transport, local = false): Session => ({
   execCommand: (command, options) => exec(command, { stdin: options?.stdin }),
   // Every command is its own client process, so there is nothing to close.
   dispose: () => {},
+  local,
 });
 
 const localAddresses = () => {
@@ -379,7 +398,8 @@ const connect = async (target: SshTarget): Promise<Session> => {
 
   if (isLocal(host)) {
     return sessionOver(
-      transport((command) => ["sh", "-c", command], environment())
+      transport((command) => ["sh", "-c", command], environment()),
+      true
     );
   }
 
@@ -411,6 +431,7 @@ export const qjsPlatform: Platform = {
   homedir: () => std.getenv("HOME") || "/root",
   sleep,
   exit: (code) => {
+    removeTmpDir();
     std.out.flush();
     std.err.flush();
     return std.exit(code);

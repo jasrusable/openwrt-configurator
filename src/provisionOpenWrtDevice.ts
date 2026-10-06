@@ -156,7 +156,9 @@ export const armWatchdogCommands = ({
       // can come back. Neither step needs the network.
       ...(packagesToUninstallOnRollback.length > 0
         ? [
-            `apk del ${packagesToUninstallOnRollback.join(" ")} >/dev/null 2>&1 || logger -t onc "rollback could not remove newly installed packages"`,
+            `apk del ${packagesToUninstallOnRollback.join(
+              " "
+            )} >/dev/null 2>&1 || logger -t onc "rollback could not remove newly installed packages"`,
           ]
         : []),
       // Reinstall from the .apk files staged before anything was removed.
@@ -280,6 +282,42 @@ const reconnectUntil = async ({
   throw lastError ?? new Error("Timed out reconnecting");
 };
 
+const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+
+/**
+ * Whether `host` still answers SSH, checked from the device itself.
+ *
+ * Busybox `nc` on a stock image has no timeout or scan flag, so it is killed
+ * after two seconds; dropbear sends its `SSH-` banner on accept, before any
+ * client input, so a listening server is visible in that time.
+ */
+export const sshAnswersCommand = (host: string, port = 22) =>
+  `out=$( { nc ${shellQuote(
+    host
+  )} ${port} </dev/null & p=$!; sleep 2; kill $p; } 2>/dev/null ); ` +
+  `case "$out" in SSH-*) echo ONC_SSH_OK ;; *) echo ONC_SSH_DOWN ;; esac`;
+
+/**
+ * Reconnecting is how a provision proves the device is still reachable, but a
+ * device provisioning itself never loses its own session, so in local mode it
+ * would confirm a config that locks everyone else out. There, also require the
+ * device's own address to still answer SSH. That catches a removed or changed
+ * address and dropbear no longer listening on it; it cannot catch a firewall
+ * or cabling change that only affects other hosts, since the check is local.
+ */
+export const reachableSession =
+  ({ connect, host }: { connect: () => Promise<Session>; host: string }) =>
+  async () => {
+    const session = await connect();
+    if (!session.local) return session;
+    const check = await session.execCommand(sshAnswersCommand(host));
+    if (!check.stdout.includes("ONC_SSH_OK")) {
+      session.dispose();
+      throw new Error(`${host} is not answering SSH on port 22.`);
+    }
+    return session;
+  };
+
 export const provisionOpenWrtDevice = async ({
   deviceModelId,
   ipAddress,
@@ -342,7 +380,11 @@ export const provisionOpenWrtDevice = async ({
   }
 
   const managedFiles = await getManagedFiles(ssh, managedFilesManifest);
-  const allCommands = getDeviceScript({ state, installedPackages, managedFiles });
+  const allCommands = getDeviceScript({
+    state,
+    installedPackages,
+    managedFiles,
+  });
   // Derived from the same state, so the split stays correct however many
   // commands the finalise segment turns out to be: the commit now names each
   // touched config, and `run_after_reload` hooks are appended after the reload.
@@ -423,11 +465,7 @@ export const provisionOpenWrtDevice = async ({
     // archiving every path the run touches means one that already existed is
     // restored rather than lost. `tar` skips paths that do not exist.
     const filesToRestore = [
-      ...new Set([
-        ...managedFiles,
-        ...newFilePaths,
-        managedFilesManifest,
-      ]),
+      ...new Set([...managedFiles, ...newFilePaths, managedFilesManifest]),
     ];
     const filesToDelete = newFilePaths.filter(
       (path) => !managedFiles.includes(path)
@@ -461,7 +499,9 @@ export const provisionOpenWrtDevice = async ({
       console.log(`Staged ${staged}/${removalCascade.length} package(s).`);
       if (staged < removalCascade.length) {
         console.warn(
-          `  !! ${removalCascade.length - staged} package(s) could not be staged; ` +
+          `  !! ${
+            removalCascade.length - staged
+          } package(s) could not be staged; ` +
             `a rollback will not be able to reinstall those.`
         );
       }
@@ -469,8 +509,16 @@ export const provisionOpenWrtDevice = async ({
 
     console.log(
       `Arming rollback [${rollbackMode}] (restores /etc/config` +
-        `${filesToRestore.length > 1 ? ` + ${filesToRestore.length - 1} managed file(s)` : ""}` +
-        `${packagesToUninstallOnRollback.length > 0 ? `, removes ${packagesToUninstallOnRollback.length} newly installed package(s)` : ""}` +
+        `${
+          filesToRestore.length > 1
+            ? ` + ${filesToRestore.length - 1} managed file(s)`
+            : ""
+        }` +
+        `${
+          packagesToUninstallOnRollback.length > 0
+            ? `, removes ${packagesToUninstallOnRollback.length} newly installed package(s)`
+            : ""
+        }` +
         ` and reboots if not confirmed within ${confirmTimeoutSeconds}s)...`
     );
     const armed = await execScript({
@@ -501,11 +549,15 @@ export const provisionOpenWrtDevice = async ({
     armedAt = Date.now();
   }
 
-  console.log(`Setting configuration (${configureCommands.length} commands)...`);
+  console.log(
+    `Setting configuration (${configureCommands.length} commands)...`
+  );
   const configured = await execScript({ ssh, commands: configureCommands });
   if (!configured.ok) {
     console.error(
-      `Command ${configured.failedIndex + 1}/${configureCommands.length} failed: ${configured.command}`
+      `Command ${configured.failedIndex + 1}/${
+        configureCommands.length
+      } failed: ${configured.command}`
     );
     console.error(configured.stderr);
     await revert(ssh, { disarm: !hasIrreversibleSteps });
@@ -577,9 +629,7 @@ export const provisionOpenWrtDevice = async ({
     if (postReloadCommands.length === 0) {
       return;
     }
-    console.log(
-      `Running ${postReloadCommands.length} post-reload hook(s)...`
-    );
+    console.log(`Running ${postReloadCommands.length} post-reload hook(s)...`);
     const hooked = await execScript({
       ssh: session,
       commands: postReloadCommands,
@@ -602,7 +652,11 @@ export const provisionOpenWrtDevice = async ({
     return;
   }
 
-  console.log("Reconnecting to confirm...");
+  console.log(
+    ssh.local
+      ? `Confirming that ${ipAddress} still answers SSH...`
+      : "Reconnecting to confirm..."
+  );
   ssh.dispose();
 
   // Leave a margin so the last attempt still has time to land before the
@@ -610,7 +664,10 @@ export const provisionOpenWrtDevice = async ({
   const deadline = confirmDeadline - reconnectIntervalMs * 2;
   let confirmSession: Session;
   try {
-    confirmSession = await reconnectUntil({ connect, deadline });
+    confirmSession = await reconnectUntil({
+      connect: reachableSession({ connect, host: ipAddress }),
+      deadline,
+    });
   } catch (e) {
     // The window has closed, so the watchdog is now reverting. Whether the
     // device has to reboot depends on whether the revert actually restored
@@ -631,7 +688,7 @@ export const provisionOpenWrtDevice = async ({
     let recoveredSession: Session | undefined;
     try {
       recoveredSession = await reconnectUntil({
-        connect,
+        connect: reachableSession({ connect, host: ipAddress }),
         deadline: Date.now() + recoverSeconds * 1000,
       });
     } catch {
@@ -643,7 +700,9 @@ export const provisionOpenWrtDevice = async ({
       );
     }
 
-    await recoveredSession.execCommand(`touch ${runPaths(runId).recoveredFlag}`);
+    await recoveredSession.execCommand(
+      `touch ${runPaths(runId).recoveredFlag}`
+    );
     recoveredSession.dispose();
     throw new Error(
       `Provisioning ${hostname} was rolled back: the new configuration cut off access. ` +
