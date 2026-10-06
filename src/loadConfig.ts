@@ -1,7 +1,7 @@
 import { ONCConfig, oncConfigSchema } from "./oncConfigSchema";
 import {
   findPlaintextSecrets,
-  lookupKeychain,
+  defaultSecretSource,
   resolveSecrets,
   SecretLookup,
 } from "./resolveSecrets";
@@ -18,9 +18,13 @@ export const loadOncConfig = async (
       `Warning: ${path} is stored in plaintext; use { "$secret": "name" } and \`openwrt-configurator secrets set <name>\`.`
     );
   }
+  const source = options?.lookup
+    ? { lookup: options.lookup, describeMissing: undefined }
+    : defaultSecretSource();
   const { value, secrets } = await resolveSecrets(
     oncJson,
-    options?.lookup ?? lookupKeychain
+    source.lookup,
+    source.describeMissing
   );
   const oncConfig: ONCConfig = parseSchema(oncConfigSchema, value);
   return { oncConfig, secrets };

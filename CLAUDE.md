@@ -72,6 +72,18 @@ The pipeline, in dependency order:
 
 Nothing in `src/` outside `src/platforms/` may import a Node built-in or a Node-only package (`node-ssh`), or touch `process` — a test enforces it (`platformBoundary.test.ts`). The goal is one bundle that runs under Node on a workstation and under QuickJS on an OpenWrt device. All runtime access goes through `platform()` from `src/platform.ts`: files, `sha256`, HTTP, local processes, `connect` (returns a `Session`, shaped like node-ssh's `execCommand`/`dispose`), env, sleep and exit. An entry point installs the implementation once with `setPlatform` before anything runs; `src/platforms/node.ts` is the Node one, and ava loads it via `src/platforms/registerNode.ts`. Because of that ordering, never call `platform()` at module load time.
 
+### Running under QuickJS
+
+`npm run bundle` builds `dist/qjs/openwrt-configurator.mjs` from `bin/qjs.ts` (esbuild, `std`/`os` external); run it with `qjs --module`. `src/platforms/qjs.ts` is the QuickJS platform. Things that differ from Node and are easy to trip over:
+
+- **QuickJS has only `console.log`**, no `setTimeout`, `Buffer` or `TextEncoder`/`TextDecoder`. `registerQjs.ts` polyfills `console.warn`/`error` to stderr; the boundary test bans the rest outside `platforms/` (`src/utf8.ts` covers the UTF-8 needs).
+- **`@types/node` owns the module name `"os"`**, so QuickJS's `os` is typed as the global `QuickJsOs` interface in `quickjs.d.ts` and cast on import.
+- **SSH is a spawned client per command**: `dbclient` when present (OpenWrt), else OpenSSH. A password reaches OpenSSH through a generated `SSH_ASKPASS` helper and dbclient through `DROPBEAR_PASSWORD`, never argv. Host keys are not checked, matching node-ssh.
+- **Exit status comes from a marker, not the client.** Each remote command is wrapped as `( cmd ) ; printf '__ONC_EXIT__%s' $? >&2`, because both clients reuse the remote exit codes for their own failures (OpenSSH 255, dbclient 1). No marker means the command never finished, reported as `code: null` just like node-ssh's dropped channel.
+- **Local mode**: when the target host is one of this machine's addresses, commands run through `sh -c` with the same wrapping, so a device can provision itself.
+- **Secrets** come from the macOS keychain on macOS and from `/etc/onc/secrets.json` (`{ "name": "value" }`, must be `0600`; `ONC_SECRETS_FILE` overrides) elsewhere. Its parse errors deliberately carry no excerpt.
+- HTTP uses `curl`; sha256 uses `sha256sum` or `shasum`.
+
 ### Commit-confirm
 
 Because committing `network`/`firewall` can sever the connection doing the provisioning, `provision` snapshots state, starts a detached `setsid` watchdog, commits, then reconnects (retrying, since `reload_config` briefly drops the network) and touches its confirm flag to disarm it. If the tool cannot get back in, the device rolls back and reboots itself. `--no-confirm` disables it; `--confirm-timeout` changes the 90 s window.

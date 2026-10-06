@@ -8,6 +8,7 @@ import {
   readFileSync,
   readSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "fs";
 import { homedir } from "os";
@@ -52,6 +53,13 @@ export const nodePlatform: Platform = {
   writeTextFile: (path, data) => writeFileSync(path, data),
   mkdirp: (path) => {
     mkdirSync(path, { recursive: true });
+  },
+  fileMode: (path) => {
+    try {
+      return statSync(path).mode & 0o777;
+    } catch {
+      return undefined;
+    }
   },
   removeFile: (path) => rmSync(path, { force: true }),
   readFileHead: (path, bytes) => {

@@ -1,4 +1,5 @@
 import { ExecResult, platform } from "./platform";
+import { decodeUtf8Hex } from "./utf8";
 
 export const KEYCHAIN_SERVICE = "openwrt-configurator";
 export const SECURITY_PATH = "/usr/bin/security";
@@ -35,9 +36,7 @@ export const parseSecurityPassword = (output: string): string | undefined => {
       throw new Error("security printed a truncated hex password");
     }
     try {
-      return new TextDecoder("utf-8", { fatal: true }).decode(
-        Buffer.from(hex, "hex")
-      );
+      return decodeUtf8Hex(hex);
     } catch {
       throw new Error("security hex password is not valid UTF-8");
     }
@@ -160,9 +159,21 @@ const substituteSecrets = (
   );
 };
 
+/** Where `$secret` refs are looked up, and what to tell the user when some are missing. */
+export type SecretSource = {
+  lookup: SecretLookup;
+  describeMissing: (names: string[]) => string;
+};
+
+const keychainMissing = (names: string[]) =>
+  `Missing keychain secrets (service ${KEYCHAIN_SERVICE}):\n` +
+  names.map((name) => `  - ${name}`).join("\n") +
+  `\nSet with: openwrt-configurator secrets set <name>`;
+
 export const resolveSecrets = async (
   value: unknown,
-  lookup: SecretLookup
+  lookup: SecretLookup,
+  describeMissing: (names: string[]) => string = keychainMissing
 ): Promise<{ value: unknown; secrets: Map<string, string> }> => {
   const names = new Set<string>();
   const errors: string[] = [];
@@ -186,11 +197,7 @@ export const resolveSecrets = async (
   }
   if (missing.length > 0) {
     missing.sort();
-    throw new Error(
-      `Missing keychain secrets (service ${KEYCHAIN_SERVICE}):\n` +
-        missing.map((name) => `  - ${name}`).join("\n") +
-        `\nSet with: openwrt-configurator secrets set <name>`
-    );
+    throw new Error(describeMissing(missing));
   }
 
   return { value: substituteSecrets(value, secrets), secrets };
@@ -223,10 +230,7 @@ export const redactValue = (
  * Paths of plaintext `password` / `key` string fields. Used as a migration
  * warning; tests and samples may still use placeholders.
  */
-export const findPlaintextSecrets = (
-  value: unknown,
-  path = ""
-): string[] => {
+export const findPlaintextSecrets = (value: unknown, path = ""): string[] => {
   if (Array.isArray(value)) {
     return value.flatMap((item, i) =>
       findPlaintextSecrets(item, childPath(path, i))
@@ -298,7 +302,9 @@ export const lookupKeychain: SecretLookup = async (name) => {
     return parsed;
   } catch (parseError) {
     throw new Error(
-      `Failed to read keychain secret "${name}": ${(parseError as Error).message}`
+      `Failed to read keychain secret "${name}": ${
+        (parseError as Error).message
+      }`
     );
   }
 };
@@ -327,3 +333,65 @@ export const setKeychainSecret = async (name: string) => {
     `Stored secret "${name}" in the keychain (service ${KEYCHAIN_SERVICE}).`
   );
 };
+
+/** Where secrets live on a host without a keychain, such as an OpenWrt device. */
+export const DEFAULT_SECRETS_FILE = "/etc/onc/secrets.json";
+
+/**
+ * Secrets from a JSON file of `{ "name": "value" }`, which must not be readable
+ * by anyone but its owner (like an SSH private key).
+ */
+export const secretsFileSource = (path: string): SecretSource => {
+  let cache: Record<string, unknown> | undefined;
+  const load = () => {
+    if (cache) return cache;
+    const mode = platform().fileMode(path);
+    if (mode === undefined) return (cache = {});
+    if ((mode & 0o077) !== 0) {
+      throw new Error(
+        `${path} is accessible to other users (mode ${mode.toString(
+          8
+        )}); run: chmod 600 ${path}`
+      );
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(platform().readTextFile(path));
+    } catch {
+      // Deliberately no position or excerpt: the offending line is a secret.
+      throw new Error(`${path} is not valid JSON.`);
+    }
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      throw new Error(`${path} must be a JSON object of secret name to value.`);
+    }
+    return (cache = parsed as Record<string, unknown>);
+  };
+  return {
+    lookup: async (name) => {
+      const secrets = load();
+      if (!Object.prototype.hasOwnProperty.call(secrets, name))
+        return undefined;
+      const value = secrets[name];
+      if (typeof value !== "string") {
+        throw new Error(`Secret "${name}" in ${path} must be a string.`);
+      }
+      return value;
+    },
+    describeMissing: (names) =>
+      `Missing secrets in ${path}:\n` +
+      names.map((name) => `  - ${name}`).join("\n") +
+      `\nAdd them to that file as { "name": "value" }, with mode 0600.`,
+  };
+};
+
+/** The macOS keychain on macOS; elsewhere a 0600 JSON file. */
+export const defaultSecretSource = (): SecretSource =>
+  platform().os === "darwin"
+    ? { lookup: lookupKeychain, describeMissing: keychainMissing }
+    : secretsFileSource(
+        platform().env("ONC_SECRETS_FILE") ?? DEFAULT_SECRETS_FILE
+      );

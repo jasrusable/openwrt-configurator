@@ -59,6 +59,8 @@ export type Platform = {
   readTextFile: (path: string) => string;
   writeTextFile: (path: string, data: string) => void;
   mkdirp: (path: string) => void;
+  /** Permission bits (e.g. 0o600), or undefined when the file does not exist. */
+  fileMode: (path: string) => number | undefined;
   /** No-op when the file does not exist. */
   removeFile: (path: string) => void;
   readFileHead: (path: string, bytes: number) => Uint8Array;

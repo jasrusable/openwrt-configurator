@@ -1,6 +1,7 @@
 import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
 import { conditionMatches } from "./resolveOncConfig";
+import { utf8ByteLength } from "./utf8";
 
 const BOOTSTRAP_MARKER = "/etc/openwrt-configurator-bootstrapped";
 const UCI_DEFAULTS_MAX_BYTES = 20480;
@@ -212,7 +213,7 @@ export const getUciDefaultsScript = ({
   );
 
   const script = lines.join("\n");
-  if (Buffer.byteLength(script, "utf8") > UCI_DEFAULTS_MAX_BYTES) {
+  if (utf8ByteLength(script) > UCI_DEFAULTS_MAX_BYTES) {
     throw new Error(
       `Generated UCI defaults script exceeds ASU limit of ${UCI_DEFAULTS_MAX_BYTES} bytes.`
     );

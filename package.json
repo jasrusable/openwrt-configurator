@@ -13,7 +13,8 @@
     "build": "tsc",
     "test": "ava",
     "test:watch": "ava --watch",
-    "package": "pkg ."
+    "package": "pkg .",
+    "bundle": "esbuild bin/qjs.ts --bundle --minify --format=esm --platform=neutral --main-fields=main,module --external:std --external:os --banner:js=\"#!/usr/bin/env qjs\" --outfile=dist/qjs/openwrt-configurator.mjs"
   },
   "repository": {
     "type": "git",
@@ -52,6 +53,7 @@
     "@types/node": "^22.19.19",
     "@yao-pkg/pkg": "^6.19.0",
     "ava": "^4.3.3",
+    "esbuild": "^0.28.2",
     "ts-node": "^10.9.1",
     "typescript": "^6.0.3"
   }
