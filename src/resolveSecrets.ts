@@ -245,7 +245,10 @@ export const findPlaintextSecrets = (value: unknown, path = ""): string[] => {
     if (
       (key === "password" || key === "key") &&
       typeof child === "string" &&
-      child.length > 0
+      child.length > 0 &&
+      // Some packages' `key` option names a file rather than holding one,
+      // e.g. uhttpd's TLS key (/etc/uhttpd.key); that path is not a secret.
+      !(key === "key" && child.startsWith("/"))
     ) {
       hits.push(childP);
     }

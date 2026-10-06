@@ -168,6 +168,8 @@ The checked-in `deviceSchemas/*.json` files are only used when `useLocal` is pas
 
 Most tests are golden-ish: load `config.json` / `config2.json`, build the OpenWrt config against a local device schema, and assert on the resulting structure. `files.test.ts`, `getConfigSections.test.ts` and `resolveSecrets.test.ts` are focused unit tests. All are offline — no test touches the network or the keychain (lookups are injected).
 
+`qjsParity.test.ts` runs the same work under Node and QuickJS and requires identical results: 11 CLI invocations (stdout, stderr and exit code), a report of everything the pipeline derives from the fixtures (`src/tests/helpers/parityReport.ts`), and the session layer over the local `sh` transport. It bundles with esbuild on the fly and is skipped where `qjs` is not installed (`brew install quickjs`). Shared test code goes under `src/tests/helpers/`, which ava does not treat as test files. A platform difference users can see, such as a file error's wording, should be normalised in the platforms rather than tolerated here.
+
 ## Gotchas
 
 - **The CLI version is duplicated.** `package.json` `version` and the hardcoded `.version("0.0.6")` in `src/cli.ts` must be bumped together.

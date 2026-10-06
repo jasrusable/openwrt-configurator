@@ -34,6 +34,28 @@ const networkError = (e: unknown, url: string): NetworkError => {
   );
 };
 
+// The same wording QuickJS's strerror gives, so a missing config file reads
+// the same on both platforms.
+const reasons: Record<string, string> = {
+  ENOENT: "No such file or directory",
+  EACCES: "Permission denied",
+  EISDIR: "Is a directory",
+  ENOTDIR: "Not a directory",
+};
+const fileError = (path: string, e: unknown) => {
+  const code = (e as NodeJS.ErrnoException)?.code;
+  return new Error(
+    `${path}: ${(code && reasons[code]) ?? (e as Error)?.message ?? e}`
+  );
+};
+const withPath = <T>(path: string, fn: () => T): T => {
+  try {
+    return fn();
+  } catch (e) {
+    throw fileError(path, e);
+  }
+};
+
 const headersOf = (response: Response) => {
   const headers: Record<string, string> = {};
   response.headers.forEach((value, key) => {
@@ -49,8 +71,9 @@ export const nodePlatform: Platform = {
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   exit: (code) => process.exit(code),
 
-  readTextFile: (path) => readFileSync(path, "utf-8"),
-  writeTextFile: (path, data) => writeFileSync(path, data),
+  readTextFile: (path) => withPath(path, () => readFileSync(path, "utf-8")),
+  writeTextFile: (path, data) =>
+    withPath(path, () => writeFileSync(path, data)),
   mkdirp: (path) => {
     mkdirSync(path, { recursive: true });
   },

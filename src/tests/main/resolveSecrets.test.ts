@@ -111,13 +111,19 @@ test("rejects malformed $secret objects", async (t) => {
     )
   );
   t.true(error?.message.startsWith("Invalid $secret references:"));
-  t.true(error?.message.includes('a: $secret object must contain only { "$secret": "name" }'));
+  t.true(
+    error?.message.includes(
+      'a: $secret object must contain only { "$secret": "name" }'
+    )
+  );
   t.true(error?.message.includes("b: $secret must be a string"));
   t.true(error?.message.includes("c:"));
 });
 
 test("leaves plaintext strings alone and does not look them up", async (t) => {
-  const lookup = lookupFrom({}) as SecretLookup & { counts: Map<string, number> };
+  const lookup = lookupFrom({}) as SecretLookup & {
+    counts: Map<string, number>;
+  };
   const input = { key: "test123456", list: ["a", 1, true, null] };
   const { value, secrets } = await resolveSecrets(input, lookup);
   t.deepEqual(value, input);
@@ -186,10 +192,7 @@ test("parseSecurityPassword keeps a quoted hex-looking value", (t) => {
 
 test("parseSecurityPassword decodes a 0x dump and ignores the lossy quote", (t) => {
   t.is(parseSecurityPassword("password: 0x616263C2A3\n"), "abc£");
-  t.is(
-    parseSecurityPassword('password: 0x616263C2A3  "abc\\243"\n'),
-    "abc£"
-  );
+  t.is(parseSecurityPassword('password: 0x616263C2A3  "abc\\243"\n'), "abc£");
   t.is(
     parseSecurityPassword("password: 0x6C696E65310A6C696E6532\n"),
     "line1\nline2"
@@ -296,11 +299,28 @@ test("loadOncConfig resolves refs then validates the schema", async (t) => {
         pppoe: "pppoe-pass",
       }),
     });
-    t.is(oncConfig.devices[0].provisioning_config?.ssh_auth.password, "ssh-pass-ok");
+    t.is(
+      oncConfig.devices[0].provisioning_config?.ssh_auth.password,
+      "ssh-pass-ok"
+    );
     t.is((oncConfig.config as any).wireless["wifi-iface"][0].key, "testpsk1");
     t.is((oncConfig.config as any).network.interface[0].password, "pppoe-pass");
     t.is(secrets.get("wifi/home"), "testpsk1");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("findPlaintextSecrets ignores a key that is a file path", (t) => {
+  t.deepEqual(
+    findPlaintextSecrets({
+      config: {
+        uhttpd: {
+          uhttpd: [{ key: "/etc/uhttpd.key", cert: "/etc/uhttpd.crt" }],
+        },
+        wireless: { "wifi-iface": [{ key: "plain-psk" }] },
+      },
+    }),
+    ["config.wireless.wifi-iface[0].key"]
+  );
 });
