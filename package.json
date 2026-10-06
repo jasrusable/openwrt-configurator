@@ -45,18 +45,11 @@
   },
   "dependencies": {
     "boolean-parser": "^0.0.2",
-    "commander": "^9.4.1",
-    "is-valid-hostname": "^1.0.2",
     "node-ssh": "^13.0.0",
-    "parse-json": "^5.2.0",
-    "semver": "^7.3.8",
-    "timezone-validator": "^1.0.3",
     "zod": "^3.19.1"
   },
   "devDependencies": {
     "@types/node": "^22.19.19",
-    "@types/parse-json": "^4.0.0",
-    "@types/semver": "^7.3.12",
     "@yao-pkg/pkg": "^6.19.0",
     "ava": "^4.3.3",
     "ts-node": "^10.9.1",

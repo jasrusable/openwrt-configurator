@@ -1,16 +1,13 @@
 import { DeviceBuildPlan } from "./getBuildPlan";
 import { getDeviceScript, managedFilesManifest } from "./getDeviceScript";
 import { getInstalledPackages, getManagedFiles } from "./deviceFacts";
-import { program } from "commander";
+import { CommandSpec, runCli } from "./args";
 import { join } from "./paths";
 import { platform } from "./platform";
 import { connectToDevice, provisionConfig } from "./provisionConfig";
 import { getDeviceSchema } from "./getDeviceSchema";
 import { loadOncConfig } from "./loadConfig";
-import {
-  redactValue,
-  setKeychainSecret,
-} from "./resolveSecrets";
+import { redactValue, setKeychainSecret } from "./resolveSecrets";
 import { getOpenWrtState } from "./getOpenWrtState";
 import { getDeviceBuildPlan } from "./getBuildPlan";
 import {
@@ -23,54 +20,57 @@ import {
 } from "./buildImage";
 
 export const main = async (argv: string[]) => {
-  program
-    .name("openwrt-configurator")
-    .description("OpenWrt Configurator")
-    .version("0.0.6");
+  const commands: CommandSpec[] = [];
 
-  program
-    .command("provision")
-    .description("provision configuration to devices")
-    .argument("<config-file>", "config file to provision")
-    .option(
-      "--no-confirm",
-      "skip the commit-confirm rollback (the device will not restore itself if the new config cuts it off)"
-    )
-    .option(
-      "--rollback <mode>",
-      "how a device recovers if a provision is never confirmed: " +
-        "reload-then-reboot (revert, reload services, reboot only if access does not come back), " +
-        "reload (never reboot), or reboot (always reboot)",
-      (v) => {
-        if (!["reload", "reboot", "reload-then-reboot"].includes(v)) {
-          throw new Error(
-            `--rollback must be one of reload, reboot, reload-then-reboot (got "${v}").`
-          );
-        }
-        return v;
+  commands.push({
+    name: "provision",
+    description: "provision configuration to devices",
+    args: [{ name: "config-file", description: "config file to provision" }],
+    options: [
+      {
+        flags: "--no-confirm",
+        description:
+          "skip the commit-confirm rollback (the device will not restore itself if the new config cuts it off)",
       },
-      "reload-then-reboot"
-    )
-    .option(
-      "--confirm-timeout <seconds>",
-      "seconds to reconnect and confirm before the device rolls back",
-      (v) => {
-        const seconds = parseInt(v, 10);
-        // An unparsed value would reach the device as `sleep NaN`.
-        if (!Number.isFinite(seconds) || seconds < 30) {
-          throw new Error(
-            `--confirm-timeout must be a whole number of seconds, at least 30 (got "${v}").`
-          );
-        }
-        return seconds;
+      {
+        flags: "--rollback <mode>",
+        description:
+          "how a device recovers if a provision is never confirmed: " +
+          "reload-then-reboot (revert, reload services, reboot only if access does not come back), " +
+          "reload (never reboot), or reboot (always reboot)",
+        parse: (v) => {
+          if (!["reload", "reboot", "reload-then-reboot"].includes(v)) {
+            throw new Error(
+              `--rollback must be one of reload, reboot, reload-then-reboot (got "${v}").`
+            );
+          }
+          return v;
+        },
+        default: "reload-then-reboot",
       },
-      90
-    )
-    .option(
-      "--identity <path>",
-      "SSH private key (like ssh -i). Overrides ssh_auth.private_key_path. Password is optional when a key or agent is used."
-    )
-    .action(async (configPath, options) => {
+      {
+        flags: "--confirm-timeout <seconds>",
+        description:
+          "seconds to reconnect and confirm before the device rolls back",
+        parse: (v) => {
+          const seconds = parseInt(v, 10);
+          // An unparsed value would reach the device as `sleep NaN`.
+          if (!Number.isFinite(seconds) || seconds < 30) {
+            throw new Error(
+              `--confirm-timeout must be a whole number of seconds, at least 30 (got "${v}").`
+            );
+          }
+          return seconds;
+        },
+        default: 90,
+      },
+      {
+        flags: "--identity <path>",
+        description:
+          "SSH private key (like ssh -i). Overrides ssh_auth.private_key_path. Password is optional when a key or agent is used.",
+      },
+    ],
+    action: async ([configPath], options) => {
       const { oncConfig } = await loadOncConfig(configPath);
       await provisionConfig({
         oncConfig,
@@ -79,21 +79,31 @@ export const main = async (argv: string[]) => {
         rollbackMode: options.rollback,
         identityPath: options.identity,
       });
-    });
+    },
+  });
 
-  program
-    .command("print-uci-commands")
-    .description("print uci commands for configuration")
-    .argument("<config-file>", "config file to print uci commands for")
-    .option(
-      "--identity <path>",
-      "SSH private key (like ssh -i). Overrides ssh_auth.private_key_path."
-    )
-    .option(
-      "--show-secrets",
-      "print resolved secret values (default: redact as { $secret: name })"
-    )
-    .action(async (configPath, options) => {
+  commands.push({
+    name: "print-uci-commands",
+    description: "print uci commands for configuration",
+    args: [
+      {
+        name: "config-file",
+        description: "config file to print uci commands for",
+      },
+    ],
+    options: [
+      {
+        flags: "--identity <path>",
+        description:
+          "SSH private key (like ssh -i). Overrides ssh_auth.private_key_path.",
+      },
+      {
+        flags: "--show-secrets",
+        description:
+          "print resolved secret values (default: redact as { $secret: name })",
+      },
+    ],
+    action: async ([configPath], options) => {
       const { oncConfig, secrets } = await loadOncConfig(configPath);
       const deviceConfigs = oncConfig.devices.filter(
         (device) => device.enabled !== false
@@ -147,30 +157,40 @@ export const main = async (argv: string[]) => {
           ssh.dispose();
         }
       }
-    });
+    },
+  });
 
-  program
-    .command("build-images")
-    .description(
-      "build per-device sysupgrade images via the OpenWrt firmware-selector API, pre-loaded with package profiles and a UCI-defaults bootstrap script"
-    )
-    .argument("<config-file>", "config file to build images for")
-    .option("--out <dir>", "output directory for built images", "./images")
-    .option(
-      "--dry-run",
-      "print the resolved build payload (including UCI-defaults script) without submitting"
-    )
-    .option(
-      "--concurrency <n>",
-      "max concurrent ASU builds",
-      (v) => parseInt(v, 10),
-      3
-    )
-    .option(
-      "--show-secrets",
-      "print resolved secret values in --dry-run output (default: redact)"
-    )
-    .action(async (configPath, options) => {
+  commands.push({
+    name: "build-images",
+    description:
+      "build per-device sysupgrade images via the OpenWrt firmware-selector API, pre-loaded with package profiles and a UCI-defaults bootstrap script",
+    args: [
+      { name: "config-file", description: "config file to build images for" },
+    ],
+    options: [
+      {
+        flags: "--out <dir>",
+        description: "output directory for built images",
+        default: "./images",
+      },
+      {
+        flags: "--dry-run",
+        description:
+          "print the resolved build payload (including UCI-defaults script) without submitting",
+      },
+      {
+        flags: "--concurrency <n>",
+        description: "max concurrent ASU builds",
+        parse: (v) => parseInt(v, 10),
+        default: 3,
+      },
+      {
+        flags: "--show-secrets",
+        description:
+          "print resolved secret values in --dry-run output (default: redact)",
+      },
+    ],
+    action: async ([configPath], options) => {
       const { oncConfig, secrets } = await loadOncConfig(configPath);
       const deviceConfigs = oncConfig.devices.filter(
         (device) => device.enabled !== false
@@ -204,7 +224,9 @@ export const main = async (argv: string[]) => {
       }
 
       const imageFilename = (plan: DeviceBuildPlan, hash: string) =>
-        `${plan.deviceConfig.model_id.replace(",", "_")}-${plan.version}-${hash}.bin`;
+        `${plan.deviceConfig.model_id.replace(",", "_")}-${
+          plan.version
+        }-${hash}.bin`;
 
       if (options.dryRun) {
         for (const [hash, group] of groups) {
@@ -335,7 +357,12 @@ export const main = async (argv: string[]) => {
               console.error(
                 `[${plan.deviceConfig.model_id} ${hash}] FAILED: ${error}`
               );
-              failures.push({ hash, model_id: plan.deviceConfig.model_id, hostnames, error });
+              failures.push({
+                hash,
+                model_id: plan.deviceConfig.model_id,
+                hostnames,
+                error,
+              });
             }
           }
         }
@@ -344,7 +371,10 @@ export const main = async (argv: string[]) => {
 
       manifest.sort((a, b) => a.filename.localeCompare(b.filename));
       const manifestPath = join(options.out, "manifest.json");
-      platform().writeTextFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+      platform().writeTextFile(
+        manifestPath,
+        JSON.stringify(manifest, null, 2) + "\n"
+      );
       console.log(`\nmanifest written to ${manifestPath}`);
 
       const rows = manifest.flatMap((m) =>
@@ -366,22 +396,25 @@ export const main = async (argv: string[]) => {
         };
         const pad = (s: string, w: number) => s + " ".repeat(w - s.length);
         console.log(
-          `\n${pad("hostname", widths.hostname)}  ${pad("model", widths.model)}  ${pad(
-            "version",
-            widths.version
-          )}  ${pad("image", widths.image)}`
+          `\n${pad("hostname", widths.hostname)}  ${pad(
+            "model",
+            widths.model
+          )}  ${pad("version", widths.version)}  ${pad("image", widths.image)}`
         );
         console.log(
-          `${"-".repeat(widths.hostname)}  ${"-".repeat(widths.model)}  ${"-".repeat(
-            widths.version
-          )}  ${"-".repeat(widths.image)}`
+          `${"-".repeat(widths.hostname)}  ${"-".repeat(
+            widths.model
+          )}  ${"-".repeat(widths.version)}  ${"-".repeat(widths.image)}`
         );
         for (const r of rows) {
           console.log(
-            `${pad(r.hostname, widths.hostname)}  ${pad(r.model, widths.model)}  ${pad(
-              r.version,
-              widths.version
-            )}  ${pad(r.image, widths.image)}`
+            `${pad(r.hostname, widths.hostname)}  ${pad(
+              r.model,
+              widths.model
+            )}  ${pad(r.version, widths.version)}  ${pad(
+              r.image,
+              widths.image
+            )}`
           );
         }
       }
@@ -405,15 +438,21 @@ export const main = async (argv: string[]) => {
         }
         platform().exit(1);
       }
-    });
+    },
+  });
 
-  program
-    .command("verify-images")
-    .description(
-      "verify built images against manifest.json by recomputing sha256"
-    )
-    .option("--out <dir>", "directory containing built images and manifest.json", "./images")
-    .action(async (options) => {
+  commands.push({
+    name: "verify-images",
+    description:
+      "verify built images against manifest.json by recomputing sha256",
+    options: [
+      {
+        flags: "--out <dir>",
+        description: "directory containing built images and manifest.json",
+        default: "./images",
+      },
+    ],
+    action: async (_args, options) => {
       const manifestPath = join(options.out, "manifest.json");
       const manifestRaw = platform().readTextFile(manifestPath);
       const manifest = JSON.parse(manifestRaw) as Array<{
@@ -441,34 +480,44 @@ export const main = async (argv: string[]) => {
           }
         } catch (e) {
           failed += 1;
-          console.log(
-            `ERROR ${entry.filename}: ${(e as Error).message}`
-          );
+          console.log(`ERROR ${entry.filename}: ${(e as Error).message}`);
         }
       }
 
       if (failed > 0) {
-        console.log(`\n${failed} of ${manifest.length} image(s) failed verification`);
+        console.log(
+          `\n${failed} of ${manifest.length} image(s) failed verification`
+        );
         platform().exit(1);
       }
       console.log(`\nall ${manifest.length} image(s) verified`);
-    });
+    },
+  });
 
-  program
-    .command("secrets")
-    .description(
-      'store secrets in the macOS keychain for { "$secret": "name" } refs'
-    )
-    .command("set")
-    .description(
-      "prompt for a value and store it (the value is never printed)"
-    )
-    .argument("<name>", "secret name matching the $secret field in the config")
-    .action(async (name) => {
+  commands.push({
+    name: "secrets set",
+    description:
+      'prompt for a value and store it in the macOS keychain for { "$secret": "name" } refs (the value is never printed)',
+    args: [
+      {
+        name: "name",
+        description: "secret name matching the $secret field in the config",
+      },
+    ],
+    action: async ([name]) => {
       await setKeychainSecret(name);
-    });
+    },
+  });
 
-  await program.parseAsync(argv, { from: "user" });
+  await runCli(
+    {
+      name: "openwrt-configurator",
+      description: "OpenWrt Configurator",
+      version: "0.0.6",
+      commands,
+    },
+    argv
+  );
 };
 
 /** Run the CLI with an already-installed platform, exiting when done. */

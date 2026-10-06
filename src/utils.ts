@@ -1,5 +1,4 @@
 import { z, ZodObject, ZodRawShape, ZodSchema } from "zod";
-import parseJsonF from "parse-json";
 
 export const parseSchema = <D>(schema: ZodSchema<D>, data: any) => {
   try {
@@ -97,6 +96,4 @@ export const makeOncConfigSchema = <T extends ZodRawShape>(
   return schema.extend(getExtensionObject(schema));
 };
 
-export const parseJson = (jsonString: string, filepath?: string) => {
-  return parseJsonF(jsonString, filepath);
-};
+export { parseJson } from "./parseJson";
