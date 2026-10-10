@@ -1,15 +1,16 @@
 // LuCI's Network › Firewall › General Settings: the defaults, then the zones,
 // each as "zone ⇒ the zones it forwards to", opening the zone's editor.
-import { Badge, Group, Text } from "@mantine/core";
+import { Badge, Group, Stack, Text } from "@mantine/core";
 import { useWatch } from "react-hook-form";
 import { withoutZone } from "../../../../src/intent/edits";
 import { wanZone, zoneLabel } from "../../../../src/intent/firewall";
 import { Intent } from "../../../../src/intent/schema";
 import { ForwardingsField } from "../../firewall/ForwardingsField";
-import { PolicyBadge, policyOptions } from "../../firewall/zones";
+import { policyOptions } from "../../firewall/zones";
 import {
   MultiSelectField,
   SegmentedField,
+  SelectField,
   SwitchField,
   TextField,
   Value,
@@ -33,15 +34,46 @@ const ZoneTitle = ({
   return <>{zone ? zoneLabel(zone, networks) : fallback}</>;
 };
 
-/** "Home ⇒ WAN, Guests": the zone, and the zones it forwards to. */
+/** LuCI's colours: WAN red, the main zone green, the rest a tint by name. */
+const zoneColor = (id: string, mainZone?: string) =>
+  id === wanZone
+    ? "red"
+    : id === mainZone
+      ? "green"
+      : ["blue", "grape", "orange", "teal", "pink", "yellow"][
+          [...id].reduce((sum, c) => sum + c.charCodeAt(0), 0) % 6
+        ];
+
+const ZoneBadge = ({
+  id,
+  label,
+  main,
+}: {
+  id: string;
+  label: string;
+  main?: string;
+}) => (
+  <Badge variant="light" color={zoneColor(id, main)} radius="sm">
+    {label}
+  </Badge>
+);
+
+/**
+ * LuCI's "zone ⇒ forwards": the zone, the zones it forwards to, and what
+ * happens to the rest (the default forward policy), in a dashed box.
+ */
 const ZoneForwardings = ({ index }: { index: number }) => {
   const zones: Intent["firewall"]["zones"] =
     useWatch({ name: "firewall.zones" }) ?? [];
   const forwardings: Intent["firewall"]["forwardings"] =
     useWatch({ name: "firewall.forwardings" }) ?? [];
   const networks: Intent["networks"] = useWatch({ name: "networks" }) ?? [];
+  const fallback: string =
+    useWatch({ name: "firewall.defaults.forward" }) ?? "reject";
   const zone = zones[index];
   if (!zone) return null;
+  const mainNetwork = networks.find((n) => n.vlan === undefined)?.id ?? "";
+  const main = zones.find((z) => z.networks.includes(mainNetwork))?.id;
   const label = (id: string) => {
     const z = zones.find((x) => x.id === id);
     return z ? zoneLabel(z, networks) : id;
@@ -50,26 +82,27 @@ const ZoneForwardings = ({ index }: { index: number }) => {
     .filter((f) => f.from === zone.id)
     .map((f) => f.to);
   return (
-    <Group gap={6} wrap="nowrap">
-      <Badge variant="filled" color={zone.id === wanZone ? "red" : "blue"}>
-        {label(zone.id)}
-      </Badge>
+    <Group gap={8} wrap="nowrap" align="flex-start">
+      <ZoneBadge id={zone.id} label={label(zone.id)} main={main} />
       <Text c="dimmed">⇒</Text>
-      {targets.length ? (
-        targets.map((id) => (
-          <Badge
-            key={id}
-            variant="light"
-            color={id === wanZone ? "red" : "blue"}
-          >
-            {label(id)}
-          </Badge>
-        ))
-      ) : (
-        <Text size="sm" c="dimmed">
-          reject
+      <Stack gap={4}>
+        {targets.map((id) => (
+          <ZoneBadge key={id} id={id} label={label(id)} main={main} />
+        ))}
+        <Text
+          size="xs"
+          fs="italic"
+          c="dimmed"
+          px={6}
+          style={{
+            border: "1px dashed var(--mantine-color-gray-4)",
+            borderRadius: 4,
+          }}
+        >
+          {fallback.toUpperCase()}
+          {targets.length ? " all others" : ""}
         </Text>
-      )}
+      </Stack>
     </Group>
   );
 };
@@ -106,47 +139,37 @@ const zones = defineList({
   onRemove: withoutZone,
   itemTitle: (i) => <ZoneTitle index={i} fallback="New zone" />,
   empty: "No zones.",
+  // As LuCI's zones table: policies and masquerading edited in place.
   columns: [
-    {
-      header: "Zone ⇒ Forwardings",
-      cell: (i) => <ZoneForwardings index={i} />,
-    },
-    {
-      header: "Input",
-      cell: (i) => (
-        <Value
-          name={`firewall.zones.${i}.input`}
-          format={(p) => <PolicyBadge policy={p} />}
+    { header: "Zone ⇒ Forwards", cell: (i) => <ZoneForwardings index={i} /> },
+    ...(["input", "output", "forward"] as const).map((policy) => ({
+      header:
+        policy === "forward"
+          ? "Intra zone forward"
+          : policy === "input"
+            ? "Input"
+            : "Output",
+      interactive: true,
+      width: 150,
+      cell: (i: number) => (
+        <SelectField
+          inline
+          name={`firewall.zones.${i}.${policy}`}
+          label={policy}
+          options={policyOptions}
         />
       ),
-    },
+    })),
     {
-      header: "Output",
+      header: "IPv4 Masquerading",
+      interactive: true,
+      width: 140,
       cell: (i) => (
-        <Value
-          name={`firewall.zones.${i}.output`}
-          format={(p) => <PolicyBadge policy={p} />}
+        <SwitchField
+          inline
+          name={`firewall.zones.${i}.masquerade`}
+          label="Masquerading"
         />
-      ),
-    },
-    {
-      header: "Forward",
-      cell: (i) => (
-        <Value
-          name={`firewall.zones.${i}.forward`}
-          format={(p) => <PolicyBadge policy={p} />}
-        />
-      ),
-    },
-    {
-      header: "Masquerading",
-      cell: (i) => (
-        <Text size="sm" c="dimmed">
-          <Value
-            name={`firewall.zones.${i}.masquerade`}
-            format={(on) => (on ? "✓" : "—")}
-          />
-        </Text>
       ),
     },
   ],
