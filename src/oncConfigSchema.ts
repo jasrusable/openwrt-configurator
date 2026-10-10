@@ -42,7 +42,9 @@ export const oncConfigSchema = z
       z
         .object({
           enabled: z.boolean().optional(),
-          model_id: z.string(),
+          // Optional: read from the device's board.json when absent. Set,
+          // it is checked against the device, and build-images needs it.
+          model_id: z.string().optional(),
           /** Only needed to provision or inspect the device over SSH. */
           ipaddr: z.string().optional(),
           hostname: z.string(),

@@ -52,7 +52,7 @@ export const getDeviceSchema = async ({
   const isSwConfig = !!boardJson.switch;
 
   const deviceSchemaTmp: DeviceSchema = {
-    name: deviceConfig.model_id,
+    name: boardJson.model.id,
     version,
     sw_config: isSwConfig,
     ports: isSwConfig
@@ -111,7 +111,7 @@ export const getDeviceSchema = async ({
 
   if ((deviceSchema.ports || []).length === 0) {
     throw new Error(
-      `Found no ports for ${deviceConfig.model_id} at ${deviceConfig.ipaddr}. Expected at least one port.`
+      `Found no ports for ${deviceSchemaTmp.name} at ${deviceConfig.ipaddr}. Expected at least one port.`
     );
   }
 
@@ -121,7 +121,7 @@ export const getDeviceSchema = async ({
     );
     if (!cpuPort) {
       throw new Error(
-        `Found no CPU port for swConfig device ${deviceConfig.model_id} at ${deviceConfig.ipaddr}. Expected at least one CPU port.`
+        `Found no CPU port for swConfig device ${deviceSchemaTmp.name} at ${deviceConfig.ipaddr}. Expected at least one CPU port.`
       );
     }
   }

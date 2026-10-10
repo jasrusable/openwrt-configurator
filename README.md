@@ -312,6 +312,8 @@ The config file is JSON, and may carry `//` and `/* */` comments and trailing co
 
 ## Roadmap
 
+Open work is tracked in [TODO.md](TODO.md).
+
 ### Short-term
 
 - Improve README.md and add more documentation.

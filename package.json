@@ -15,7 +15,9 @@
     "test:watch": "ava --watch",
     "package": "pkg .",
     "bundle": "node scripts/bundle.js",
-    "typecheck": "tsc -p tsconfig.typecheck.json"
+    "typecheck": "tsc -p tsconfig.typecheck.json && tsc -p ui/tsconfig.json",
+    "ui:build": "node scripts/build-ui.js",
+    "ui": "node scripts/build-ui.js && ts-node --transpile-only ./bin/index.ts ui"
   },
   "repository": {
     "type": "git",
@@ -51,10 +53,21 @@
     "zod": "^3.19.1"
   },
   "devDependencies": {
+    "@hookform/resolvers": "5.9.1",
+    "@mantine/core": "9.6.3",
+    "@mantine/hooks": "9.6.3",
+    "@mantine/notifications": "9.6.3",
+    "@tabler/icons-react": "3.48.0",
+    "@tanstack/react-query": "5.104.0",
     "@types/node": "^22.19.19",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "@yao-pkg/pkg": "^6.19.0",
     "ava": "^4.3.3",
     "esbuild": "^0.28.2",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-hook-form": "7.89.0",
     "ts-node": "^10.9.1",
     "typescript": "^6.0.3"
   }

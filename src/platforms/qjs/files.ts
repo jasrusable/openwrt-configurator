@@ -29,6 +29,16 @@ export const writeTextFile = (path: string, data: string) => {
   }
 };
 
+export const writeFileAtomic = (path: string, data: string, mode: number) => {
+  const temporary = `${path}.onc-tmp`;
+  writeTextFile(temporary, data);
+  // QuickJS's os has no chmod.
+  os.exec(["chmod", mode.toString(8), temporary], { block: true });
+  if (os.rename(temporary, path) !== 0) {
+    throw new Error(`${path}: could not replace it`);
+  }
+};
+
 export const removeFile = (path: string) => {
   os.remove(path);
 };

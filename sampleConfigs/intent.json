@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "site": {
+    "name": "Home",
+    "timezone": "Europe/Zurich",
+    "country": "CH"
+  },
+  "admin": {
+    "ssh_key_path": "~/.ssh/id_ed25519"
+  },
+  "devices": [
+    { "name": "home-router", "role": "router" },
+    {
+      "name": "home-ap-1",
+      "role": "access-point",
+      "wifi": { "channel": { "2g": 11, "5g": 36 } }
+    }
+  ],
+  "internet": {
+    "connection": { "type": "dhcp" },
+    "ipv6": true,
+    "speed": { "down_mbps": 950, "up_mbps": 950 }
+  },
+  "network": {
+    "subnet": "10.0.0.0/24",
+    "domain": "lan",
+    "dhcp": { "size": 250, "lease": "24h" },
+    "ipv6": true
+  },
+  "wifi": [
+    {
+      "ssid": "Home",
+      "password": "change-me-please",
+      "extra_passwords": ["change-me-too"]
+    }
+  ],
+  "dns": {
+    "over_https": "cloudflare"
+  }
+}

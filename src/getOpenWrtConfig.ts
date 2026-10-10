@@ -24,11 +24,33 @@ export const getOpenWrtConfig = ({
   };
   const physicalPorts = ports.filter((port) => !port.sw_config_cpu_name);
 
-  const resolvedOncConfig = resolveOncConfig({
-    deviceConfig,
-    deviceSchema,
-    oncConfig,
-  });
+  // "@wan_port", as any whole value: the port board.json gives the WAN role,
+  // so a config can name it without knowing the model (eth1 on one, wan on
+  // another).
+  const wanPort = () => {
+    const wan = physicalPorts.find((port) => port.default_role === "wan");
+    if (!wan || useSwConfig) {
+      throw new Error(
+        `${deviceConfig.hostname} has no WAN port for "@wan_port"` +
+          (useSwConfig ? " (not supported on swconfig devices yet)." : ".")
+      );
+    }
+    return wan.name;
+  };
+  const withWanPort = (value: unknown): unknown =>
+    value === "@wan_port"
+      ? wanPort()
+      : Array.isArray(value)
+      ? value.map(withWanPort)
+      : value && typeof value === "object"
+      ? Object.fromEntries(
+          Object.entries(value).map(([key, v]) => [key, withWanPort(v)])
+        )
+      : value;
+
+  const resolvedOncConfig = withWanPort(
+    resolveOncConfig({ deviceConfig, deviceSchema, oncConfig })
+  ) as ReturnType<typeof resolveOncConfig>;
 
   // "*" means every physical port nothing else uses, and only explicit port
   // lists count as uses — so two "*" devices would each claim every free port,

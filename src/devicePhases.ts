@@ -52,7 +52,8 @@ import {
 } from "./rollback";
 
 export type DeviceRunOptions = {
-  deviceModelId: string;
+  /** Checked against board.json when the config declares one. */
+  deviceModelId?: string;
   ipAddress: string;
   hostname: string;
   /** An already-connected session, reused from device introspection. */
@@ -110,7 +111,7 @@ export const planDevice = async (
     managedFiles: managedFilesProbe(managedFilesManifest),
   });
   const { boardJson, installedPackages, managedFiles } = facts;
-  if (boardJson.model.id !== deviceModelId) {
+  if (deviceModelId !== undefined && boardJson.model.id !== deviceModelId) {
     throw new ProvisionFailure(
       `Mismatching device model id. Expected ${deviceModelId} but found ${boardJson.model.id} in /etc/board.json`,
       false

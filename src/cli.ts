@@ -18,7 +18,12 @@ import {
 import { confirmTiming } from "./confirm";
 import { getDeviceSchema } from "./getDeviceSchema";
 import { loadOncConfig } from "./loadConfig";
-import { redactValue, setKeychainSecret } from "./resolveSecrets";
+import { cgiResponse, uiHandler } from "./server/handlers";
+import {
+  redactSecretFields,
+  redactValue,
+  setKeychainSecret,
+} from "./resolveSecrets";
 import { getOpenWrtState } from "./getOpenWrtState";
 import { getDeviceBuildPlan } from "./getBuildPlan";
 import {
@@ -110,6 +115,96 @@ export const main = async ({
         platform,
         timing,
       });
+    },
+  });
+
+  commands.push({
+    name: "compile",
+    description:
+      "print the low-level config a config file compiles to (an intent file, or a low-level one as validated)",
+    args: [{ name: "config-file", description: "config file to compile" }],
+    options: [
+      {
+        flags: "--show-secrets",
+        description: "print passwords and keys (default: redact)",
+      },
+    ],
+    action: async ([configPath], options) => {
+      const { oncConfig, secrets } = await loadOncConfig({
+        path: configPath,
+        platform,
+      });
+      const hideSecrets = (value: unknown): unknown =>
+        typeof value === "string"
+          ? redactValue(value, secrets)
+          : Array.isArray(value)
+          ? value.map(hideSecrets)
+          : value && typeof value === "object"
+          ? Object.fromEntries(
+              Object.entries(value).map(([k, v]) => [k, hideSecrets(v)])
+            )
+          : value;
+      const printed = options.showSecrets
+        ? oncConfig
+        : hideSecrets(redactSecretFields(oncConfig));
+      console.log(JSON.stringify(printed, null, 2));
+    },
+  });
+
+  const uiOptions = [
+    {
+      flags: "--ui-dir <dir>",
+      description: "the built web UI (npm run ui:build)",
+      default: "dist/ui",
+    },
+  ];
+
+  commands.push({
+    name: "ui",
+    description:
+      "serve the web UI for an intent file on this machine (on a router, uhttpd runs `cgi` instead)",
+    args: [{ name: "intent-file", description: "the intent file to edit" }],
+    options: [
+      ...uiOptions,
+      { flags: "--port <port>", description: "port to listen on", default: "8080" },
+      {
+        flags: "--host <host>",
+        description: "address to listen on; the API returns passwords, so keep it local",
+        default: "127.0.0.1",
+      },
+    ],
+    action: async ([intentPath], options) => {
+      if (!platform.serve) {
+        throw new Error(
+          "This runtime cannot listen on a port. On a router, have uhttpd run `cgi`."
+        );
+      }
+      console.log(`Serving ${intentPath} at http://${options.host}:${options.port}/`);
+      await platform.serve(
+        uiHandler({ intentPath, uiRoot: options.uiDir, platform }),
+        { host: options.host, port: Number(options.port) }
+      );
+    },
+  });
+
+  commands.push({
+    name: "cgi",
+    description:
+      "answer one web UI request as a CGI program (what uhttpd runs on a router)",
+    args: [{ name: "intent-file", description: "the intent file to edit" }],
+    options: uiOptions,
+    action: async ([intentPath], options) => {
+      const length = Number(platform.env("CONTENT_LENGTH") || 0);
+      const response = await uiHandler({
+        intentPath,
+        uiRoot: options.uiDir,
+        platform,
+      })({
+        method: platform.env("REQUEST_METHOD") || "GET",
+        path: platform.env("PATH_INFO") || "/",
+        body: length > 0 ? platform.readStdin() : "",
+      });
+      console.log(cgiResponse(response));
     },
   });
 
@@ -523,7 +618,7 @@ export const main = async ({
         try {
           // Read-only: introspection only, the same as print-uci-commands.
           const schema = await getDeviceSchema({ deviceConfig, ssh });
-          const path = join(options.out, `${deviceConfig.model_id}.json`);
+          const path = join(options.out, `${schema.name}.json`);
           platform.writeTextFile(path, JSON.stringify(schema, null, 2) + "\n");
           console.log(`${deviceConfig.hostname}: wrote ${path}`);
         } finally {

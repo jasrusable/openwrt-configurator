@@ -1,6 +1,9 @@
-import { z, ZodObject, ZodRawShape, ZodSchema } from "zod";
+import { z, ZodObject, ZodRawShape, ZodSchema, ZodTypeAny } from "zod";
 
-export const parseSchema = <D>(schema: ZodSchema<D>, data: any) => {
+export const parseSchema = <S extends ZodTypeAny>(
+  schema: S,
+  data: any
+): z.output<S> => {
   try {
     return schema.parse(data);
   } catch (e: any) {

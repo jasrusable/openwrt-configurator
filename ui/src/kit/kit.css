@@ -1,0 +1,5 @@
+/* A divider between the rows a section actually renders, however they are
+   nested in fragments or hidden by conditions. */
+.onc-rows > * + * {
+  border-top: 1px solid var(--mantine-color-default-border);
+}

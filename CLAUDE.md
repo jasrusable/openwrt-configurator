@@ -38,6 +38,10 @@ A CLI that takes one UCI-like JSON file describing an entire network — every d
 
 Published to GitHub Releases as standalone binaries (macOS/Linux/Windows) via `@yao-pkg/pkg`.
 
+## Open work
+
+Tracked in `TODO.md` at the repo root. Add to it what is found and deferred, and remove an item in the commit that finishes it.
+
 ## Commands
 
 ```sh
@@ -48,6 +52,7 @@ npm run typecheck        # tsc over src, bin and the tests
 npm run bundle           # QuickJS bundle -> dist/qjs (scripts/bundle.js)
 scripts/rig-test.sh      # end-to-end provision against OpenWrt in Docker, ~1.5 min
 npm run package          # pkg -> ./artifacts (needs npm run build first)
+npm run ui -- <intent>   # build the web UI and serve it on http://127.0.0.1:8080
 
 # Against real devices — only on explicit request:
 npm run provision          <config-file>
@@ -70,6 +75,14 @@ The pipeline, in dependency order:
 7. **`src/getUciCommands.ts`** + **`src/getDeviceScript.ts`** + **`src/uci.ts`** — emit the scripts, in three parts that `provision` runs separately. **Prepare** (`getPrepareCommands`): discard every pending UCI change (clean start, see below) → package install/removal → `reload_config` (baseline refresh, see below). **Stage** (`getStageCommands`, built from the device's config as read *after* prepare): one `uci batch` that deletes every section `configs_to_not_reset` does not keep, by exact name, then sets every declared section → file writes (each with its optional `run_after`). **Finalise** (`getFinaliseCommands`): `uci commit` per changed config → `reload_config`. Then each `run_after_reload`, over the *reconnected* session: `reload_config` is what can sever the link, and once dropbear exits the next marker `printf` in `execScript` takes SIGPIPE and kills the script, so a hook after the reload in that same script would be silently dropped on exactly the runs that reshape networking. `getDeviceScript` concatenates all of it for the dry run (see "The wipe").
 8. **`src/execScript.ts`** — runs the whole command list as one script: it is written to a `0600` file in `/tmp` over stdin (`cat >`), then run as `sh <file> < /dev/null`. Do not "simplify" this into a single joined exec string: dropbear rejects exec requests over ~9 KB and drops the connection on larger ones, while a real provision script is comfortably past that. Nor pipe it straight into `sh`: commands that read stdin then swallow the rest of the script. `set -e` plus a marker echoed after each command preserves per-command failure granularity.
 9. **`src/devicePhases.ts`** + **`src/provisionNetwork.ts`** — provisioning as explicit phases over a `DeviceRun` record: `planDevice` (verify the board id, read state, warn about removals and discarded changes) → `armRollback` → `configureDevice` (prepare, read the config, stage, read back and verify) → `ensureTimeToConfirm` → `commitDevice` → `confirmDevice` → `disarmDevice` → `runPostReloadHooks`, plus the ways out: `revertStaged` (nothing committed), `rollBackNow` and `waitForRecovery`. Each phase returns an updated record or throws a `ProvisionFailure` saying whether the device's change was committed. `provisionNetwork` runs them across every device as **one change** (see "Several devices, one change"); a single device is N = 1. Files are written *before* `uci commit` so a write failure leaves the revert effective. Every question asked of a device is a typed probe in **`src/deviceProbes.ts`** (see "Device probes").
+
+### The intent layer and the web UI
+
+An *intent file* (`{"schema": 1, ...}`, `src/intent/schema.ts`) describes the network in the user's terms: site, devices (name + role), internet, the home network, Wi-Fi, DNS. It holds decisions only, **never device facts** (model, ports, radios, version): those are read from the devices at provision time. `compileIntent` (`src/intent/compile.ts`) is pure: each module in `src/intent/features/` returns a fragment of low-level config and they are merged in order. Anything device-specific is left to the engine as a condition (`.if device.model_id == ...`) or a placeholder (`"*"` ports, `@wan_port`, `@cpu_port`). `loadOncConfig` compiles an intent file transparently, so every command takes one; `compile` prints the result. There is no escape hatch: a setting the intent cannot express does not exist, and because of the wipe, the features plus their defaults must produce a complete working device.
+
+The web UI edits the intent file and nothing else. `src/server/handlers.ts` is the whole backend (GET/PUT `/api/intent` plus the built UI's static files), transport-free: `onc ui` serves it with Node on a Mac (loopback, Host/Origin-checked against DNS rebinding), `onc cgi` answers one request under uhttpd on a router (QuickJS cannot listen on a socket). A save is validated by the intent schema and by compiling, then written atomically with mode `0600` (it holds the Wi-Fi passwords). **The API has no authentication yet: do not expose `cgi` on a router** (see `TODO.md`).
+
+`ui/` is React + Mantine + React Query + React Hook Form, built by `scripts/build-ui.js` (esbuild) into `dist/ui`. Layers: `data/` (the only HTTP code, as React Query hooks), `kit/` (layout: `SettingsPage`, `Section`, `SettingRow`), `form/` (fields bound to the intent by name, e.g. `<TextField name="site.name" />`, validated with the same zod schema as the server), and `pages/`, which should stay declarative: which settings, in what order, labelled how. URLs are relative and routing is by hash, so the same build works at `/` and under `/cgi-bin/onc/`. `src/intent/timezones.ts` is generated by `scripts/gen-timezones.js`.
 
 ### The platform boundary
 

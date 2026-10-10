@@ -43,6 +43,17 @@ export type SshTarget = {
   keepaliveCountMax: number;
 };
 
+/** An incoming request, as both the HTTP server and CGI see it. */
+export type HttpRequest = {
+  method: string;
+  /** Without the query string. */
+  path: string;
+  body: string;
+};
+
+/** How a request is answered: a server, or CGI on the router. */
+export type HttpHandler = (request: HttpRequest) => Promise<HttpResponse>;
+
 export type HttpResponse = {
   status: number;
   /** Lower-cased header names. */
@@ -94,4 +105,20 @@ export type Platform = {
   runInteractive: (argv: string[]) => Promise<number | null>;
 
   connect: (target: SshTarget) => Promise<Session>;
+
+  /**
+   * Replace a file in one step (write a temporary file, then rename it), so a
+   * crash mid-write leaves the old file whole.
+   */
+  writeFileAtomic: (path: string, data: string, mode: number) => void;
+  /** All of standard input: a CGI request's body. */
+  readStdin: () => string;
+  /**
+   * Answer HTTP on a port until the process is killed. Node only: QuickJS
+   * cannot listen on a socket, so on a router uhttpd runs `cgi` instead.
+   */
+  serve?: (
+    handler: HttpHandler,
+    options: { host: string; port: number }
+  ) => Promise<void>;
 };

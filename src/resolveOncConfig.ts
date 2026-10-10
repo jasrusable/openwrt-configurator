@@ -17,7 +17,7 @@ export const conditionMatches = ({
     "device.sw_config": deviceSchema.sw_config,
     "device.hostname": deviceConfig.hostname,
     "device.ipaddr": deviceConfig.ipaddr,
-    "device.model_id": deviceConfig.model_id,
+    "device.model_id": deviceConfig.model_id ?? deviceSchema.name,
     "device.version": deviceSchema.version,
   };
   return evaluateCondition(condition, (name) => {

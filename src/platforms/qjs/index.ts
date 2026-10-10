@@ -10,6 +10,7 @@ import {
   removeFile,
   sha256,
   sha256File,
+  writeFileAtomic,
   writeTextFile,
 } from "./files";
 import { http } from "./http";
@@ -50,4 +51,7 @@ export const qjsPlatform: Platform = {
     os.exec(resolveArgv(argv), { block: true, usePath: false }),
 
   connect,
+
+  writeFileAtomic,
+  readStdin: () => std.fdopen(0, "r")?.readAsString() ?? "",
 };

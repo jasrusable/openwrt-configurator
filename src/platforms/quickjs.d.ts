@@ -22,6 +22,7 @@ declare module "std" {
     flags: string,
     errorObj?: { errno?: number }
   ): FILE | null;
+  function fdopen(fd: number, flags: string): FILE | null;
   function tmpfile(errorObj?: { errno?: number }): FILE | null;
   function getenv(name: string): string | undefined;
   function getenviron(): Record<string, string>;
@@ -44,6 +45,7 @@ interface QuickJsOs {
   stat(path: string): [{ mode: number; size: number } | null, number];
   mkdir(path: string, mode?: number): number;
   remove(path: string): number;
+  rename(oldPath: string, newPath: string): number;
 }
 
 type QuickJsExecOptions = {

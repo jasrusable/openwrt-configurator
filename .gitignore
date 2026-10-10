@@ -117,3 +117,6 @@ configs
 images/
 # Copied in by packaging/openwrt/build.sh.
 packaging/openwrt/openwrt-configurator/files/openwrt-configurator.mjs
+
+# Scratch output of the Playwright browser tool.
+.playwright-mcp/

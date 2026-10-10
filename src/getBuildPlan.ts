@@ -4,11 +4,24 @@ import { conditionMatches } from "./resolveOncConfig";
 import { utf8ByteLength } from "./utf8";
 import { shellQuote } from "./shell";
 
+/** An image is built for a model, so a device to build for must name one. */
+type BuildDevice = ONCDeviceConfig & { model_id: string };
+
+const requireModelId = (deviceConfig: ONCDeviceConfig): BuildDevice => {
+  if (!deviceConfig.model_id) {
+    throw new Error(
+      `${deviceConfig.hostname} has no model_id. build-images needs one per ` +
+        `device: there is no live device to read it from.`
+    );
+  }
+  return { ...deviceConfig, model_id: deviceConfig.model_id };
+};
+
 const BOOTSTRAP_MARKER = "/etc/openwrt-configurator-bootstrapped";
 const UCI_DEFAULTS_MAX_BYTES = 20480;
 
 export const buildModeDeviceSchema = (
-  deviceConfig: ONCDeviceConfig
+  deviceConfig: BuildDevice
 ): DeviceSchema => ({
   name: deviceConfig.model_id,
   version: "build-time",
@@ -17,7 +30,7 @@ export const buildModeDeviceSchema = (
 
 const matches = (
   condition: string | undefined,
-  deviceConfig: ONCDeviceConfig,
+  deviceConfig: BuildDevice,
   deviceSchema: DeviceSchema
 ) => conditionMatches({ condition, deviceConfig, deviceSchema });
 
@@ -30,7 +43,7 @@ const applyOverridesScalar = <T>({
 }: {
   base: T;
   overrides?: Array<{ ".if": string; override: any }>;
-  deviceConfig: ONCDeviceConfig;
+  deviceConfig: BuildDevice;
   deviceSchema: DeviceSchema;
   pick: (override: any) => T;
 }): T => {
@@ -44,7 +57,7 @@ export const resolveVersion = ({
   deviceConfig,
 }: {
   oncConfig: ONCConfig;
-  deviceConfig: ONCDeviceConfig;
+  deviceConfig: BuildDevice;
 }): string => {
   if (!oncConfig.version) {
     throw new Error(
@@ -69,7 +82,7 @@ export const resolvePackages = ({
   deviceConfig,
 }: {
   oncConfig: ONCConfig;
-  deviceConfig: ONCDeviceConfig;
+  deviceConfig: BuildDevice;
 }): string[] => {
   const deviceSchema = buildModeDeviceSchema(deviceConfig);
   return (oncConfig.package_profiles || [])
@@ -84,7 +97,7 @@ const resolveSection = ({
   deviceSchema,
 }: {
   section: any;
-  deviceConfig: ONCDeviceConfig;
+  deviceConfig: BuildDevice;
   deviceSchema: DeviceSchema;
 }) => {
   if (!matches(section?.[".if"], deviceConfig, deviceSchema)) {
@@ -105,7 +118,7 @@ export const resolveLanInterface = ({
   deviceConfig,
 }: {
   oncConfig: ONCConfig;
-  deviceConfig: ONCDeviceConfig;
+  deviceConfig: BuildDevice;
 }) => {
   const deviceSchema = buildModeDeviceSchema(deviceConfig);
   const interfaces: any[] = (oncConfig.config?.network as any)?.interface || [];
@@ -132,7 +145,7 @@ export const resolveTimezone = ({
   deviceConfig,
 }: {
   oncConfig: ONCConfig;
-  deviceConfig: ONCDeviceConfig;
+  deviceConfig: BuildDevice;
 }): { timezone?: string; zonename?: string } => {
   const deviceSchema = buildModeDeviceSchema(deviceConfig);
   const systemSections: any[] = (oncConfig.config?.system as any)?.system || [];
@@ -213,7 +226,7 @@ export const getUciDefaultsScript = ({
 };
 
 export type DeviceBuildPlan = {
-  deviceConfig: ONCDeviceConfig;
+  deviceConfig: BuildDevice;
   version: string;
   packages: string[];
   uciDefaults: string;
@@ -221,13 +234,14 @@ export type DeviceBuildPlan = {
 
 export const getDeviceBuildPlan = ({
   oncConfig,
-  deviceConfig,
+  deviceConfig: unchecked,
   redact,
 }: {
   oncConfig: ONCConfig;
   deviceConfig: ONCDeviceConfig;
   redact?: (value: string) => string;
 }): DeviceBuildPlan => {
+  const deviceConfig = requireModelId(unchecked);
   const version = resolveVersion({ oncConfig, deviceConfig });
   const packages = resolvePackages({ oncConfig, deviceConfig });
   const lan = resolveLanInterface({ oncConfig, deviceConfig });

@@ -9,10 +9,12 @@ import {
   openSync,
   readFileSync,
   readSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "fs";
+import { createServer } from "http";
 import { homedir } from "os";
 import { NodeSSH } from "node-ssh";
 import {
@@ -240,4 +242,54 @@ export const nodePlatform: Platform = {
     ssh.connection?.on("error", () => {});
     return ssh;
   },
+
+  writeFileAtomic: (path, data, mode) =>
+    withPath(path, () => {
+      const temporary = `${path}.onc-tmp`;
+      writeFileSync(temporary, data, { mode });
+      renameSync(temporary, path);
+    }),
+  readStdin: () => readFileSync(0, "utf8"),
+  serve: (handler, { host, port }) =>
+    new Promise((_, reject) => {
+      // DNS rebinding: a web page whose name now resolves to 127.0.0.1 is
+      // same-origin with this server, so only answer requests addressed to
+      // it by a local name, and refuse writes from any other origin.
+      const loopback = ["127.0.0.1", "localhost", "[::1]"];
+      const allowedHosts = new Set(
+        (loopback.includes(host) ? loopback : [host]).map((h) => `${h}:${port}`)
+      );
+      const server = createServer((req, res) => {
+        const origin = req.headers.origin;
+        const crossOrigin =
+          origin !== undefined &&
+          ![...allowedHosts].some((h) => origin === `http://${h}`);
+        if (
+          !allowedHosts.has(req.headers.host ?? "") ||
+          (req.method !== "GET" && crossOrigin)
+        ) {
+          res.writeHead(403, { "content-type": "text/plain" });
+          res.end("Forbidden");
+          return;
+        }
+        let body = "";
+        req.setEncoding("utf8");
+        req.on("data", (chunk) => (body += chunk));
+        req.on("end", async () => {
+          const response = await handler({
+            method: req.method ?? "GET",
+            path: (req.url ?? "/").split("?")[0],
+            body,
+          }).catch((e) => ({
+            status: 500,
+            headers: { "content-type": "text/plain" },
+            body: String((e as Error)?.message ?? e),
+          }));
+          res.writeHead(response.status, response.headers);
+          res.end(response.body);
+        });
+      });
+      server.on("error", reject);
+      server.listen(port, host);
+    }),
 };
