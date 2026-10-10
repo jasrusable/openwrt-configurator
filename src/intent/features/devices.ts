@@ -10,7 +10,7 @@ export const devices: Feature = (intent) => ({
     ipaddr:
       device.role === "router"
         ? routerAddress(intent)
-        : `${device.name}.${intent.network.domain}`,
+        : `${device.name}.${intent.dns.local_domain}`,
     provisioning_config: {
       ssh_auth: {
         username: "root",

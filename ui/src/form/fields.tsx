@@ -374,3 +374,59 @@ export const DurationField = (row: RowProps) => {
     </SettingRow>
   );
 };
+
+/**
+ * A choice that also fills in other settings, which stay adjustable: e.g. a
+ * network's purpose sets its access switches. `presets[value]` is written to
+ * `fills` when that value is picked.
+ */
+export const PresetField = <T extends string>({
+  options,
+  fills,
+  presets,
+  ...row
+}: RowProps & {
+  options: Option<T>[];
+  fills: IntentField;
+  presets: Record<T, unknown>;
+}) => {
+  const field = useField(row.name);
+  const { setValue } = useIntentForm();
+  return (
+    <SettingRow {...row} error={field.error}>
+      <SegmentedControl
+        data={options}
+        value={field.value}
+        onChange={(value) => {
+          field.onChange(value);
+          setValue(fills, presets[value as T] as never, {
+            shouldDirty: true,
+            shouldValidate: true,
+          });
+        }}
+      />
+    </SettingRow>
+  );
+};
+
+/**
+ * A pick from another list in the intent, stored by a stable key: e.g. which
+ * network a Wi-Fi joins, kept as the network's id and shown by its name.
+ */
+export const ReferenceField = ({
+  to,
+  valueKey,
+  labelKey,
+  ...row
+}: RowProps & { to: IntentField; valueKey: string; labelKey: string }) => {
+  const items: Record<string, any>[] = useWatch<any>({ name: to }) ?? [];
+  return (
+    <SelectField
+      {...row}
+      options={items.map((item) => ({
+        value: String(item[valueKey]),
+        label: item[labelKey] || "Unnamed",
+      }))}
+    />
+  );
+};

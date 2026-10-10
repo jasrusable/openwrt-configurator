@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "site": {
     "name": "Home",
     "timezone": "Europe/Zurich",
@@ -21,20 +21,38 @@
     "ipv6": true,
     "speed": { "down_mbps": 950, "up_mbps": 950 }
   },
-  "network": {
-    "subnet": "10.0.0.0/24",
-    "domain": "lan",
-    "dhcp": { "size": 250, "lease": "24h" },
-    "ipv6": true
-  },
+  "networks": [
+    {
+      "id": "lan",
+      "name": "Home",
+      "purpose": "home",
+      "access": { "internet": true, "other_networks": true, "isolate_clients": false },
+      "subnet": "10.0.0.0/24",
+      "dhcp": { "size": 250, "lease": "24h" },
+      "ipv6": true
+    },
+    {
+      "id": "guest",
+      "name": "Guests",
+      "purpose": "guest",
+      "access": { "internet": true, "other_networks": false, "isolate_clients": true },
+      "vlan": 20,
+      "subnet": "10.0.20.0/24",
+      "dhcp": { "size": 100, "lease": "2h" },
+      "ipv6": false
+    }
+  ],
   "wifi": [
     {
       "ssid": "Home",
+      "network": "lan",
       "password": "change-me-please",
       "extra_passwords": ["change-me-too"]
-    }
+    },
+    { "ssid": "Home Guests", "network": "guest", "password": "welcome-guests" }
   ],
   "dns": {
-    "over_https": "cloudflare"
+    "over_https": "cloudflare",
+    "local_domain": "lan"
   }
 }

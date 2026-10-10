@@ -1,7 +1,7 @@
 // Wi-Fi, from the access points: every network on every band, with fast
 // roaming between access points. Radios are matched to bands on the device;
 // the intent only ever says which channel, if any, to pin.
-import { Feature, onAccessPoints, onDevice } from "../fragment";
+import { Feature, mainNetwork, onAccessPoints, onDevice } from "../fragment";
 import { timezones } from "../timezones";
 
 const bands = [
@@ -11,6 +11,8 @@ const bands = [
 
 export const wifi: Feature = (intent) => {
   const posixTimezone = timezones[intent.site.timezone];
+  const isolated = (id: string) =>
+    !!intent.networks.find((n) => n.id === id)?.access.isolate_clients;
   const ap = (section: Record<string, unknown>) => ({
     ".if": onAccessPoints,
     ...section,
@@ -50,7 +52,9 @@ export const wifi: Feature = (intent) => {
           ap({
             mode: "ap",
             device: bands.map(({ name }) => name),
-            network: "lan",
+            network: network.network,
+            // Clients of an isolated network cannot reach each other.
+            ...(isolated(network.network) ? { isolate: true } : {}),
             ssid: network.ssid,
             encryption: "psk2+ccmp",
             key: network.password,
@@ -75,7 +79,8 @@ export const wifi: Feature = (intent) => {
         usteer: [
           ap({
             ".name": "usteer",
-            network: "lan",
+            // Access points coordinate over the main network.
+            network: mainNetwork(intent).id,
             syslog: "1",
             debug_level: "1",
             assoc_steering: "0",

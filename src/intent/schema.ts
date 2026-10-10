@@ -46,10 +46,65 @@ const leaseTime = z
     "at least 2 minutes"
   );
 
+export const intentVersion = 2;
+
+export const purposes = ["home", "guest", "iot"] as const;
+export type Purpose = (typeof purposes)[number];
+export type Access = {
+  /** Can reach the internet. */
+  internet: boolean;
+  /** Can reach devices on the other networks. */
+  other_networks: boolean;
+  /** Wi-Fi clients cannot reach each other. */
+  isolate_clients: boolean;
+};
+
+/** What each purpose allows, as a starting point the user can adjust. */
+export const purposeAccess: Record<Purpose, Access> = {
+  home: { internet: true, other_networks: true, isolate_clients: false },
+  guest: { internet: true, other_networks: false, isolate_clients: true },
+  iot: { internet: true, other_networks: false, isolate_clients: false },
+};
+
+const network = z
+  .object({
+    /**
+     * Stable and hidden: Wi-Fi refers to it, and it names the network on the
+     * devices, so renaming never breaks a link. Short, as UCI names must be.
+     */
+    id: z.string().regex(/^[a-z][a-z0-9]{0,9}$/, "a short id"),
+    name: z.string().min(1, "required").max(32),
+    purpose: z.enum(purposes),
+    access: z
+      .object({
+        internet: z.boolean(),
+        other_networks: z.boolean(),
+        isolate_clients: z.boolean(),
+      })
+      .strict(),
+    /** Absent for the main network, which is untagged on every port. */
+    vlan: z
+      .number()
+      .int()
+      .min(2, "2 to 4094 (1 is the main network)")
+      .max(4094, "2 to 4094")
+      .optional(),
+    subnet: ipv4Subnet,
+    dhcp: z
+      .object({
+        size: z.number().int().min(1).max(253),
+        lease: leaseTime,
+      })
+      .strict()
+      .default({ size: 150, lease: "12h" }),
+    ipv6: z.boolean().default(true),
+  })
+  .strict();
+
 export const intentSchema = z
   .object({
-    /** This file's format version, for migrations. */
-    schema: z.literal(1),
+    /** This file's format version; older files are migrated (migrations.ts). */
+    schema: z.literal(intentVersion),
 
     site: z
       .object({
@@ -125,27 +180,18 @@ export const intentSchema = z
       })
       .strict(),
 
-    /** The home network. One for now; guest and IoT networks come later. */
-    network: z
-      .object({
-        subnet: ipv4Subnet,
-        /** Devices are reachable as <name>.<domain>. */
-        domain: name.default("lan"),
-        dhcp: z
-          .object({
-            size: z.number().int().min(1).max(253),
-            lease: leaseTime,
-          })
-          .strict()
-          .default({ size: 150, lease: "12h" }),
-        ipv6: z.boolean().default(true),
-      })
-      .strict(),
+    /**
+     * The networks: one untagged main network, and any number on their own
+     * VLANs (guests, IoT). Every LAN port and access point carries them all.
+     */
+    networks: z.array(network).min(1, "at least one network"),
 
     wifi: z.array(
       z
         .object({
           ssid: z.string().min(1, "required").max(32, "at most 32 characters"),
+          /** The id of the network it joins. */
+          network: z.string().min(1, "pick a network"),
           password: wifiPassword,
           /** More passwords for the same network, e.g. one per person. */
           extra_passwords: z.array(wifiPassword).optional(),
@@ -157,11 +203,41 @@ export const intentSchema = z
       .object({
         /** Encrypt lookups to this provider. Unset: use the ISP's resolvers. */
         over_https: z.enum(["cloudflare", "google", "quad9"]).optional(),
+        /** Devices are reachable as <name>.<local_domain>. */
+        local_domain: name.default("lan"),
       })
       .strict()
       .default({}),
   })
-  .strict();
+  .strict()
+  .superRefine((intent, ctx) => {
+    // Rules across settings, at the field they concern, so the UI shows them
+    // there. The server applies the same ones: nothing invalid is saved.
+    const issue = (path: (string | number)[], message: string) =>
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path, message });
+    const untagged = intent.networks.filter((n) => n.vlan === undefined);
+    if (untagged.length !== 1) {
+      issue(["networks"], "exactly one network must be the main, untagged one");
+    }
+    intent.networks.forEach((network, i) => {
+      const earlier = intent.networks.slice(0, i);
+      if (earlier.some((n) => n.id === network.id)) {
+        issue(["networks", i, "id"], "already used by another network");
+      }
+      if (network.vlan !== undefined && earlier.some((n) => n.vlan === network.vlan)) {
+        issue(["networks", i, "vlan"], "already used by another network");
+      }
+      if (earlier.some((n) => n.subnet === network.subnet)) {
+        issue(["networks", i, "subnet"], "already used by another network");
+      }
+    });
+    const ids = intent.networks.map((n) => n.id);
+    intent.wifi.forEach((wifi, i) => {
+      if (!ids.includes(wifi.network)) {
+        issue(["wifi", i, "network"], "pick a network");
+      }
+    });
+  });
 
 export type Intent = z.infer<typeof intentSchema>;
 /** What a file or the UI supplies: defaults not yet applied. */

@@ -43,24 +43,21 @@ A first slice is in: `src/intent/` (schema, one compiler module per
 feature), `onc compile`, `onc ui`/`onc cgi` over `src/server/handlers.ts`,
 and the React UI in `ui/`.
 
-- [ ] A Networks table, once there are several networks (Wi-Fi and Devices
-      have theirs: `ListPage` from a `defineList` spec).
-- [ ] Several networks (guest, IoT): `network` becomes `networks[]`, Wi-Fi
-      picks one, and the compiler emits a VLAN, a firewall zone and DHCP per
-      network.
-- [ ] **No invalid configuration, by construction.** Cross-setting rules
-      (PPPoE needs credentials, channels legal in the country, the LAN not
-      overlapping the WAN) as named rules in the shared schema, and the
-      choices the UI offers served by the API from the same rules, so the
-      UI only offers valid values. Device-only facts (a missing 5 GHz radio)
-      fail at plan time, before any change.
+- [ ] **No invalid configuration, by construction.** Started: cross-setting
+      rules live in the schema's superRefine (one main network, unique VLANs
+      and ranges, Wi-Fi on an existing network) and inputs are constrained.
+      Still to do: channels legal in the chosen country, the LAN not
+      overlapping the WAN's range, and the choices the UI offers served from
+      the same rules. Device-only facts (a missing 5 GHz radio) fail at plan
+      time, before any change.
+- [ ] Per-port network assignment (today every LAN port carries every
+      network: the main one untagged, the others tagged).
 - [ ] Reach parity with the jaculu config before provisioning from intent:
       model quirk files (R6S packet steering, AP AQL hook, the odhcpd RA
       fix) and admin SSH login. Then diff `print-uci-commands` of both.
 - [ ] Open schema questions: a second AP (`jaculu-ap-2`)? Why two SSIDs on
       one LAN? What are the extra Wi-Fi passwords for? Keep LuCI? Wi-Fi on
       a router that has radios (today only access points broadcast)?
-- [ ] Version the intent schema itself, with migrations.
 - [ ] Snapshot tests per feature × OpenWrt version; the rig on more than
       one version.
 - [ ] `@wan_port` on swconfig devices (the WAN is a switch VLAN there).

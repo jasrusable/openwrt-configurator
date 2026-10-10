@@ -1,9 +1,9 @@
 // The router's internet side: the WAN connection, the firewall between it and
 // the home network, and smart queueing when the line's speed is known.
-import { Feature, onRouter } from "../fragment";
+import { Feature, mainNetwork, onRouter } from "../fragment";
 
 /** OpenWrt's stock WAN rules: DHCP renewal, ping, multicast and IPv6 upkeep. */
-const stockWanRules = [
+const stockWanRules = (main: string) => [
   {
     name: "Allow-DHCP-Renew",
     src: "wan",
@@ -86,22 +86,67 @@ const stockWanRules = [
   {
     name: "Allow-IPSec-ESP",
     src: "wan",
-    dest: "lan",
+    dest: main,
     proto: ["esp"],
     target: "ACCEPT",
   },
   {
     name: "Allow-ISAKMP",
     src: "wan",
-    dest: "lan",
+    dest: main,
     dest_port: [500],
     proto: ["udp"],
     target: "ACCEPT",
   },
 ];
 
+/**
+ * What a network that may not reach the others still needs from the router:
+ * addresses (DHCP, DHCPv6), names (DNS) and IPv6 neighbour discovery.
+ */
+const routerServices = (zone: string) => [
+  {
+    name: `${zone}-DHCP`,
+    src: zone,
+    proto: ["udp"],
+    dest_port: [67],
+    family: "ipv4",
+    target: "ACCEPT",
+  },
+  {
+    name: `${zone}-DHCPv6`,
+    src: zone,
+    proto: ["udp"],
+    dest_port: [547],
+    family: "ipv6",
+    target: "ACCEPT",
+  },
+  {
+    name: `${zone}-DNS`,
+    src: zone,
+    proto: ["tcp", "udp"],
+    dest_port: [53],
+    target: "ACCEPT",
+  },
+  {
+    name: `${zone}-ICMPv6`,
+    src: zone,
+    proto: ["icmp"],
+    icmp_type: [
+      "router-solicitation",
+      "neighbour-solicitation",
+      "neighbour-advertisement",
+      "echo-request",
+    ],
+    family: "ipv6",
+    target: "ACCEPT",
+  },
+];
+
 export const internet: Feature = (intent) => {
   const { connection, ipv6, speed } = intent.internet;
+  const { networks } = intent;
+  const main = mainNetwork(intent).id;
   // With encrypted DNS the ISP's resolvers must not be used.
   const peerdns = !intent.dns.over_https;
   const routerOnly = (sections: Record<string, unknown>[]) =>
@@ -152,16 +197,33 @@ export const internet: Feature = (intent) => {
             mtu_fix: true,
             network: ipv6 && connection.type === "dhcp" ? ["wan", "wan6"] : ["wan"],
           },
-          {
-            name: "lan",
-            input: "ACCEPT",
+          // One zone per network. Trusted networks (allowed to reach the
+          // others) may also reach the router itself; the rest only get its
+          // services (routerServices).
+          ...networks.map((n) => ({
+            name: n.id,
+            input: n.access.other_networks ? "ACCEPT" : "REJECT",
             output: "ACCEPT",
-            forward: "ACCEPT",
-            network: ["lan"],
-          },
+            forward: "REJECT",
+            network: [n.id],
+          })),
         ]),
-        forwarding: routerOnly([{ src: "lan", dest: "wan" }]),
-        rule: routerOnly(stockWanRules),
+        forwarding: routerOnly(
+          networks.flatMap((n) => [
+            ...(n.access.internet ? [{ src: n.id, dest: "wan" }] : []),
+            ...(n.access.other_networks
+              ? networks
+                  .filter((other) => other.id !== n.id)
+                  .map((other) => ({ src: n.id, dest: other.id }))
+              : []),
+          ])
+        ),
+        rule: routerOnly([
+          ...stockWanRules(main),
+          ...networks
+            .filter((n) => !n.access.other_networks)
+            .flatMap((n) => routerServices(n.id)),
+        ]),
       },
       ...(speed
         ? {

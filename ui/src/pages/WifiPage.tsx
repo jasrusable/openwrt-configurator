@@ -1,5 +1,12 @@
 import { Text } from "@mantine/core";
-import { PasswordField, PasswordListField, TextField, Value } from "../form/fields";
+import { useWatch } from "react-hook-form";
+import {
+  PasswordField,
+  PasswordListField,
+  ReferenceField,
+  TextField,
+  Value,
+} from "../form/fields";
 import { defineList, ListPage } from "../form/ListPage";
 
 const wifiNetworks = defineList({
@@ -8,7 +15,12 @@ const wifiNetworks = defineList({
   description:
     "Every network is broadcast by every access point, on every band, with seamless roaming between them.",
   addLabel: "Add network",
-  newItem: () => ({ ssid: "", password: "" }),
+  // Joins the main network unless told otherwise.
+  newItem: (_, intent) => ({
+    ssid: "",
+    password: "",
+    network: intent.networks.find((n) => n.vlan === undefined)?.id ?? "",
+  }),
   itemTitle: (i) => <Value name={`wifi.${i}.ssid`} fallback="New network" />,
   empty: "No Wi-Fi networks yet.",
   columns: [
@@ -17,6 +29,14 @@ const wifiNetworks = defineList({
       cell: (i) => (
         <Text size="sm" fw={500}>
           <Value name={`wifi.${i}.ssid`} fallback="Unnamed" />
+        </Text>
+      ),
+    },
+    {
+      header: "Network",
+      cell: (i) => (
+        <Text size="sm" c="dimmed">
+          <NetworkName index={i} />
         </Text>
       ),
     },
@@ -43,6 +63,14 @@ const wifiNetworks = defineList({
   editor: (i) => (
     <>
       <TextField name={`wifi.${i}.ssid`} label="Name" />
+      <ReferenceField
+        name={`wifi.${i}.network`}
+        label="Network"
+        description="Devices that join this Wi-Fi land on that network."
+        to="networks"
+        valueKey="id"
+        labelKey="name"
+      />
       <PasswordField name={`wifi.${i}.password`} label="Password" />
       <PasswordListField
         name={`wifi.${i}.extra_passwords`}
@@ -53,5 +81,12 @@ const wifiNetworks = defineList({
     </>
   ),
 });
+
+/** The name of the network Wi-Fi `index` joins. */
+const NetworkName = ({ index }: { index: number }) => {
+  const id = useWatch({ name: `wifi.${index}.network` });
+  const networks: { id: string; name: string }[] = useWatch({ name: "networks" }) ?? [];
+  return <>{networks.find((n) => n.id === id)?.name ?? "—"}</>;
+};
 
 export const WifiPage = () => <ListPage list={wifiNetworks} />;

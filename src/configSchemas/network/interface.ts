@@ -5,7 +5,8 @@ export const networkInterfaceSchema = z
   .object({
     ".name": nameValidation,
     device: z.string().optional(),
-    proto: z.enum(["static", "dhcp", "dhcpv6", "pppoe", "batadv", "batadv_hardif"]),
+    // "none": an interface with no address, e.g. a VLAN an access point only bridges.
+    proto: z.enum(["static", "dhcp", "dhcpv6", "pppoe", "batadv", "batadv_hardif", "none"]),
     ipaddr: z.string().optional(),
     netmask: z.string().optional(),
   })

@@ -54,20 +54,39 @@ export const fields: FieldInfo[] = [
   { path: "internet.speed.down_mbps", label: "Download", unit: "Mbit/s" },
   { path: "internet.speed.up_mbps", label: "Upload", unit: "Mbit/s" },
 
-  { path: "network", label: "Network" },
+  { path: "networks", label: "Networks" },
+  { path: "networks.*", label: (n) => `“${n?.name || "unnamed"}”` },
+  { path: "networks.*.name", label: "Name" },
+  { path: "networks.*.purpose", label: "Purpose" },
+  { path: "networks.*.access", label: "Access" },
   {
-    path: "network.subnet",
+    path: "networks.*.access.internet",
+    label: "Internet",
+    description: "Whether devices on it can reach the internet.",
+  },
+  {
+    path: "networks.*.access.other_networks",
+    label: "Reach other networks",
+    description: "Whether devices on it can reach devices on your other networks.",
+  },
+  {
+    path: "networks.*.access.isolate_clients",
+    label: "Isolate Wi-Fi clients",
+    description: "Whether Wi-Fi devices on it are kept from reaching each other.",
+  },
+  {
+    path: "networks.*.vlan",
+    label: "VLAN",
+    description: "Switches between your devices must carry it.",
+  },
+  {
+    path: "networks.*.subnet",
     label: "Addresses",
-    description: "Every device gets a new address; the router takes the first.",
+    description: "Every device on it gets a new address; the router takes the first.",
   },
-  {
-    path: "network.domain",
-    label: "Local domain",
-    description: "Devices are reachable as name.domain.",
-  },
-  { path: "network.dhcp.size", label: "Addresses for devices" },
-  { path: "network.dhcp.lease", label: "Lease time" },
-  { path: "network.ipv6", label: "IPv6" },
+  { path: "networks.*.dhcp.size", label: "Addresses for devices" },
+  { path: "networks.*.dhcp.lease", label: "Lease time" },
+  { path: "networks.*.ipv6", label: "IPv6" },
 
   { path: "wifi", label: "Wi-Fi" },
   { path: "wifi.*", label: (w) => `“${w?.ssid || "unnamed"}”` },
@@ -83,8 +102,18 @@ export const fields: FieldInfo[] = [
     description: "Devices will have to join again with the new password.",
   },
   { path: "wifi.*.extra_passwords", label: "More passwords", secret: true },
+  {
+    path: "wifi.*.network",
+    label: "Network",
+    description: "Devices joining this Wi-Fi land on that network.",
+  },
 
   { path: "dns", label: "DNS" },
+  {
+    path: "dns.local_domain",
+    label: "Local domain",
+    description: "Devices are reachable as name.domain.",
+  },
   {
     path: "dns.over_https",
     label: "Encrypted DNS",

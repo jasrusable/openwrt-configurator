@@ -4,6 +4,7 @@
 // so it works wherever it is mounted: / on a Mac, /cgi-bin/onc/ on a router.
 import { compileIntent } from "../intent/compile";
 import { diffIntent } from "../intent/diff";
+import { migrateIntent } from "../intent/migrations";
 import { intentSchema } from "../intent/schema";
 import { oncConfigSchema } from "../oncConfigSchema";
 import { parseConfigJson } from "../parseJson";
@@ -30,7 +31,11 @@ export const intentApi =
   async ({ method, body }) => {
     if (method === "GET") {
       try {
-        return json(200, parseConfigJson(files.readTextFile(intentPath), intentPath));
+        // In the current format: the UI only knows that one.
+        return json(
+          200,
+          migrateIntent(parseConfigJson(files.readTextFile(intentPath), intentPath))
+        );
       } catch (e) {
         return json(404, { error: (e as Error).message });
       }
@@ -101,9 +106,10 @@ export const staticFiles =
 
 type JobPlatform = Files & Pick<Platform, "run" | "selfCommand">;
 
-const readJson = (files: Files, path: string) => {
+/** An intent file, in the current format; undefined if missing or unreadable. */
+const readIntent = (files: Files, path: string) => {
   try {
-    return parseConfigJson(files.readTextFile(path), path);
+    return migrateIntent(parseConfigJson(files.readTextFile(path), path)) as any;
   } catch {
     return undefined;
   }
@@ -124,8 +130,8 @@ export const provisionApi =
   async ({ method }) => {
     if (method === "GET") {
       const status = await provisionStatus({ intentPath, files: platform });
-      const draft = readJson(platform, intentPath);
-      const live = readJson(platform, jobPaths(intentPath).live);
+      const draft = readIntent(platform, intentPath);
+      const live = readIntent(platform, jobPaths(intentPath).live);
       return json(200, {
         ...status,
         devices: ((draft?.devices as { name: string }[]) || []).map((d) => d.name),
@@ -136,7 +142,7 @@ export const provisionApi =
     if (method === "POST") {
       // Never provision what would not have been saved: a file edited by
       // hand, or saved under older rules, is refused here, not mid-run.
-      const draft = intentSchema.safeParse(readJson(platform, intentPath));
+      const draft = intentSchema.safeParse(readIntent(platform, intentPath));
       const compiled =
         draft.success && oncConfigSchema.safeParse(compileIntent(draft.data));
       if (!draft.success || !compiled || !compiled.success) {

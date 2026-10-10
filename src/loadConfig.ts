@@ -9,6 +9,7 @@ import { Platform } from "./platform";
 import { parseConfigJson } from "./parseJson";
 import { parseSchema } from "./utils";
 import { compileIntent, intentSchema, isIntent } from "./intent/compile";
+import { migrateIntent } from "./intent/migrations";
 
 export const loadOncConfig = async ({
   path: configPath,
@@ -50,7 +51,7 @@ export const loadOncConfig = async ({
   // An intent file compiles to the same low-level config a hand-written one
   // is, so every command takes either.
   const lowLevel = isIntent(value)
-    ? compileIntent(parseSchema(intentSchema, value))
+    ? compileIntent(parseSchema(intentSchema, migrateIntent(value)))
     : value;
   const oncConfig: ONCConfig = parseSchema(oncConfigSchema, lowLevel);
   return { oncConfig, secrets };

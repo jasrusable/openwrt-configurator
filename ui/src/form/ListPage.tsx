@@ -10,6 +10,7 @@ import {
   UseFieldArrayReturn,
   useFieldArray,
   useFormState,
+  useWatch,
 } from "react-hook-form";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Intent } from "../../../src/intent/schema";
@@ -26,7 +27,10 @@ export type ListSpec<N extends ListName> = {
   title: string;
   description?: ReactNode;
   addLabel: string;
-  newItem: () => Item<N>;
+  /** What Add creates, given the items already there and the whole draft. */
+  newItem: (items: Item<N>[], intent: Intent) => Item<N>;
+  /** Whether an item may be removed (the main network may not). */
+  canRemove?: (item: Item<N>) => boolean;
   /** Item `index`'s name, for its page title and breadcrumb. */
   itemTitle: (index: number) => ReactNode;
   columns: Column[];
@@ -48,6 +52,7 @@ const ListTable = <N extends ListName>({
   fields: Fields<N>;
 }) => {
   const navigate = useNavigate();
+  const { getValues } = useIntentForm();
   const { errors } = useFormState<Intent>({ name: list.name });
   const hasErrors = (index: number) =>
     !!(errors as Record<string, unknown[] | undefined>)[list.name]?.[index];
@@ -60,7 +65,9 @@ const ListTable = <N extends ListName>({
             variant="light"
             leftSection={<IconPlus size={14} />}
             onClick={() => {
-              fields.append(list.newItem() as never);
+              fields.append(
+                list.newItem(getValues(list.name) as Item<N>[], getValues()) as never
+              );
               // Its own page, marked new: Cancel there discards it.
               navigate(String(fields.fields.length), { state: { created: true } });
             }}
@@ -97,6 +104,8 @@ const ListItemPage = <N extends ListName>({
   const navigate = useNavigate();
   const created = !!(useLocation().state as { created?: boolean } | null)?.created;
   const { trigger } = useIntentForm();
+  const item = useWatch({ name: `${list.name}.${index}` as never }) as Item<N>;
+  const removable = !list.canRemove || list.canRemove(item);
   const back = () => navigate("..", { relative: "path" });
   const discard = () => {
     fields.remove(index);
@@ -130,10 +139,12 @@ const ListItemPage = <N extends ListName>({
           </Button>
         </Group>
       ) : (
-        <Group justify="space-between">
-          <Button variant="subtle" color="red" onClick={discard}>
-            Remove
-          </Button>
+        <Group justify={removable ? "space-between" : "flex-end"}>
+          {removable && (
+            <Button variant="subtle" color="red" onClick={discard}>
+              Remove
+            </Button>
+          )}
           <Button variant="default" onClick={back}>
             Back to {list.title}
           </Button>

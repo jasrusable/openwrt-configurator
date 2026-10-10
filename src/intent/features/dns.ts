@@ -22,7 +22,7 @@ const providers = {
 const proxyPort = 5053;
 
 export const dns: Feature = (intent) => {
-  const { domain } = intent.network;
+  const domain = intent.dns.local_domain;
   const provider = intent.dns.over_https && providers[intent.dns.over_https];
   return {
     package_profiles: provider
@@ -49,7 +49,7 @@ export const dns: Feature = (intent) => {
             localservice: true,
             cachesize: 5000,
             dnsforwardmax: 1000,
-            interface: ["lan"],
+            interface: intent.networks.map((n) => n.id),
             quietdhcp: true,
             ...(provider
               ? { noresolv: true, server: [`127.0.0.1#${proxyPort}`] }

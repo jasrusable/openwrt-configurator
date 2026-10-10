@@ -23,9 +23,18 @@ export const onAccessPoints = role("access-point");
 export const onDevice = (name: string) => `device.hostname == '${name}'`;
 export const onModel = (model: string) => `device.model_id == '${model}'`;
 
-/** The router takes the first address of the home network. */
-export const routerAddress = (intent: Intent) =>
-  intent.network.subnet.replace(/\.0\/24$/, ".1");
+export type Network = Intent["networks"][number];
+
+/** The untagged network: the one devices are managed over. */
+export const mainNetwork = (intent: Intent) =>
+  intent.networks.find((n) => n.vlan === undefined)!;
+
+/** The router takes the first address of each network. */
+export const gatewayOf = (network: Network) =>
+  network.subnet.replace(/\.0\/24$/, ".1");
+
+/** The router's address on the main network: how it is managed. */
+export const routerAddress = (intent: Intent) => gatewayOf(mainNetwork(intent));
 
 export const merge = (fragments: Fragment[]) =>
   fragments.reduce<Required<Fragment>>(

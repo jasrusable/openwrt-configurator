@@ -3,6 +3,7 @@
 import {
   everyDevice,
   Feature,
+  mainNetwork,
   onAccessPoints,
   onRouter,
   routerAddress,
@@ -19,6 +20,7 @@ const ntpPool = [
 
 export const system: Feature = (intent) => {
   const router = routerAddress(intent);
+  const main = mainNetwork(intent).id;
   return {
     package_profiles: [{ ".if": everyDevice, packages: ["luci-ssl"] }],
     configs_to_not_reset: [
@@ -42,7 +44,7 @@ export const system: Feature = (intent) => {
             ".if": onRouter,
             ".name": "ntp",
             enable_server: true,
-            interface: "lan",
+            interface: main,
             use_dhcp: false,
             server: ntpPool,
           },
@@ -62,7 +64,8 @@ export const system: Feature = (intent) => {
             PasswordAuth: "on",
             RootPasswordAuth: "on",
             Port: 22,
-            Interface: "lan",
+            // Only on the main network: guests and IoT get no SSH.
+            Interface: main,
             BannerFile: "/etc/banner",
           },
         ],
