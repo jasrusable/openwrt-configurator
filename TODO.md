@@ -48,9 +48,6 @@ and the React UI in `ui/`.
 - [ ] Several networks (guest, IoT): `network` becomes `networks[]`, Wi-Fi
       picks one, and the compiler emits a VLAN, a firewall zone and DHCP per
       network.
-- [ ] `npm run dev`: hot reload on a Mac (esbuild watch with live reload for
-      the UI, the backend restarting on change). Production stays `onc ui`
-      under Node (a Mac or Raspberry Pi) or `onc cgi` under uhttpd (a router).
 - [ ] **No invalid configuration, by construction.** Cross-setting rules
       (PPPoE needs credentials, channels legal in the country, the LAN not
       overlapping the WAN) as named rules in the shared schema, and the

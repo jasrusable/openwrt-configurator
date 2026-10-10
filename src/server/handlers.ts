@@ -72,6 +72,7 @@ const contentTypes: Record<string, string> = {
   css: "text/css; charset=utf-8",
   json: "application/json; charset=utf-8",
   svg: "image/svg+xml",
+  txt: "text/plain; charset=utf-8",
 };
 
 /** The built UI (text files only), from a directory. */

@@ -53,6 +53,7 @@ npm run bundle           # QuickJS bundle -> dist/qjs (scripts/bundle.js)
 scripts/rig-test.sh      # end-to-end provision against OpenWrt in Docker, ~1.5 min
 npm run package          # pkg -> ./artifacts (needs npm run build first)
 npm run ui -- <intent>   # build the web UI and serve it on http://127.0.0.1:8080
+npm run dev -- <intent>  # the same, with hot reload: UI rebuilds and reloads, backend restarts
 
 # Against real devices — only on explicit request:
 npm run provision          <config-file>
