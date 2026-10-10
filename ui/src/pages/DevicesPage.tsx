@@ -1,6 +1,13 @@
 import { Badge, Text } from "@mantine/core";
-import { SegmentedField, SelectField, TextField, Value, When } from "../form/fields";
+import {
+  SegmentedField,
+  SelectField,
+  TextField,
+  Value,
+  When,
+} from "../form/fields";
 import { defineList, ListPage } from "../form/ListPage";
+import { Section } from "../kit/layout";
 
 // Unset is automatic, so it is offered by `emptyLabel`, not listed here.
 const channels = (numbers: number[]) =>
@@ -22,7 +29,8 @@ const channel = (value?: number | "auto") =>
 const devices = defineList({
   name: "devices",
   title: "Devices",
-  description: "Your router and access points. Each is set up entirely from these settings.",
+  description:
+    "Your router and access points. Each is set up entirely from these settings.",
   addLabel: "Add device",
   newItem: () => ({ name: "", role: "access-point" as const }),
   itemTitle: (i) => <Value name={`devices.${i}.name`} fallback="New device" />,
@@ -58,7 +66,7 @@ const devices = defineList({
             format={(device) =>
               device?.role === "access-point"
                 ? `${channel(device.wifi?.channel?.["2g"])} · ${channel(
-                    device.wifi?.channel?.["5g"]
+                    device.wifi?.channel?.["5g"],
                   )}`
                 : "—"
             }
@@ -69,21 +77,36 @@ const devices = defineList({
   ],
   editor: (i) => (
     <>
-      <TextField name={`devices.${i}.name`} label="Name" description="Also its hostname." />
-      <SegmentedField name={`devices.${i}.role`} label="Role" options={roles} />
+      <Section>
+        <TextField
+          name={`devices.${i}.name`}
+          label="Name"
+          description="Also its hostname."
+        />
+        <SegmentedField
+          name={`devices.${i}.role`}
+          label="Role"
+          options={roles}
+        />
+      </Section>
       <When name={`devices.${i}.role`} is="access-point">
-        <SelectField
-          name={`devices.${i}.wifi.channel.2g`}
-          label="2.4 GHz channel"
-          options={channels2g}
-          emptyLabel="Automatic"
-        />
-        <SelectField
-          name={`devices.${i}.wifi.channel.5g`}
-          label="5 GHz channel"
-          options={channels5g}
-          emptyLabel="Automatic"
-        />
+        <Section
+          title="Wi-Fi"
+          description="Pin a channel only to avoid a crowded one; automatic picks for you."
+        >
+          <SelectField
+            name={`devices.${i}.wifi.channel.2g`}
+            label="2.4 GHz channel"
+            options={channels2g}
+            emptyLabel="Automatic"
+          />
+          <SelectField
+            name={`devices.${i}.wifi.channel.5g`}
+            label="5 GHz channel"
+            options={channels5g}
+            emptyLabel="Automatic"
+          />
+        </Section>
       </When>
     </>
   ),

@@ -2,8 +2,8 @@
 // ListSpec and shown as two pages: the table at /<page>, and one item's
 // detail page at /<page>/<index>. The detail page's fields edit the draft
 // directly, so Save and Revert in the header cover them like any other.
-import { Anchor, Button, Group, ThemeIcon } from "@mantine/core";
-import { IconAlertCircle, IconChevronLeft, IconPlus } from "@tabler/icons-react";
+import { Button, ThemeIcon } from "@mantine/core";
+import { IconAlertCircle, IconPlus } from "@tabler/icons-react";
 import { ReactNode } from "react";
 import {
   FieldArrayPath,
@@ -15,7 +15,7 @@ import {
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Intent } from "../../../src/intent/schema";
 import { Column, DataTable } from "../kit/DataTable";
-import { Section, SettingsPage } from "../kit/layout";
+import { SettingsPage } from "../kit/layout";
 import { useIntentForm } from "./IntentForm";
 
 type ListName = FieldArrayPath<Intent>;
@@ -34,7 +34,10 @@ export type ListSpec<N extends ListName> = {
   /** Item `index`'s name, for its page title and breadcrumb. */
   itemTitle: (index: number) => ReactNode;
   columns: Column[];
-  /** The fields of item `index`, named `${name}.${index}.<field>`. */
+  /**
+   * Item `index`'s page: its fields (named `${name}.${index}.<field>`) in
+   * titled Sections, grouped by what they are about.
+   */
   editor: (index: number) => ReactNode;
   empty: ReactNode;
 };
@@ -57,24 +60,27 @@ const ListTable = <N extends ListName>({
   const hasErrors = (index: number) =>
     !!(errors as Record<string, unknown[] | undefined>)[list.name]?.[index];
   return (
-    <SettingsPage title={list.title} description={list.description} wide>
+    <SettingsPage
+      title={list.title}
+      description={list.description}
+      wide
+      actions={
+        <Button
+          variant="light"
+          leftSection={<IconPlus size={16} />}
+          onClick={() => {
+            fields.append(
+              list.newItem(getValues(list.name) as Item<N>[], getValues()) as never
+            );
+            // Its own page, marked new: Cancel there discards it.
+            navigate(String(fields.fields.length), { state: { created: true } });
+          }}
+        >
+          {list.addLabel}
+        </Button>
+      }
+    >
       <DataTable
-        actions={
-          <Button
-            size="xs"
-            variant="light"
-            leftSection={<IconPlus size={14} />}
-            onClick={() => {
-              fields.append(
-                list.newItem(getValues(list.name) as Item<N>[], getValues()) as never
-              );
-              // Its own page, marked new: Cancel there discards it.
-              navigate(String(fields.fields.length), { state: { created: true } });
-            }}
-          >
-            {list.addLabel}
-          </Button>
-        }
         columns={list.columns}
         rowCount={fields.fields.length}
         rowKey={(index) => fields.fields[index].id}
@@ -111,45 +117,37 @@ const ListItemPage = <N extends ListName>({
     fields.remove(index);
     back();
   };
+  // Same width and header position as the list: only the title grows a
+  // step, "Networks / Home", whose first part leads back.
   return (
     <SettingsPage
-      title={list.itemTitle(index)}
-      breadcrumbs={
-        <Anchor size="sm" onClick={back}>
-          <Group gap={2}>
-            <IconChevronLeft size={16} />
-            {list.title}
-          </Group>
-        </Anchor>
-      }
-    >
-      <Section>{list.editor(index)}</Section>
-      {created ? (
-        <Group justify="flex-end">
-          <Button variant="default" onClick={discard}>
-            Cancel
-          </Button>
-          <Button
-            onClick={async () => {
-              // Only a complete item is added; otherwise its errors show here.
-              if (await trigger(`${list.name}.${index}` as never)) back();
-            }}
-          >
-            {list.addLabel}
-          </Button>
-        </Group>
-      ) : (
-        <Group justify={removable ? "space-between" : "flex-end"}>
-          {removable && (
-            <Button variant="subtle" color="red" onClick={discard}>
+      wide
+      title={[{ label: list.title, onClick: back }, { label: list.itemTitle(index) }]}
+      actions={
+        created ? (
+          <>
+            <Button variant="default" onClick={discard}>
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                // Only a complete item is added; otherwise its errors show here.
+                if (await trigger(`${list.name}.${index}` as never)) back();
+              }}
+            >
+              {list.addLabel}
+            </Button>
+          </>
+        ) : (
+          removable && (
+            <Button variant="light" color="red" onClick={discard}>
               Remove
             </Button>
-          )}
-          <Button variant="default" onClick={back}>
-            Back to {list.title}
-          </Button>
-        </Group>
-      )}
+          )
+        )
+      }
+    >
+      {list.editor(index)}
     </SettingsPage>
   );
 };

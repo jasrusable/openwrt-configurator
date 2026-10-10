@@ -8,6 +8,7 @@ import {
   Value,
 } from "../form/fields";
 import { defineList, ListPage } from "../form/ListPage";
+import { Section } from "../kit/layout";
 
 const wifiNetworks = defineList({
   name: "wifi",
@@ -62,22 +63,29 @@ const wifiNetworks = defineList({
   ],
   editor: (i) => (
     <>
-      <TextField name={`wifi.${i}.ssid`} label="Name" />
-      <ReferenceField
-        name={`wifi.${i}.network`}
-        label="Network"
-        description="Devices that join this Wi-Fi land on that network."
-        to="networks"
-        valueKey="id"
-        labelKey="name"
-      />
-      <PasswordField name={`wifi.${i}.password`} label="Password" />
-      <PasswordListField
-        name={`wifi.${i}.extra_passwords`}
-        label="More passwords"
-        description="Each works on its own, e.g. one per person."
-        addLabel="Add password"
-      />
+      <Section>
+        <TextField name={`wifi.${i}.ssid`} label="Name" />
+        <ReferenceField
+          name={`wifi.${i}.network`}
+          label="Network"
+          description="Devices that join this Wi-Fi land on that network."
+          to="networks"
+          valueKey="id"
+          labelKey="name"
+        />
+      </Section>
+      <Section
+        title="Security"
+        description="WPA2. Devices join with any of these passwords."
+      >
+        <PasswordField name={`wifi.${i}.password`} label="Password" />
+        <PasswordListField
+          name={`wifi.${i}.extra_passwords`}
+          label="More passwords"
+          description="Each works on its own, e.g. one per person."
+          addLabel="Add password"
+        />
+      </Section>
     </>
   ),
 });
@@ -85,7 +93,8 @@ const wifiNetworks = defineList({
 /** The name of the network Wi-Fi `index` joins. */
 const NetworkName = ({ index }: { index: number }) => {
   const id = useWatch({ name: `wifi.${index}.network` });
-  const networks: { id: string; name: string }[] = useWatch({ name: "networks" }) ?? [];
+  const networks: { id: string; name: string }[] =
+    useWatch({ name: "networks" }) ?? [];
   return <>{networks.find((n) => n.id === id)?.name ?? "—"}</>;
 };
 

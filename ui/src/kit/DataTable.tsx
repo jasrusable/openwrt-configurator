@@ -1,5 +1,5 @@
-// A list of things as a table: a title with actions at the top right, a row
-// per item that opens it when clicked, and a friendly empty state.
+// A list of things as a table: a row per item that opens it when clicked, and
+// a friendly empty state. Its title and Add live in the page's header.
 import { Group, Paper, Table, Text } from "@mantine/core";
 import { IconChevronRight } from "@tabler/icons-react";
 import { ReactNode } from "react";
@@ -12,8 +12,6 @@ export type Column = {
 };
 
 export const DataTable = ({
-  title,
-  actions,
   columns,
   rowCount,
   rowKey,
@@ -21,8 +19,6 @@ export const DataTable = ({
   rowMarker,
   empty,
 }: {
-  title?: ReactNode;
-  actions?: ReactNode;
   columns: Column[];
   rowCount: number;
   rowKey: (index: number) => string;
@@ -32,14 +28,6 @@ export const DataTable = ({
   empty: ReactNode;
 }) => (
   <div>
-    {(title || actions) && (
-      <Group justify="space-between" mb={6} px={4}>
-        <Text fw={600} size="sm">
-          {title}
-        </Text>
-        {actions}
-      </Group>
-    )}
     <Paper withBorder radius="lg" style={{ overflow: "hidden" }}>
       {rowCount === 0 ? (
         <Text c="dimmed" size="sm" ta="center" py="xl">

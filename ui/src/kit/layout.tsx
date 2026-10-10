@@ -1,29 +1,43 @@
 // Page structure, in the style of macOS System Settings: a page is a title
 // and grouped sections; a section is a card of rows; a row is a label (and
 // an explanation) on the left, its control on the right.
-import { Box, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import { Anchor, Box, Group, Paper, Stack, Text, Title } from "@mantine/core";
 import { ReactNode } from "react";
 import "./kit.css";
+
+export type Crumb = { label: ReactNode; onClick?: () => void };
 
 export const SettingsPage = ({
   title,
   description,
-  breadcrumbs,
+  actions,
   wide,
   children,
 }: {
-  title: ReactNode;
+  /**
+   * The page's name, or the path to it for a nested page, which reads as
+   * "Networks / Home" with each earlier step a link back.
+   */
+  title: ReactNode | Crumb[];
   description?: ReactNode;
-  /** Above the title, for a page nested in another (e.g. one Wi-Fi network). */
-  breadcrumbs?: ReactNode;
-  /** For tables, which want the room. */
+  /** At the right of the title: Add on a list, Remove on an item. */
+  actions?: ReactNode;
+  /** For tables and the pages nested in them, which want the room. */
   wide?: boolean;
   children: ReactNode;
 }) => (
   <Stack gap="xl" maw={wide ? 1040 : 720} mx="auto" py="lg" px="md">
     <Box>
-      {breadcrumbs && <Box mb={6}>{breadcrumbs}</Box>}
-      <Title order={2}>{title}</Title>
+      <Group justify="space-between" wrap="nowrap" gap="md">
+        <Title order={2}>
+          {Array.isArray(title) ? <Crumbs crumbs={title} /> : title}
+        </Title>
+        {actions && (
+          <Group gap="xs" wrap="nowrap">
+            {actions}
+          </Group>
+        )}
+      </Group>
       {description && (
         <Text c="dimmed" mt={4}>
           {description}
@@ -32,6 +46,35 @@ export const SettingsPage = ({
     </Box>
     {children}
   </Stack>
+);
+
+const Crumbs = ({ crumbs }: { crumbs: Crumb[] }) => (
+  <>
+    {crumbs.map((crumb, i) => (
+      <span key={i}>
+        {i > 0 && (
+          <Text span inherit c="dimmed" mx={8} fw={400}>
+            /
+          </Text>
+        )}
+        {crumb.onClick ? (
+          // A button, not a bare <a>: focusable, and announced as actionable.
+          <Anchor
+            component="button"
+            type="button"
+            inherit
+            c="dimmed"
+            underline="hover"
+            onClick={crumb.onClick}
+          >
+            {crumb.label}
+          </Anchor>
+        ) : (
+          crumb.label
+        )}
+      </span>
+    ))}
+  </>
 );
 
 export const Section = ({
