@@ -58,16 +58,38 @@ const Shell = () => {
         </Group>
       </AppShell.Header>
       <AppShell.Navbar p="sm">
-        {pages.map(({ id, label, icon: Icon }) => (
-          <NavLink
-            key={id}
-            label={label}
-            leftSection={<Icon size={18} stroke={1.6} />}
-            active={isActive(id)}
-            onClick={() => navigate(`/${id}`)}
-            style={{ borderRadius: 8 }}
-          />
-        ))}
+        {pages.map((page) => {
+          const { id, label, icon: Icon } = page;
+          const children = "children" in page ? page.children : undefined;
+          return (
+            <NavLink
+              key={id}
+              label={label}
+              leftSection={<Icon size={18} stroke={1.6} />}
+              active={isActive(id) && !children}
+              opened={!!children && isActive(id)}
+              onClick={() => navigate(`/${id}`)}
+              style={{ borderRadius: 8 }}
+            >
+              {children?.map((child) => {
+                const path = child.id ? `/${id}/${child.id}` : `/${id}`;
+                return (
+                  <NavLink
+                    key={child.id}
+                    label={child.label}
+                    active={
+                      child.id
+                        ? isActive(`${id}/${child.id}`)
+                        : pathname === `/${id}`
+                    }
+                    onClick={() => navigate(path)}
+                    style={{ borderRadius: 8 }}
+                  />
+                );
+              })}
+            </NavLink>
+          );
+        })}
       </AppShell.Navbar>
       <AppShell.Main bg="var(--mantine-color-gray-0)">
         <Outlet />

@@ -31,11 +31,15 @@ export const intentApi =
   async ({ method, body }) => {
     if (method === "GET") {
       try {
-        // In the current format: the UI only knows that one.
-        return json(
-          200,
-          migrateIntent(parseConfigJson(files.readTextFile(intentPath), intentPath))
+        // In the current format, the only one the UI knows, and with the
+        // schema's defaults filled in: a setting a file leaves out must show
+        // as its default, or saving would write whatever the control showed.
+        // An invalid file comes back as written, for the UI to flag.
+        const intent = migrateIntent(
+          parseConfigJson(files.readTextFile(intentPath), intentPath)
         );
+        const parsed = intentSchema.safeParse(intent);
+        return json(200, parsed.success ? parsed.data : intent);
       } catch (e) {
         return json(404, { error: (e as Error).message });
       }
@@ -106,10 +110,16 @@ export const staticFiles =
 
 type JobPlatform = Files & Pick<Platform, "run" | "selfCommand">;
 
-/** An intent file, in the current format; undefined if missing or unreadable. */
+/**
+ * An intent file, in the current format and with defaults filled in when it
+ * is valid (so a diff never reports a default as a change); undefined if
+ * missing or unreadable.
+ */
 const readIntent = (files: Files, path: string) => {
   try {
-    return migrateIntent(parseConfigJson(files.readTextFile(path), path)) as any;
+    const intent = migrateIntent(parseConfigJson(files.readTextFile(path), path));
+    const parsed = intentSchema.safeParse(intent);
+    return (parsed.success ? parsed.data : intent) as any;
   } catch {
     return undefined;
   }

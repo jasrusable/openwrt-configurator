@@ -15,7 +15,7 @@ import {
   useFormState,
   useWatch,
 } from "react-hook-form";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { Intent } from "../../../src/intent/schema";
 import { Column, DataTable } from "../kit/DataTable";
 import { SettingsPage } from "../kit/layout";
@@ -70,9 +70,11 @@ type Fields<N extends ListName> = UseFieldArrayReturn<Intent, N>;
 const ListTable = <N extends ListName>({
   list,
   fields,
+  base,
 }: {
   list: ListSpec<N>;
   fields: Fields<N>;
+  base: string;
 }) => {
   const navigate = useNavigate();
   const { errors } = useFormState<Intent>({ name: list.name });
@@ -88,7 +90,7 @@ const ListTable = <N extends ListName>({
           variant="light"
           leftSection={<IconPlus size={16} />}
           // Nothing is added yet: the new item's page adds it, on confirm.
-          onClick={() => navigate("new")}
+          onClick={() => navigate(`${base}/new`)}
         >
           {list.addLabel}
         </Button>
@@ -98,7 +100,7 @@ const ListTable = <N extends ListName>({
         columns={list.columns}
         rowCount={fields.fields.length}
         rowKey={(index) => fields.fields[index].id}
-        onRowClick={(index) => navigate(String(index))}
+        onRowClick={(index) => navigate(`${base}/${index}`)}
         rowMarker={(index) =>
           hasErrors(index) && (
             <ThemeIcon size={18} radius="xl" color="red" variant="light">
@@ -116,16 +118,18 @@ const ListItemPage = <N extends ListName>({
   list,
   fields,
   index,
+  base,
 }: {
   list: ListSpec<N>;
   fields: Fields<N>;
   index: number;
+  base: string;
 }) => {
   const navigate = useNavigate();
   const draft = useIntentForm();
   const item = useWatch({ name: `${list.name}.${index}` as never }) as Item<N>;
   const removable = !list.canRemove || list.canRemove(item);
-  const back = () => navigate("..", { relative: "path" });
+  const back = () => navigate(base);
   // Same width and header position as the list: only the title grows a
   // step, "Networks / Home", whose first part leads back.
   return (
@@ -165,9 +169,11 @@ const ListItemPage = <N extends ListName>({
 const NewItemPage = <N extends ListName>({
   list,
   fields,
+  base,
 }: {
   list: ListSpec<N>;
   fields: Fields<N>;
+  base: string;
 }) => {
   const navigate = useNavigate();
   const draft = useIntentForm();
@@ -180,7 +186,7 @@ const NewItemPage = <N extends ListName>({
     };
   });
   const form = useIntentFormState(copy);
-  const back = () => navigate("..", { relative: "path" });
+  const back = () => navigate(base);
   const add = async () => {
     const path = `${list.name}.${index}` as never;
     // What adding implies (a network's zone) first, so the check sees it.
@@ -215,16 +221,31 @@ const NewItemPage = <N extends ListName>({
   );
 };
 
-/** The list's table, or one item's page when the URL names an index. */
-export const ListPage = <N extends ListName>({ list }: { list: ListSpec<N> }) => {
-  // One field array for both views, so they never disagree.
+/**
+ * The list's table, or one item's page when the URL names an index (or
+ * "new"). `sub` is that last part of the URL, when the list is nested in a
+ * section (/firewall/zones/1); otherwise it is the route's own splat.
+ */
+export const ListPage = <N extends ListName>({
+  list,
+  sub: given,
+}: {
+  list: ListSpec<N>;
+  sub?: string;
+}) => {
+  // One field array for every view, so they never disagree.
   const fields = useFieldArray<Intent, N>({ name: list.name });
-  const sub = useParams()["*"];
-  if (sub === "new") return <NewItemPage list={list} fields={fields} />;
-  const index = sub && /^\d+$/.test(sub) ? Number(sub) : undefined;
+  const splat = useParams()["*"];
+  const sub = given ?? splat ?? "";
+  const { pathname } = useLocation();
+  // The table's own URL: where its rows lead from, and items lead back to.
+  const base = (sub ? pathname.slice(0, pathname.length - sub.length) : pathname).replace(/\/+$/, "");
+  const props = { list, fields, base };
+  if (sub === "new") return <NewItemPage {...props} />;
+  const index = /^\d+$/.test(sub) ? Number(sub) : undefined;
   return index !== undefined && index < fields.fields.length ? (
-    <ListItemPage list={list} fields={fields} index={index} />
+    <ListItemPage {...props} index={index} />
   ) : (
-    <ListTable list={list} fields={fields} />
+    <ListTable {...props} />
   );
 };

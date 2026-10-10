@@ -4,12 +4,14 @@
 import {
   Button,
   Group,
+  MultiSelect,
   NumberInput,
   PasswordInput,
   SegmentedControl,
   Select,
   Stack,
   Switch,
+  TagsInput,
   TextInput,
 } from "@mantine/core";
 import { ReactNode } from "react";
@@ -428,5 +430,73 @@ export const ReferenceField = ({
         label: item[labelKey] || "Unnamed",
       }))}
     />
+  );
+};
+
+/** Several choices from a list, e.g. the networks in a zone. */
+export const MultiSelectField = ({
+  options,
+  placeholder,
+  ...row
+}: RowProps & { options: Option<string>[]; placeholder?: string }) => {
+  const field = useField(row.name);
+  return (
+    <SettingRow {...row} error={field.error}>
+      <MultiSelect
+        data={options}
+        value={field.value ?? []}
+        onChange={field.onChange}
+        placeholder={placeholder}
+        error={!!field.error}
+        style={control.wide}
+      />
+    </SettingRow>
+  );
+};
+
+/**
+ * A list of short values typed one by one, e.g. addresses. Empty is left out
+ * of the file rather than saved as [].
+ */
+export const TagsField = ({
+  placeholder,
+  ...row
+}: RowProps & { placeholder?: string }) => {
+  const field = useField(row.name);
+  return (
+    <SettingRow {...row} error={field.error}>
+      <TagsInput
+        value={field.value ?? []}
+        onChange={(values) => field.onChange(values.length ? values : undefined)}
+        placeholder={placeholder}
+        error={!!field.error}
+        style={control.wide}
+      />
+    </SettingRow>
+  );
+};
+
+/**
+ * A switch for whether `value` is in a list setting; `inverted` when the list
+ * names what is off (e.g. built-in rules switched off).
+ */
+export const ListToggleField = ({
+  value,
+  inverted,
+  ...row
+}: RowProps & { value: string; inverted?: boolean }) => {
+  const field = useField(row.name);
+  const list: string[] = field.value ?? [];
+  const present = list.includes(value);
+  return (
+    <SettingRow {...row} error={field.error}>
+      <Switch
+        checked={inverted ? !present : present}
+        onChange={() =>
+          field.onChange(present ? list.filter((v) => v !== value) : [...list, value])
+        }
+        size="md"
+      />
+    </SettingRow>
   );
 };
