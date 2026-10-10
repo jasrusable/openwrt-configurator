@@ -14,7 +14,8 @@
     "test": "ava",
     "test:watch": "ava --watch",
     "package": "pkg .",
-    "bundle": "esbuild bin/qjs.ts --bundle --minify --format=esm --platform=neutral --main-fields=main,module --external:std --external:os --banner:js=\"#!/usr/bin/env qjs\" --outfile=dist/qjs/openwrt-configurator.mjs"
+    "bundle": "node scripts/bundle.js",
+    "typecheck": "tsc -p tsconfig.typecheck.json"
   },
   "repository": {
     "type": "git",
@@ -40,12 +41,12 @@
       "ts"
     ],
     "require": [
-      "ts-node/register/transpile-only",
-      "./src/platforms/registerNode.ts"
-    ]
+      "ts-node/register/transpile-only"
+    ],
+    "timeout": "2m"
   },
   "dependencies": {
-    "boolean-parser": "^0.0.2",
+    "jsonc-parser": "^3.3.1",
     "node-ssh": "^13.0.0",
     "zod": "^3.19.1"
   },

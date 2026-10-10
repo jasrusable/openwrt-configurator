@@ -35,11 +35,3 @@ export const oncFirewallSchema = makeOncConfigSchema(
     .passthrough()
 );
 
-export const firewallSectionsToReset = {
-  firewall: {
-    defaults: true,
-    zone: true,
-    forwarding: true,
-    rule: true,
-  },
-};

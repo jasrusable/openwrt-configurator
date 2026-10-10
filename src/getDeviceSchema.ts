@@ -1,39 +1,53 @@
 import { DeviceSchema, deviceSchemaSchema } from "./deviceSchema";
-import { parseSections } from "./getConfigSections";
 import { ONCDeviceConfig } from "./oncConfigSchema";
-import { getDeviceFacts } from "./deviceFacts";
-import { platform, Session } from "./platform";
+import {
+  boardJson as boardJsonProbe,
+  radios as radiosProbe,
+  release,
+  runProbes,
+} from "./deviceProbes";
+import { Platform, Session } from "./platform";
 import { parseJson, parseSchema } from "./utils";
-
-const useLocalOverride = false;
 
 export const getDeviceSchema = async ({
   deviceConfig,
   ssh,
-  useLocal,
+  local,
 }: {
   deviceConfig: ONCDeviceConfig;
   /** An already-connected session. Reused so provisioning need not reconnect. */
   ssh?: Session;
-  useLocal?: boolean;
+  /**
+   * Read the schema from the checked-in ./deviceSchemas instead of the device.
+   * Only the tests use this, and those files cover just two old models.
+   */
+  local?: Pick<Platform, "readTextFile">;
 }) => {
-  // For local testing:
-  if (useLocalOverride || useLocal) {
-    const schema = parseJson(
-      platform().readTextFile(`./deviceSchemas/${deviceConfig.model_id}.json`)
+  if (local) {
+    const path = `./deviceSchemas/${deviceConfig.model_id}.json`;
+    return parseSchema(
+      deviceSchemaSchema,
+      parseJson(local.readTextFile(path), path)
     );
-    const deviceSchema = parseSchema(deviceSchemaSchema, schema);
-    return deviceSchema;
   }
 
   if (!ssh) {
     throw new Error(
-      `No SSH session provided for ${deviceConfig.hostname} and useLocal was not set.`
+      `No SSH session provided for ${deviceConfig.hostname} and no local schemas.`
     );
   }
 
-  const { boardJson, radios, uciExport, version } = await getDeviceFacts(ssh);
-  const configSections = parseSections(uciExport);
+  // One round trip: each exec is a separate SSH channel (~59ms on a LAN
+  // device, a whole client process under QuickJS).
+  const {
+    boardJson,
+    radios,
+    release: version,
+  } = await runProbes(ssh, {
+    boardJson: boardJsonProbe,
+    radios: radiosProbe,
+    release,
+  });
 
   const isSwConfig = !!boardJson.switch;
 
@@ -41,7 +55,6 @@ export const getDeviceSchema = async ({
     name: deviceConfig.model_id,
     version,
     sw_config: isSwConfig,
-    config_sections: configSections,
     ports: isSwConfig
       ? (boardJson.switch || {}).switch0.ports.map((port) => {
           return {

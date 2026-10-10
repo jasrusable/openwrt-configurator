@@ -1,0 +1,47 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # The release workflow runs all of this as its gate.
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: "npm"
+
+      - run: npm ci
+
+      - uses: ./.github/actions/setup-quickjs
+
+      - run: npm test
+
+      # The ts-node test run does not typecheck; this covers src, bin and the
+      # tests themselves (tsconfig.json's build excludes *.test.ts).
+      - run: npm run typecheck
+
+  # Provisions a real OpenWrt userland (procd, dropbear, netifd) booted in a
+  # container, over every SSH client path, including self-rollback when the
+  # new config cuts SSH off. See scripts/rig-test.sh.
+  rig:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: "npm"
+
+      - run: npm ci
+
+      - run: scripts/rig-test.sh

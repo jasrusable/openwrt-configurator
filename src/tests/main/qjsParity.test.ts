@@ -6,29 +6,47 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { parityReport } from "../helpers/parityReport";
+import { nodePlatform } from "../../platforms/node";
 
 // The same code under Node and QuickJS must behave identically. Skipped where
 // qjs is not installed; everything here is offline.
 const hasQjs = spawnSync("sh", ["-c", "command -v qjs"]).status === 0;
 const qjsTest = hasQjs ? test : test.skip;
 
+// Skipping is for machines without qjs. CI installs it, so its absence there
+// means the parity check silently stopped running.
+if (process.env.CI && !hasQjs) {
+  test("qjs is installed in CI", (t) => {
+    t.fail("qjs not found on PATH; see scripts/install-quickjs.sh");
+  });
+}
+
 const root = join(__dirname, "../../..");
 const work = mkdtempSync(join(tmpdir(), "onc-parity-"));
 test.after.always(() => rmSync(work, { recursive: true, force: true }));
+
+// The QuickJS side is built exactly as `npm run bundle` builds it.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { bundleForQjs } = require("../../../scripts/bundle.js");
 
 const bundle = (entry: string, platform: "node" | "neutral") => {
   const outfile = join(
     work,
     `${entry.replace(/\W/g, "_")}.${platform === "node" ? "cjs" : "mjs"}`
   );
+  if (platform === "neutral") {
+    bundleForQjs(join(root, entry), outfile);
+    return outfile;
+  }
   buildSync({
     entryPoints: [join(root, entry)],
     bundle: true,
-    format: platform === "node" ? "cjs" : "esm",
-    platform,
-    mainFields: ["main", "module"],
+    format: "cjs",
+    platform: "node",
+    // Same reason as scripts/bundle.js: jsonc-parser's UMD `main` cannot be bundled.
+    mainFields: ["module", "main"],
     // node-ssh pulls in native modules esbuild cannot bundle; NODE_PATH finds it.
-    external: platform === "node" ? ["node-ssh"] : ["std", "os"],
+    external: ["node-ssh"],
     outfile,
     logLevel: "error",
   });
@@ -66,9 +84,7 @@ writeFileSync(
   JSON.stringify([
     {
       filename: "good.bin",
-      // sha256 of "image bytes\n"
-      sha256:
-        "b4c0b5e2f5bf5be7c1ea4ae30c1d2ff9a2a9e1c7d3b4f51bd5d9e0e1f9fa6f1a",
+      sha256: createHash("sha256").update("image bytes\n").digest("hex"),
       devices: [{ hostname: "r1" }],
     },
     {
@@ -106,7 +122,9 @@ qjsTest("pipeline output for the fixtures", async (t) => {
   // The fixtures' plaintext-key warnings are expected; keep them out of the log.
   const warn = console.warn;
   console.warn = () => {};
-  const expected = await parityReport().finally(() => (console.warn = warn));
+  const expected = await parityReport({ platform: nodePlatform }).finally(
+    () => (console.warn = warn)
+  );
   const actual = run(
     [
       "qjs",

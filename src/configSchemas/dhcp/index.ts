@@ -29,10 +29,3 @@ export const oncDhcpSchema = makeOncConfigSchema(
     .passthrough()
 );
 
-export const dhcpSectionsToReset = {
-  dhcp: {
-    dnsmasq: true,
-    dhcp: true,
-    odhcpd: true,
-  },
-};

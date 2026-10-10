@@ -1,7 +1,7 @@
 import test from "ava";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { findJsonError, parseJson } from "../../parseJson";
+import { findJsonError, parseConfigJson, parseJson } from "../../parseJson";
 
 const errorOf = (text: string) => {
   try {
@@ -34,7 +34,7 @@ test("a trailing comma is called out", (t) => {
 test("common hand-editing mistakes are located", (t) => {
   t.regex(errorOf("{a: 1}"), /:1:2: Expected a double-quoted property name/);
   t.regex(errorOf('{"a" 1}'), /:1:6: Expected ':'/);
-  t.regex(errorOf('{"a": 1 "b": 2}'), /:1:9: Expected ',' or '}'/);
+  t.regex(errorOf('{"a": 1 "b": 2}'), /:1:9: Expected ','/);
   t.regex(errorOf('{"a": "x'), /Unterminated string/);
   t.regex(errorOf(""), /:1:1: Unexpected end of input/);
   t.regex(errorOf('{"a": 1}}'), /after the end of the JSON value/);
@@ -80,4 +80,31 @@ test("the scanner agrees with JSON.parse on mutated real configs", (t) => {
     if (valid !== (findJsonError(mutated) === undefined)) disagreements++;
   }
   t.is(disagreements, 0);
+});
+
+test("config files may carry comments and trailing commas", (t) => {
+  const text = [
+    "{",
+    "  // the router",
+    '  "url": "https://example.com/feed", /* inline */',
+    '  "list": [1, 2,],',
+    "}",
+  ].join("\n");
+  t.deepEqual(parseConfigJson(text, "net.json"), {
+    url: "https://example.com/feed",
+    list: [1, 2],
+  });
+});
+
+test("config file errors are still located, after comments", (t) => {
+  const text = '{\n  // a comment\n  "a": 1\n  "b": 2\n}';
+  const error = t.throws(() => parseConfigJson(text, "net.json"));
+  t.true(
+    error!.message.startsWith("net.json:4:3: Expected ','"),
+    error!.message
+  );
+});
+
+test("strict JSON still rejects comments", (t) => {
+  t.throws(() => parseJson('{ // no\n "a": 1 }'), { message: /:1:3:/ });
 });

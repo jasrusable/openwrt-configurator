@@ -45,8 +45,8 @@ export const getOpenWrtState = ({
     .filter((packageName) => packageName.startsWith("-"))
     .map((name) => name.slice(1));
 
-  const a = deviceSchema.config_sections || {};
-
+  // What the wipe leaves alone. The rest is worked out against the device's
+  // actual config, read after the package step (see getStageCommands).
   const configsToNotReset = (oncConfig.configs_to_not_reset || [])
     .filter((a) => {
       return conditionMatches({
@@ -55,19 +55,7 @@ export const getOpenWrtState = ({
         deviceSchema,
       });
     })
-    .reduce<string[]>((acc, curr) => {
-      return [...acc, ...curr.configs];
-    }, []);
-
-  const configSectionsToReset = Object.keys(a).reduce((acc, configKey) => {
-    if (configsToNotReset.includes(`${configKey}.*`)) {
-      return acc;
-    }
-    const sectionKeys = a[configKey].filter((sectionKey) => {
-      return !configsToNotReset.includes(`${configKey}.${sectionKey}`);
-    });
-    return { ...acc, [configKey]: [...(acc[configKey] || []), ...sectionKeys] };
-  }, {} as any);
+    .flatMap((a) => a.configs);
 
   // Resolve files (conditional via `.if`), de-duped by path with last-one-wins.
   const filesMap = new Map<
@@ -103,7 +91,7 @@ export const getOpenWrtState = ({
     config: openWrtConfig,
     packagesToInstall,
     packagesToUninstall,
-    configSectionsToReset,
+    configsToNotReset,
     files,
   };
 

@@ -1,10 +1,20 @@
 import test from "ava";
-import { getDeviceScript, getRevertCommands } from "../../getDeviceScript";
-import { getInstalledPackages } from "../../deviceFacts";
+import {
+  getDeviceScript,
+  getFinaliseCommands,
+  revertPendingCommands,
+} from "../../getDeviceScript";
+import {
+  installedPackages,
+  runProbe,
+  summarisePendingChanges,
+} from "../../deviceProbes";
 import { OpenWrtState } from "../../openWrtConfigSchema";
 
 /** Routes canned responses by command, like a device would. */
-const fakeSsh = (responses: { match: string; stdout: string; code?: number }[]) =>
+const fakeSsh = (
+  responses: { match: string; stdout: string; code?: number }[]
+) =>
   ({
     execCommand: async (command: string) => {
       const hit = responses.find((r) => command.includes(r.match));
@@ -13,11 +23,13 @@ const fakeSsh = (responses: { match: string; stdout: string; code?: number }[]) 
   } as any);
 
 // Real `apk info` output: bare names, one per line.
-const apkInfo = ["firewall4", "wpad-basic-mbedtls", "curl", "dnsmasq"].join("\n");
+const apkInfo = ["firewall4", "wpad-basic-mbedtls", "curl", "dnsmasq"].join(
+  "\n"
+);
 
 test("getInstalledPackages returns bare names from apk info", async (t) => {
   const ssh = fakeSsh([{ match: "apk info", stdout: apkInfo }]);
-  const packages = await getInstalledPackages(ssh);
+  const packages = await runProbe(ssh, installedPackages);
   t.deepEqual(packages, ["firewall4", "wpad-basic-mbedtls", "curl", "dnsmasq"]);
 });
 
@@ -28,7 +40,10 @@ test("package removals survive the installed-set filter", async (t) => {
   const state: OpenWrtState = {
     config: {} as any,
     packagesToUninstall: ["firewall4", "not-installed-pkg"],
-    packagesToInstall: [{ packageName: "curl" }, { packageName: "sqm-scripts" }],
+    packagesToInstall: [
+      { packageName: "curl" },
+      { packageName: "sqm-scripts" },
+    ],
   };
   const commands = getDeviceScript({
     state,
@@ -38,40 +53,17 @@ test("package removals survive the installed-set filter", async (t) => {
   const add = commands.find((c) => c.startsWith("apk add"));
 
   // Only the package actually installed is removed.
-  t.is(del, "apk del --rdepends firewall4");
+  t.is(del, "apk del --rdepends 'firewall4'");
   // Only the package not already installed is added.
-  t.is(add, "apk add --update-cache sqm-scripts");
-});
-
-test("getRevertCommands covers configs outside the built-in set", (t) => {
-  // The config schema has a catchall, so a config can drive any UCI package.
-  // Those were staged but never reverted, and the final bare `uci commit`
-  // commits every package — so a later run committed the leftovers.
-  const state: OpenWrtState = {
-    config: { network: {}, sqm: {}, dropbear: {}, usteer: {} } as any,
-  };
-  const reverts = getRevertCommands(state);
-  const reverted = (config: string) =>
-    reverts.includes(
-      `if [ -f /etc/config/${config} ]; then uci revert ${config}; fi`
-    );
-
-  t.true(reverted("sqm"));
-  t.true(reverted("dropbear"));
-  t.true(reverted("usteer"));
-  // Built-ins are still covered even when the config does not mention them.
-  t.true(reverted("firewall"));
-  t.true(reverted("wireless"));
-  // `uci revert` exits 1 on a config that is not present, and the revert script
-  // runs under `set -e` — unguarded, one absent config would abort every
-  // remaining revert, at the worst possible moment.
-  t.true(reverts.every((c) => c.startsWith("if [ -f /etc/config/")));
+  t.is(add, "apk add --update-cache 'sqm-scripts'");
 });
 
 test("uci set operations are collapsed into a single uci batch", async (t) => {
   const state: OpenWrtState = {
     config: {
-      system: { system: [{ ".name": "system0", hostname: "r1", timezone: "UTC" }] },
+      system: {
+        system: [{ ".name": "system0", hostname: "r1", timezone: "UTC" }],
+      },
     } as any,
   };
 
@@ -199,7 +191,9 @@ test("the config baseline is refreshed after installs and before staging", async
 
 test("the script still ends with commit then reload", async (t) => {
   const state: OpenWrtState = {
-    config: { system: { system: [{ ".name": "system0", hostname: "r1" }] } } as any,
+    config: {
+      system: { system: [{ ".name": "system0", hostname: "r1" }] },
+    } as any,
   };
   const commands = await getDeviceScript({ state });
   t.is(
@@ -214,20 +208,32 @@ test("the script still ends with commit then reload", async (t) => {
 // earlier run that failed and was rolled back.
 test("the commit names only the configs this run touched", async (t) => {
   const state: OpenWrtState = {
-    config: { network: { interface: [{ ".name": "lan", proto: "static" }] } } as any,
-    configSectionsToReset: { firewall: ["zone"] },
+    config: {
+      network: { interface: [{ ".name": "lan", proto: "static" }] },
+    } as any,
+    configsToNotReset: ["luci.*"],
   };
 
-  const commands = await getDeviceScript({ state });
+  const commands = getDeviceScript({
+    state,
+    current: {
+      firewall: [{ type: "zone", options: {} }],
+      luci: [{ type: "core", name: "main", options: {} }],
+    },
+  });
   const commits = commands.filter((c) => c.includes("uci commit"));
 
   t.is(commits.length, 2);
   // Both the config it writes and the config it resets are committed...
   t.true(
-    commits.includes("if [ -f /etc/config/network ]; then uci commit network; fi")
+    commits.includes(
+      "if [ -f /etc/config/network ]; then uci commit network; fi"
+    )
   );
   t.true(
-    commits.includes("if [ -f /etc/config/firewall ]; then uci commit firewall; fi")
+    commits.includes(
+      "if [ -f /etc/config/firewall ]; then uci commit firewall; fi"
+    )
   );
   // ...and nothing commits every package wholesale.
   t.false(commands.includes("uci commit"));
@@ -245,18 +251,27 @@ test("configs with no operations are neither reverted nor committed", async (t) 
       usteer: {},
       radius: { radius: [] },
     } as any,
-    // Present on the device, but nothing of it is being reset.
-    configSectionsToReset: { network: ["interface"], dropbear: [] },
+    // Present on the device, but kept.
+    configsToNotReset: ["dropbear.*"],
   };
 
-  const commands = await getDeviceScript({ state });
+  const commands = getDeviceScript({
+    state,
+    current: {
+      network: [{ type: "interface", name: "lan", options: {} }],
+      dropbear: [{ type: "dropbear", name: "main", options: {} }],
+    },
+  });
   const mentions = (config: string) =>
     commands.some((c) => c.includes(`/etc/config/${config}`));
 
   t.true(mentions("network"), "a config with real operations is handled");
   t.false(mentions("usteer"), "an empty package is skipped");
-  t.false(mentions("radius"), "a package whose sections are all gone is skipped");
-  t.false(mentions("dropbear"), "a config with nothing to reset is skipped");
+  t.false(
+    mentions("radius"),
+    "a package whose sections are all gone is skipped"
+  );
+  t.false(mentions("dropbear"), "a kept config is skipped");
 });
 
 // A run that dies before it can revert leaves staged deltas in /tmp/.uci. The
@@ -269,16 +284,63 @@ test("staged changes are discarded before this run stages its own", async (t) =>
   };
 
   const commands = await getDeviceScript({ state });
-  const revert = commands.indexOf(
-    "if [ -f /etc/config/network ]; then uci revert network; fi"
-  );
+  const revert = commands.indexOf(revertPendingCommands[0]);
   const install = commands.findIndex((c) => c.startsWith("apk add"));
   const firstStaged = commands.findIndex((c) => c.startsWith("uci batch"));
 
-  t.true(revert > -1, "the touched config is reverted first");
+  t.true(revert > -1, "pending changes are discarded");
   // Before the packages step: `default_postinst` ends with a bare `uci commit`
   // for any package shipping /etc/uci-defaults, which would commit the very
   // leftovers being dropped here.
   t.true(revert < install, "the clean start precedes package installs");
   t.true(revert < firstStaged, "the clean start precedes staging");
+});
+
+test("a run starts by discarding every pending change, whoever made it", (t) => {
+  const commands = getDeviceScript({
+    state: { config: { system: { system: [{ ".name": "s" }] } } as any },
+  });
+  // First, before the packages step: default_postinst's bare `uci commit`
+  // would otherwise commit whatever was staged anywhere.
+  t.deepEqual(
+    commands.slice(0, revertPendingCommands.length),
+    revertPendingCommands
+  );
+  // Read on the device, so it covers packages this run knows nothing about,
+  // and guarded against deltas for config files that do not exist.
+  t.regex(revertPendingCommands[0], /uci changes/);
+  t.regex(revertPendingCommands[0], /if \[ -f "\/etc\/config\/\$pkg" \]/);
+});
+
+test("the commit covers packages whose sections are only reset", (t) => {
+  const state: OpenWrtState = {
+    config: { system: { system: [{ ".name": "s" }] }, sqm: {} } as any,
+    configsToNotReset: ["dhcp.dnsmasq"],
+  };
+  const current = {
+    attendedsysupgrade: [{ type: "server", options: {} }],
+    dhcp: [{ type: "dnsmasq", options: {} }],
+  };
+  const committed = getFinaliseCommands({ state, current }).flatMap((c) => {
+    const m = c.match(/uci commit (\S+);/);
+    return m ? [m[1]] : [];
+  });
+  // sqm and dhcp have nothing staged (dhcp's only section type is kept), so
+  // naming them would commit someone else's changes; attendedsysupgrade only
+  // has sections wiped.
+  t.deepEqual(committed, ["attendedsysupgrade", "system"]);
+});
+
+test("pending changes are summarised per package, without values", (t) => {
+  const summary = summarisePendingChanges(
+    [
+      "-dropbear.main",
+      "wireless.default_radio0.key='hunter2'",
+      "network.lan.dns+='1.1.1.1'",
+      "network.wan=interface",
+      "",
+    ].join("\n")
+  );
+  t.deepEqual(summary, { dropbear: 1, wireless: 1, network: 2 });
+  t.false(JSON.stringify(summary).includes("hunter2"));
 });

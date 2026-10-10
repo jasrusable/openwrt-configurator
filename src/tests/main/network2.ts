@@ -5,6 +5,7 @@ import { getDeviceSchema } from "../../getDeviceSchema";
 import { getOpenWrtConfig } from "../../getOpenWrtConfig";
 import { ONCConfig, oncConfigSchema } from "../../oncConfigSchema";
 import { parseJson, parseSchema } from "../../utils";
+import { nodePlatform } from "../../platforms/node";
 
 const oncConfigString = readFileSync(
   join(__dirname, "./config2.json"),
@@ -21,7 +22,7 @@ test("network", async (t) => {
     deviceConfigs.map(async (deviceConfig) => {
       const deviceSchema = await getDeviceSchema({
         deviceConfig,
-        useLocal: true,
+        local: nodePlatform,
       });
       return deviceSchema;
     })

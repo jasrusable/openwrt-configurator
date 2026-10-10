@@ -43,7 +43,8 @@ export const oncConfigSchema = z
         .object({
           enabled: z.boolean().optional(),
           model_id: z.string(),
-          ipaddr: z.string(),
+          /** Only needed to provision or inspect the device over SSH. */
+          ipaddr: z.string().optional(),
           hostname: z.string(),
           tags: z.record(z.union([z.string(), z.array(z.string())])),
           provisioning_config: z
@@ -63,7 +64,15 @@ export const oncConfigSchema = z
         z
           .object({
             ".if": conditionSchema.optional(),
-            packages: z.array(z.string()),
+            // apk's own name charset; a leading "-" means remove.
+            packages: z.array(
+              z
+                .string()
+                .regex(
+                  /^-?[A-Za-z0-9][A-Za-z0-9._+-]*$/,
+                  "must be an apk package name, optionally prefixed with - to remove it"
+                )
+            ),
           })
           .strict()
       )
@@ -73,9 +82,12 @@ export const oncConfigSchema = z
         z
           .object({
             ".if": conditionSchema.optional(),
-            path: z.string(),
+            path: z.string().startsWith("/", "must be an absolute path"),
             content: z.string(),
-            mode: z.string().optional(),
+            mode: z
+              .string()
+              .regex(/^[0-7]{3,4}$/, "must be an octal mode such as 0755")
+              .optional(),
             run_after: z.string().optional(),
             run_after_reload: z.string().optional(),
           })

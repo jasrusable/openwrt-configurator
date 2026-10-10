@@ -76,6 +76,10 @@ The JSON config file can be conditionally composed with `.if` and/or `.overrides
 
    Standalone binaries for macOS, Linux and Windows are also on the [GitHub Releases page](https://github.com/jasrusable/openwrt-configurator/releases).
 
+   `provision` treats all the devices in the file as **one change**: every device is armed with a rollback before any is touched, and only when every one of them can be reached afterwards is the change kept. If any fails, the devices already changed are rolled back too. The router (your machine's gateway) and the device running the tool are provisioned last.
+
+   Each device's SSH host key is remembered the first time you connect (`~/.config/openwrt-configurator/known_hosts`; on a device, dropbear's `~/.ssh/known_hosts`), and a changed key is refused. After reflashing a device, delete its line from that file.
+
 2. Download a [sample configuration file](https://github.com/jasrusable/openwrt-configurator/tree/main/sampleConfigs).
 
 3. Adjust your configuration file as needed.
@@ -129,7 +133,9 @@ Provisioning completed.
 
 ## How it works
 
-1. Add your devices to the JSON config file.
+The config file is JSON, and may carry `//` and `/* */` comments and trailing commas.
+
+1. Add your devices to the JSON config file. `ipaddr` and `provisioning_config` are only needed for devices you provision over SSH; a device that is only ever built as an image (`build-images`) can leave them out, and `provision` skips it with a note.
 
 ```json
   "devices": [
@@ -202,6 +208,18 @@ Provisioning completed.
 ```
 
 4. Specify your UCI configuration in JSON, and add `.if` and/or `.overrides` keys to apply configuration conditionally.
+
+   Conditions compare a device's properties: `device.tag.<key>`, `device.hostname`, `device.ipaddr`, `device.model_id`, `device.version` and `device.sw_config`.
+
+   | Syntax | Meaning |
+   |---|---|
+   | `device.tag.role == 'ap'`, `!=` | equals / differs (a list-valued tag *contains* the value) |
+   | `device.tag.role in ['ap', 'switch']` | equals any of |
+   | `AND` / `&&`, `OR` / `\|\|`, `NOT` / `!`, `( … )` | combine; `AND` binds tighter than `OR`; keywords in any case |
+   | `'my house'`, `"jason's ap"`, `'it\'s'` | strings keep spaces; `\` escapes a quote |
+   | `*` | always |
+
+   A tag the device does not set is simply absent: `==` and `in` are false, `!=` is true. A misspelled built-in such as `device.hostnmae` is an error.
 
 ```json
   "config": {

@@ -43,12 +43,3 @@ export const oncNetworkSchema = makeOncConfigSchema(
     .strict()
 );
 
-export const networkSectionsToReset = {
-  network: {
-    interface: true,
-    device: true,
-    "bridge-vlan": true,
-    switch_vlan: true,
-    switch: true,
-  },
-};

@@ -1,0 +1,20 @@
+name: Set up QuickJS
+description: >
+  Build qjs at exactly the version OpenWrt 25.12 ships (hash-pinned in
+  scripts/install-quickjs.sh), cached, and put it on PATH. The parity test
+  fails in CI without it.
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v4
+      id: cache
+      with:
+        path: ~/.local/quickjs
+        key: quickjs-${{ hashFiles('scripts/install-quickjs.sh') }}
+
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: sh
+      run: scripts/install-quickjs.sh ~/.local/quickjs
+
+    - shell: sh
+      run: echo "$HOME/.local/quickjs/bin" >> "$GITHUB_PATH"

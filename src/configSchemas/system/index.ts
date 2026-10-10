@@ -23,8 +23,3 @@ export const oncSystemSchema = makeOncConfigSchema(
     .passthrough()
 );
 
-export const systemSectionsToReset = {
-  system: {
-    system: true,
-  },
-};

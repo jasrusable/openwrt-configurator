@@ -2,6 +2,7 @@ import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
 import { conditionMatches } from "./resolveOncConfig";
 import { utf8ByteLength } from "./utf8";
+import { shellQuote } from "./shell";
 
 const BOOTSTRAP_MARKER = "/etc/openwrt-configurator-bootstrapped";
 const UCI_DEFAULTS_MAX_BYTES = 20480;
@@ -73,10 +74,7 @@ export const resolvePackages = ({
   const deviceSchema = buildModeDeviceSchema(deviceConfig);
   return (oncConfig.package_profiles || [])
     .filter((p) => matches(p[".if"], deviceConfig, deviceSchema))
-    .reduce<string[]>(
-      (acc, p) => [...new Set([...acc, ...p.packages])],
-      []
-    )
+    .reduce<string[]>((acc, p) => [...new Set([...acc, ...p.packages])], [])
     .map((entry) => entry.split("@")[0]);
 };
 
@@ -122,7 +120,11 @@ export const resolveLanInterface = ({
   });
   if (!resolved) return undefined;
   delete (resolved as any)[".name"];
-  return resolved as { proto?: string; ipaddr?: string; netmask?: string } & Record<string, unknown>;
+  return resolved as {
+    proto?: string;
+    ipaddr?: string;
+    netmask?: string;
+  } & Record<string, unknown>;
 };
 
 export const resolveTimezone = ({
@@ -133,21 +135,16 @@ export const resolveTimezone = ({
   deviceConfig: ONCDeviceConfig;
 }): { timezone?: string; zonename?: string } => {
   const deviceSchema = buildModeDeviceSchema(deviceConfig);
-  const systemSections: any[] =
-    (oncConfig.config?.system as any)?.system || [];
+  const systemSections: any[] = (oncConfig.config?.system as any)?.system || [];
   const merged = systemSections
     .map((s) => resolveSection({ section: s, deviceConfig, deviceSchema }))
     .filter((s): s is Record<string, unknown> => !!s)
     .reduce((acc, s) => ({ ...acc, ...s }), {} as Record<string, unknown>);
   return {
-    timezone:
-      typeof merged.timezone === "string" ? merged.timezone : undefined,
-    zonename:
-      typeof merged.zonename === "string" ? merged.zonename : undefined,
+    timezone: typeof merged.timezone === "string" ? merged.timezone : undefined,
+    zonename: typeof merged.zonename === "string" ? merged.zonename : undefined,
   };
 };
-
-const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 
 export const getUciDefaultsScript = ({
   timezone,
@@ -204,13 +201,7 @@ export const getUciDefaultsScript = ({
     }
   }
 
-  lines.push(
-    "__UCI__",
-    "",
-    `touch ${BOOTSTRAP_MARKER}`,
-    "exit 0",
-    ""
-  );
+  lines.push("__UCI__", "", `touch ${BOOTSTRAP_MARKER}`, "exit 0", "");
 
   const script = lines.join("\n");
   if (utf8ByteLength(script) > UCI_DEFAULTS_MAX_BYTES) {

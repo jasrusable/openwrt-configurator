@@ -1,10 +1,21 @@
 import { DeviceBuildPlan } from "./getBuildPlan";
 import { getDeviceScript, managedFilesManifest } from "./getDeviceScript";
-import { getInstalledPackages, getManagedFiles } from "./deviceFacts";
+import {
+  installedPackages,
+  managedFiles,
+  runProbes,
+  uciConfigs,
+} from "./deviceProbes";
 import { CommandSpec, runCli } from "./args";
 import { join } from "./paths";
-import { platform } from "./platform";
-import { connectToDevice, provisionConfig } from "./provisionConfig";
+import { Platform } from "./platform";
+import {
+  connectToDevice,
+  provisionableDevices,
+  provisionConfig,
+  reportSkipped,
+} from "./provisionConfig";
+import { confirmTiming } from "./confirm";
 import { getDeviceSchema } from "./getDeviceSchema";
 import { loadOncConfig } from "./loadConfig";
 import { redactValue, setKeychainSecret } from "./resolveSecrets";
@@ -19,7 +30,22 @@ import {
   verifyImageFile,
 } from "./buildImage";
 
-export const main = async (argv: string[]) => {
+export const main = async ({
+  argv,
+  platform,
+}: {
+  argv: string[];
+  platform: Platform;
+}) => {
+  const timing = confirmTiming(platform.env("ONC_TEST_MIN_CONFIRM_WINDOW"));
+  const { minimumConfirmTimeoutSeconds } = timing;
+  if (timing.shortened) {
+    console.warn(
+      `Warning: ONC_TEST_MIN_CONFIRM_WINDOW shortens the confirm window to ` +
+        `${timing.minimumConfirmWindowMs / 1000}s. For tests only.`
+    );
+  }
+
   const commands: CommandSpec[] = [];
 
   commands.push({
@@ -55,9 +81,12 @@ export const main = async (argv: string[]) => {
         parse: (v) => {
           const seconds = parseInt(v, 10);
           // An unparsed value would reach the device as `sleep NaN`.
-          if (!Number.isFinite(seconds) || seconds < 30) {
+          if (
+            !Number.isFinite(seconds) ||
+            seconds < minimumConfirmTimeoutSeconds
+          ) {
             throw new Error(
-              `--confirm-timeout must be a whole number of seconds, at least 30 (got "${v}").`
+              `--confirm-timeout must be a whole number of seconds, at least ${minimumConfirmTimeoutSeconds} (got "${v}").`
             );
           }
           return seconds;
@@ -71,13 +100,15 @@ export const main = async (argv: string[]) => {
       },
     ],
     action: async ([configPath], options) => {
-      const { oncConfig } = await loadOncConfig(configPath);
+      const { oncConfig } = await loadOncConfig({ path: configPath, platform });
       await provisionConfig({
         oncConfig,
         confirm: options.confirm,
         confirmTimeoutSeconds: options.confirmTimeout,
         rollbackMode: options.rollback,
         identityPath: options.identity,
+        platform,
+        timing,
       });
     },
   });
@@ -104,18 +135,22 @@ export const main = async (argv: string[]) => {
       },
     ],
     action: async ([configPath], options) => {
-      const { oncConfig, secrets } = await loadOncConfig(configPath);
-      const deviceConfigs = oncConfig.devices.filter(
-        (device) => device.enabled !== false
-      );
+      const { oncConfig, secrets } = await loadOncConfig({
+        path: configPath,
+        platform,
+      });
+      const { ready: deviceConfigs, skipped } = provisionableDevices(oncConfig);
+      reportSkipped(skipped);
 
       // Each device keeps its own schema. Looking it up by model_id meant two
       // devices of the same model shared one schema, so the second was built
       // against the first device's UCI sections and firmware version.
       const devices = await Promise.all(
         deviceConfigs.map(async (deviceConfig) => {
-          const ssh = await connectToDevice(deviceConfig, {
+          const ssh = await connectToDevice({
+            deviceConfig,
             identityPath: options.identity,
+            platform,
           });
           try {
             const deviceSchema = await getDeviceSchema({ deviceConfig, ssh });
@@ -143,10 +178,16 @@ export const main = async (argv: string[]) => {
           // actually on the device — which badly overstates the change. It
           // printed a 21-package `apk del` cascade for packages that were not
           // even installed, and a dry run nobody can trust is worse than none.
+          const facts = await runProbes(ssh, {
+            installedPackages,
+            managedFiles: managedFiles(managedFilesManifest),
+            uciConfigs,
+          });
           const commands = getDeviceScript({
             state,
-            installedPackages: await getInstalledPackages(ssh),
-            managedFiles: await getManagedFiles(ssh, managedFilesManifest),
+            installedPackages: facts.installedPackages,
+            managedFiles: facts.managedFiles,
+            current: facts.uciConfigs.configs,
             redact: options.showSecrets
               ? undefined
               : (value) => redactValue(value, secrets),
@@ -191,7 +232,10 @@ export const main = async (argv: string[]) => {
       },
     ],
     action: async ([configPath], options) => {
-      const { oncConfig, secrets } = await loadOncConfig(configPath);
+      const { oncConfig, secrets } = await loadOncConfig({
+        path: configPath,
+        platform,
+      });
       const deviceConfigs = oncConfig.devices.filter(
         (device) => device.enabled !== false
       );
@@ -201,7 +245,7 @@ export const main = async (argv: string[]) => {
       );
 
       const groupKey = (plan: DeviceBuildPlan) =>
-        platform()
+        platform
           .sha256(
             JSON.stringify({
               version: plan.version,
@@ -237,6 +281,7 @@ export const main = async (argv: string[]) => {
             const resolved = await getProfileTarget({
               version: plan.version,
               modelId: plan.deviceConfig.model_id,
+              platform,
             });
             target = resolved.target;
             profile = resolved.profile;
@@ -277,7 +322,7 @@ export const main = async (argv: string[]) => {
         return;
       }
 
-      platform().mkdirp(options.out);
+      platform.mkdirp(options.out);
 
       type ManifestEntry = {
         filename: string;
@@ -302,17 +347,21 @@ export const main = async (argv: string[]) => {
         const { profile, target } = await getProfileTarget({
           version: plan.version,
           modelId: plan.deviceConfig.model_id,
+          platform,
         });
         console.log(`[${tag}] requesting build (${target}/${profile})...`);
         const { requestHash } = await requestBuild({
-          version: plan.version,
-          target,
-          profile,
-          packages: plan.packages,
-          defaults: plan.uciDefaults,
+          req: {
+            version: plan.version,
+            target,
+            profile,
+            packages: plan.packages,
+            defaults: plan.uciDefaults,
+          },
+          platform,
         });
         console.log(`[${tag}] build queued: ${requestHash}`);
-        const result = await pollBuild({ requestHash });
+        const result = await pollBuild({ requestHash, platform });
         const sysupgrade = pickSysupgradeImage(result);
         const filename = imageFilename(plan, hash);
         const outPath = join(options.out, filename);
@@ -323,6 +372,7 @@ export const main = async (argv: string[]) => {
           outPath,
           expectedSha256: sysupgrade.sha256,
           expectedSize: sysupgrade.size,
+          platform,
         });
         console.log(
           `[${tag}] verified. sha256=${verified.sha256} size=${verified.size} format=${verified.magic}`
@@ -371,7 +421,7 @@ export const main = async (argv: string[]) => {
 
       manifest.sort((a, b) => a.filename.localeCompare(b.filename));
       const manifestPath = join(options.out, "manifest.json");
-      platform().writeTextFile(
+      platform.writeTextFile(
         manifestPath,
         JSON.stringify(manifest, null, 2) + "\n"
       );
@@ -436,7 +486,49 @@ export const main = async (argv: string[]) => {
             `  ${f.model_id} ${f.hash} (${f.hostnames.join(", ")}): ${f.error}`
           );
         }
-        platform().exit(1);
+        platform.exit(1);
+      }
+    },
+  });
+
+  commands.push({
+    name: "capture-device-schema",
+    description:
+      "record each device's hardware schema (ports, radios, section types, version; no option values) as a test fixture",
+    args: [
+      { name: "config-file", description: "config file naming the devices" },
+    ],
+    options: [
+      {
+        flags: "--out <dir>",
+        description: "directory to write <model_id>.json into",
+        default: "./deviceSchemas",
+      },
+      {
+        flags: "--identity <path>",
+        description: "SSH private key (like ssh -i).",
+      },
+    ],
+    action: async ([configPath], options) => {
+      const { oncConfig } = await loadOncConfig({ path: configPath, platform });
+      const { ready, skipped } = provisionableDevices(oncConfig);
+      reportSkipped(skipped);
+      platform.mkdirp(options.out);
+      for (const deviceConfig of ready) {
+        const ssh = await connectToDevice({
+          deviceConfig,
+          identityPath: options.identity,
+          platform,
+        });
+        try {
+          // Read-only: introspection only, the same as print-uci-commands.
+          const schema = await getDeviceSchema({ deviceConfig, ssh });
+          const path = join(options.out, `${deviceConfig.model_id}.json`);
+          platform.writeTextFile(path, JSON.stringify(schema, null, 2) + "\n");
+          console.log(`${deviceConfig.hostname}: wrote ${path}`);
+        } finally {
+          ssh.dispose();
+        }
       }
     },
   });
@@ -454,7 +546,7 @@ export const main = async (argv: string[]) => {
     ],
     action: async (_args, options) => {
       const manifestPath = join(options.out, "manifest.json");
-      const manifestRaw = platform().readTextFile(manifestPath);
+      const manifestRaw = platform.readTextFile(manifestPath);
       const manifest = JSON.parse(manifestRaw) as Array<{
         filename: string;
         sha256: string;
@@ -468,6 +560,7 @@ export const main = async (argv: string[]) => {
           const { ok, actualSha256 } = await verifyImageFile({
             path,
             expectedSha256: entry.sha256,
+            platform,
           });
           const hostnames = entry.devices.map((d) => d.hostname).join(", ");
           if (ok) {
@@ -488,7 +581,7 @@ export const main = async (argv: string[]) => {
         console.log(
           `\n${failed} of ${manifest.length} image(s) failed verification`
         );
-        platform().exit(1);
+        platform.exit(1);
       }
       console.log(`\nall ${manifest.length} image(s) verified`);
     },
@@ -505,7 +598,7 @@ export const main = async (argv: string[]) => {
       },
     ],
     action: async ([name]) => {
-      await setKeychainSecret(name);
+      await setKeychainSecret({ name, platform });
     },
   });
 
@@ -520,13 +613,19 @@ export const main = async (argv: string[]) => {
   );
 };
 
-/** Run the CLI with an already-installed platform, exiting when done. */
-export const run = (argv: string[]) =>
-  main(argv)
-    .then(() => platform().exit(0))
+/** Run the CLI on the given platform, exiting when done. */
+export const run = ({
+  argv,
+  platform,
+}: {
+  argv: string[];
+  platform: Platform;
+}) =>
+  main({ argv, platform })
+    .then(() => platform.exit(0))
     .catch((e) => {
       // Without this a failure surfaces as an unhandled rejection and a stack
       // trace rather than a readable message.
       console.error(`\nError: ${(e as Error)?.message ?? e}`);
-      platform().exit(1);
+      platform.exit(1);
     });

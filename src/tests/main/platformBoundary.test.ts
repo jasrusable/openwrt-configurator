@@ -4,7 +4,7 @@ import { builtinModules } from "module";
 import { join } from "path";
 
 // Everything outside src/platforms/ must run under QuickJS as well as Node, so
-// it reaches the runtime only through `platform()`.
+// it reaches the runtime only through a `Platform` passed in.
 const srcDir = join(__dirname, "../..");
 const exempt = [join(srcDir, "platforms"), join(srcDir, "tests")];
 const nodeOnlyPackages = ["node-ssh", "axios"];

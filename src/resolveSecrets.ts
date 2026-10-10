@@ -1,4 +1,4 @@
-import { ExecResult, platform } from "./platform";
+import { ExecResult, Platform } from "./platform";
 import { decodeUtf8Hex } from "./utf8";
 
 export const KEYCHAIN_SERVICE = "openwrt-configurator";
@@ -257,67 +257,75 @@ export const findPlaintextSecrets = (value: unknown, path = ""): string[] => {
   return hits;
 };
 
-export const lookupKeychain: SecretLookup = async (name) => {
-  if (platform().os !== "darwin") {
-    throw new Error(
-      `Keychain secret "${name}" cannot be resolved: keychain lookup is only supported on macOS.`
-    );
-  }
-  let result: ExecResult;
-  try {
-    result = await platform().run([
-      SECURITY_PATH,
-      "find-generic-password",
-      "-s",
-      KEYCHAIN_SERVICE,
-      "-a",
-      name,
-      "-g",
-    ]);
-  } catch {
-    throw new Error(
-      `Failed to read keychain secret "${name}": ${SECURITY_PATH} not found.`
-    );
-  }
-  const { stdout, stderr } = result;
-  if (result.code !== 0) {
-    // 44 is errSecItemNotFound. The message is the portable signal. `-g`
-    // prints the secret on stderr, so a failure that got that far must not
-    // carry stderr into this error.
-    if (result.code === 44 || /could not be found/i.test(stderr)) {
-      return undefined;
+export const keychainLookup =
+  (platform: Pick<Platform, "os" | "run">): SecretLookup =>
+  async (name) => {
+    if (platform.os !== "darwin") {
+      throw new Error(
+        `Keychain secret "${name}" cannot be resolved: keychain lookup is only supported on macOS.`
+      );
     }
-    const raw =
-      stderr.trim() || `security exited ${result.code ?? "without a status"}`;
-    const detail = /^password: /m.test(raw)
-      ? "security failed after printing a password"
-      : raw;
-    throw new Error(`Failed to read keychain secret "${name}": ${detail}`);
-  }
-  // The password line is on stderr; stdout is the attribute dump. Never
-  // include either in an error — stderr is the secret.
-  try {
-    const parsed =
-      parseSecurityPassword(stderr) ?? parseSecurityPassword(stdout);
-    if (parsed === undefined) {
-      throw new Error("security did not print a password");
+    let result: ExecResult;
+    try {
+      result = await platform.run([
+        SECURITY_PATH,
+        "find-generic-password",
+        "-s",
+        KEYCHAIN_SERVICE,
+        "-a",
+        name,
+        "-g",
+      ]);
+    } catch {
+      throw new Error(
+        `Failed to read keychain secret "${name}": ${SECURITY_PATH} not found.`
+      );
     }
-    return parsed;
-  } catch (parseError) {
-    throw new Error(
-      `Failed to read keychain secret "${name}": ${
-        (parseError as Error).message
-      }`
-    );
-  }
-};
+    const { stdout, stderr } = result;
+    if (result.code !== 0) {
+      // 44 is errSecItemNotFound. The message is the portable signal. `-g`
+      // prints the secret on stderr, so a failure that got that far must not
+      // carry stderr into this error.
+      if (result.code === 44 || /could not be found/i.test(stderr)) {
+        return undefined;
+      }
+      const raw =
+        stderr.trim() || `security exited ${result.code ?? "without a status"}`;
+      const detail = /^password: /m.test(raw)
+        ? "security failed after printing a password"
+        : raw;
+      throw new Error(`Failed to read keychain secret "${name}": ${detail}`);
+    }
+    // The password line is on stderr; stdout is the attribute dump. Never
+    // include either in an error — stderr is the secret.
+    try {
+      const parsed =
+        parseSecurityPassword(stderr) ?? parseSecurityPassword(stdout);
+      if (parsed === undefined) {
+        throw new Error("security did not print a password");
+      }
+      return parsed;
+    } catch (parseError) {
+      throw new Error(
+        `Failed to read keychain secret "${name}": ${
+          (parseError as Error).message
+        }`
+      );
+    }
+  };
 
-export const setKeychainSecret = async (name: string) => {
+export const setKeychainSecret = async ({
+  name,
+  platform,
+}: {
+  name: string;
+  platform: Pick<Platform, "os" | "runInteractive">;
+}) => {
   assertSecretName(name);
-  if (platform().os !== "darwin") {
+  if (platform.os !== "darwin") {
     throw new Error("Keychain secrets are only supported on macOS.");
   }
-  const code = await platform().runInteractive([
+  const code = await platform.runInteractive([
     SECURITY_PATH,
     "add-generic-password",
     "-U",
@@ -344,11 +352,17 @@ export const DEFAULT_SECRETS_FILE = "/etc/onc/secrets.json";
  * Secrets from a JSON file of `{ "name": "value" }`, which must not be readable
  * by anyone but its owner (like an SSH private key).
  */
-export const secretsFileSource = (path: string): SecretSource => {
+export const secretsFileSource = ({
+  path,
+  platform,
+}: {
+  path: string;
+  platform: Pick<Platform, "fileMode" | "readTextFile">;
+}): SecretSource => {
   let cache: Record<string, unknown> | undefined;
   const load = () => {
     if (cache) return cache;
-    const mode = platform().fileMode(path);
+    const mode = platform.fileMode(path);
     if (mode === undefined) return (cache = {});
     if ((mode & 0o077) !== 0) {
       throw new Error(
@@ -359,7 +373,7 @@ export const secretsFileSource = (path: string): SecretSource => {
     }
     let parsed: unknown;
     try {
-      parsed = JSON.parse(platform().readTextFile(path));
+      parsed = JSON.parse(platform.readTextFile(path));
     } catch {
       // Deliberately no position or excerpt: the offending line is a secret.
       throw new Error(`${path} is not valid JSON.`);
@@ -392,9 +406,10 @@ export const secretsFileSource = (path: string): SecretSource => {
 };
 
 /** The macOS keychain on macOS; elsewhere a 0600 JSON file. */
-export const defaultSecretSource = (): SecretSource =>
-  platform().os === "darwin"
-    ? { lookup: lookupKeychain, describeMissing: keychainMissing }
-    : secretsFileSource(
-        platform().env("ONC_SECRETS_FILE") ?? DEFAULT_SECRETS_FILE
-      );
+export const defaultSecretSource = (platform: Platform): SecretSource =>
+  platform.os === "darwin"
+    ? { lookup: keychainLookup(platform), describeMissing: keychainMissing }
+    : secretsFileSource({
+        path: platform.env("ONC_SECRETS_FILE") ?? DEFAULT_SECRETS_FILE,
+        platform,
+      });

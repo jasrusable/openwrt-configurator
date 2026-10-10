@@ -10,7 +10,11 @@ permissions:
   contents: write
 
 jobs:
+  tests:
+    uses: ./.github/workflows/test.yml
+
   release:
+    needs: tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,8 +37,6 @@ jobs:
             echo "Tag $tag, package.json $pkg and src/cli.ts $cli must match." >&2
             exit 1
           }
-
-      - run: npm test
 
       - run: npm run build
 

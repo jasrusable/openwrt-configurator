@@ -3,15 +3,45 @@
 // Lives under helpers/ so ava does not run it as a test file.
 import { getDeviceBuildPlan } from "../../getBuildPlan";
 import { getDeviceSchema } from "../../getDeviceSchema";
-import { getDeviceScript, getRevertCommands } from "../../getDeviceScript";
+import { getDeviceScript, getFinaliseCommands } from "../../getDeviceScript";
 import { getOpenWrtState } from "../../getOpenWrtState";
 import { loadOncConfig } from "../../loadConfig";
+import { Platform } from "../../platform";
+import { parseUciExport } from "../../uci";
 
 export const parityConfigs = [
   "src/tests/main/config.json",
   "src/tests/main/config2.json",
   "sampleConfigs/basic.json",
 ];
+
+/** What a device's uciConfigs probe might print: the wipe is computed from it. */
+const deviceExport = [
+  "package network",
+  "",
+  "config interface 'loopback'",
+  "\toption device 'lo'",
+  "",
+  "config globals 'globals'",
+  "\toption ula_prefix 'fd00::/48'",
+  "",
+  "package firewall",
+  "",
+  "config rule",
+  "\toption name 'it'\\''s'",
+  "\tlist proto 'tcp'",
+  "\tlist proto 'udp'",
+  "",
+  "config rule",
+  "\toption note 'two",
+  "config lines'",
+  "",
+  "package luci",
+  "",
+  "config core 'main'",
+  "__ONC_UNREADABLE__ broken",
+].join("\n");
+const deviceConfigs = parseUciExport(deviceExport);
 
 const attempt = <T>(fn: () => T) => {
   try {
@@ -22,16 +52,18 @@ const attempt = <T>(fn: () => T) => {
 };
 
 /** Run from the repository root: device schemas are read from ./deviceSchemas. */
-export const parityReport = async () => {
-  const report: unknown[] = [];
+export const parityReport = async ({ platform }: { platform: Platform }) => {
+  const report: unknown[] = [deviceConfigs];
   for (const configPath of parityConfigs) {
-    const { oncConfig } = await loadOncConfig(configPath, {
+    const { oncConfig } = await loadOncConfig({
+      path: configPath,
+      platform,
       lookup: async (name) => `placeholder-${name}`,
     });
     for (const deviceConfig of oncConfig.devices) {
       const deviceSchema = await getDeviceSchema({
         deviceConfig,
-        useLocal: true,
+        local: platform,
       }).catch((e) => ({ error: (e as Error).message }));
       const device = {
         config: configPath,
@@ -50,8 +82,12 @@ export const parityReport = async () => {
                     state,
                     installedPackages: ["dnsmasq", "firewall4", "curl"],
                     managedFiles: ["/etc/onc-parity-stale"],
+                    current: deviceConfigs.configs,
                   }),
-                  reverts: getRevertCommands(state),
+                  commits: getFinaliseCommands({
+                    state,
+                    current: deviceConfigs.configs,
+                  }),
                 };
               }),
         buildPlan: attempt(() => {

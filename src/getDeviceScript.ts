@@ -1,11 +1,13 @@
-import { dhcpSectionsToReset } from "./configSchemas/dhcp";
-import { firewallSectionsToReset } from "./configSchemas/firewall";
-import { networkSectionsToReset } from "./configSchemas/network";
-import { systemSectionsToReset } from "./configSchemas/system";
-import { wirelessSectionsToReset } from "./configSchemas/wireless";
 import { getUciCommands } from "./getUciCommands";
+import {
+  changedConfigs,
+  declaredConfigs,
+  UciConfigs,
+  wipeOperations,
+} from "./uci";
 import { OpenWrtState } from "./openWrtConfigSchema";
 import { dirname } from "./paths";
+import { shellQuote } from "./shell";
 
 // Manifest of files written by this tool, so files removed from config are
 // removed from the device on the next provision (declarative, like UCI resets).
@@ -30,49 +32,32 @@ const forEachExistingConfig = (configKeys: string[], operation: string) =>
   );
 
 /**
- * Every config this run stages changes in: what it sets, plus what it resets.
+ * Discard every staged UCI change on the device, whoever made it.
  *
- * Only configs with at least one real operation count. Resolving a config for a
- * device routinely leaves a package behind with no sections — one whose
- * sections were all filtered out by `.if`, so it applies to other devices but
- * not this one. Committing those would defeat the point of naming configs
- * explicitly, since it would commit whatever staged changes happened to be
- * sitting in a package this run never touches, and reverting them would discard
- * someone else's staged edits for no reason.
+ * The tool owns the device's config, so a run starts and ends from committed
+ * state. Three reasons it has to be everything, not just the configs this run
+ * writes:
+ *
+ * - A run that dies without reverting (the link drops mid-configure) leaves
+ *   its deltas in /tmp/.uci, and the watchdog restores /etc/config without
+ *   touching them; the next commit would re-apply a rolled-back provision.
+ * - `default_postinst` ends with a bare `uci commit` for any package shipping
+ *   /etc/uci-defaults, so installing a package mid-run would commit whatever
+ *   was staged anywhere — including someone's unfinished `uci set`.
+ * - A rollback's own reload_config reads deltas on top of the restored files.
+ *
+ * The package list is read on the device, so it covers packages nothing here
+ * knows about. LuCI's unsaved edits are not affected: rpcd stages those per
+ * session under /var/run/rpcd/uci-<session>, which `uci changes` does not see
+ * (verified on 25.12.5).
+ *
+ * Guarded, because `uci revert` exits 1 on a config file that does not exist
+ * and these run under `set -e`. Used before staging, on abort, and by the
+ * rollback watchdog.
  */
-const touchedConfigs = (state: OpenWrtState) => {
-  const written = Object.keys(state.config || {}).filter((configKey) =>
-    Object.values((state.config as any)[configKey] || {}).some(
-      (sections) => ((sections as any[]) || []).length > 0
-    )
-  );
-  const reset = Object.keys(state.configSectionsToReset || {}).filter(
-    (configKey) => (state.configSectionsToReset?.[configKey] || []).length > 0
-  );
-  return [...new Set([...written, ...reset])].sort();
-};
-
-/**
- * Discard any staged UCI changes in the configs this run is about to write.
- *
- * A run that dies without being able to revert — the link drops mid-configure,
- * so the tool's own `uci revert` never reaches the device — leaves its staged
- * deltas in /tmp/.uci. The watchdog restores /etc/config but does not touch the
- * delta directory, so those changes survive the rollback and the next run's
- * commit would pick them up, silently re-applying part of a provision that was
- * deliberately rolled back.
- *
- * Clearing the staging area up front fixes that deterministically, without
- * racing an abandoned script that may still be running. Only the configs this
- * run writes are reverted, so unrelated staged changes (a half-finished LuCI
- * edit, say) are left alone rather than discarded.
- *
- * This runs before the packages step because `default_postinst` ends with a
- * bare `uci commit` for any package shipping /etc/uci-defaults — which would
- * otherwise commit the very leftovers we are trying to drop.
- */
-export const getStartCleanCommands = (state: OpenWrtState) =>
-  forEachExistingConfig(touchedConfigs(state), "revert");
+export const revertPendingCommands = [
+  `for pkg in $(uci changes | sed 's/^[-+]//; s/[.=].*//' | sort -u); do if [ -f "/etc/config/$pkg" ]; then uci revert "$pkg"; fi; done`,
+];
 
 /**
  * The trailing commands that make staged UCI changes take effect.
@@ -86,8 +71,22 @@ export const getStartCleanCommands = (state: OpenWrtState) =>
  * them as their own step rather than as part of this one — see
  * `getPostReloadCommands`.
  */
-export const getFinaliseCommands = (state: OpenWrtState) => [
-  ...forEachExistingConfig(touchedConfigs(state), "commit"),
+export const getFinaliseCommands = ({
+  state,
+  current,
+}: {
+  state: OpenWrtState;
+  /** The device's config as read after the package step. */
+  current: UciConfigs;
+}) => [
+  ...forEachExistingConfig(
+    changedConfigs({
+      current,
+      declared: declaredConfigs(state.config),
+      keep: state.configsToNotReset || [],
+    }),
+    "commit"
+  ),
   "reload_config",
 ];
 
@@ -155,43 +154,11 @@ const writeFileCommand = (path: string, content: string, mode?: string) => {
   const delimiter = heredocDelimiter(content);
   const body = content.endsWith("\n") ? content : `${content}\n`;
   return [
-    `mkdir -p '${dirname(path)}'`,
-    `cat > '${path}' <<'${delimiter}'`,
+    `mkdir -p ${shellQuote(dirname(path))}`,
+    `cat > ${shellQuote(path)} <<'${delimiter}'`,
     `${body}${delimiter}`,
-    ...(mode ? [`chmod ${mode} '${path}'`] : []),
+    ...(mode ? [`chmod ${shellQuote(mode)} ${shellQuote(path)}`] : []),
   ].join("\n");
-};
-
-const sectionsToReset: any = {
-  ...dhcpSectionsToReset,
-  ...firewallSectionsToReset,
-  ...networkSectionsToReset,
-  ...systemSectionsToReset,
-  ...wirelessSectionsToReset,
-};
-
-
-/**
- * `uci revert` for every config this provision could have staged changes in.
- *
- * Deriving this from the built-in section list alone was not enough: the config
- * schema has a catchall, so a config can legitimately drive any UCI package
- * (dropbear, sqm, usteer, ...). Those were staged but never reverted, and since
- * the final command is a bare `uci commit` — which commits *every* package —
- * a later run would silently commit changes left behind by a failed one.
- */
-export const getRevertCommands = (state: OpenWrtState) => {
-  const touched = [
-    ...new Set([
-      ...Object.keys(sectionsToReset),
-      ...Object.keys(state.config || {}),
-    ]),
-  ].sort();
-
-  // Guarded, because `uci revert` exits 1 on a config that is not present and
-  // the revert script runs under `set -e` — one absent config would otherwise
-  // abort every remaining revert, which is the worst possible moment for it.
-  return forEachExistingConfig(touched, "revert");
 };
 
 /**
@@ -251,46 +218,13 @@ const uciBatchCommands = (uciCommands: string[]) => {
   return commands;
 };
 
-/**
- * Pure: everything read off the device is passed in. Leaving `installedPackages`
- * out installs and removes every package the state names, unfiltered; leaving
- * `managedFiles` out prunes nothing.
- */
-export const getDeviceScript = ({
+const packageCommands = ({
   state,
   installedPackages,
-  managedFiles,
-  redact,
 }: {
   state: OpenWrtState;
-  /** From `getInstalledPackages`. */
   installedPackages?: string[];
-  /** From `getManagedFiles`: what the previous provision wrote. */
-  managedFiles?: string[];
-  /** Replace a resolved secret before it is written into the script. */
-  redact?: (value: string) => string;
 }) => {
-  const hide = (value: string) => (redact ? redact(value) : value);
-  const uciCommands = getUciCommands({ openWrtConfig: state.config, redact });
-
-  const configSections =
-    state.configSectionsToReset &&
-    Object.keys(state.configSectionsToReset).reduce<string[][]>(
-      (acc, configKey) => {
-        const sections = (state.configSectionsToReset?.[configKey] || []).map(
-          (sectionKey) => [configKey, sectionKey]
-        );
-        return [...acc, ...sections];
-      },
-      []
-    );
-
-  const resetCommands = configSections
-    ? configSections.map(([configKey, sectionKey]) => {
-        return `while uci -q delete ${configKey}.@${sectionKey}[0]; do :; done`;
-      })
-    : [];
-
   const packagesToUninstall = installedPackages
     ? (state.packagesToUninstall || []).filter((p) =>
         installedPackages.includes(p)
@@ -303,18 +237,65 @@ export const getDeviceScript = ({
       )
     : state.packagesToInstall;
 
-  const packageCommands = [
+  return [
     ...(packagesToUninstall && packagesToUninstall.length > 0
-      ? [`apk del --rdepends ${packagesToUninstall.join(" ")}`]
+      ? [`apk del --rdepends ${packagesToUninstall.map(shellQuote).join(" ")}`]
       : []),
     ...(packagesToInstall && packagesToInstall.length > 0
       ? [
           `apk add --update-cache ${packagesToInstall
-            .map((p) => p.packageName)
+            .map((p) => shellQuote(p.packageName))
             .join(" ")}`,
         ]
       : []),
   ];
+};
+
+/**
+ * Everything that changes the device's config behind our back, run before the
+ * config is read: discard pending changes, install and remove packages (their
+ * postinst and uci-defaults add sections and whole configs), then refresh the
+ * reload baseline. Leaving `installedPackages` out installs and removes every
+ * package the state names, unfiltered.
+ */
+export const getPrepareCommands = ({
+  state,
+  installedPackages,
+}: {
+  state: OpenWrtState;
+  /** From the installedPackages probe. */
+  installedPackages?: string[];
+}) => [
+  ...revertPendingCommands,
+  ...packageCommands({ state, installedPackages }),
+  ...baselineRefreshCommands,
+];
+
+/**
+ * Stage the declared config over a wiped one, in a single `uci batch`: delete
+ * every section of `current` that `configs_to_not_reset` does not keep, by
+ * exact name, then set every declared section. `current` must be read after
+ * the prepare step, or sections a package adds survive the wipe. Then write
+ * the managed files. Leaving `managedFiles` out prunes nothing.
+ */
+export const getStageCommands = ({
+  state,
+  current,
+  managedFiles,
+  redact,
+}: {
+  state: OpenWrtState;
+  current: UciConfigs;
+  /** From the managedFiles probe: what the previous provision wrote. */
+  managedFiles?: string[];
+  /** Replace a resolved secret before it is written into the script. */
+  redact?: (value: string) => string;
+}) => {
+  const hide = (value: string) => (redact ? redact(value) : value);
+  const wipe = wipeOperations(current, state.configsToNotReset || []).map(
+    (operation) => `uci ${operation}`
+  );
+  const uciCommands = getUciCommands({ openWrtConfig: state.config, redact });
 
   const files = state.files || [];
   const staleFiles = (managedFiles || []).filter(
@@ -324,7 +305,7 @@ export const getDeviceScript = ({
   const fileCommands =
     files.length > 0 || staleFiles.length > 0
       ? [
-          ...staleFiles.map((path) => `rm -f '${path}'`),
+          ...staleFiles.map((path) => `rm -f ${shellQuote(path)}`),
           ...files.flatMap((file) => [
             writeFileCommand(file.path, hide(file.content), file.mode),
             // Optional command run immediately after the file is written (e.g.
@@ -341,20 +322,38 @@ export const getDeviceScript = ({
   // Files are written before `uci commit` so a file-write failure aborts before
   // the UCI changes are committed (the revert is then effective), and so a
   // freshly-written hotplug script is in place when reload_config runs.
-  return [
-    ...getStartCleanCommands(state),
-    ...packageCommands,
-    ...baselineRefreshCommands,
-    ...resetCommands,
-    ...uciBatchCommands(uciCommands),
-    ...fileCommands,
-    ...getFinaliseCommands(state),
-    // Printed as part of the script so a dry run shows the whole sequence,
-    // but `provision` splits these off and runs them over a reconnected
-    // session. See `getPostReloadCommands`.
-    ...getPostReloadCommands(state).map(hide),
-  ];
+  return [...uciBatchCommands([...wipe, ...uciCommands]), ...fileCommands];
 };
+
+/**
+ * The whole run as one script, for a dry run. `provision` runs it in parts
+ * (see devicePhases), reading the device's config between the prepare and
+ * stage steps; here `current` is read up front, so sections that packages
+ * installed by this run would add are not shown being wiped. Leaving
+ * `current` out wipes nothing.
+ */
+export const getDeviceScript = ({
+  state,
+  installedPackages,
+  managedFiles,
+  current = {},
+  redact,
+}: {
+  state: OpenWrtState;
+  installedPackages?: string[];
+  managedFiles?: string[];
+  current?: UciConfigs;
+  redact?: (value: string) => string;
+}) => [
+  ...getPrepareCommands({ state, installedPackages }),
+  ...getStageCommands({ state, current, managedFiles, redact }),
+  ...getFinaliseCommands({ state, current }),
+  // Printed so a dry run shows the whole sequence, but `provision` runs these
+  // over a reconnected session. See `getPostReloadCommands`.
+  ...getPostReloadCommands(state).map((command) =>
+    redact ? redact(command) : command
+  ),
+];
 
 /** The packages a provision would remove from this device, for reporting. */
 export const getPackagesToRemove = ({

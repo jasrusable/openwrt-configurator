@@ -30,6 +30,25 @@ export const getOpenWrtConfig = ({
     oncConfig,
   });
 
+  // "*" means every physical port nothing else uses, and only explicit port
+  // lists count as uses — so two "*" devices would each claim every free port,
+  // and netifd would put each port in whichever it set up last. Resolved per
+  // device, so "*" bridges whose .if never both apply are fine.
+  const wildcardDevices = (resolvedOncConfig.network?.device || [])
+    .filter((device) => device.ports === "*")
+    .map((device) => device.name);
+  if (wildcardDevices.length > 1) {
+    const names = wildcardDevices.map((name) => `"${name}"`);
+    throw new Error(
+      `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]} ${
+        names.length === 2 ? "both" : "all"
+      } use ` +
+        `"ports": "*" on ${deviceConfig.hostname}, but a port can only be in one ` +
+        `bridge. List the ports of all but one explicitly, or use one bridge with ` +
+        `bridge-vlan sections.`
+    );
+  }
+
   const bridgedDevices = (resolvedOncConfig.network?.device || [])
     .filter((device) => device.type === "bridge")
     .reduce<string[]>((acc, device) => {
@@ -137,18 +156,14 @@ export const getOpenWrtConfig = ({
               ...(!useSwConfig &&
                 configKey === "network" &&
                 sectionKey === "bridge-vlan" && {
-                  ports: getDevicePorts(resolvedSection.device).map((port) => {
-                    if (typeof resolvedSection.ports === "string") {
-                      return resolvedSection.ports === "*"
-                        ? port
-                        : resolvedSection.ports === "*t"
-                        ? `${port}:t`
-                        : "";
-                    } else {
-                      // TODO: Test this case.
-                      return resolvedSection.ports;
-                    }
-                  }),
+                  // "*" / "*t": every port of the bridge, untagged / tagged.
+                  // A list is taken as written. (It used to be repeated once
+                  // per bridge port, nesting lists, so it never worked.)
+                  ports: Array.isArray(resolvedSection.ports)
+                    ? resolvedSection.ports
+                    : getDevicePorts(resolvedSection.device).map((port) =>
+                        resolvedSection.ports === "*t" ? `${port}:t` : port
+                      ),
                 }),
 
               // Resolve switch_vlan ports
@@ -207,7 +222,13 @@ export const getOpenWrtConfig = ({
   const wifiDevices: NonNullable<
     NonNullable<OpenWrtConfig["wireless"]>["wifi-device"]
   > = radiosAndDevices.reduce<any[]>((acc, { radio, wifiDevice }, index) => {
-    const name = wifiDevice?.[".name"] || sanitizeName(`wifidevice${index}`);
+    // Radios are matched to config by band, so two radios in the same band
+    // (tri-band hardware) share one config wifi-device. They still need
+    // distinct section names, or the second overwrites the first in UCI.
+    const wanted = wifiDevice?.[".name"] || sanitizeName(`wifidevice${index}`);
+    const name = acc.some((d) => d[".name"] === wanted)
+      ? sanitizeName(`${wanted}${index}`)
+      : wanted;
 
     return [
       ...acc,

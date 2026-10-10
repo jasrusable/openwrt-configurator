@@ -1,0 +1,25 @@
+{
+  "name": "zyxel,nwa50ax-pro",
+  "sw_config": false,
+  "version": "25.12.5",
+  "ports": [
+    {
+      "name": "eth0",
+      "default_role": "lan"
+    }
+  ],
+  "radios": [
+    {
+      "name": "radio0",
+      "type": "mac80211",
+      "path": "platform/soc/18000000.wifi",
+      "band": "2g"
+    },
+    {
+      "name": "radio1",
+      "type": "mac80211",
+      "path": "platform/soc/18000000.wifi+1",
+      "band": "5g"
+    }
+  ]
+}

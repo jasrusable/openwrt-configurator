@@ -15,6 +15,7 @@ import {
 } from "../../resolveSecrets";
 import { getUciCommands } from "../../getUciCommands";
 import { getUciDefaultsScript } from "../../getBuildPlan";
+import { nodePlatform } from "../../platforms/node";
 
 const lookupFrom = (store: Record<string, string>): SecretLookup => {
   const counts = new Map<string, number>();
@@ -292,7 +293,9 @@ test("loadOncConfig resolves refs then validates the schema", async (t) => {
     })
   );
   try {
-    const { oncConfig, secrets } = await loadOncConfig(path, {
+    const { oncConfig, secrets } = await loadOncConfig({
+      path,
+      platform: nodePlatform,
       lookup: lookupFrom({
         "ssh/root": "ssh-pass-ok",
         "wifi/home": "testpsk1",

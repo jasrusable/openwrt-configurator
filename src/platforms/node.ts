@@ -1,7 +1,9 @@
 import { spawn } from "child_process";
 import { createHash } from "crypto";
 import {
+  appendFileSync,
   closeSync,
+  existsSync,
   createReadStream,
   mkdirSync,
   openSync,
@@ -13,7 +15,16 @@ import {
 } from "fs";
 import { homedir } from "os";
 import { NodeSSH } from "node-ssh";
-import { NetworkError, Platform } from "../platform";
+import {
+  checkHostKey,
+  formatKnownHost,
+  hostKeyAlgorithms,
+  hostKeyChangedMessage,
+  keyTypeOfBlob,
+  parseKnownHosts,
+} from "../knownHosts";
+import { dirname } from "../paths";
+import { NetworkError, Platform, SshTarget } from "../platform";
 
 const transientCodes = new Set([
   "ECONNRESET",
@@ -54,6 +65,46 @@ const withPath = <T>(path: string, fn: () => T): T => {
   } catch (e) {
     throw fileError(path, e);
   }
+};
+
+/**
+ * ssh2 options that verify the host key against `knownHostsFile`, recording
+ * it the first time. Once a host's key type is known, only that type is
+ * negotiated, so a server cannot dodge the check by offering another.
+ */
+const hostKeyOptions = (target: SshTarget, onChanged: () => void) => {
+  const file = target.knownHostsFile;
+  const host = target.host;
+  if (!file || !host) return {};
+  const entries = existsSync(file)
+    ? parseKnownHosts(readFileSync(file, "utf-8"))
+    : [];
+  const knownTypes = entries
+    .filter((entry) => entry.host === host)
+    .map((entry) => entry.type);
+  return {
+    ...(knownTypes.length > 0
+      ? {
+          algorithms: {
+            serverHostKey: [...new Set(knownTypes.flatMap(hostKeyAlgorithms))],
+          },
+        }
+      : {}),
+    hostVerifier: (key: Buffer) => {
+      const candidate = {
+        host,
+        type: keyTypeOfBlob(key),
+        key: key.toString("base64"),
+      };
+      const verdict = checkHostKey(entries, candidate);
+      if (verdict === "new") {
+        mkdirSync(dirname(file), { recursive: true });
+        appendFileSync(file, formatKnownHost(candidate));
+      }
+      if (verdict === "changed") onChanged();
+      return verdict !== "changed";
+    },
+  };
 };
 
 const headersOf = (response: Response) => {
@@ -157,6 +208,10 @@ export const nodePlatform: Platform = {
       child.stderr.setEncoding("utf8").on("data", (d) => (stderr += d));
       child.on("error", reject);
       child.on("close", (code) => resolve({ stdout, stderr, code }));
+      // A program that exits without reading its input (`ip route`, say)
+      // closes the pipe first, and the write then fails with EPIPE. That is
+      // not an error worth crashing over: the exit status says what happened.
+      child.stdin.on("error", () => {});
       child.stdin.end(options?.stdin ?? "");
     }),
   runInteractive: (argv) =>
@@ -168,7 +223,17 @@ export const nodePlatform: Platform = {
 
   connect: async (target) => {
     const ssh = new NodeSSH();
-    await ssh.connect(target);
+    let changed = false;
+    try {
+      await ssh.connect({
+        ...target,
+        ...hostKeyOptions(target, () => (changed = true)),
+      });
+    } catch (e) {
+      throw changed
+        ? new Error(hostKeyChangedMessage(target.host!, target.knownHostsFile!))
+        : e;
+    }
     // Once a command is in flight node-ssh drops its own 'error' listener, so an
     // RST arriving mid-command would emit 'error' with nothing attached and kill
     // the process. The command still settles via the channel closing.

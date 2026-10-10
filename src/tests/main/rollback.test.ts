@@ -1,8 +1,10 @@
 import test from "ava";
-import { armWatchdogCommands } from "../../provisionOpenWrtDevice";
-import { getRemovalCascade } from "../../deviceFacts";
+import { armWatchdogCommands } from "../../rollback";
+import { removalCascade } from "../../deviceProbes";
 
-const arm = (overrides: Partial<Parameters<typeof armWatchdogCommands>[0]> = {}) =>
+const arm = (
+  overrides: Partial<Parameters<typeof armWatchdogCommands>[0]> = {}
+) =>
   armWatchdogCommands({
     runId: "abc123",
     timeoutSeconds: 90,
@@ -66,8 +68,10 @@ test("rollback restores config, files and newly installed packages", (t) => {
   // Files this run creates did not exist before, so they are removed.
   t.true(watchdog.includes("rm -f '/etc/hotplug.d/iface/99-new'"));
   // Packages this run installs are removed again; this needs no network.
-  t.true(watchdog.includes("apk del sqm-scripts luci-app-sqm"));
-  t.true(watchdog.includes("cp -a /tmp/onc-rollback-abc123/config /etc/config"));
+  t.true(watchdog.includes("apk del 'sqm-scripts' 'luci-app-sqm'"));
+  t.true(
+    watchdog.includes("cp -a /tmp/onc-rollback-abc123/config /etc/config")
+  );
 });
 
 // Doing `mv /etc/config` before the copy meant a failed copy — an overlay full
@@ -82,15 +86,23 @@ test("the restored config is staged before the live one is moved aside", (t) => 
   t.true(swap.indexOf("cp -a") < swap.indexOf("mv /etc/config"));
   t.true(swap.includes("else"));
   // and no unguarded move survives
-  t.false(watchdog.split("\n").some((l) => l.trim().startsWith("mv /etc/config /etc/config.onc-failed")));
+  t.false(
+    watchdog
+      .split("\n")
+      .some((l) => l.trim().startsWith("mv /etc/config /etc/config.onc-failed"))
+  );
 });
 
 // Staging packages is network-bound, so it happens before the watchdog starts
 // counting; clearing the directory therefore cannot be part of arming.
 test("arming does not clear the rollback directory", (t) => {
   const commands = arm();
-  t.false(commands.some((c) => c.startsWith("rm -rf /tmp/onc-rollback-abc123 ")));
-  t.false(commands.some((c) => c.startsWith("mkdir -p /tmp/onc-rollback-abc123")));
+  t.false(
+    commands.some((c) => c.startsWith("rm -rf /tmp/onc-rollback-abc123 "))
+  );
+  t.false(
+    commands.some((c) => c.startsWith("mkdir -p /tmp/onc-rollback-abc123"))
+  );
 });
 
 // Recovery is graduated: a reload that restores access should not cost an
@@ -108,7 +120,11 @@ test("the default mode reverts, reloads, then reboots only if access does not re
   t.true(wait > reload, "waits for the recovered flag after reloading");
   t.true(reboot > wait, "reboots only after the wait");
   // The wait exits early and cleanly when access comes back.
-  t.true(watchdog.includes('logger -t onc "revert restored access, no reboot needed"'));
+  t.true(
+    watchdog.includes(
+      'logger -t onc "revert restored access, no reboot needed"'
+    )
+  );
 });
 
 // Restoring /etc/config is not enough on its own. Every UCI read applies the
@@ -175,43 +191,29 @@ test("nothing file- or package-related is emitted when there is nothing to do", 
 // `--rdepends` removes dependents too, so the named packages understate it:
 // removing firewall4 on a stock image takes 21 packages, uhttpd and the whole
 // LuCI stack among them.
-test("getRemovalCascade reports everything apk would purge", async (t) => {
-  const ssh = {
-    execCommand: async (command: string) => {
-      t.true(command.includes("apk del --simulate --rdepends firewall4"));
-      return {
-        code: 0,
-        stdout: [
-          "( 1/3) Purging luci-ssl (26.180.75667~128a781)",
-          "( 2/3) Purging uhttpd (2026.06.16~7b1bec45-r1)",
-          "( 3/3) Purging firewall4 (2025.03.17~b6e51575-r2)",
-        ].join("\n"),
-        stderr: "",
-      };
-    },
-  } as any;
-
-  const cascade = await getRemovalCascade({ ssh, packages: ["firewall4"] });
-  t.deepEqual(cascade, ["luci-ssl", "uhttpd", "firewall4"]);
+test("the removal cascade reports everything apk would purge", (t) => {
+  const probe = removalCascade(["firewall4"]);
+  t.is(probe.command, "apk del --simulate --rdepends 'firewall4'");
+  const stdout = [
+    "( 1/3) Purging luci-ssl (26.180.75667~128a781)",
+    "( 2/3) Purging uhttpd (2026.06.16~7b1bec45-r1)",
+    "( 3/3) Purging firewall4 (2025.03.17~b6e51575-r2)",
+  ].join("\n");
+  t.deepEqual(probe.parse({ stdout, stderr: "", code: 0 }), [
+    "luci-ssl",
+    "uhttpd",
+    "firewall4",
+  ]);
 });
 
-test("getRemovalCascade falls back to the named packages if apk output is unusable", async (t) => {
-  const ssh = {
-    execCommand: async () => ({ code: 1, stdout: "ERROR: unknown", stderr: "" }),
-  } as any;
+test("the removal cascade falls back to the named packages if apk output is unusable", (t) => {
   // Reporting an empty list here would be falsely reassuring.
-  const cascade = await getRemovalCascade({ ssh, packages: ["firewall4"] });
-  t.deepEqual(cascade, ["firewall4"]);
-});
-
-test("getRemovalCascade does nothing when there is nothing to remove", async (t) => {
-  let called = false;
-  const ssh = {
-    execCommand: async () => {
-      called = true;
-      return { code: 0, stdout: "", stderr: "" };
-    },
-  } as any;
-  t.deepEqual(await getRemovalCascade({ ssh, packages: [] }), []);
-  t.false(called);
+  t.deepEqual(
+    removalCascade(["firewall4"]).parse({
+      stdout: "ERROR: unknown",
+      stderr: "",
+      code: 1,
+    }),
+    ["firewall4"]
+  );
 });

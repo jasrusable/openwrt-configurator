@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { dirname } from "./paths";
-import { HttpResponse, platform } from "./platform";
+import { HttpResponse, Platform } from "./platform";
+
+type Http = Pick<Platform, "http" | "sleep">;
 
 const TRANSIENT_STATUSES = new Set([502, 503, 504, 529]);
 
@@ -11,11 +13,13 @@ const withRetry = async <T>(
     baseMs = 1000,
     isTransient,
     label,
+    sleep,
   }: {
     attempts?: number;
     baseMs?: number;
     isTransient: (e: unknown) => boolean;
     label: string;
+    sleep: (ms: number) => Promise<void>;
   }
 ): Promise<T> => {
   let lastErr: unknown;
@@ -31,7 +35,7 @@ const withRetry = async <T>(
           (e as Error).message
         } — retrying in ${wait}ms`
       );
-      await platform().sleep(wait);
+      await sleep(wait);
     }
   }
   throw lastErr;
@@ -60,13 +64,15 @@ const request = async ({
   url,
   json,
   accept,
+  platform,
 }: {
   method: "GET" | "POST";
   url: string;
   json?: unknown;
   accept: number[];
+  platform: Http;
 }): Promise<HttpResponse & { data: unknown }> => {
-  const response = await platform().http.request({ method, url, json });
+  const response = await platform.http.request({ method, url, json });
   const data = parseBody(response.body);
   if (!accept.includes(response.status)) {
     throw Object.assign(
@@ -100,14 +106,17 @@ let overviewCache: Record<string, Record<string, string>> = {};
 export const getProfileTarget = async ({
   version,
   modelId,
+  platform,
 }: {
   version: string;
   modelId: string;
+  platform: Http;
 }): Promise<{ profile: string; target: string }> => {
   if (!overviewCache[version]) {
     const response = await request({
       method: "GET",
       url: `${DOWNLOADS_BASE}/releases/${version}/.overview.json`,
+      platform,
       accept: [200],
     });
     const parsed = overviewSchema.parse(response.data);
@@ -148,28 +157,36 @@ export type BuildRequest = {
   defaults: string;
 };
 
-export const requestBuild = async (
-  req: BuildRequest
-): Promise<{ requestHash: string }> => {
+export const requestBuild = async ({
+  req,
+  platform,
+}: {
+  req: BuildRequest;
+  platform: Http;
+}): Promise<{ requestHash: string }> => {
   const post = () =>
     request({
       method: "POST",
       url: `${ASU_BASE}/api/v1/build`,
       json: req,
       accept: [200, 202],
+      platform,
     });
 
   try {
     const response = await withRetry(post, {
       isTransient,
       label: "asu build",
+      sleep: platform.sleep,
     });
     const requestHash =
       (response.data as { request_hash?: string })?.request_hash ||
       response.headers["x-request-hash"];
     if (!requestHash) {
       throw new Error(
-        `ASU build response missing request_hash: ${JSON.stringify(response.data)}`
+        `ASU build response missing request_hash: ${JSON.stringify(
+          response.data
+        )}`
       );
     }
     return { requestHash };
@@ -177,8 +194,7 @@ export const requestBuild = async (
     const he = e as HttpError;
     const status = he.status;
     const data = he.status === undefined ? he.message : he.data;
-    const dataStr =
-      typeof data === "string" ? data : JSON.stringify(data);
+    const dataStr = typeof data === "string" ? data : JSON.stringify(data);
     if (
       status === 400 &&
       typeof dataStr === "string" &&
@@ -188,9 +204,7 @@ export const requestBuild = async (
         `ASU rejected uci-defaults (status 400): ${dataStr}. The server may have allow_defaults=false; if you control it, enable that setting.`
       );
     }
-    throw new Error(
-      `ASU build request failed: ${status} ${dataStr}`
-    );
+    throw new Error(`ASU build request failed: ${status} ${dataStr}`);
   }
 };
 
@@ -198,10 +212,12 @@ export const pollBuild = async ({
   requestHash,
   timeoutMs = 10 * 60 * 1000,
   intervalMs = 3000,
+  platform,
 }: {
   requestHash: string;
   timeoutMs?: number;
   intervalMs?: number;
+  platform: Http;
 }): Promise<BuildResult> => {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -211,8 +227,9 @@ export const pollBuild = async ({
           method: "GET",
           url: `${ASU_BASE}/api/v1/build/${requestHash}`,
           accept: [200, 202, 400, 500],
+          platform,
         }),
-      { isTransient, label: `asu poll ${requestHash}` }
+      { isTransient, label: `asu poll ${requestHash}`, sleep: platform.sleep }
     );
     if (response.status === 200) {
       return buildResultSchema.parse(response.data);
@@ -226,7 +243,7 @@ export const pollBuild = async ({
         }`
       );
     }
-    await platform().sleep(intervalMs);
+    await platform.sleep(intervalMs);
   }
   throw new Error(
     `ASU build did not complete within ${timeoutMs}ms (request_hash=${requestHash})`
@@ -235,15 +252,16 @@ export const pollBuild = async ({
 
 const HEAD_BYTES = 512;
 
-const KNOWN_IMAGE_MAGICS: { name: string; offset: number; bytes: number[] }[] = [
-  { name: "gzip", offset: 0, bytes: [0x1f, 0x8b] },
-  { name: "uImage", offset: 0, bytes: [0x27, 0x05, 0x19, 0x56] },
-  { name: "FIT/DTB", offset: 0, bytes: [0xd0, 0x0d, 0xfe, 0xed] },
-  { name: "squashfs", offset: 0, bytes: [0x68, 0x73, 0x71, 0x73] },
-  { name: "ELF", offset: 0, bytes: [0x7f, 0x45, 0x4c, 0x46] },
-  // POSIX tar: "ustar" at offset 257. Sysupgrade for NAND/UBI targets ships .tar.
-  { name: "tar", offset: 257, bytes: [0x75, 0x73, 0x74, 0x61, 0x72] },
-];
+const KNOWN_IMAGE_MAGICS: { name: string; offset: number; bytes: number[] }[] =
+  [
+    { name: "gzip", offset: 0, bytes: [0x1f, 0x8b] },
+    { name: "uImage", offset: 0, bytes: [0x27, 0x05, 0x19, 0x56] },
+    { name: "FIT/DTB", offset: 0, bytes: [0xd0, 0x0d, 0xfe, 0xed] },
+    { name: "squashfs", offset: 0, bytes: [0x68, 0x73, 0x71, 0x73] },
+    { name: "ELF", offset: 0, bytes: [0x7f, 0x45, 0x4c, 0x46] },
+    // POSIX tar: "ustar" at offset 257. Sysupgrade for NAND/UBI targets ships .tar.
+    { name: "tar", offset: 257, bytes: [0x75, 0x73, 0x74, 0x61, 0x72] },
+  ];
 
 const identifyMagic = (head: Uint8Array): string | undefined => {
   for (const { name, offset, bytes } of KNOWN_IMAGE_MAGICS) {
@@ -263,21 +281,23 @@ export const downloadImage = async ({
   outPath,
   expectedSha256,
   expectedSize,
+  platform,
 }: {
   binDir: string;
   name: string;
   outPath: string;
   expectedSha256: string;
   expectedSize?: number;
+  platform: Pick<
+    Platform,
+    "http" | "mkdirp" | "sha256File" | "readFileHead" | "removeFile"
+  >;
 }): Promise<{ sha256: string; size: number; magic: string }> => {
-  platform().mkdirp(dirname(outPath));
+  platform.mkdirp(dirname(outPath));
   const url = `${ASU_BASE}/store/${binDir}/${name}`;
 
   try {
-    const { bytes, contentLength } = await platform().http.download(
-      url,
-      outPath
-    );
+    const { bytes, contentLength } = await platform.http.download(url, outPath);
     const declaredSize = expectedSize ?? contentLength;
 
     if (declaredSize !== undefined && bytes !== declaredSize) {
@@ -286,14 +306,14 @@ export const downloadImage = async ({
       );
     }
 
-    const sha256 = await platform().sha256File(outPath);
+    const sha256 = await platform.sha256File(outPath);
     if (sha256 !== expectedSha256) {
       throw new Error(
         `sha256 mismatch for ${name}: expected ${expectedSha256}, got ${sha256}`
       );
     }
 
-    const head = platform().readFileHead(outPath, HEAD_BYTES);
+    const head = platform.readFileHead(outPath, HEAD_BYTES);
     const magic = identifyMagic(head);
     if (!magic) {
       const firstHex = Array.from(head.subarray(0, 16))
@@ -306,7 +326,7 @@ export const downloadImage = async ({
 
     return { sha256, size: bytes, magic: magic ?? "unknown" };
   } catch (e) {
-    platform().removeFile(outPath);
+    platform.removeFile(outPath);
     throw e;
   }
 };
@@ -314,11 +334,13 @@ export const downloadImage = async ({
 export const verifyImageFile = async ({
   path,
   expectedSha256,
+  platform,
 }: {
   path: string;
   expectedSha256: string;
+  platform: Pick<Platform, "sha256File">;
 }): Promise<{ ok: boolean; actualSha256: string }> => {
-  const actualSha256 = await platform().sha256File(path);
+  const actualSha256 = await platform.sha256File(path);
   return { ok: actualSha256 === expectedSha256, actualSha256 };
 };
 

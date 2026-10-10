@@ -1,4 +1,22 @@
 import { OpenWrtConfig } from "./openWrtConfigSchema";
+import { shellQuote } from "./shell";
+
+// Values are quoted; names cannot be, so they must already be plain words.
+// The five modelled packages are schema-checked, but a passthrough one
+// (dropbear, sqm, ...) reaches here unchecked.
+const packageName = /^[A-Za-z0-9_-]+$/;
+const optionName = /^[A-Za-z0-9_]+$/;
+const checkName = (name: string, pattern: RegExp, what: string) => {
+  if (!pattern.test(name)) {
+    throw new Error(
+      `Invalid UCI ${what} name ${JSON.stringify(
+        name
+      )}: use letters, digits and _` +
+        (pattern === packageName ? " or -" : "") +
+        "."
+    );
+  }
+};
 
 export const getUciCommands = ({
   openWrtConfig,
@@ -10,10 +28,10 @@ export const getUciCommands = ({
 }) => {
   // Booleans become 0/1 here. Only original strings are secrets, so a secret
   // whose text is "1" must not blank every flag.
-  const render = (value: unknown) => {
+  const render = (value: unknown): string | number => {
     if (typeof value === "boolean") return value ? "1" : "0";
     if (typeof value === "string" && redact) return redact(value);
-    return value;
+    return value as string | number;
   };
   const configKeys = Object.keys(openWrtConfig);
   const configCommands = configKeys.reduce<string[]>((acc, configKey) => {
@@ -27,6 +45,11 @@ export const getUciCommands = ({
             (e) => ![".name"].includes(e[0])
           )
         );
+        checkName(configKey, packageName, "package");
+        checkName(sectionKey, packageName, "section type");
+        Object.keys(resolvedSection).forEach((key) =>
+          checkName(key, optionName, "option")
+        );
         const identifier = `${configKey}.${sectionName}`;
         const commands = [
           `uci set ${identifier}=${sectionKey}`,
@@ -37,9 +60,13 @@ export const getUciCommands = ({
               ...(Array.isArray(value)
                 ? value.map(
                     (item) =>
-                      `uci add_list ${identifier}.${key}='${render(item)}'`
+                      `uci add_list ${identifier}.${key}=${shellQuote(
+                        render(item)
+                      )}`
                   )
-                : [`uci set ${identifier}.${key}='${render(value)}'`]),
+                : [
+                    `uci set ${identifier}.${key}=${shellQuote(render(value))}`,
+                  ]),
             ];
           }, []),
         ];

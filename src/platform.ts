@@ -3,8 +3,9 @@
  *
  * The rest of `src/` must not import Node built-ins or Node-only packages, so
  * the same bundle can run under Node on a workstation and under QuickJS on an
- * OpenWrt device. An entry point installs one implementation with
- * `setPlatform` before doing anything else; see `src/platforms/`.
+ * OpenWrt device. Each entry point builds one implementation (see
+ * `src/platforms/`) and passes it down explicitly; functions take only the
+ * parts they use, typed as `Pick<Platform, ...>`, so tests can hand in fakes.
  */
 
 export type ExecResult = {
@@ -31,6 +32,11 @@ export type SshTarget = {
   password?: string;
   privateKeyPath?: string;
   agent?: string;
+  /**
+   * Trust-on-first-use store (OpenSSH known_hosts format): a host's key is
+   * recorded on first connect and a different key is refused afterwards.
+   */
+  knownHostsFile?: string;
   /** Handshake timeout. */
   readyTimeout: number;
   keepaliveInterval: number;
@@ -88,17 +94,4 @@ export type Platform = {
   runInteractive: (argv: string[]) => Promise<number | null>;
 
   connect: (target: SshTarget) => Promise<Session>;
-};
-
-let installed: Platform | undefined;
-
-export const setPlatform = (platform: Platform) => {
-  installed = platform;
-};
-
-export const platform = (): Platform => {
-  if (!installed) {
-    throw new Error("No platform installed; call setPlatform first.");
-  }
-  return installed;
 };

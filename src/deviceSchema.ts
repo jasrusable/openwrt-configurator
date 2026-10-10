@@ -5,7 +5,6 @@ export const deviceSchemaSchema = z.object({
   name: z.string(),
   sw_config: z.boolean().optional(),
   version: z.string(),
-  config_sections: z.record(z.array(z.string())).optional(),
   ports: z
     .array(
       z.object({

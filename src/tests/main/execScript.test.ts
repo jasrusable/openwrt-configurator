@@ -44,7 +44,11 @@ test("execScript stages the script to a file and runs it with stdin detached", a
   // Removed after running, and the script's exit code is preserved.
   t.true(calls[1].command.includes(`rm -f ${stagedScriptPath}`));
   // ...and a trap inside the script covers a connection dropping mid-run.
-  t.true(calls[0].stdin!.includes(`trap 'rm -f ${stagedScriptPath}' EXIT INT TERM HUP`));
+  t.true(
+    calls[0].stdin!.includes(
+      `trap 'rm -f ${stagedScriptPath}' EXIT INT TERM HUP`
+    )
+  );
   t.true(calls[1].command.includes("exit $__onc_code"));
   t.is(calls[1].stdin, undefined);
 });

@@ -6,6 +6,7 @@ import { getOpenWrtConfig } from "../../getOpenWrtConfig";
 import { getUciCommands } from "../../getUciCommands";
 import { ONCConfig, oncConfigSchema } from "../../oncConfigSchema";
 import { parseJson, parseSchema } from "../../utils";
+import { nodePlatform } from "../../platforms/node";
 
 const oncConfigString = readFileSync(join(__dirname, "./config.json"), "utf-8");
 const oncJson = parseJson(oncConfigString);
@@ -43,7 +44,7 @@ test("wireless", async (t) => {
     deviceConfigs.map(async (deviceConfig) => {
       const deviceSchema = await getDeviceSchema({
         deviceConfig,
-        useLocal: true,
+        local: nodePlatform,
       });
       return deviceSchema;
     })

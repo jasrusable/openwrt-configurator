@@ -83,7 +83,11 @@ export type OpenWrtState = {
   config: OpenWrtConfig;
   packagesToInstall?: { packageName: string; version?: string }[];
   packagesToUninstall?: string[];
-  configSectionsToReset?: Record<string, string[]>;
+  /**
+   * `configs_to_not_reset` for this device: `<config>.*` or
+   * `<config>.<section type>`. Everything else on the device is wiped.
+   */
+  configsToNotReset?: string[];
   files?: {
     path: string;
     content: string;

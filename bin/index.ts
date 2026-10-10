@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import "../src/platforms/registerNode";
 import { run } from "../src/cli";
+import { nodePlatform } from "../src/platforms/node";
 
-run(process.argv.slice(2));
+run({ argv: process.argv.slice(2), platform: nodePlatform });

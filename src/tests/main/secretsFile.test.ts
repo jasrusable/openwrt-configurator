@@ -3,6 +3,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { resolveSecrets, secretsFileSource } from "../../resolveSecrets";
+import { nodePlatform } from "../../platforms/node";
 
 const dirs: string[] = [];
 test.after.always(() =>
@@ -19,7 +20,10 @@ const secretsFile = (content: string, mode = 0o600) => {
 };
 
 test("resolves refs from a 0600 file", async (t) => {
-  const source = secretsFileSource(secretsFile('{"wifi/home": "pw-123"}'));
+  const source = secretsFileSource({
+    path: secretsFile('{"wifi/home": "pw-123"}'),
+    platform: nodePlatform,
+  });
   const { value } = await resolveSecrets(
     { key: { $secret: "wifi/home" } },
     source.lookup,
@@ -30,7 +34,7 @@ test("resolves refs from a 0600 file", async (t) => {
 
 test("missing names are listed with the file's own hint", async (t) => {
   const path = secretsFile("{}");
-  const source = secretsFileSource(path);
+  const source = secretsFileSource({ path: path, platform: nodePlatform });
   const error = await t.throwsAsync(
     resolveSecrets(
       { a: { $secret: "x" } },
@@ -42,23 +46,35 @@ test("missing names are listed with the file's own hint", async (t) => {
 });
 
 test("an absent file means every secret is missing, not an error", async (t) => {
-  const source = secretsFileSource("/nonexistent/onc/secrets.json");
+  const source = secretsFileSource({
+    path: "/nonexistent/onc/secrets.json",
+    platform: nodePlatform,
+  });
   t.is(await source.lookup("x"), undefined);
 });
 
 test("a file readable by others is refused", async (t) => {
-  const source = secretsFileSource(secretsFile('{"x": "y"}', 0o644));
+  const source = secretsFileSource({
+    path: secretsFile('{"x": "y"}', 0o644),
+    platform: nodePlatform,
+  });
   await t.throwsAsync(source.lookup("x"), { message: /chmod 600/ });
 });
 
 test("invalid JSON is reported without echoing the file", async (t) => {
-  const source = secretsFileSource(secretsFile('{"x": "hunter2",}'));
+  const source = secretsFileSource({
+    path: secretsFile('{"x": "hunter2",}'),
+    platform: nodePlatform,
+  });
   const error = await t.throwsAsync(source.lookup("x"));
   t.false(error!.message.includes("hunter2"));
   t.regex(error!.message, /is not valid JSON/);
 });
 
 test("non-string values are rejected", async (t) => {
-  const source = secretsFileSource(secretsFile('{"x": 5}'));
+  const source = secretsFileSource({
+    path: secretsFile('{"x": 5}'),
+    platform: nodePlatform,
+  });
   await t.throwsAsync(source.lookup("x"), { message: /must be a string/ });
 });

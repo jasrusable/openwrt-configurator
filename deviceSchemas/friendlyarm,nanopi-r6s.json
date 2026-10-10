@@ -1,0 +1,19 @@
+{
+  "name": "friendlyarm,nanopi-r6s",
+  "sw_config": false,
+  "version": "25.12.5",
+  "ports": [
+    {
+      "name": "eth0",
+      "default_role": "lan"
+    },
+    {
+      "name": "eth2",
+      "default_role": "lan"
+    },
+    {
+      "name": "eth1",
+      "default_role": "wan"
+    }
+  ]
+}

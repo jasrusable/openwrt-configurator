@@ -1,8 +1,8 @@
 // Bundled and run under qjs by qjsParity.test.ts: the session layer over the
 // local transport (sh), which shares all of its wrapping with SSH.
-import "../../platforms/registerQjs";
+import "../../platforms/qjsGlobals";
 import { execScript } from "../../execScript";
-import { platform } from "../../platform";
+import { qjsPlatform as platform } from "../../platforms/qjs";
 
 const results: string[] = [];
 const check = (name: string, ok: boolean, detail: unknown) =>
@@ -11,7 +11,7 @@ const check = (name: string, ok: boolean, detail: unknown) =>
   );
 
 const main = async () => {
-  const s = await platform().connect({
+  const s = await platform.connect({
     host: "localhost",
     readyTimeout: 5000,
     keepaliveInterval: 5000,
@@ -67,11 +67,11 @@ const main = async () => {
 main().then(
   () => {
     console.log(results.join("\n"));
-    platform().exit(0);
+    platform.exit(0);
   },
   (e) => {
     console.log(results.join("\n"));
     console.error(`session check crashed: ${(e as Error)?.message ?? e}`);
-    platform().exit(1);
+    platform.exit(1);
   }
 );

@@ -2,29 +2,31 @@ import { getDeviceSchema } from "./getDeviceSchema";
 import { getOpenWrtState } from "./getOpenWrtState";
 import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
 import { join } from "./paths";
-import { platform, SshTarget } from "./platform";
-import {
-  provisionOpenWrtDevice,
-  RollbackMode,
-} from "./provisionOpenWrtDevice";
+import { Platform, SshTarget } from "./platform";
+import { defaultGateway } from "./gateway";
+import { provisionNetwork, provisioningOrder } from "./provisionNetwork";
+import { RollbackMode } from "./rollback";
+import { ConfirmTiming, confirmTiming } from "./confirm";
 
 const connectTimeoutMs = 15000;
 
-const expandHome = (path: string) =>
+const expandHome = (path: string, home: string) =>
   path === "~"
-    ? platform().homedir()
+    ? home
     : path.startsWith("~/")
-      ? join(platform().homedir(), path.slice(2))
-      : path;
+    ? join(home, path.slice(2))
+    : path;
 
 export const sshConnectOptions = ({
   deviceConfig,
   identityPath,
   agentSocket,
+  platform,
 }: {
   deviceConfig: ONCDeviceConfig;
   identityPath?: string;
   agentSocket?: string;
+  platform: Pick<Platform, "env" | "homedir">;
 }): SshTarget => {
   const auth = deviceConfig.provisioning_config?.ssh_auth;
   const keyPath = identityPath || auth?.private_key_path;
@@ -40,24 +42,82 @@ export const sshConnectOptions = ({
     readyTimeout: connectTimeoutMs,
     keepaliveInterval: 5000,
     keepaliveCountMax: 3,
-    ...(keyPath ? { privateKeyPath: expandHome(keyPath) } : {}),
+    ...(keyPath
+      ? { privateKeyPath: expandHome(keyPath, platform.homedir()) }
+      : {}),
     ...(password ? { password } : {}),
     ...(!keyPath && !password && agentSocket ? { agent: agentSocket } : {}),
+    knownHostsFile:
+      platform.env("ONC_KNOWN_HOSTS") ??
+      join(platform.homedir(), ".config/openwrt-configurator/known_hosts"),
   };
 };
 
-export const connectToDevice = async (
-  deviceConfig: ONCDeviceConfig,
-  options?: { identityPath?: string }
-) => {
-  return platform().connect(
+export const connectToDevice = ({
+  deviceConfig,
+  identityPath,
+  platform,
+}: {
+  deviceConfig: ONCDeviceConfig;
+  identityPath?: string;
+  platform: Platform;
+}) =>
+  platform.connect(
     sshConnectOptions({
       deviceConfig,
-      identityPath: options?.identityPath,
-      agentSocket: platform().env("SSH_AUTH_SOCK"),
+      identityPath,
+      agentSocket: platform.env("SSH_AUTH_SOCK"),
+      platform,
     })
   );
+
+export type ProvisionableDevice = ONCDeviceConfig & {
+  ipaddr: string;
+  provisioning_config: NonNullable<ONCDeviceConfig["provisioning_config"]>;
 };
+
+/**
+ * The enabled devices that can be reached over SSH, and why the others cannot.
+ * A device without an address or SSH login is legitimate — one that is only
+ * ever built as an image, say — so it is skipped with a note, not an error.
+ */
+export const provisionableDevices = (oncConfig: ONCConfig) =>
+  oncConfig.devices
+    .filter((device) => device.enabled !== false)
+    .reduce<{
+      ready: ProvisionableDevice[];
+      skipped: { hostname: string; reason: string }[];
+    }>(
+      ({ ready, skipped }, device) =>
+        !device.ipaddr
+          ? {
+              ready,
+              skipped: [
+                ...skipped,
+                { hostname: device.hostname, reason: "no ipaddr" },
+              ],
+            }
+          : !device.provisioning_config?.ssh_auth
+          ? {
+              ready,
+              skipped: [
+                ...skipped,
+                {
+                  hostname: device.hostname,
+                  reason: "no provisioning_config.ssh_auth",
+                },
+              ],
+            }
+          : { ready: [...ready, device as ProvisionableDevice], skipped },
+      { ready: [], skipped: [] }
+    );
+
+export const reportSkipped = (
+  skipped: { hostname: string; reason: string }[]
+) =>
+  skipped.forEach(({ hostname, reason }) =>
+    console.warn(`Skipping ${hostname}: ${reason}.`)
+  );
 
 export const provisionConfig = async ({
   oncConfig,
@@ -65,26 +125,29 @@ export const provisionConfig = async ({
   confirmTimeoutSeconds = 90,
   rollbackMode = "reload-then-reboot",
   identityPath,
+  platform,
+  timing,
 }: {
   oncConfig: ONCConfig;
   confirm?: boolean;
   confirmTimeoutSeconds?: number;
   rollbackMode?: RollbackMode;
   identityPath?: string;
+  platform: Platform;
+  timing?: ConfirmTiming;
 }) => {
-  const deviceConfigs = oncConfig.devices.filter(
-    (device) =>
-      device.enabled !== false &&
-      device.ipaddr &&
-      device.provisioning_config?.ssh_auth
-  );
+  const connect = (deviceConfig: ONCDeviceConfig) =>
+    connectToDevice({ deviceConfig, identityPath, platform });
+
+  const { ready: deviceConfigs, skipped } = provisionableDevices(oncConfig);
+  reportSkipped(skipped);
 
   // One session per device, opened once and reused for introspection and
   // provisioning. Previously each device was connected to twice and neither
   // session was ever disposed.
   const connections = await Promise.allSettled(
     deviceConfigs.map(async (deviceConfig) => {
-      const ssh = await connectToDevice(deviceConfig, { identityPath });
+      const ssh = await connect(deviceConfig);
       try {
         const deviceSchema = await getDeviceSchema({ deviceConfig, ssh });
         // Paired with its own device. Looking the schema up by model_id meant
@@ -125,49 +188,37 @@ export const provisionConfig = async ({
     );
   }
 
-  for (const { deviceConfig, deviceSchema, ssh: introspected } of ready) {
-    const state = getOpenWrtState({ oncConfig, deviceConfig, deviceSchema });
-
-    // Sessions are opened for every device up front so the run can abort before
-    // changing anything. By the time this device's turn comes, an earlier
-    // device's network changes may have killed its session — an AP behind a
-    // freshly reconfigured router is the obvious case. Check, and reconnect if
-    // it has gone, rather than provisioning over a stale session.
-    let ssh = introspected;
-    const alive = await introspected
-      .execCommand("true")
-      .then((r) => r.code === 0)
-      .catch(() => false);
-    if (!alive) {
-      console.log(
-        `Session to ${deviceConfig.hostname} did not survive; reconnecting...`
-      );
+  const devices = provisioningOrder(
+    ready.map(({ deviceConfig, deviceSchema, ssh }) => ({
+      deviceModelId: deviceConfig.model_id,
+      ipAddress: deviceConfig.ipaddr,
+      hostname: deviceConfig.hostname,
+      ssh,
+      connect: () => connect(deviceConfig),
+      state: getOpenWrtState({ oncConfig, deviceConfig, deviceSchema }),
+      rollbackMode,
+      recoverSeconds: 60,
+      sleep: platform.sleep,
+      now: Date.now,
+      timing: timing ?? confirmTiming(),
+    })),
+    await defaultGateway(platform)
+  );
+  console.log(
+    `Provisioning ${devices.map((d) => d.hostname).join(", then ")}` +
+      (confirm && devices.length > 1
+        ? ", as one change: all are confirmed or all roll back."
+        : ".")
+  );
+  try {
+    await provisionNetwork({ devices, confirm, confirmTimeoutSeconds });
+  } finally {
+    devices.forEach((device) => {
       try {
-        introspected.dispose();
+        device.ssh.dispose();
       } catch {
-        // Already gone.
+        // Already closed.
       }
-      ssh = await connectToDevice(deviceConfig, { identityPath });
-    }
-
-    try {
-      await provisionOpenWrtDevice({
-        deviceModelId: deviceConfig.model_id,
-        ipAddress: deviceConfig.ipaddr,
-        hostname: deviceConfig.hostname,
-        ssh,
-        connect: () => connectToDevice(deviceConfig, { identityPath }),
-        state,
-        confirm,
-        confirmTimeoutSeconds,
-        rollbackMode,
-      });
-    } finally {
-      try {
-        ssh.dispose();
-      } catch {
-        // Already disposed after the commit; nothing to clean up.
-      }
-    }
+    });
   }
 };

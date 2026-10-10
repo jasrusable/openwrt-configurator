@@ -34,10 +34,3 @@ export const oncWirelessSchema = makeOncConfigSchema(
     .strict()
 );
 
-export const wirelessSectionsToReset = {
-  wireless: {
-    "wifi-device": true,
-    "wifi-iface": true,
-    "wifi-station": true,
-  },
-};

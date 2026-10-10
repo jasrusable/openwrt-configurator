@@ -1,8 +1,7 @@
 import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig, oncConfigSchema, ONCDeviceConfig } from "./oncConfigSchema";
-import { ExtensionSchema, Condition, parseJson } from "./utils";
-// @ts-ignore
-import booleanParser from "boolean-parser";
+import { evaluateCondition } from "./condition";
+import { ExtensionSchema, Condition } from "./utils";
 
 export const conditionMatches = ({
   condition,
@@ -13,70 +12,26 @@ export const conditionMatches = ({
   deviceConfig: ONCDeviceConfig;
   deviceSchema: DeviceSchema;
 }) => {
-  if (!condition || condition === "*") {
-    return true;
-  }
-
-  const useSwConfig = deviceSchema.sw_config;
-
-  const lhsMapping: any = Object.keys(deviceConfig.tags).reduce(
-    (acc, tagKey) => {
-      return {
-        ...acc,
-        [`device.tag.${tagKey}`]: deviceConfig.tags[tagKey],
-      };
-    },
-    {
-      [`device.sw_config`]: useSwConfig,
-      [`device.hostname`]: deviceConfig.hostname,
-      ["device.ipaddr"]: deviceConfig.ipaddr,
-      ["device.model_id"]: deviceConfig.model_id,
-      ["device.version"]: deviceSchema.version,
+  if (!condition) return true;
+  const builtIn: Record<string, string | boolean | undefined> = {
+    "device.sw_config": deviceSchema.sw_config,
+    "device.hostname": deviceConfig.hostname,
+    "device.ipaddr": deviceConfig.ipaddr,
+    "device.model_id": deviceConfig.model_id,
+    "device.version": deviceSchema.version,
+  };
+  return evaluateCondition(condition, (name) => {
+    if (name.startsWith("device.tag.")) {
+      // A tag this device does not set is absent, not an error: conditions
+      // are shared by every device, and not every device sets every tag.
+      return { value: deviceConfig.tags[name.slice("device.tag.".length)] };
     }
-  );
-
-  const query: string[][] = booleanParser.parseBooleanQuery(condition);
-
-  return query.some((q) => {
-    return q.every((s) => {
-      const equals = s.replace(/\s/g, "").split("==");
-      if (equals.length === 2) {
-        const [lhs, rhs] = equals;
-        const value = lhsMapping[lhs];
-        if (value === undefined) {
-          throw new Error(
-            `Invalid conditional parameter defined: ${lhs}. Must be one of ${Object.keys(
-              lhsMapping
-            ).join(" ")}.`
-          );
-        }
-        const parsedRhs = parseJson(rhs.replace(/\'/g, `"`));
-        if (Array.isArray(value)) {
-          return value.includes(parsedRhs);
-        }
-        return value === parsedRhs;
-      }
-
-      const notEquals = s.replace(/\s/g, "").split("!=");
-      if (notEquals.length === 2) {
-        const [lhs, rhs] = notEquals;
-        const value = lhsMapping[lhs];
-        if (value === undefined) {
-          throw new Error(
-            `Invalid conditional parameter defined: ${lhs}. Must be one of ${Object.keys(
-              lhsMapping
-            ).join(" ")}.`
-          );
-        }
-        const parsedRhs = parseJson(rhs.replace(/\'/g, `"`));
-        if (Array.isArray(value)) {
-          return !value.includes(parsedRhs);
-        }
-        return value !== parsedRhs;
-      }
-
-      throw new Error(`Unable to parse condition: ${condition}`);
-    });
+    if (name in builtIn) return { value: builtIn[name] };
+    throw new Error(
+      `unknown name ${name}; use device.tag.<key> or one of ${Object.keys(
+        builtIn
+      ).join(", ")}`
+    );
   });
 };
 
