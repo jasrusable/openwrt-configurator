@@ -513,7 +513,7 @@ export const main = async (argv: string[]) => {
     {
       name: "openwrt-configurator",
       description: "OpenWrt Configurator",
-      version: "0.0.6",
+      version: "0.1.0",
       commands,
     },
     argv
