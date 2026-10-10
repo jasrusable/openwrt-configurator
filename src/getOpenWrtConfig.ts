@@ -271,12 +271,22 @@ export const getOpenWrtConfig = ({
     (acc, { device, stations, ...wifiIface }, wifiIfaceIndex) => {
       const radioDeviceNames = wifiDevices.map((device) => device[".name"]);
 
-      const devices =
+      // A radio the config declares for a band this device does not have
+      // (6 GHz on a dual-band access point) has no wifi-device here, so an
+      // interface on it is skipped. A name nothing declares still goes
+      // through, for netifd to report, rather than hiding a typo.
+      const declaredElsewhere = (name: string) =>
+        !radioDeviceNames.includes(name) &&
+        (resolvedOncConfig.wireless?.["wifi-device"] || []).some(
+          (d) => d[".name"] === name
+        );
+      const devices = (
         (typeof device === "string"
           ? device === "*"
             ? radioDeviceNames
             : [device]
-          : device) || radioDeviceNames;
+          : device) || radioDeviceNames
+      ).filter((name) => !declaredElsewhere(name));
 
       const interfaces = devices.map((deviceName, deviceIndex) => {
         return {

@@ -155,6 +155,30 @@ test("on the access point: bridged, a DHCP client, Wi-Fi on both bands", (t) => 
   t.is(config.ubihealthd["ubi-device"][0].device, "/dev/ubi0");
 });
 
+test("radios are set per band; an SSID can keep to some bands; 6 GHz is WPA3", (t) => {
+  const intent = sample();
+  intent.radios = {
+    "2g": { enabled: true, width: "auto", power: "low", cell_density: "off" },
+    "5g": { enabled: true, width: "160", power: "auto", cell_density: "high" },
+    "6g": { enabled: true },
+  };
+  intent.wifi[1].bands = ["2g"];
+  const config = compile(intent).config.wireless as any;
+  const radio = (band: string) => config["wifi-device"].find((d: any) => d.band === band);
+  t.like(radio("2g"), { htmode: "HE20", txpower: 10, cell_density: 0 });
+  t.like(radio("5g"), { htmode: "HE160", cell_density: 2 });
+  t.is(radio("5g").txpower, undefined, "auto: as much as the country allows");
+  t.is(radio("6g").disabled, undefined);
+  t.deepEqual(
+    config["wifi-iface"].map((w: any) => [w.ssid, w.device, w.encryption]),
+    [
+      ["Home", ["radio0", "radio1"], "psk2+ccmp"],
+      ["Home", ["radio2"], "sae"],
+      ["Home Guests", ["radio0"], "psk2+ccmp"],
+    ]
+  );
+});
+
 test("the intent is checked before it compiles", (t) => {
   const bad = (change: (intent: any) => void) => {
     const intent = sample();
@@ -232,13 +256,12 @@ test("a version 1 file is migrated, keeping every setting", (t) => {
     dns: { over_https: "quad9" },
   };
   const migrated = intentSchema.parse(migrateIntent(v1));
-  t.is(migrated.schema, 3);
+  t.is(migrated.schema, 4);
   t.deepEqual(migrated.networks, [
     {
       id: "lan",
       name: "Home",
       purpose: "home",
-      isolate_clients: false,
       subnet: "10.0.0.0/24",
       dhcp: { size: 200, lease: "24h" },
       ipv6: false,

@@ -437,15 +437,23 @@ export const ReferenceField = ({
 export const MultiSelectField = ({
   options,
   placeholder,
+  emptyIsUnset,
   ...row
-}: RowProps & { options: Option<string>[]; placeholder?: string }) => {
+}: RowProps & {
+  options: Option<string>[];
+  placeholder?: string;
+  /** Nothing chosen leaves the setting out (e.g. "every band"). */
+  emptyIsUnset?: boolean;
+}) => {
   const field = useField(row.name);
   return (
     <SettingRow {...row} error={field.error}>
       <MultiSelect
         data={options}
         value={field.value ?? []}
-        onChange={field.onChange}
+        onChange={(values) =>
+          field.onChange(emptyIsUnset && values.length === 0 ? undefined : values)
+        }
         placeholder={placeholder}
         error={!!field.error}
         style={control.wide}

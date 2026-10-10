@@ -209,6 +209,36 @@ test('a wifi-iface on "*" (or no device) is fanned out to every radio, with its 
   );
 });
 
+test("an interface on a radio for a band the device lacks is skipped", (t) => {
+  const config = build(
+    {
+      wireless: {
+        "wifi-device": [
+          { ".name": "radio0", band: "2g" },
+          { ".name": "radio1", band: "5g" },
+          { ".name": "radio2", band: "6g" },
+        ],
+        "wifi-iface": [
+          { ssid: "home", mode: "ap", network: "lan", device: ["radio0", "radio1"] },
+          { ssid: "home", mode: "ap", network: "lan", device: ["radio2"] },
+          { ssid: "typo", mode: "ap", network: "lan", device: ["radoi0"] },
+        ],
+      },
+    },
+    twoRadios
+  );
+  t.deepEqual(
+    config.wireless["wifi-iface"].map((i: any) => [i.device, i.ssid]),
+    [
+      ["radio0", "home"],
+      ["radio1", "home"],
+      // radio2 (6 GHz) is declared, but this device has no 6 GHz radio.
+      ["radoi0", "typo"],
+    ],
+    "a name nothing declares is kept, for netifd to report"
+  );
+});
+
 test("the device's hostname is set in system", (t) => {
   const config = build({ system: { system: [{ timezone: "UTC0" }] } }, dsa);
   t.is(config.system.system[0].hostname, "box");

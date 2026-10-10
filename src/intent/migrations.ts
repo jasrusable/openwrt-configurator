@@ -63,6 +63,18 @@ const migrations: Record<number, (old: Json) => Json> = {
       builtin_rules_off: [],
     },
   }),
+
+  // 3 -> 4: Wi-Fi client isolation moves from the network to each SSID on
+  // it, where hostapd applies it. Radios get defaults (2.4 and 5 GHz on).
+  3: ({ networks, wifi, ...rest }) => ({
+    ...rest,
+    schema: 4,
+    networks: networks.map(({ isolate_clients, ...network }: Json) => network),
+    wifi: (wifi ?? []).map((w: Json) => ({
+      ...w,
+      isolate_clients: !!networks.find((n: Json) => n.id === w.network)?.isolate_clients,
+    })),
+  }),
 };
 
 /** The intent in the current format, whatever version it was written in. */

@@ -47,7 +47,25 @@ const leaseTime = z
     "at least 2 minutes"
   );
 
-export const intentVersion = 3;
+export const intentVersion = 4;
+
+export const bands = ["2g", "5g", "6g"] as const;
+export type Band = (typeof bands)[number];
+
+/** One band's radios, on every access point. */
+const radio = (defaults: { enabled: boolean }) =>
+  z
+    .object({
+      enabled: z.boolean().default(defaults.enabled),
+      /** MHz; "auto" picks the band's usual width. */
+      width: z.enum(["auto", "20", "40", "80", "160"]).default("auto"),
+      /** Transmit power. Auto is the most the country allows. */
+      power: z.enum(["auto", "low", "medium", "high"]).default("auto"),
+      /** Fewer, faster clients near each access point; less range. */
+      cell_density: z.enum(["off", "normal", "high", "very_high"]).default("normal"),
+    })
+    .strict()
+    .default({});
 
 /**
  * What a network is for. It sets up the network's firewall zone when the
@@ -65,11 +83,7 @@ const network = z
     id: z.string().regex(/^[a-z][a-z0-9]{0,9}$/, "a short id"),
     name: z.string().min(1, "required").max(32),
     purpose: z.enum(purposes),
-    /**
-     * Wi-Fi clients on it cannot reach each other (hostapd isolation: within
-     * one access point and band). Layer 2, so not the firewall's to decide.
-     */
-    isolate_clients: z.boolean().default(false),
+
     /** Absent for the main network, which is untagged on every port. */
     vlan: z
       .number()
@@ -182,12 +196,30 @@ export const intentSchema = z
           ssid: z.string().min(1, "required").max(32, "at most 32 characters"),
           /** The id of the network it joins. */
           network: z.string().min(1, "pick a network"),
+          /** Where it is broadcast; unset, on every enabled band. */
+          bands: z.array(z.enum(bands)).min(1, "at least one band").optional(),
+          /**
+           * Clients cannot reach each other: hostapd's isolation, within one
+           * access point and band.
+           */
+          isolate_clients: z.boolean().default(false),
           password: wifiPassword,
           /** More passwords for the same network, e.g. one per person. */
           extra_passwords: z.array(wifiPassword).optional(),
         })
         .strict()
     ),
+
+    /** Per band, on every access point. */
+    radios: z
+      .object({
+        "2g": radio({ enabled: true }),
+        "5g": radio({ enabled: true }),
+        // Off by default: few access points have it, and it needs WPA3.
+        "6g": radio({ enabled: false }),
+      })
+      .strict()
+      .default({}),
 
     dns: z
       .object({
@@ -219,6 +251,14 @@ export const intentSchema = z
       }
       if (earlier.some((n) => n.subnet === network.subnet)) {
         issue(["networks", i, "subnet"], "already used by another network");
+      }
+    });
+    if (intent.radios["2g"].width === "80" || intent.radios["2g"].width === "160") {
+      issue(["radios", "2g", "width"], "2.4 GHz is at most 40 MHz wide");
+    }
+    intent.wifi.forEach((wifi, i) => {
+      if (wifi.bands && !wifi.bands.some((band) => intent.radios[band].enabled)) {
+        issue(["wifi", i, "bands"], "none of its bands is on (Wi-Fi › Radios)");
       }
     });
     const ids = intent.networks.map((n) => n.id);

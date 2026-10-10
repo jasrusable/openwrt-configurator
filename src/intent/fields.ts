@@ -59,12 +59,6 @@ export const fields: FieldInfo[] = [
   { path: "networks.*.name", label: "Name" },
   { path: "networks.*.purpose", label: "Purpose" },
   {
-    path: "networks.*.isolate_clients",
-    label: "Isolate Wi-Fi clients",
-    description:
-      "Whether Wi-Fi devices on the same access point and band are kept from reaching each other.",
-  },
-  {
     path: "networks.*.vlan",
     label: "VLAN",
     description: "Switches between your devices must carry it.",
@@ -92,6 +86,20 @@ export const fields: FieldInfo[] = [
     description: "Devices will have to join again with the new password.",
   },
   { path: "wifi.*.extra_passwords", label: "More passwords", secret: true },
+  { path: "wifi.*.bands", label: "Bands" },
+  {
+    path: "wifi.*.isolate_clients",
+    label: "Isolate clients",
+    description: "Whether devices on it, on the same access point and band, are kept from reaching each other.",
+  },
+  { path: "radios", label: "Radios" },
+  { path: "radios.2g", label: "2.4 GHz" },
+  { path: "radios.5g", label: "5 GHz" },
+  { path: "radios.6g", label: "6 GHz" },
+  { path: "radios.*.enabled", label: "Enabled" },
+  { path: "radios.*.width", label: "Channel width" },
+  { path: "radios.*.power", label: "Transmit power" },
+  { path: "radios.*.cell_density", label: "Cell density" },
   {
     path: "wifi.*.network",
     label: "Network",

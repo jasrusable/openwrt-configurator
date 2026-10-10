@@ -1,68 +1,70 @@
-// Wi-Fi, from the access points: every network on every band, with fast
-// roaming between access points. Radios are matched to bands on the device;
-// the intent only ever says which channel, if any, to pin.
+// Wi-Fi, from the access points: each SSID on its bands, with fast roaming
+// between access points, and each band's radios set as Wi-Fi › Radios says.
+// Radios are matched to bands on the device, so a band an access point lacks
+// (6 GHz on most) is skipped there; the intent only pins channels per device.
 import { Feature, mainNetwork, onAccessPoints, onDevice } from "../fragment";
+import { Band } from "../schema";
 import { timezones } from "../timezones";
 
-const bands = [
-  { band: "2g", name: "radio0", htmode: "HE20" },
-  { band: "5g", name: "radio1", htmode: "HE80" },
-] as const;
+const radios: { band: Band; name: string; width: string }[] = [
+  { band: "2g", name: "radio0", width: "20" },
+  { band: "5g", name: "radio1", width: "80" },
+  { band: "6g", name: "radio2", width: "160" },
+];
+
+/** dBm. The driver still caps it at what the country allows. */
+const txpower = { low: 10, medium: 15, high: 20 } as const;
+const cellDensity = { off: 0, normal: 1, high: 2, very_high: 3 } as const;
 
 export const wifi: Feature = (intent) => {
   const posixTimezone = timezones[intent.site.timezone];
-  const isolated = (id: string) =>
-    !!intent.networks.find((n) => n.id === id)?.isolate_clients;
   const ap = (section: Record<string, unknown>) => ({
     ".if": onAccessPoints,
     ...section,
   });
+  const enabled = radios.filter(({ band }) => intent.radios[band].enabled);
+
   return {
     package_profiles: [
       {
         ".if": onAccessPoints,
-        // The full wpad, for 802.11r; usteer steers clients between APs.
-        packages: [
-          "-wpad-basic-mbedtls",
-          "wpad-mbedtls",
-          "usteer",
-          "luci-app-usteer",
-        ],
+        // The full wpad, for 802.11r and WPA3; usteer steers clients between APs.
+        packages: ["-wpad-basic-mbedtls", "wpad-mbedtls", "usteer", "luci-app-usteer"],
       },
     ],
     config: {
       wireless: {
-        "wifi-device": bands.map(({ band, name, htmode }) =>
-          ap({
+        "wifi-device": radios.map(({ band, name, width }) => {
+          const settings = intent.radios[band];
+          return ap({
             ".name": name,
             band,
-            htmode,
+            ...(settings.enabled ? {} : { disabled: true }),
+            htmode: `HE${settings.width === "auto" ? width : settings.width}`,
             channel: "auto",
-            cell_density: 1,
+            cell_density: cellDensity[settings.cell_density],
+            ...(settings.power === "auto" ? {} : { txpower: txpower[settings.power] }),
             country: intent.site.country,
             ".overrides": intent.devices.flatMap((device) => {
-              const channel = device.wifi?.channel?.[band];
+              const channel = (device.wifi?.channel as Record<string, unknown> | undefined)?.[band];
               return channel !== undefined
                 ? [{ ".if": onDevice(device.name), override: { channel } }]
                 : [];
             }),
-          })
-        ),
-        "wifi-iface": intent.wifi.map((network) =>
-          ap({
+          });
+        }),
+        "wifi-iface": intent.wifi.flatMap((ssid) => {
+          const on = enabled.filter(({ band }) => !ssid.bands || ssid.bands.includes(band));
+          const common = {
             mode: "ap",
-            device: bands.map(({ name }) => name),
-            network: network.network,
-            // hostapd's isolation: only within this access point's BSS. Across
-            // access points, bands or wired ports it needs bridge port
-            // isolation too (TODO.md).
-            ...(isolated(network.network) ? { isolate: true } : {}),
-            ssid: network.ssid,
-            encryption: "psk2+ccmp",
-            key: network.password,
-            ...(network.extra_passwords?.length
-              ? { stations: network.extra_passwords.map((key) => ({ key })) }
+            network: ssid.network,
+            ssid: ssid.ssid,
+            key: ssid.password,
+            ...(ssid.extra_passwords?.length
+              ? { stations: ssid.extra_passwords.map((key) => ({ key })) }
               : {}),
+            // hostapd's isolation: within this access point and band only.
+            ...(ssid.isolate_clients ? { isolate: true } : {}),
             // Fast roaming between access points (802.11r/k/v).
             ieee80211r: true,
             ieee80211k: true,
@@ -74,8 +76,17 @@ export const wifi: Feature = (intent) => {
             disassoc_low_ack: false,
             bss_load_update_period: "0",
             chan_util_avg_period: "0",
-          })
-        ),
+          };
+          const legacy = on.filter(({ band }) => band !== "6g");
+          const sixGhz = on.find(({ band }) => band === "6g");
+          return [
+            ...(legacy.length
+              ? [ap({ ...common, device: legacy.map((r) => r.name), encryption: "psk2+ccmp" })]
+              : []),
+            // 6 GHz allows WPA3 (SAE) only.
+            ...(sixGhz ? [ap({ ...common, device: [sixGhz.name], encryption: "sae" })] : []),
+          ];
+        }),
       },
       usteer: {
         usteer: [

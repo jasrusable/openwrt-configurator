@@ -15,7 +15,6 @@ const withIot = () => {
     id: "net2",
     name: "Gadgets",
     purpose: "iot",
-    isolate_clients: false,
     vlan: 30,
     subnet: "10.0.30.0/24",
     dhcp: { size: 50, lease: "12h" },

@@ -62,13 +62,15 @@ const Shell = () => {
         {pages.map((page) => {
           const { id, label, icon: Icon } = page;
           const indent = "indent" in page && page.indent;
+          // A heading is never the current page: it leads to its first one.
+          const to = "header" in page ? page.to : id;
           return (
             <NavLink
               key={id}
               label={label}
               leftSection={<Icon size={indent ? 16 : 18} stroke={1.6} />}
-              active={isActive(id)}
-              onClick={() => navigate(`/${id}`)}
+              active={!("header" in page) && isActive(id)}
+              onClick={() => navigate(`/${to}`)}
               style={{ borderRadius: 8, ...(indent ? { paddingLeft: 32 } : {}) }}
             />
           );
@@ -108,7 +110,9 @@ const router = createHashRouter([
     errorElement: <PageError />,
     children: [
       { index: true, element: <Navigate to="general" replace /> },
-      ...pages.map(({ id, Page }) => ({ path: `${id}/*`, element: <Page /> })),
+      ...pages.flatMap((page) =>
+        "Page" in page ? [{ path: `${page.id}/*`, element: <page.Page /> }] : []
+      ),
       { path: "*", element: <Navigate to="general" replace /> },
     ],
   },

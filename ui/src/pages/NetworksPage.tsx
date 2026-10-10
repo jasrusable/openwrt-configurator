@@ -5,7 +5,7 @@ import { ZoneField } from "../firewall/ZoneField";
 import {
   DurationField,
   NumberField,
-  PresetField,
+  SegmentedField,
   SubnetField,
   SwitchField,
   TextField,
@@ -41,7 +41,6 @@ const newNetwork = (networks: { id: string; vlan?: number; subnet: string }[]) =
     ),
     name: "",
     purpose: "guest" as const,
-    isolate_clients: true,
     vlan,
     subnet,
     dhcp: { size: 100, lease: "12h" },
@@ -110,18 +109,11 @@ const networks = defineList({
     <>
       <Section>
         <TextField name={`networks.${i}.name`} label="Name" />
-        <PresetField
+        <SegmentedField
           name={`networks.${i}.purpose`}
           label="Purpose"
-          description="What it is for: sets up its firewall zone when created, and Wi-Fi isolation."
+          description="What it is for: sets up its firewall zone when the network is created."
           options={purposes}
-          fills={`networks.${i}.isolate_clients`}
-          presets={{ home: false, guest: true, iot: false }}
-        />
-        <SwitchField
-          name={`networks.${i}.isolate_clients`}
-          label="Isolate Wi-Fi clients"
-          description="Wi-Fi devices on the same access point and band cannot reach each other."
         />
       </Section>
       <Section title="Firewall">

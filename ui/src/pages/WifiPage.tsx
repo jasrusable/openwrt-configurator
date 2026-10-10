@@ -1,26 +1,31 @@
 import { Text } from "@mantine/core";
 import { useWatch } from "react-hook-form";
 import {
+  MultiSelectField,
   PasswordField,
   PasswordListField,
   ReferenceField,
+  SwitchField,
   TextField,
   Value,
 } from "../form/fields";
 import { defineList, ListPage } from "../form/ListPage";
 import { Section } from "../kit/layout";
 
+const bandLabels: Record<string, string> = { "2g": "2.4 GHz", "5g": "5 GHz", "6g": "6 GHz" };
+
 const wifiNetworks = defineList({
   name: "wifi",
-  title: "Wi-Fi",
+  title: "SSIDs",
   description:
-    "Every network is broadcast by every access point, on every band, with seamless roaming between them.",
+    "Each SSID is broadcast by every access point, on its bands, with seamless roaming between them.",
   addLabel: "Add network",
   // Joins the main network unless told otherwise.
   newItem: (_, intent) => ({
     ssid: "",
     password: "",
     network: intent.networks.find((n) => n.vlan === undefined)?.id ?? "",
+    isolate_clients: false,
   }),
   itemTitle: (i) => <Value name={`wifi.${i}.ssid`} fallback="New network" />,
   empty: "No Wi-Fi networks yet.",
@@ -54,9 +59,14 @@ const wifiNetworks = defineList({
     },
     {
       header: "Bands",
-      cell: () => (
+      cell: (i) => (
         <Text size="sm" c="dimmed">
-          2.4 and 5 GHz
+          <Value
+            name={`wifi.${i}.bands`}
+            format={(bands?: string[]) =>
+              bands ? bands.map((b) => bandLabels[b]).join(", ") : "All enabled"
+            }
+          />
         </Text>
       ),
     },
@@ -84,6 +94,21 @@ const wifiNetworks = defineList({
           label="More passwords"
           description="Each works on its own, e.g. one per person."
           addLabel="Add password"
+        />
+      </Section>
+      <Section title="Broadcast">
+        <MultiSelectField
+          name={`wifi.${i}.bands`}
+          label="Bands"
+          description="Empty: every band that is on (Wi-Fi › Radios)."
+          options={Object.entries(bandLabels).map(([value, label]) => ({ value, label }))}
+          placeholder="All enabled"
+          emptyIsUnset
+        />
+        <SwitchField
+          name={`wifi.${i}.isolate_clients`}
+          label="Isolate clients"
+          description="Devices on it, on the same access point and band, cannot reach each other."
         />
       </Section>
     </>

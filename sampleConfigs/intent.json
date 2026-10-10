@@ -1,5 +1,5 @@
 {
-  "schema": 3,
+  "schema": 4,
   "site": {
     "name": "Home",
     "timezone": "Europe/Zurich",
@@ -34,52 +34,10 @@
       "up_mbps": 950
     }
   },
-  "wifi": [
-    {
-      "ssid": "Home",
-      "network": "lan",
-      "password": "change-me-please",
-      "extra_passwords": [
-        "change-me-too"
-      ]
-    },
-    {
-      "ssid": "Home Guests",
-      "network": "guest",
-      "password": "welcome-guests"
-    }
-  ],
   "dns": {
     "over_https": "cloudflare",
     "local_domain": "lan"
   },
-  "networks": [
-    {
-      "id": "lan",
-      "name": "Home",
-      "purpose": "home",
-      "subnet": "10.0.0.0/24",
-      "dhcp": {
-        "size": 250,
-        "lease": "24h"
-      },
-      "ipv6": true,
-      "isolate_clients": false
-    },
-    {
-      "id": "guest",
-      "name": "Guests",
-      "purpose": "guest",
-      "vlan": 20,
-      "subnet": "10.0.20.0/24",
-      "dhcp": {
-        "size": 100,
-        "lease": "2h"
-      },
-      "ipv6": false,
-      "isolate_clients": true
-    }
-  ],
   "firewall": {
     "zones": [
       {
@@ -143,5 +101,47 @@
       }
     ],
     "builtin_rules_off": []
-  }
+  },
+  "networks": [
+    {
+      "id": "lan",
+      "name": "Home",
+      "purpose": "home",
+      "subnet": "10.0.0.0/24",
+      "dhcp": {
+        "size": 250,
+        "lease": "24h"
+      },
+      "ipv6": true
+    },
+    {
+      "id": "guest",
+      "name": "Guests",
+      "purpose": "guest",
+      "vlan": 20,
+      "subnet": "10.0.20.0/24",
+      "dhcp": {
+        "size": 100,
+        "lease": "2h"
+      },
+      "ipv6": false
+    }
+  ],
+  "wifi": [
+    {
+      "ssid": "Home",
+      "network": "lan",
+      "password": "change-me-please",
+      "extra_passwords": [
+        "change-me-too"
+      ],
+      "isolate_clients": false
+    },
+    {
+      "ssid": "Home Guests",
+      "network": "guest",
+      "password": "welcome-guests",
+      "isolate_clients": true
+    }
+  ]
 }
