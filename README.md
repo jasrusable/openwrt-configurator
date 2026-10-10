@@ -56,7 +56,25 @@ The JSON config file can be conditionally composed with `.if` and/or `.overrides
 
 ## Getting started
 
-1. Download OpenWrt Configurator from the [GitHub Releases page](https://github.com/jasrusable/openwrt-configurator/releases).
+1. Install OpenWrt Configurator.
+
+   On macOS, with [Homebrew](https://brew.sh):
+
+   ```sh
+   brew install jasrusable/tap/openwrt-configurator
+   ```
+
+   On an OpenWrt 25.12+ device, from the signed package feed (it pulls in `quickjs`, about 350 KB in all):
+
+   ```sh
+   wget -O /etc/apk/keys/openwrt-configurator.pem https://jasrusable.github.io/openwrt-configurator/openwrt/openwrt-configurator.pem
+   echo "https://jasrusable.github.io/openwrt-configurator/openwrt/packages.adb" >> /etc/apk/repositories.d/customfeeds.list
+   apk update && apk add openwrt-configurator
+   ```
+
+   On the device, `$secret` refs are read from `/etc/onc/secrets.json` (`{ "name": "value" }`, mode `0600`) instead of a keychain. A device can provision itself as well as the devices it reaches; run it under `setsid` so that losing your own SSH session to the reload does not stop it.
+
+   Standalone binaries for macOS, Linux and Windows are also on the [GitHub Releases page](https://github.com/jasrusable/openwrt-configurator/releases).
 
 2. Download a [sample configuration file](https://github.com/jasrusable/openwrt-configurator/tree/main/sampleConfigs).
 

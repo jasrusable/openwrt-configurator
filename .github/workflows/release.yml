@@ -22,14 +22,31 @@ jobs:
 
       - run: npm ci
 
+      # The version lives in package.json and src/cli.ts, and the Homebrew
+      # formula's test checks `--version` against the tag.
+      - name: Check the tag matches the version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p 'require("./package.json").version')
+          cli=$(sed -n 's/.*version: "\([0-9.]*\)".*/\1/p' src/cli.ts | head -1)
+          [ "$tag" = "$pkg" ] && [ "$tag" = "$cli" ] || {
+            echo "Tag $tag, package.json $pkg and src/cli.ts $cli must match." >&2
+            exit 1
+          }
+
+      - run: npm test
+
       - run: npm run build
 
       - run: npm run package
 
+      - run: npm run bundle
+
       - name: Generate checksums
         working-directory: artifacts
         run: |
-          for f in openwrt-configurator-*; do
+          cp ../dist/qjs/openwrt-configurator.mjs .
+          for f in openwrt-configurator-* openwrt-configurator.mjs; do
             sha256sum "$f" > "$f.sha256"
           done
           ls -la
@@ -43,5 +60,85 @@ jobs:
             artifacts/openwrt-configurator-macos.sha256
             artifacts/openwrt-configurator-win.exe
             artifacts/openwrt-configurator-win.exe.sha256
+            artifacts/openwrt-configurator.mjs
+            artifacts/openwrt-configurator.mjs.sha256
           generate_release_notes: true
           fail_on_unmatched_files: true
+
+  # A signed apk feed on GitHub Pages. Devices trust it by the key, so the
+  # signing key must stay the same across releases: it comes from a secret
+  # rather than being generated per build.
+  openwrt-feed:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: "npm"
+
+      - run: npm ci
+
+      - run: npm run bundle
+
+      - name: Build the package and signed index
+        env:
+          FEED_KEY: ${{ secrets.OPENWRT_FEED_KEY }}
+        run: |
+          [ -n "$FEED_KEY" ] || { echo "The OPENWRT_FEED_KEY secret is not set." >&2; exit 1; }
+          key="$RUNNER_TEMP/feed-key.pem"
+          (umask 077 && printf '%s\n' "$FEED_KEY" > "$key")
+          packaging/openwrt/build.sh "${GITHUB_REF_NAME#v}" site/openwrt "$key"
+          rm -f "$key"
+          mv site/openwrt/public-key.pem site/openwrt/openwrt-configurator.pem
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Render the formula from the released bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" --pattern openwrt-configurator.mjs
+          packaging/homebrew/render.sh "${GITHUB_REF_NAME#v}" \
+            "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/openwrt-configurator.mjs" \
+            openwrt-configurator.mjs > "$RUNNER_TEMP/openwrt-configurator.rb"
+
+      # A deploy key with write access to the tap repository only.
+      - name: Push it to the tap
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          [ -n "$TAP_DEPLOY_KEY" ] || { echo "The HOMEBREW_TAP_DEPLOY_KEY secret is not set." >&2; exit 1; }
+          key="$RUNNER_TEMP/tap-key"
+          (umask 077 && printf '%s\n' "$TAP_DEPLOY_KEY" > "$key")
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone git@github.com:jasrusable/homebrew-tap.git tap
+          mkdir -p tap/Formula
+          cp "$RUNNER_TEMP/openwrt-configurator.rb" tap/Formula/
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/openwrt-configurator.rb
+          git diff --cached --quiet || git commit -m "openwrt-configurator ${GITHUB_REF_NAME#v}"
+          git push
+          rm -f "$key"

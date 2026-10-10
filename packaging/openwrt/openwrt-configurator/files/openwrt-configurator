@@ -1,0 +1,2 @@
+#!/bin/sh
+exec qjs --module /usr/share/openwrt-configurator/openwrt-configurator.mjs "$@"

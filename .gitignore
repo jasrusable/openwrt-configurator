@@ -115,3 +115,5 @@ configs
 # These bake your network topology (hostnames, lan IPs) into the artifact
 # so they should not be committed.
 images/
+# Copied in by packaging/openwrt/build.sh.
+packaging/openwrt/openwrt-configurator/files/openwrt-configurator.mjs

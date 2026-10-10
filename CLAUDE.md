@@ -84,6 +84,15 @@ Nothing in `src/` outside `src/platforms/` may import a Node built-in or a Node-
 - **Secrets** come from the macOS keychain on macOS and from `/etc/onc/secrets.json` (`{ "name": "value" }`, must be `0600`; `ONC_SECRETS_FILE` overrides) elsewhere. Its parse errors deliberately carry no excerpt.
 - HTTP uses `curl`; sha256 uses `sha256sum` or `shasum`.
 
+### Packaging
+
+A pushed tag runs `.github/workflows/release.yml`. Besides the `pkg` binaries it attaches the QuickJS bundle, then:
+
+- **OpenWrt feed** — `packaging/openwrt/build.sh` builds `packaging/openwrt/openwrt-configurator/` (`PKGARCH:=all`, `DEPENDS:=+quickjs`) in the `openwrt/sdk:x86-64-v25.12.5` image and signs the index with the `OPENWRT_FEED_KEY` secret (an EC P-256 PEM). The feed and its public key are published to GitHub Pages under `/openwrt/`. The key must never change: devices trust the feed by it. The SDK does not sign the `.apk` itself; apk verifies it through the signed index's hash, like OpenWrt's own feeds. Without a key the script generates a throwaway one, fine for local testing only. The SDK warns that `quickjs` "does not exist" (it lacks the packages feed); the dependency is still recorded.
+- **Homebrew** — `packaging/homebrew/render.sh` fills `openwrt-configurator.rb.in` with the release URL and sha256, and the workflow pushes it to `jasrusable/homebrew-tap` over SSH with a write deploy key on that repo (the `HOMEBREW_TAP_DEPLOY_KEY` secret). The formula's test checks `--version` against the tag, which is why the workflow also refuses a tag that disagrees with `package.json` and `src/cli.ts`.
+
+To test the package without a device, install it into `openwrt/rootfs:x86-64-v25.12.5` from a `file://` feed.
+
 ### Commit-confirm
 
 Because committing `network`/`firewall` can sever the connection doing the provisioning, `provision` snapshots state, starts a detached `setsid` watchdog, commits, then reconnects (retrying, since `reload_config` briefly drops the network) and touches its confirm flag to disarm it. If the tool cannot get back in, the device rolls back and reboots itself. `--no-confirm` disables it; `--confirm-timeout` changes the 90 s window.
@@ -172,8 +181,8 @@ Most tests are golden-ish: load `config.json` / `config2.json`, build the OpenWr
 
 ## Gotchas
 
-- **The CLI version is duplicated.** `package.json` `version` and the hardcoded `.version("0.0.6")` in `src/cli.ts` must be bumped together.
-- **Releases are tag-driven.** `.github/workflows/release.yml` fires on a pushed `X.Y.Z` or `vX.Y.Z` tag, runs build + package, and publishes binaries with sha256 sums. Nothing runs on push to `main` — there is no CI test run, so run `npm test` yourself.
+- **The CLI version is duplicated.** `package.json` `version` and the `version` in the spec in `src/cli.ts` must be bumped together.
+- **Releases are tag-driven.** `.github/workflows/release.yml` fires on a pushed `X.Y.Z` or `vX.Y.Z` tag, checks the tag against the version, runs `npm test` (the QuickJS parity test is skipped there: no `qjs`), then publishes the binaries, the bundle, the OpenWrt feed and the Homebrew formula (see "Packaging"). Nothing runs on push to `main`, so run `npm test` yourself before merging.
 - **`print-uci-commands` builds against the live SSH session**, the same as `provision`. It used to call `getDeviceScript({ state })` with no session, so package diffing never ran: every package the config named was printed as an install and every removal as a removal, regardless of what was on the device. That reported a 21-package `apk del` cascade for packages that were not installed at all. Keep the session open until the script is built, or the dry run stops matching what a provision would do. Resolved `$secret` values are redacted in the printed script; `--show-secrets` turns that off — don't pass it unless the user asks.
 - **`$secret` refs are resolved once at load** (`loadOncConfig`), before schema parse. The rest of the pipeline still sees plaintext strings. `secrets set` prompts for a value and stores it; there is no `get`.
 - **`npm start` is dead.** It points at `./src/index.ts`, which does not exist.
