@@ -1,6 +1,7 @@
 // Older intent files, upgraded one version at a time to the current one. A
 // file is migrated when read, and written in the current format on its next
 // save. A migration never drops a setting: it moves it to where it now lives.
+import { defaultWanZone, routerServiceRules, stockRules } from "./firewall";
 import { intentVersion } from "./schema";
 
 type Json = Record<string, any>;
@@ -75,6 +76,67 @@ const migrations: Record<number, (old: Json) => Json> = {
       isolate_clients: !!networks.find((n: Json) => n.id === w.network)?.isolate_clients,
     })),
   }),
+
+  // 4 -> 5: the firewall as LuCI has it. WAN becomes a zone of its own; each
+  // zone gets masquerading and MSS clamping (off: WAN had them); the stock
+  // rules still on, and each "router services" zone's services, become
+  // ordinary rules, ahead of the user's own, which now list protocols.
+  4: ({ firewall, networks, ...rest }) => {
+    const main = firewall.zones.find((z: Json) =>
+      z.networks.includes(networks.find((n: Json) => n.vlan === undefined)?.id)
+    )?.id ?? "lan";
+    const off: string[] = firewall.builtin_rules_off ?? [];
+    const stockOn = stockRules(main).filter((rule) =>
+      !off.includes(stockGroup[rule.name as keyof typeof stockGroup])
+    );
+    const services = firewall.zones
+      .filter((z: Json) => (z.router_services ?? true) && z.input !== "accept")
+      .flatMap((z: Json) => routerServiceRules(z.id));
+    const own = (firewall.rules ?? []).map(({ protocol, ports, ...rule }: Json) => ({
+      ...rule,
+      protocols:
+        protocol === "tcp+udp" || protocol === undefined
+          ? ["tcp", "udp"]
+          : protocol === "any"
+          ? ["all"]
+          : [protocol],
+      ...(ports ? { destination_port: String(ports).replace(/,/g, " ") } : {}),
+    }));
+    return {
+      ...rest,
+      networks,
+      schema: 5,
+      firewall: {
+        ...(firewall.defaults ? { defaults: firewall.defaults } : {}),
+        zones: [
+          ...firewall.zones.map(({ router_services, ...zone }: Json) => ({
+            ...zone,
+            masquerade: false,
+            mss_clamping: false,
+          })),
+          // As format 4 compiled it (forward DROP), not OpenWrt's stock REJECT:
+          // a migration keeps what a file did.
+          { ...defaultWanZone, forward: "drop" },
+        ],
+        forwardings: firewall.forwardings ?? [],
+        rules: [...stockOn, ...services, ...own],
+        port_forwards: firewall.port_forwards ?? [],
+      },
+    };
+  },
+};
+
+/** Format 4's built-in rule switches, by the stock rule each covered. */
+const stockGroup = {
+  "Allow-DHCP-Renew": "dhcp_renew",
+  "Allow-Ping": "ping",
+  "Allow-IGMP": "igmp",
+  "Allow-DHCPv6": "ipv6",
+  "Allow-MLD": "ipv6",
+  "Allow-ICMPv6-Input": "ipv6",
+  "Allow-ICMPv6-Forward": "ipv6",
+  "Allow-IPSec-ESP": "ipsec_passthrough",
+  "Allow-ISAKMP": "ipsec_passthrough",
 };
 
 /** The intent in the current format, whatever version it was written in. */

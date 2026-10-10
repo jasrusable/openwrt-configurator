@@ -28,7 +28,12 @@ const forwards = defineList({
     internal_address: "",
     reflection: true,
   }),
-  itemTitle: (i) => <Value name={`firewall.port_forwards.${i}.name`} fallback="New port forward" />,
+  itemTitle: (i) => (
+    <Value
+      name={`firewall.port_forwards.${i}.name`}
+      fallback="New port forward"
+    />
+  ),
   empty: "Nothing is forwarded.",
   columns: [
     {
@@ -45,7 +50,9 @@ const forwards = defineList({
         <Text size="sm" ff="monospace">
           <Value
             name={`firewall.port_forwards.${i}`}
-            format={(f) => f && `${f.protocol.toUpperCase()} ${f.external_port}`}
+            format={(f) =>
+              f && `${f.protocol.toUpperCase()} ${f.external_port}`
+            }
           />
         </Text>
       ),
@@ -56,7 +63,9 @@ const forwards = defineList({
         <Text size="sm" ff="monospace">
           <Value
             name={`firewall.port_forwards.${i}`}
-            format={(f) => f && `${f.internal_address}:${f.internal_port || f.external_port}`}
+            format={(f) =>
+              f && `${f.internal_address}:${f.internal_port || f.external_port}`
+            }
           />
         </Text>
       ),
@@ -67,7 +76,13 @@ const forwards = defineList({
         <Group>
           <Value
             name={`firewall.port_forwards.${i}.enabled`}
-            format={(on) => !on && <Text size="xs" c="dimmed">Off</Text>}
+            format={(on) =>
+              !on && (
+                <Text size="xs" c="dimmed">
+                  Off
+                </Text>
+              )
+            }
           />
         </Group>
       ),
@@ -77,7 +92,10 @@ const forwards = defineList({
     <>
       <Section>
         <TextField name={`firewall.port_forwards.${i}.name`} label="Name" />
-        <SwitchField name={`firewall.port_forwards.${i}.enabled`} label="Enabled" />
+        <SwitchField
+          name={`firewall.port_forwards.${i}.enabled`}
+          label="Enabled"
+        />
       </Section>
       <Section title="Forward">
         <SegmentedField

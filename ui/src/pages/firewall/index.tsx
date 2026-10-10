@@ -1,37 +1,36 @@
-// The firewall section: its own pages, by the first part of the URL after
-// /firewall, as tabs above each page's title; the rest of the URL goes to
-// the list pages (a zone, a rule).
+// The firewall, laid out as LuCI's Network › Firewall: General settings (the
+// defaults and zones), Port forwards and Traffic rules, as tabs above each
+// page's title. A zone's page is under General settings (/firewall/zones/1).
 import { Tabs } from "@mantine/core";
 import { useNavigate, useParams } from "react-router";
 import { SectionNav } from "../../kit/layout";
-import { FirewallOverviewPage } from "./OverviewPage";
+import { GeneralSettingsPage } from "./GeneralSettingsPage";
 import { PortForwardsPage } from "./PortForwardsPage";
 import { RulesPage } from "./RulesPage";
-import { FirewallSettingsPage } from "./SettingsPage";
-import { ZonesPage } from "./ZonesPage";
 
-export const firewallPages = [
-  // At /firewall itself.
-  { id: "overview", label: "Overview" },
-  { id: "zones", label: "Zones" },
-  { id: "rules", label: "Rules" },
-  { id: "port-forwards", label: "Port forwarding" },
-  { id: "settings", label: "Settings" },
-] as const;
+const tabs = [
+  { value: "general", label: "General settings", path: "/firewall" },
+  {
+    value: "port-forwards",
+    label: "Port forwards",
+    path: "/firewall/port-forwards",
+  },
+  { value: "rules", label: "Traffic rules", path: "/firewall/rules" },
+];
 
-const FirewallTabs = ({ section }: { section: string }) => {
+const FirewallTabs = ({ tab }: { tab: string }) => {
   const navigate = useNavigate();
   return (
     <Tabs
-      value={section}
+      value={tab}
       onChange={(value) =>
-        navigate(value && value !== "overview" ? `/firewall/${value}` : "/firewall")
+        navigate(tabs.find((t) => t.value === value)?.path ?? "/firewall")
       }
     >
       <Tabs.List>
-        {firewallPages.map((page) => (
-          <Tabs.Tab key={page.id} value={page.id}>
-            {page.label}
+        {tabs.map((t) => (
+          <Tabs.Tab key={t.value} value={t.value}>
+            {t.label}
           </Tabs.Tab>
         ))}
       </Tabs.List>
@@ -41,25 +40,21 @@ const FirewallTabs = ({ section }: { section: string }) => {
 
 export const FirewallPage = () => {
   const [first = "", ...rest] = (useParams()["*"] ?? "").split("/");
-  const section = firewallPages.some((p) => p.id === first) ? first : "overview";
+  const sub = rest.join("/");
+  const page =
+    first === "port-forwards" ? (
+      <PortForwardsPage sub={sub} />
+    ) : first === "rules" ? (
+      <RulesPage sub={sub} />
+    ) : (
+      // /firewall and /firewall/zones/<n>: the zones live here.
+      <GeneralSettingsPage sub={first === "zones" ? sub : ""} />
+    );
+  const tab =
+    first === "port-forwards" || first === "rules" ? first : "general";
   return (
-    <SectionNav.Provider value={<FirewallTabs section={section} />}>
-      <FirewallSection section={section} sub={rest.join("/")} />
+    <SectionNav.Provider value={<FirewallTabs tab={tab} />}>
+      {page}
     </SectionNav.Provider>
   );
-};
-
-const FirewallSection = ({ section, sub }: { section: string; sub: string }) => {
-  switch (section) {
-    case "zones":
-      return <ZonesPage sub={sub} />;
-    case "rules":
-      return <RulesPage sub={sub} />;
-    case "port-forwards":
-      return <PortForwardsPage sub={sub} />;
-    case "settings":
-      return <FirewallSettingsPage />;
-    default:
-      return <FirewallOverviewPage />;
-  }
 };

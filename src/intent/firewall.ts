@@ -1,78 +1,108 @@
-// The firewall, in OpenWrt's own terms: zones (each grouping networks, with
-// input/forward/output policies), forwardings between zones, traffic rules,
-// port forwards (DNAT), and the stock WAN rules as named built-ins that can be
-// switched off. The built-in WAN zone is "wan"; "router" as a rule's
-// destination means traffic to the router itself (fw4 input).
+// The firewall, as OpenWrt (fw4) and LuCI have it: defaults; zones, WAN
+// among them, each covering networks with input/output/forward policies,
+// masquerading and MSS clamping; forwardings between zones; traffic rules,
+// OpenWrt's stock ones included, as ordinary rules; and port forwards. A
+// rule's destination may be a zone, "router" (LuCI's "Device (input)") or
+// "*" (any zone); its source a zone or "*".
 import { z } from "zod";
 
 export const policies = ["accept", "reject", "drop"] as const;
 const policy = z.enum(policies);
 
+/** The WAN zone's id: it covers the internet connection, not a network. */
+export const wanZone = "wan";
+
 /** A short id: it names the fw4 zone, which allows at most 11 characters. */
 export const zoneId = z
   .string()
   .regex(/^[a-z][a-z0-9]{0,9}$/, "a short id")
-  .refine((id) => id !== "wan" && id !== "router", "reserved");
+  .refine((id) => id !== "router", "reserved");
 
-/** A port, a range or a list: "443", "8000-8100", "80,443". */
+/** A port or a range: "443", "8000-8100". */
+const port = z
+  .string()
+  .regex(/^\d{1,5}(-\d{1,5})?$/, "a port or a range like 8000-8100")
+  .refine((value) => value.split("-").every((p) => +p >= 1 && +p <= 65535), "ports are 1 to 65535");
+
+/** For rules, several too: "80 443". */
 const ports = z
   .string()
   .regex(
-    /^\d{1,5}(-\d{1,5})?(,\d{1,5}(-\d{1,5})?)*$/,
-    "a port, a range like 8000-8100, or a list like 80,443"
+    /^\d{1,5}(-\d{1,5})?([ ,]\d{1,5}(-\d{1,5})?)*$/,
+    "a port, a range like 8000-8100, or several like 80 443"
   )
   .refine(
-    (value) => value.split(/[,-]/).every((p) => +p >= 1 && +p <= 65535),
+    (value) => value.split(/[ ,-]/).every((p) => +p >= 1 && +p <= 65535),
     "ports are 1 to 65535"
   );
 
 const address = z
   .string()
   .regex(
-    /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$|^[0-9a-f:]+(\/\d{1,3})?$/i,
+    /^!?((\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?|[0-9a-f:]+(\/\d{1,3})?)$/i,
     "an IP address or a range like 10.0.0.0/24"
   );
 
-export const protocols = ["tcp+udp", "tcp", "udp", "icmp", "any"] as const;
+export const protocols = ["tcp", "udp", "icmp", "igmp", "esp", "ah", "sctp", "all"] as const;
+
+export const icmpTypes = [
+  "echo-request",
+  "echo-reply",
+  "destination-unreachable",
+  "packet-too-big",
+  "time-exceeded",
+  "bad-header",
+  "unknown-header-type",
+  "router-solicitation",
+  "neighbour-solicitation",
+  "router-advertisement",
+  "neighbour-advertisement",
+  "130/0",
+  "131/0",
+  "132/0",
+  "143/0",
+] as const;
 
 export const zoneSchema = z
   .object({
     id: zoneId,
     /** Unset: the zone is known by its networks' names (zoneLabel). */
     name: z.string().max(32).optional(),
-    /** The network ids in this zone. */
+    /** The network ids it covers. The WAN zone covers the internet connection. */
     networks: z.array(z.string()),
-    /** Traffic to the router itself. */
     input: policy,
-    /** Traffic between this zone's own networks. */
-    forward: policy,
     output: policy,
-    /** Answer DHCP, DNS and NTP even when input is not accept. */
-    router_services: z.boolean().default(true),
+    /** Between this zone's own networks. */
+    forward: policy,
+    masquerade: z.boolean().default(false),
+    mss_clamping: z.boolean().default(false),
   })
   .strict();
 
 export const forwardingSchema = z
-  .object({
-    /** A zone id, or "wan". */
-    from: z.string(),
-    to: z.string(),
-  })
+  .object({ from: z.string(), to: z.string() })
   .strict();
 
 export const ruleSchema = z
   .object({
     name: z.string().min(1, "required").max(64),
     enabled: z.boolean().default(true),
-    /** A zone id, or "wan". */
-    from: z.string(),
-    /** A zone id, "wan", or "router" for traffic to the router itself. */
-    to: z.string(),
-    source_addresses: z.array(address).optional(),
-    destination_addresses: z.array(address).optional(),
-    protocol: z.enum(protocols),
-    ports: ports.optional(),
     family: z.enum(["any", "ipv4", "ipv6"]).default("any"),
+    protocols: z.array(z.enum(protocols)).min(1, "at least one").default(["tcp", "udp"]),
+    /** A zone id, or "*" for any zone. */
+    from: z.string(),
+    source_addresses: z.array(address).optional(),
+    source_port: ports.optional(),
+    /** A zone id, "router" (to the router itself), or "*" (any zone). */
+    to: z.string(),
+    destination_addresses: z.array(address).optional(),
+    destination_port: ports.optional(),
+    icmp_types: z.array(z.enum(icmpTypes)).optional(),
+    /** Rate limit, like "1000/sec". */
+    limit: z
+      .string()
+      .regex(/^\d+\/(sec|second|min|minute|hour|day)$/, "like 1000/sec")
+      .optional(),
     action: policy,
   })
   .strict();
@@ -82,67 +112,19 @@ export const portForwardSchema = z
     name: z.string().min(1, "required").max(64),
     enabled: z.boolean().default(true),
     protocol: z.enum(["tcp+udp", "tcp", "udp"]),
-    external_port: ports,
+    external_port: port,
     /** A host on one of the networks. */
     internal_address: z
       .string()
       .regex(/^(\d{1,3}\.){3}\d{1,3}$/, "an IPv4 address on one of your networks"),
     /** Defaults to the external port. */
-    internal_port: ports.optional(),
+    internal_port: port.optional(),
     /** Only from these addresses, if set. */
     source_addresses: z.array(address).optional(),
     /** Also reachable from inside, by the public address (NAT loopback). */
     reflection: z.boolean().default(true),
   })
   .strict();
-
-/**
- * OpenWrt's stock WAN rules, by id: on unless switched off. The IPv6 ones
- * keep IPv6 working; the rest are conveniences.
- */
-export const builtinRules = {
-  dhcp_renew: {
-    label: "Allow DHCP renewal",
-    description: "Lets the router renew its address from your ISP.",
-    rules: () => [
-      { name: "Allow-DHCP-Renew", src: "wan", proto: ["udp"], dest_port: [68], target: "ACCEPT", family: "ipv4" },
-    ],
-  },
-  ping: {
-    label: "Allow ping",
-    description: "Answer pings from the internet.",
-    rules: () => [
-      { name: "Allow-Ping", src: "wan", proto: ["icmp"], icmp_type: ["echo-request"], family: "ipv4", target: "ACCEPT" },
-    ],
-  },
-  igmp: {
-    label: "Allow IGMP",
-    description: "Multicast from the ISP, e.g. for IPTV.",
-    rules: () => [
-      { name: "Allow-IGMP", src: "wan", proto: ["igmp"], family: "ipv4", target: "ACCEPT" },
-    ],
-  },
-  ipv6: {
-    label: "IPv6 essentials",
-    description: "DHCPv6, MLD and ICMPv6 from the ISP. IPv6 does not work without them.",
-    rules: () => [
-      { name: "Allow-DHCPv6", src: "wan", proto: ["udp"], dest_port: [546], family: "ipv6", target: "ACCEPT" },
-      { name: "Allow-MLD", src: "wan", proto: ["icmp"], src_ip: ["fe80::/10"], icmp_type: ["130/0", "131/0", "132/0", "143/0"], family: "ipv6", target: "ACCEPT" },
-      { name: "Allow-ICMPv6-Input", src: "wan", proto: ["icmp"], icmp_type: ["echo-request", "echo-reply", "destination-unreachable", "packet-too-big", "time-exceeded", "bad-header", "unknown-header-type", "router-solicitation", "neighbour-solicitation", "router-advertisement", "neighbour-advertisement"], limit: "1000/sec", family: "ipv6", target: "ACCEPT" },
-      { name: "Allow-ICMPv6-Forward", src: "wan", dest: "*", proto: ["icmp"], icmp_type: ["echo-request", "echo-reply", "destination-unreachable", "packet-too-big", "time-exceeded", "bad-header", "unknown-header-type"], limit: "1000/sec", family: "ipv6", target: "ACCEPT" },
-    ],
-  },
-  ipsec_passthrough: {
-    label: "IPsec passthrough",
-    description: "Lets IPsec VPNs from the internet reach the main zone.",
-    rules: (mainZone: string) => [
-      { name: "Allow-IPSec-ESP", src: "wan", dest: mainZone, proto: ["esp"], target: "ACCEPT" },
-      { name: "Allow-ISAKMP", src: "wan", dest: mainZone, dest_port: [500], proto: ["udp"], target: "ACCEPT" },
-    ],
-  },
-} as const;
-
-export type BuiltinRule = keyof typeof builtinRules;
 
 export const firewallSchema = z
   .object({
@@ -160,51 +142,87 @@ export const firewallSchema = z
     forwardings: z.array(forwardingSchema).default([]),
     rules: z.array(ruleSchema).default([]),
     port_forwards: z.array(portForwardSchema).default([]),
-    /** Stock rules switched off; every other one is on. */
-    builtin_rules_off: z
-      .array(z.enum(Object.keys(builtinRules) as [BuiltinRule, ...BuiltinRule[]]))
-      .default([]),
   })
   .strict();
 
 export type Firewall = z.infer<typeof firewallSchema>;
+export type Zone = z.infer<typeof zoneSchema>;
+export type Rule = z.input<typeof ruleSchema>;
 
-/** What to call a zone: its name, or else its networks'. */
-export const zoneLabel = (zone: { id: string; name?: string; networks: string[] }, networks: { id: string; name: string }[]) =>
+/** What to call a zone: its name, or its networks', or its id. */
+export const zoneLabel = (
+  zone: { id: string; name?: string; networks: string[] },
+  networks: { id: string; name: string }[]
+) =>
   zone.name ||
+  (zone.id === wanZone ? "WAN" : "") ||
   zone.networks
     .map((id) => networks.find((n) => n.id === id)?.name)
     .filter(Boolean)
     .join(" + ") ||
   zone.id;
-export type Zone = z.infer<typeof zoneSchema>;
+
+/** OpenWrt's WAN zone, as a fresh install has it. */
+export const defaultWanZone: Zone = {
+  id: wanZone,
+  networks: [],
+  input: "reject",
+  output: "accept",
+  forward: "reject",
+  masquerade: true,
+  mss_clamping: true,
+};
+
+/** OpenWrt's stock WAN rules, as a fresh install has them. */
+export const stockRules = (mainZone: string): Rule[] => [
+  { name: "Allow-DHCP-Renew", from: "wan", to: "router", protocols: ["udp"], destination_port: "68", family: "ipv4", action: "accept" },
+  { name: "Allow-Ping", from: "wan", to: "router", protocols: ["icmp"], icmp_types: ["echo-request"], family: "ipv4", action: "accept" },
+  { name: "Allow-IGMP", from: "wan", to: "router", protocols: ["igmp"], family: "ipv4", action: "accept" },
+  { name: "Allow-DHCPv6", from: "wan", to: "router", protocols: ["udp"], destination_port: "546", family: "ipv6", action: "accept" },
+  { name: "Allow-MLD", from: "wan", to: "router", protocols: ["icmp"], source_addresses: ["fe80::/10"], icmp_types: ["130/0", "131/0", "132/0", "143/0"], family: "ipv6", action: "accept" },
+  { name: "Allow-ICMPv6-Input", from: "wan", to: "router", protocols: ["icmp"], icmp_types: ["echo-request", "echo-reply", "destination-unreachable", "packet-too-big", "time-exceeded", "bad-header", "unknown-header-type", "router-solicitation", "neighbour-solicitation", "router-advertisement", "neighbour-advertisement"], limit: "1000/sec", family: "ipv6", action: "accept" },
+  { name: "Allow-ICMPv6-Forward", from: "wan", to: "*", protocols: ["icmp"], icmp_types: ["echo-request", "echo-reply", "destination-unreachable", "packet-too-big", "time-exceeded", "bad-header", "unknown-header-type"], limit: "1000/sec", family: "ipv6", action: "accept" },
+  { name: "Allow-IPSec-ESP", from: "wan", to: mainZone, protocols: ["esp"], action: "accept" },
+  { name: "Allow-ISAKMP", from: "wan", to: mainZone, protocols: ["udp"], destination_port: "500", action: "accept" },
+];
 
 /**
- * A new network's zone and forwardings, from its purpose: the starting point,
- * which the firewall then owns. Home is trusted (the router and every other
- * zone); guest and IoT reach only the internet, plus the router's services.
+ * What a zone that rejects input needs from the router to work at all:
+ * addresses, names, time and IPv6 neighbour discovery. Ordinary rules, as
+ * one would add them in LuCI.
+ */
+export const routerServiceRules = (zone: string): Rule[] => [
+  { name: `Allow-${zone}-DHCP`, from: zone, to: "router", protocols: ["udp"], destination_port: "67", family: "ipv4", action: "accept" },
+  { name: `Allow-${zone}-DHCPv6`, from: zone, to: "router", protocols: ["udp"], destination_port: "547", family: "ipv6", action: "accept" },
+  { name: `Allow-${zone}-DNS`, from: zone, to: "router", protocols: ["tcp", "udp"], destination_port: "53", action: "accept" },
+  { name: `Allow-${zone}-NTP`, from: zone, to: "router", protocols: ["udp"], destination_port: "123", action: "accept" },
+  { name: `Allow-${zone}-ICMPv6`, from: zone, to: "router", protocols: ["icmp"], icmp_types: ["router-solicitation", "neighbour-solicitation", "neighbour-advertisement", "echo-request"], family: "ipv6", action: "accept" },
+];
+
+/**
+ * A new network's zone, forwardings and rules, from its purpose: the starting
+ * point, which the firewall then owns. Home is trusted (the router and every
+ * other zone); guest and IoT reach only WAN, and get the router's services.
  */
 export const zoneForPurpose = (
   purpose: "home" | "guest" | "iot",
-  {
-    id,
-    network,
-    otherZones,
-  }: { id: string; network: string; otherZones: string[] }
-): { zone: Zone; forwardings: { from: string; to: string }[] } => {
+  { id, network, otherZones }: { id: string; network: string; otherZones: string[] }
+): { zone: Zone; forwardings: { from: string; to: string }[]; rules: Rule[] } => {
   const trusted = purpose === "home";
   return {
     zone: {
       id,
       networks: [network],
       input: trusted ? "accept" : "reject",
-      forward: trusted ? "accept" : "reject",
       output: "accept",
-      router_services: true,
+      forward: trusted ? "accept" : "reject",
+      masquerade: false,
+      mss_clamping: false,
     },
     forwardings: [
-      { from: id, to: "wan" },
-      ...(trusted ? otherZones.map((to) => ({ from: id, to })) : []),
+      { from: id, to: wanZone },
+      ...(trusted ? otherZones.filter((z) => z !== wanZone).map((to) => ({ from: id, to })) : []),
     ],
+    rules: trusted ? [] : routerServiceRules(id),
   };
 };

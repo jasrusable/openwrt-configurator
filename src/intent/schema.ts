@@ -4,7 +4,7 @@
 // and nothing else; src/intent/compile.ts turns it into the low-level config.
 import { z } from "zod";
 import { countries } from "./countries";
-import { firewallSchema } from "./firewall";
+import { firewallSchema, wanZone } from "./firewall";
 import { timezones } from "./timezones";
 
 const name = z
@@ -47,7 +47,7 @@ const leaseTime = z
     "at least 2 minutes"
   );
 
-export const intentVersion = 4;
+export const intentVersion = 5;
 
 export const bands = ["2g", "5g", "6g"] as const;
 export type Band = (typeof bands)[number];
@@ -268,10 +268,13 @@ export const intentSchema = z
       }
     });
 
-    // The firewall: every network in exactly one zone, and every reference
-    // to a zone a real one.
+    // The firewall: a WAN zone, every network in exactly one zone, and
+    // every reference to a zone a real one.
     const { zones, forwardings, rules, port_forwards } = intent.firewall;
     const zoneIds = zones.map((z) => z.id);
+    if (!zoneIds.includes(wanZone)) {
+      issue(["firewall", "zones"], "the WAN zone is missing");
+    }
     intent.networks.forEach((network, i) => {
       const count = zones.filter((z) => z.networks.includes(network.id)).length;
       if (count !== 1) {
@@ -285,25 +288,34 @@ export const intentSchema = z
       if (zones.slice(0, i).some((z) => z.id === zone.id)) {
         issue(["firewall", "zones", i, "id"], "already used by another zone");
       }
+      if (zone.id === wanZone && zone.networks.length > 0) {
+        issue(["firewall", "zones", i, "networks"], "WAN covers the internet connection only");
+      }
       zone.networks.forEach((id) => {
         if (!ids.includes(id)) {
           issue(["firewall", "zones", i, "networks"], `no network "${id}"`);
         }
       });
     });
-    const isZone = (id: string) => id === "wan" || zoneIds.includes(id);
+    const isZone = (id: string) => zoneIds.includes(id);
     forwardings.forEach((f, i) => {
       if (!isZone(f.from)) issue(["firewall", "forwardings", i, "from"], "pick a zone");
       if (!isZone(f.to)) issue(["firewall", "forwardings", i, "to"], "pick a zone");
       if (f.from === f.to) issue(["firewall", "forwardings", i, "to"], "a zone to itself is its forward policy");
     });
     rules.forEach((rule, i) => {
-      if (!isZone(rule.from)) issue(["firewall", "rules", i, "from"], "pick a zone");
-      if (!isZone(rule.to) && rule.to !== "router") {
-        issue(["firewall", "rules", i, "to"], "pick a zone or the router");
+      if (!isZone(rule.from) && rule.from !== "*") {
+        issue(["firewall", "rules", i, "from"], "pick a zone");
       }
-      if (rule.ports && !["tcp", "udp", "tcp+udp"].includes(rule.protocol)) {
-        issue(["firewall", "rules", i, "ports"], "ports need TCP or UDP");
+      if (!isZone(rule.to) && rule.to !== "router" && rule.to !== "*") {
+        issue(["firewall", "rules", i, "to"], "pick a zone, the device or any zone");
+      }
+      const portable = rule.protocols.every((p) => ["tcp", "udp", "sctp"].includes(p));
+      if ((rule.source_port || rule.destination_port) && !portable) {
+        issue(["firewall", "rules", i, "protocols"], "ports need TCP, UDP or SCTP only");
+      }
+      if (rule.icmp_types?.length && !rule.protocols.includes("icmp")) {
+        issue(["firewall", "rules", i, "icmp_types"], "ICMP types need the ICMP protocol");
       }
     });
     const inANetwork = (address: string) =>

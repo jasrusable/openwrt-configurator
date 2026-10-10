@@ -17,7 +17,6 @@ export const SettingsPage = ({
   title,
   description,
   actions,
-  wide,
   children,
 }: {
   /**
@@ -28,11 +27,10 @@ export const SettingsPage = ({
   description?: ReactNode;
   /** At the right of the title: Add on a list, Remove on an item. */
   actions?: ReactNode;
-  /** For tables and the pages nested in them, which want the room. */
-  wide?: boolean;
   children: ReactNode;
 }) => (
-  <Stack gap="xl" maw={wide ? 1040 : 720} mx="auto" py="lg" px="md">
+  // One width for every page, tables or not, so nothing shifts between them.
+  <Stack gap="xl" maw={1040} mx="auto" py="lg" px="md">
     <Box>
       <SectionNavSlot />
       <Group justify="space-between" wrap="nowrap" gap="md">

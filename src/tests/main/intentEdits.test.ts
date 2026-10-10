@@ -25,12 +25,15 @@ const withIot = () => {
 
 test("a new network gets its own zone, set up from its purpose", (t) => {
   const intent = withNetworkZone(withIot(), 2);
-  t.like(intent.firewall.zones[2], {
+  t.like(intent.firewall.zones[3], {
     id: "net2",
     networks: ["net2"],
     input: "reject",
-    router_services: true,
   });
+  t.true(
+    intent.firewall.rules.some((r) => r.name === "Allow-net2-DNS"),
+    "a zone that rejects input still gets DHCP and DNS, as explicit rules"
+  );
   const to = (zone: string) =>
     intent.firewall.forwardings.filter((f) => f.to === zone).map((f) => f.from);
   const from = (zone: string) =>
@@ -50,14 +53,15 @@ test("removing a network takes it out of its zone, and an emptied zone goes", (t
   const intent = withoutNetwork(sample(), 1);
   t.deepEqual(
     intent.firewall.zones.map((z) => z.id),
-    ["lan"]
+    ["lan", "wan"]
   );
   t.deepEqual(intent.firewall.forwardings, [{ from: "lan", to: "wan" }]);
-  // Its Wi-Fi and the rule naming its zone stay, flagged for the user.
+  // As LuCI deletes a zone: the rules naming it go too.
+  t.false(intent.firewall.rules.some((r) => r.from === "guest" || r.to === "guest"));
+  // The Wi-Fi on it stays, flagged for the user.
   const result = intentSchema.safeParse(intent);
-  t.false(result.success);
   t.deepEqual(
     result.success ? [] : result.error.issues.map((i) => i.path.join(".")),
-    ["wifi.1.network", "firewall.rules.0.from"]
+    ["wifi.1.network"]
   );
 });

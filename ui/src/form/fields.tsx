@@ -29,7 +29,27 @@ type RowProps = {
   name: IntentField;
   label: ReactNode;
   description?: ReactNode;
+  /** Just the control, e.g. in a table cell; the label becomes its name. */
+  inline?: boolean;
 };
+
+/** A control in its row, with its label and error; or alone, when inline. */
+const Row = ({
+  row,
+  error,
+  children,
+}: {
+  row: RowProps;
+  error?: string;
+  children: ReactNode;
+}) =>
+  row.inline ? (
+    <>{children}</>
+  ) : (
+    <SettingRow label={row.label} description={row.description} error={error}>
+      {children}
+    </SettingRow>
+  );
 
 const useField = (name: IntentField) => {
   const { field, fieldState } = useController({ name });
@@ -50,7 +70,8 @@ export const TextField = ({
     <SettingRow {...row} error={field.error}>
       <TextInput
         value={field.value ?? ""}
-        onChange={(e) => field.onChange(e.currentTarget.value)}
+        // Cleared is unset: "" would fail a pattern an optional field allows.
+        onChange={(e) => field.onChange(e.currentTarget.value || undefined)}
         onBlur={field.onBlur}
         placeholder={placeholder}
         error={!!field.error}
@@ -67,7 +88,8 @@ export const PasswordField = (row: RowProps) => {
     <SettingRow {...row} error={field.error}>
       <PasswordInput
         value={field.value ?? ""}
-        onChange={(e) => field.onChange(e.currentTarget.value)}
+        // Cleared is unset: "" would fail a pattern an optional field allows.
+        onChange={(e) => field.onChange(e.currentTarget.value || undefined)}
         onBlur={field.onBlur}
         error={!!field.error}
         style={control.wide}
@@ -103,13 +125,14 @@ export const NumberField = ({
 export const SwitchField = (row: RowProps) => {
   const field = useField(row.name);
   return (
-    <SettingRow {...row} error={field.error}>
+    <Row row={row} error={field.error}>
       <Switch
         checked={!!field.value}
         onChange={(e) => field.onChange(e.currentTarget.checked)}
+        aria-label={typeof row.label === "string" ? row.label : undefined}
         size="md"
       />
-    </SettingRow>
+    </Row>
   );
 };
 
@@ -136,7 +159,7 @@ export const SelectField = <T extends string | number>({
     ...options.map((option) => ({ value: String(option.value), label: option.label })),
   ];
   return (
-    <SettingRow {...row} error={field.error}>
+    <Row row={row} error={field.error}>
       <Select
         data={data}
         value={field.value === undefined ? (emptyLabel ? empty : null) : String(field.value)}
@@ -150,9 +173,10 @@ export const SelectField = <T extends string | number>({
         searchable={searchable}
         allowDeselect={false}
         error={!!field.error}
-        style={control.wide}
+        aria-label={typeof row.label === "string" ? row.label : undefined}
+        style={row.inline ? undefined : control.wide}
       />
-    </SettingRow>
+    </Row>
   );
 };
 
@@ -162,13 +186,14 @@ export const SegmentedField = <T extends string>({
 }: RowProps & { options: Option<T>[] }) => {
   const field = useField(row.name);
   return (
-    <SettingRow {...row} error={field.error}>
+    <Row row={row} error={field.error}>
       <SegmentedControl
         data={options}
         value={field.value}
         onChange={field.onChange}
+        size={row.inline ? "xs" : "sm"}
       />
-    </SettingRow>
+    </Row>
   );
 };
 
@@ -259,16 +284,21 @@ export const PasswordListField = ({
   );
 };
 
-/** Shows its children only while a setting has a given value. */
+/** Shows its children only while a setting has a value (`is`) or passes `test`. */
 export const When = ({
   name,
   is,
+  test,
   children,
 }: {
   name: IntentField;
-  is: unknown;
+  is?: unknown;
+  test?: (value: any) => boolean;
   children: ReactNode;
-}) => (useWatch({ name }) === is ? <>{children}</> : null);
+}) => {
+  const value = useWatch({ name });
+  return (test ? test(value) : value === is) ? <>{children}</> : null;
+};
 
 /**
  * The live value of a setting, e.g. in a table cell or a title. `format`
@@ -484,27 +514,3 @@ export const TagsField = ({
   );
 };
 
-/**
- * A switch for whether `value` is in a list setting; `inverted` when the list
- * names what is off (e.g. built-in rules switched off).
- */
-export const ListToggleField = ({
-  value,
-  inverted,
-  ...row
-}: RowProps & { value: string; inverted?: boolean }) => {
-  const field = useField(row.name);
-  const list: string[] = field.value ?? [];
-  const present = list.includes(value);
-  return (
-    <SettingRow {...row} error={field.error}>
-      <Switch
-        checked={inverted ? !present : present}
-        onChange={() =>
-          field.onChange(present ? list.filter((v) => v !== value) : [...list, value])
-        }
-        size="md"
-      />
-    </SettingRow>
-  );
-};

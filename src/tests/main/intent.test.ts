@@ -88,11 +88,18 @@ test("on the router: each network routed, served and firewalled by purpose", (t)
   t.is(zone("guest").input, "REJECT");
   t.deepEqual(
     config.firewall.rule.filter((r: any) => r.src === "guest").map((r: any) => r.name),
-    ["guest-DHCP", "guest-DHCPv6", "guest-DNS", "guest-NTP", "guest-ICMPv6", "Guests may print"]
+    [
+      "Allow-guest-DHCP",
+      "Allow-guest-DHCPv6",
+      "Allow-guest-DNS",
+      "Allow-guest-NTP",
+      "Allow-guest-ICMPv6",
+      "Guests may print",
+    ]
   );
   t.like(
     config.firewall.rule.find((r: any) => r.name === "Guests may print"),
-    { src: "guest", dest: "lan", dest_ip: ["10.0.0.20"], proto: ["tcp"], dest_port: "631,9100", target: "ACCEPT" }
+    { src: "guest", dest: "lan", dest_ip: ["10.0.0.20"], proto: ["tcp"], dest_port: "631 9100", target: "ACCEPT" }
   );
   // The stock WAN rules are on unless switched off.
   t.true(config.firewall.rule.some((r: any) => r.name === "Allow-Ping"));
@@ -109,20 +116,31 @@ test("on the router: each network routed, served and firewalled by purpose", (t)
   });
 });
 
-test("built-in rules can be switched off, and any-protocol rules say so", (t) => {
+test("rules compile one to one, in order; WAN is a zone with masquerading", (t) => {
   const intent = sample();
-  intent.firewall.builtin_rules_off = ["ping", "ipsec_passthrough"];
-  intent.firewall.rules.push({ name: "Block IoT", from: "guest", to: "wan", protocol: "any", action: "drop" });
-  const firewallRules: any[] = (compile(intent).config as any).firewall.rule;
-  const rules = firewallRules.map((r) => r.name);
-  t.false(rules.includes("Allow-Ping"));
-  t.false(rules.includes("Allow-ISAKMP"));
-  t.true(rules.includes("Allow-DHCP-Renew"));
-  t.deepEqual(
-    firewallRules.find((r) => r.name === "Block IoT").proto,
-    ["all"],
-    "unset would mean tcp+udp in fw4"
-  );
+  // Stock rules are ordinary rules: removing one removes it.
+  intent.firewall.rules = intent.firewall.rules.filter((r: any) => r.name !== "Allow-Ping");
+  intent.firewall.rules.push({
+    name: "Block IoT",
+    from: "guest",
+    to: "wan",
+    protocols: ["all"],
+    family: "any",
+    enabled: true,
+    action: "drop",
+  });
+  const fw = (compile(intent).config as any).firewall;
+  const names = fw.rule.map((r: any) => r.name);
+  t.false(names.includes("Allow-Ping"));
+  t.is(names[0], "Allow-DHCP-Renew", "in the order given");
+  t.deepEqual(fw.rule.find((r: any) => r.name === "Block IoT").proto, ["all"]);
+  t.like(fw.rule.find((r: any) => r.name === "Allow-ICMPv6-Forward"), { src: "wan", dest: "*" });
+  t.is(fw.rule.find((r: any) => r.name === "Allow-DHCP-Renew").dest, undefined, "to the device: input");
+  t.like(fw.zone.find((z: any) => z.name === "wan"), {
+    masq: true,
+    mtu_fix: true,
+    network: ["wan", "wan6"],
+  });
 });
 
 test("on the access point: bridged, a DHCP client, Wi-Fi on both bands", (t) => {
@@ -256,7 +274,7 @@ test("a version 1 file is migrated, keeping every setting", (t) => {
     dns: { over_https: "quad9" },
   };
   const migrated = intentSchema.parse(migrateIntent(v1));
-  t.is(migrated.schema, 4);
+  t.is(migrated.schema, 5);
   t.deepEqual(migrated.networks, [
     {
       id: "lan",
@@ -267,11 +285,12 @@ test("a version 1 file is migrated, keeping every setting", (t) => {
       ipv6: false,
     },
   ]);
-  // Format 2's access became the firewall: a trusted zone that reaches the
-  // internet, and the stock rules on.
+  // Format 2's access became the firewall: a trusted zone that reaches WAN,
+  // WAN a zone of its own, and the stock rules as ordinary rules.
   t.like(migrated.firewall.zones[0], { id: "lan", networks: ["lan"], input: "accept" });
+  t.like(migrated.firewall.zones[1], { id: "wan", masquerade: true, mss_clamping: true });
   t.deepEqual(migrated.firewall.forwardings, [{ from: "lan", to: "wan" }]);
-  t.deepEqual(migrated.firewall.builtin_rules_off, []);
+  t.is(migrated.firewall.rules.length, 9);
   t.is(migrated.wifi[0].network, "lan");
   t.deepEqual(migrated.dns, { over_https: "quad9", local_domain: "home" });
   t.throws(() => migrateIntent({ ...v1, schema: 99 }), { message: /newer/ });

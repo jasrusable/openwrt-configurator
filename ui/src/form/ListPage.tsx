@@ -2,7 +2,7 @@
 // ListSpec and shown as two pages: the table at /<page>, and one item's
 // detail page at /<page>/<index>. The detail page's fields edit the draft
 // directly, so Save and Revert in the header cover them like any other.
-import { Button, ThemeIcon } from "@mantine/core";
+import { Button, Group, Stack, Text, ThemeIcon } from "@mantine/core";
 import { IconAlertCircle, IconPlus } from "@tabler/icons-react";
 import { ReactNode } from "react";
 import { useState } from "react";
@@ -67,49 +67,74 @@ export const defineList = <N extends ListName>(spec: ListSpec<N>) => spec;
 
 type Fields<N extends ListName> = UseFieldArrayReturn<Intent, N>;
 
+/** A page the table sits in, under other settings (LuCI's zones table). */
+export type HostPage = {
+  title: ReactNode;
+  description?: ReactNode;
+  before?: ReactNode;
+};
+
 const ListTable = <N extends ListName>({
   list,
   fields,
   base,
+  page,
 }: {
   list: ListSpec<N>;
   fields: Fields<N>;
   base: string;
+  page?: HostPage;
 }) => {
   const navigate = useNavigate();
   const { errors } = useFormState<Intent>({ name: list.name });
   const hasErrors = (index: number) =>
     !!(errors as Record<string, unknown[] | undefined>)[list.name]?.[index];
-  return (
+  const add = (
+    <Button
+      variant="light"
+      leftSection={<IconPlus size={16} />}
+      // Nothing is added yet: the new item's page adds it, on confirm.
+      onClick={() => navigate(`${base}/new`)}
+    >
+      {list.addLabel}
+    </Button>
+  );
+  const table = (
+    <DataTable
+      columns={list.columns}
+      rowCount={fields.fields.length}
+      rowKey={(index) => fields.fields[index].id}
+      onRowClick={(index) => navigate(`${base}/${index}`)}
+      rowMarker={(index) =>
+        hasErrors(index) && (
+          <ThemeIcon size={18} radius="xl" color="red" variant="light">
+            <IconAlertCircle size={14} />
+          </ThemeIcon>
+        )
+      }
+      empty={list.empty}
+    />
+  );
+  return page ? (
+    <SettingsPage title={page.title} description={page.description}>
+      {page.before}
+      <Stack gap={6}>
+        <Group justify="space-between" px={4}>
+          <Text fw={600} size="sm">
+            {list.title}
+          </Text>
+          {add}
+        </Group>
+        {table}
+      </Stack>
+    </SettingsPage>
+  ) : (
     <SettingsPage
       title={list.title}
       description={list.description}
-      wide
-      actions={
-        <Button
-          variant="light"
-          leftSection={<IconPlus size={16} />}
-          // Nothing is added yet: the new item's page adds it, on confirm.
-          onClick={() => navigate(`${base}/new`)}
-        >
-          {list.addLabel}
-        </Button>
-      }
+      actions={add}
     >
-      <DataTable
-        columns={list.columns}
-        rowCount={fields.fields.length}
-        rowKey={(index) => fields.fields[index].id}
-        onRowClick={(index) => navigate(`${base}/${index}`)}
-        rowMarker={(index) =>
-          hasErrors(index) && (
-            <ThemeIcon size={18} radius="xl" color="red" variant="light">
-              <IconAlertCircle size={14} />
-            </ThemeIcon>
-          )
-        }
-        empty={list.empty}
-      />
+      {table}
     </SettingsPage>
   );
 };
@@ -134,8 +159,10 @@ const ListItemPage = <N extends ListName>({
   // step, "Networks / Home", whose first part leads back.
   return (
     <SettingsPage
-      wide
-      title={[{ label: list.title, onClick: back }, { label: list.itemTitle(index) }]}
+      title={[
+        { label: list.title, onClick: back },
+        { label: list.itemTitle(index) },
+      ]}
       actions={
         removable && (
           <Button
@@ -204,8 +231,10 @@ const NewItemPage = <N extends ListName>({
   return (
     <FormProvider {...form}>
       <SettingsPage
-        wide
-        title={[{ label: list.title, onClick: back }, { label: list.itemTitle(index) }]}
+        title={[
+          { label: list.title, onClick: back },
+          { label: list.itemTitle(index) },
+        ]}
         actions={
           <>
             <Button variant="default" onClick={back}>
@@ -229,9 +258,15 @@ const NewItemPage = <N extends ListName>({
 export const ListPage = <N extends ListName>({
   list,
   sub: given,
+  page,
+  base: givenBase,
 }: {
   list: ListSpec<N>;
   sub?: string;
+  /** The table sits in this page, under its other settings. */
+  page?: HostPage;
+  /** Where the items live, when not under the table's own URL. */
+  base?: string;
 }) => {
   // One field array for every view, so they never disagree.
   const fields = useFieldArray<Intent, N>({ name: list.name });
@@ -239,13 +274,18 @@ export const ListPage = <N extends ListName>({
   const sub = given ?? splat ?? "";
   const { pathname } = useLocation();
   // The table's own URL: where its rows lead from, and items lead back to.
-  const base = (sub ? pathname.slice(0, pathname.length - sub.length) : pathname).replace(/\/+$/, "");
+  const base =
+    givenBase ??
+    (sub ? pathname.slice(0, pathname.length - sub.length) : pathname).replace(
+      /\/+$/,
+      "",
+    );
   const props = { list, fields, base };
   if (sub === "new") return <NewItemPage {...props} />;
   const index = /^\d+$/.test(sub) ? Number(sub) : undefined;
   return index !== undefined && index < fields.fields.length ? (
     <ListItemPage {...props} index={index} />
   ) : (
-    <ListTable {...props} />
+    <ListTable {...props} page={page} />
   );
 };
