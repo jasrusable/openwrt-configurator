@@ -5,18 +5,20 @@
 import { Button, ThemeIcon } from "@mantine/core";
 import { IconAlertCircle, IconPlus } from "@tabler/icons-react";
 import { ReactNode } from "react";
+import { useState } from "react";
 import {
   FieldArrayPath,
+  FormProvider,
   UseFieldArrayReturn,
   useFieldArray,
   useFormState,
   useWatch,
 } from "react-hook-form";
-import { useLocation, useNavigate, useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { Intent } from "../../../src/intent/schema";
 import { Column, DataTable } from "../kit/DataTable";
 import { SettingsPage } from "../kit/layout";
-import { useIntentForm } from "./IntentForm";
+import { useIntentForm, useIntentFormState } from "./IntentForm";
 
 type ListName = FieldArrayPath<Intent>;
 type Item<N extends ListName> = Intent[N] extends (infer I)[] ? I : never;
@@ -55,7 +57,6 @@ const ListTable = <N extends ListName>({
   fields: Fields<N>;
 }) => {
   const navigate = useNavigate();
-  const { getValues } = useIntentForm();
   const { errors } = useFormState<Intent>({ name: list.name });
   const hasErrors = (index: number) =>
     !!(errors as Record<string, unknown[] | undefined>)[list.name]?.[index];
@@ -68,13 +69,8 @@ const ListTable = <N extends ListName>({
         <Button
           variant="light"
           leftSection={<IconPlus size={16} />}
-          onClick={() => {
-            fields.append(
-              list.newItem(getValues(list.name) as Item<N>[], getValues()) as never
-            );
-            // Its own page, marked new: Cancel there discards it.
-            navigate(String(fields.fields.length), { state: { created: true } });
-          }}
+          // Nothing is added yet: the new item's page adds it, on confirm.
+          onClick={() => navigate("new")}
         >
           {list.addLabel}
         </Button>
@@ -108,15 +104,9 @@ const ListItemPage = <N extends ListName>({
   index: number;
 }) => {
   const navigate = useNavigate();
-  const created = !!(useLocation().state as { created?: boolean } | null)?.created;
-  const { trigger } = useIntentForm();
   const item = useWatch({ name: `${list.name}.${index}` as never }) as Item<N>;
   const removable = !list.canRemove || list.canRemove(item);
   const back = () => navigate("..", { relative: "path" });
-  const discard = () => {
-    fields.remove(index);
-    back();
-  };
   // Same width and header position as the list: only the title grows a
   // step, "Networks / Home", whose first part leads back.
   return (
@@ -124,26 +114,17 @@ const ListItemPage = <N extends ListName>({
       wide
       title={[{ label: list.title, onClick: back }, { label: list.itemTitle(index) }]}
       actions={
-        created ? (
-          <>
-            <Button variant="default" onClick={discard}>
-              Cancel
-            </Button>
-            <Button
-              onClick={async () => {
-                // Only a complete item is added; otherwise its errors show here.
-                if (await trigger(`${list.name}.${index}` as never)) back();
-              }}
-            >
-              {list.addLabel}
-            </Button>
-          </>
-        ) : (
-          removable && (
-            <Button variant="light" color="red" onClick={discard}>
-              Remove
-            </Button>
-          )
+        removable && (
+          <Button
+            variant="light"
+            color="red"
+            onClick={() => {
+              fields.remove(index);
+              back();
+            }}
+          >
+            Remove
+          </Button>
         )
       }
     >
@@ -152,11 +133,64 @@ const ListItemPage = <N extends ListName>({
   );
 };
 
+/**
+ * A new item's page. It edits a copy of the draft with the item appended,
+ * through the same editor, so the item is checked against everything else
+ * (a VLAN already taken, say); only Add puts it into the draft. Leaving, or
+ * Cancel, adds nothing.
+ */
+const NewItemPage = <N extends ListName>({
+  list,
+  fields,
+}: {
+  list: ListSpec<N>;
+  fields: Fields<N>;
+}) => {
+  const navigate = useNavigate();
+  const draft = useIntentForm();
+  const [{ copy, index }] = useState(() => {
+    const intent = draft.getValues();
+    const items = intent[list.name] as Item<N>[];
+    return {
+      copy: { ...intent, [list.name]: [...items, list.newItem(items, intent)] },
+      index: items.length,
+    };
+  });
+  const form = useIntentFormState(copy);
+  const back = () => navigate("..", { relative: "path" });
+  const add = async () => {
+    const path = `${list.name}.${index}` as never;
+    // Only a complete item is added; otherwise its errors show here.
+    if (!(await form.trigger(path))) return;
+    fields.append(form.getValues(path) as never);
+    back();
+  };
+  return (
+    <FormProvider {...form}>
+      <SettingsPage
+        wide
+        title={[{ label: list.title, onClick: back }, { label: list.itemTitle(index) }]}
+        actions={
+          <>
+            <Button variant="default" onClick={back}>
+              Cancel
+            </Button>
+            <Button onClick={add}>{list.addLabel}</Button>
+          </>
+        }
+      >
+        {list.editor(index)}
+      </SettingsPage>
+    </FormProvider>
+  );
+};
+
 /** The list's table, or one item's page when the URL names an index. */
 export const ListPage = <N extends ListName>({ list }: { list: ListSpec<N> }) => {
   // One field array for both views, so they never disagree.
   const fields = useFieldArray<Intent, N>({ name: list.name });
   const sub = useParams()["*"];
+  if (sub === "new") return <NewItemPage list={list} fields={fields} />;
   const index = sub && /^\d+$/.test(sub) ? Number(sub) : undefined;
   return index !== undefined && index < fields.fields.length ? (
     <ListItemPage list={list} fields={fields} index={index} />

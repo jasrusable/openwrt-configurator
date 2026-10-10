@@ -11,6 +11,15 @@ import { useSaveIntent } from "../data/intent";
 
 export type IntentField = FieldPath<Intent>;
 
+/** A form over a whole intent, checked by the same schema as the server. */
+export const useIntentFormState = (intent: Intent) =>
+  useForm<Intent>({
+    resolver: zodResolver(intentSchema) as never,
+    defaultValues: intent,
+    mode: "onTouched",
+  });
+
+/** The draft: what Save writes. Every field on every page edits it. */
 export const IntentForm = ({
   intent,
   children,
@@ -18,11 +27,7 @@ export const IntentForm = ({
   intent: Intent;
   children: ReactNode;
 }) => {
-  const form = useForm<Intent>({
-    resolver: zodResolver(intentSchema) as never,
-    defaultValues: intent,
-    mode: "onTouched",
-  });
+  const form = useIntentFormState(intent);
   // A file edited by hand, or saved under older rules, can already be
   // invalid: show its problems at once, not only once a field is touched.
   useEffect(() => {
