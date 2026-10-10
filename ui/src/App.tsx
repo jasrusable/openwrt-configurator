@@ -16,6 +16,7 @@ import {
   RouterProvider,
   useLocation,
   useNavigate,
+  useRouteError,
 } from "react-router";
 import { useIntent } from "./data/intent";
 import { IntentForm, useSaveActions } from "./form/IntentForm";
@@ -60,34 +61,16 @@ const Shell = () => {
       <AppShell.Navbar p="sm">
         {pages.map((page) => {
           const { id, label, icon: Icon } = page;
-          const children = "children" in page ? page.children : undefined;
+          const indent = "indent" in page && page.indent;
           return (
             <NavLink
               key={id}
               label={label}
-              leftSection={<Icon size={18} stroke={1.6} />}
-              active={isActive(id) && !children}
-              opened={!!children && isActive(id)}
+              leftSection={<Icon size={indent ? 16 : 18} stroke={1.6} />}
+              active={isActive(id)}
               onClick={() => navigate(`/${id}`)}
-              style={{ borderRadius: 8 }}
-            >
-              {children?.map((child) => {
-                const path = child.id ? `/${id}/${child.id}` : `/${id}`;
-                return (
-                  <NavLink
-                    key={child.id}
-                    label={child.label}
-                    active={
-                      child.id
-                        ? isActive(`${id}/${child.id}`)
-                        : pathname === `/${id}`
-                    }
-                    onClick={() => navigate(path)}
-                    style={{ borderRadius: 8 }}
-                  />
-                );
-              })}
-            </NavLink>
+              style={{ borderRadius: 8, ...(indent ? { paddingLeft: 32 } : {}) }}
+            />
           );
         })}
       </AppShell.Navbar>
@@ -101,10 +84,28 @@ const Shell = () => {
 // A hash router: the URL's path after # is the page, so the same build works
 // wherever it is served from, with no server-side routes. `/*` lets a page
 // have its own nested pages (one Wi-Fi network, one device).
+/** A page that failed to render: say so, keep the rest of the app usable. */
+const PageError = () => {
+  const error = useRouteError();
+  return (
+    <Center h="100vh" p="md">
+      <Alert color="red" title="This page hit a problem" maw={560}>
+        <Text size="sm" mb="md">
+          {(error as Error)?.message ?? String(error)}
+        </Text>
+        <Button variant="default" onClick={() => (window.location.hash = "/general")}>
+          Go to General
+        </Button>
+      </Alert>
+    </Center>
+  );
+};
+
 const router = createHashRouter([
   {
     path: "/",
     element: <Shell />,
+    errorElement: <PageError />,
     children: [
       { index: true, element: <Navigate to="general" replace /> },
       ...pages.map(({ id, Page }) => ({ path: `${id}/*`, element: <Page /> })),

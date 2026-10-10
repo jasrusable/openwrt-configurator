@@ -2,10 +2,16 @@
 // and grouped sections; a section is a card of rows; a row is a label (and
 // an explanation) on the left, its control on the right.
 import { Anchor, Box, Group, Paper, Stack, Text, Title } from "@mantine/core";
-import { ReactNode } from "react";
+import { createContext, ReactNode, useContext } from "react";
 import "./kit.css";
 
 export type Crumb = { label: ReactNode; onClick?: () => void };
+
+/**
+ * Shown above the title of every page inside a section, e.g. the Firewall's
+ * tabs, so a section's pages, and the items nested in them, share them.
+ */
+export const SectionNav = createContext<ReactNode>(null);
 
 export const SettingsPage = ({
   title,
@@ -28,6 +34,7 @@ export const SettingsPage = ({
 }) => (
   <Stack gap="xl" maw={wide ? 1040 : 720} mx="auto" py="lg" px="md">
     <Box>
+      <SectionNavSlot />
       <Group justify="space-between" wrap="nowrap" gap="md">
         <Title order={2}>
           {Array.isArray(title) ? <Crumbs crumbs={title} /> : title}
@@ -47,6 +54,11 @@ export const SettingsPage = ({
     {children}
   </Stack>
 );
+
+const SectionNavSlot = () => {
+  const nav = useContext(SectionNav);
+  return nav ? <Box mb="lg">{nav}</Box> : null;
+};
 
 const Crumbs = ({ crumbs }: { crumbs: Crumb[] }) => (
   <>
