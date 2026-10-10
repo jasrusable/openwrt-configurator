@@ -43,13 +43,11 @@ A first slice is in: `src/intent/` (schema, one compiler module per
 feature), `onc compile`, `onc ui`/`onc cgi` over `src/server/handlers.ts`,
 and the React UI in `ui/`.
 
-- [ ] UI tables for Networks, Wi-Fi and Devices: a reusable table with Add
-      at the top right, and a row opening its editor.
+- [ ] A Networks table, once there are several networks (Wi-Fi and Devices
+      have theirs: `ListPage` from a `defineList` spec).
 - [ ] Several networks (guest, IoT): `network` becomes `networks[]`, Wi-Fi
       picks one, and the compiler emits a VLAN, a firewall zone and DHCP per
       network.
-- [ ] Inputs that cannot be wrong: country as a dropdown, the subnet as
-      structured fields, the lease time as a number plus a unit.
 - [ ] `npm run dev`: hot reload on a Mac (esbuild watch with live reload for
       the UI, the backend restarting on change). Production stays `onc ui`
       under Node (a Mac or Raspberry Pi) or `onc cgi` under uhttpd (a router).

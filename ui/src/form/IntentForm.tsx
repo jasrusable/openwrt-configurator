@@ -3,7 +3,7 @@
 // the server's answer to a save maps back onto the same field names.
 import { zodResolver } from "@hookform/resolvers/zod";
 import { notifications } from "@mantine/notifications";
-import { ReactNode } from "react";
+import { ReactNode, useEffect } from "react";
 import { FieldPath, FormProvider, useForm, useFormContext } from "react-hook-form";
 import { Intent, intentSchema } from "../../../src/intent/schema";
 import { SaveError } from "../data/api";
@@ -23,6 +23,11 @@ export const IntentForm = ({
     defaultValues: intent,
     mode: "onTouched",
   });
+  // A file edited by hand, or saved under older rules, can already be
+  // invalid: show its problems at once, not only once a field is touched.
+  useEffect(() => {
+    form.trigger();
+  }, [form]);
   return <FormProvider {...form}>{children}</FormProvider>;
 };
 

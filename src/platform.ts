@@ -49,6 +49,8 @@ export type HttpRequest = {
   /** Without the query string. */
   path: string;
   body: string;
+  /** Lower-case names. */
+  headers: Record<string, string>;
 };
 
 /** How a request is answered: a server, or CGI on the router. */

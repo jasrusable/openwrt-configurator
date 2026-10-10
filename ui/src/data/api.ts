@@ -6,6 +6,9 @@ import type { ProvisionStatus } from "../../../src/server/provisionJob";
 
 export type Issue = { path: string; message: string };
 
+/** Every write carries it: the server refuses writes without (CSRF). */
+const writeHeaders = { "x-onc": "1" };
+
 export class SaveError extends Error {
   constructor(message: string, readonly issues: Issue[] = []) {
     super(message);
@@ -22,7 +25,7 @@ export const loadIntent = async (): Promise<Intent> => {
 export const saveIntent = async (intent: Intent): Promise<Intent> => {
   const response = await fetch("api/intent", {
     method: "PUT",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...writeHeaders },
     body: JSON.stringify(intent),
   });
   const body = await response.json();
@@ -46,7 +49,10 @@ export const loadProvision = async (): Promise<ProvisionInfo> => {
 };
 
 export const startProvision = async () => {
-  const response = await fetch("api/provision", { method: "POST" });
+  const response = await fetch("api/provision", {
+    method: "POST",
+    headers: writeHeaders,
+  });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not start provisioning.");
 };

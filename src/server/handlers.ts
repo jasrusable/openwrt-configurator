@@ -133,6 +133,16 @@ export const provisionApi =
       });
     }
     if (method === "POST") {
+      // Never provision what would not have been saved: a file edited by
+      // hand, or saved under older rules, is refused here, not mid-run.
+      const draft = intentSchema.safeParse(readJson(platform, intentPath));
+      const compiled =
+        draft.success && oncConfigSchema.safeParse(compileIntent(draft.data));
+      if (!draft.success || !compiled || !compiled.success) {
+        return json(409, {
+          error: "The saved settings are not valid: fix them, save, then provision.",
+        });
+      }
       const result = await startProvision({
         intentPath,
         files: platform,
@@ -160,7 +170,12 @@ export const uiHandler = ({
     "/api/provision": provisionApi({ intentPath, platform }),
   };
   const ui = staticFiles({ root: uiRoot, files: platform });
-  return (request) => (routes[request.path] ?? ui)(request);
+  return (request) =>
+    // Writes must carry a header a cross-site page cannot send without a
+    // CORS preflight, which is never granted: no CSRF on any transport.
+    request.method !== "GET" && request.headers["x-onc"] !== "1"
+      ? Promise.resolve(json(403, { error: "Missing the X-ONC header." }))
+      : (routes[request.path] ?? ui)(request);
 };
 
 /** A response in CGI's format: a Status header, the headers, then the body. */

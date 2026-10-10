@@ -8,14 +8,21 @@ import "./kit.css";
 export const SettingsPage = ({
   title,
   description,
+  breadcrumbs,
+  wide,
   children,
 }: {
-  title: string;
-  description?: string;
+  title: ReactNode;
+  description?: ReactNode;
+  /** Above the title, for a page nested in another (e.g. one Wi-Fi network). */
+  breadcrumbs?: ReactNode;
+  /** For tables, which want the room. */
+  wide?: boolean;
   children: ReactNode;
 }) => (
-  <Stack gap="xl" maw={720} mx="auto" py="lg" px="md">
+  <Stack gap="xl" maw={wide ? 1040 : 720} mx="auto" py="lg" px="md">
     <Box>
+      {breadcrumbs && <Box mb={6}>{breadcrumbs}</Box>}
       <Title order={2}>{title}</Title>
       {description && (
         <Text c="dimmed" mt={4}>

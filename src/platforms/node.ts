@@ -289,6 +289,9 @@ export const nodePlatform: Platform = {
             method: req.method ?? "GET",
             path: (req.url ?? "/").split("?")[0],
             body,
+            headers: Object.fromEntries(
+              Object.entries(req.headers).map(([k, v]) => [k, String(v)])
+            ),
           }).catch((e) => ({
             status: 500,
             headers: { "content-type": "text/plain" },

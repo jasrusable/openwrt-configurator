@@ -9,11 +9,18 @@ import {
   Text,
   Title,
 } from "@mantine/core";
+import {
+  createHashRouter,
+  Navigate,
+  Outlet,
+  RouterProvider,
+  useLocation,
+  useNavigate,
+} from "react-router";
 import { useIntent } from "./data/intent";
-import { ProvisionButton } from "./provision/ProvisionButton";
 import { IntentForm, useSaveActions } from "./form/IntentForm";
-import { useHashRoute } from "./kit/useHashRoute";
-import { PageId, pages } from "./pages";
+import { pages } from "./pages";
+import { ProvisionButton } from "./provision/ProvisionButton";
 
 const SaveBar = () => {
   const { save, revert, dirty, valid, saving } = useSaveActions();
@@ -35,11 +42,10 @@ const SaveBar = () => {
 };
 
 const Shell = () => {
-  const [route, navigate] = useHashRoute(
-    pages.map((page) => page.id),
-    "general" as PageId
-  );
-  const { Page } = pages.find((page) => page.id === route)!;
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const isActive = (id: string) =>
+    pathname === `/${id}` || pathname.startsWith(`/${id}/`);
   return (
     <AppShell header={{ height: 60 }} navbar={{ width: 240, breakpoint: "sm" }} padding="md">
       <AppShell.Header px="md">
@@ -57,18 +63,33 @@ const Shell = () => {
             key={id}
             label={label}
             leftSection={<Icon size={18} stroke={1.6} />}
-            active={id === route}
-            onClick={() => navigate(id)}
+            active={isActive(id)}
+            onClick={() => navigate(`/${id}`)}
             style={{ borderRadius: 8 }}
           />
         ))}
       </AppShell.Navbar>
       <AppShell.Main bg="var(--mantine-color-gray-0)">
-        <Page />
+        <Outlet />
       </AppShell.Main>
     </AppShell>
   );
 };
+
+// A hash router: the URL's path after # is the page, so the same build works
+// wherever it is served from, with no server-side routes. `/*` lets a page
+// have its own nested pages (one Wi-Fi network, one device).
+const router = createHashRouter([
+  {
+    path: "/",
+    element: <Shell />,
+    children: [
+      { index: true, element: <Navigate to="general" replace /> },
+      ...pages.map(({ id, Page }) => ({ path: `${id}/*`, element: <Page /> })),
+      { path: "*", element: <Navigate to="general" replace /> },
+    ],
+  },
+]);
 
 export const App = () => {
   const intent = useIntent();
@@ -91,7 +112,7 @@ export const App = () => {
   return (
     // Keyed by the saved file, so a save or a reload restarts the form from it.
     <IntentForm key={JSON.stringify(intent.data)} intent={intent.data}>
-      <Shell />
+      <RouterProvider router={router} />
     </IntentForm>
   );
 };

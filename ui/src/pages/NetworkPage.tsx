@@ -1,14 +1,21 @@
-import { NumberField, SwitchField, TextField } from "../form/fields";
+import { DurationField, NumberField, SubnetField, SwitchField, TextField, Value } from "../form/fields";
 import { Section, SettingsPage } from "../kit/layout";
 
 export const NetworkPage = () => (
   <SettingsPage title="Network" description="Your home network.">
     <Section>
-      <TextField
+      <SubnetField
         name="network.subnet"
         label="Addresses"
-        description="The router takes the first one."
-        placeholder="10.0.0.0/24"
+        description={
+          <>
+            The router is{" "}
+            <Value
+              name="network.subnet"
+              format={(subnet: string) => subnet?.replace(/\.0\/24$/, ".1")}
+            />
+          </>
+        }
       />
       <TextField
         name="network.domain"
@@ -24,11 +31,7 @@ export const NetworkPage = () => (
         min={1}
         max={253}
       />
-      <TextField
-        name="network.dhcp.lease"
-        label="Lease time"
-        description="Like 12h, 30m or 7d."
-      />
+      <DurationField name="network.dhcp.lease" label="Lease time" />
     </Section>
   </SettingsPage>
 );

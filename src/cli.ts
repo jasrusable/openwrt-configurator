@@ -203,6 +203,8 @@ export const main = async ({
         method: platform.env("REQUEST_METHOD") || "GET",
         path: platform.env("PATH_INFO") || "/",
         body: length > 0 ? platform.readStdin() : "",
+        // CGI passes request headers as HTTP_<NAME> variables.
+        headers: { "x-onc": platform.env("HTTP_X_ONC") ?? "" },
       });
       console.log(cgiResponse(response));
     },

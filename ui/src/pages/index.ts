@@ -23,4 +23,4 @@ export const pages = [
   { id: "devices", label: "Devices", icon: IconDevices, Page: DevicesPage },
 ] as const;
 
-export type PageId = (typeof pages)[number]["id"];
+

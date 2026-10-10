@@ -3,6 +3,7 @@
 // are read from the devices when they are provisioned. The UI edits this file
 // and nothing else; src/intent/compile.ts turns it into the low-level config.
 import { z } from "zod";
+import { countries } from "./countries";
 import { timezones } from "./timezones";
 
 const name = z
@@ -19,11 +20,30 @@ const wifiPassword = z
   .min(8, "at least 8 characters")
   .max(63, "at most 63 characters");
 
+/** A private IPv4 /24 (RFC 1918), like 10.0.0.0/24, as "a.b.c.0/24". */
+export const parseSubnet = (subnet: string) => {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.0\/24$/.exec(subnet);
+  if (!match) return undefined;
+  const [a, b, c] = match.slice(1).map(Number);
+  const isPrivate =
+    a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  return isPrivate && b <= 255 && c <= 255 ? [a, b, c] : undefined;
+};
+
 const ipv4Subnet = z
   .string()
-  .regex(
-    /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/24$/,
-    "an IPv4 /24, like 10.0.0.0/24"
+  .refine(
+    (subnet) => parseSubnet(subnet) !== undefined,
+    "a private range: 10.x.x.0/24, 172.16-31.x.0/24 or 192.168.x.0/24"
+  );
+
+/** A DHCP lease: a whole number of minutes (at least 2), hours or days. */
+const leaseTime = z
+  .string()
+  .regex(/^\d+[mhd]$/, "like 12h, 30m or 7d")
+  .refine(
+    (lease) => parseInt(lease, 10) >= (lease.endsWith("m") ? 2 : 1),
+    "at least 2 minutes"
   );
 
 export const intentSchema = z
@@ -33,12 +53,14 @@ export const intentSchema = z
 
     site: z
       .object({
-        name: z.string().min(1),
+        name: z.string().min(1, "required"),
         timezone: z
           .string()
           .refine((zone) => zone in timezones, "an IANA zone, like Europe/Zurich"),
         /** Wi-Fi regulatory domain, ISO 3166 (CH, US, ...). */
-        country: z.string().regex(/^[A-Z]{2}$/, "two capital letters"),
+        country: z
+          .string()
+          .refine((code) => countries.includes(code), "pick a country"),
       })
       .strict(),
 
@@ -112,7 +134,7 @@ export const intentSchema = z
         dhcp: z
           .object({
             size: z.number().int().min(1).max(253),
-            lease: z.string().regex(/^\d+[mhd]$/, "like 12h, 30m or 7d"),
+            lease: leaseTime,
           })
           .strict()
           .default({ size: 150, lease: "12h" }),
@@ -123,7 +145,7 @@ export const intentSchema = z
     wifi: z.array(
       z
         .object({
-          ssid: z.string().min(1).max(32),
+          ssid: z.string().min(1, "required").max(32, "at most 32 characters"),
           password: wifiPassword,
           /** More passwords for the same network, e.g. one per person. */
           extra_passwords: z.array(wifiPassword).optional(),

@@ -1,4 +1,4 @@
-import { createTheme } from "@mantine/core";
+import { Badge, createTheme } from "@mantine/core";
 
 // Close to Apple's system look: the system font, soft corners, iOS blue.
 export const theme = createTheme({
@@ -26,4 +26,8 @@ export const theme = createTheme({
     ],
   },
   primaryShade: 5,
+  components: {
+    // Sentence case, as Apple's UI writes labels, not Mantine's capitals.
+    Badge: Badge.extend({ styles: { root: { textTransform: "none" } } }),
+  },
 });
