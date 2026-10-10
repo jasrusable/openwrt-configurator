@@ -111,6 +111,11 @@ export type Platform = {
    * crash mid-write leaves the old file whole.
    */
   writeFileAtomic: (path: string, data: string, mode: number) => void;
+  /**
+   * The command that runs this program again (before its arguments), for
+   * work that must outlive a request, like a provision started from the UI.
+   */
+  selfCommand: () => string[];
   /** All of standard input: a CGI request's body. */
   readStdin: () => string;
   /**

@@ -54,4 +54,6 @@ export const qjsPlatform: Platform = {
 
   writeFileAtomic,
   readStdin: () => std.fdopen(0, "r")?.readAsString() ?? "",
+  // How both packages run the bundle (see packaging/).
+  selfCommand: () => ["qjs", "--module", scriptArgs[0]],
 };

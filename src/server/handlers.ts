@@ -3,10 +3,12 @@
 // (`cgi`) answer every request with the same code. The UI uses relative URLs,
 // so it works wherever it is mounted: / on a Mac, /cgi-bin/onc/ on a router.
 import { compileIntent } from "../intent/compile";
+import { diffIntent } from "../intent/diff";
 import { intentSchema } from "../intent/schema";
 import { oncConfigSchema } from "../oncConfigSchema";
 import { parseConfigJson } from "../parseJson";
 import { HttpHandler, HttpResponse, Platform } from "../platform";
+import { jobPaths, provisionStatus, startProvision } from "./provisionJob";
 
 type Files = Pick<Platform, "readTextFile" | "writeFileAtomic">;
 
@@ -86,12 +88,61 @@ export const staticFiles =
         status: 200,
         headers: {
           "content-type": contentTypes[extension] ?? "application/octet-stream",
+          // Revalidate every time: file names do not change between builds.
+          "cache-control": "no-cache",
         },
         body: files.readTextFile(`${root}/${relative}`),
       };
     } catch {
       return notFound;
     }
+  };
+
+type JobPlatform = Files & Pick<Platform, "run" | "selfCommand">;
+
+const readJson = (files: Files, path: string) => {
+  try {
+    return parseConfigJson(files.readTextFile(path), path);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * GET: whether a provision is running, its log, and what the draft changes
+ * compared with what was last provisioned. POST: provision the saved draft.
+ */
+export const provisionApi =
+  ({
+    intentPath,
+    platform,
+  }: {
+    intentPath: string;
+    platform: JobPlatform;
+  }): HttpHandler =>
+  async ({ method }) => {
+    if (method === "GET") {
+      const status = await provisionStatus({ intentPath, files: platform });
+      const draft = readJson(platform, intentPath);
+      const live = readJson(platform, jobPaths(intentPath).live);
+      return json(200, {
+        ...status,
+        devices: ((draft?.devices as { name: string }[]) || []).map((d) => d.name),
+        // Never provisioned from here: everything is new, so no diff.
+        changes: live ? diffIntent(live, draft) : [],
+      });
+    }
+    if (method === "POST") {
+      const result = await startProvision({
+        intentPath,
+        files: platform,
+        now: () => Date.now(),
+      });
+      return result.started
+        ? json(202, { started: true })
+        : json(409, { error: result.reason });
+    }
+    return json(405, { error: `${method} is not supported.` });
   };
 
 /** Everything the UI needs, behind any transport. */
@@ -102,12 +153,14 @@ export const uiHandler = ({
 }: {
   intentPath: string;
   uiRoot: string;
-  platform: Files;
+  platform: JobPlatform;
 }): HttpHandler => {
-  const api = intentApi({ intentPath, files: platform });
+  const routes: Record<string, HttpHandler> = {
+    "/api/intent": intentApi({ intentPath, files: platform }),
+    "/api/provision": provisionApi({ intentPath, platform }),
+  };
   const ui = staticFiles({ root: uiRoot, files: platform });
-  return (request) =>
-    request.path === "/api/intent" ? api(request) : ui(request);
+  return (request) => (routes[request.path] ?? ui)(request);
 };
 
 /** A response in CGI's format: a Status header, the headers, then the body. */

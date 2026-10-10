@@ -1,0 +1,21 @@
+// Server state for provisioning: polled while a run is in progress.
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { loadProvision, startProvision } from "./api";
+
+export const provisionKey = ["provision"] as const;
+
+export const useProvision = () =>
+  useQuery({
+    queryKey: provisionKey,
+    queryFn: loadProvision,
+    refetchInterval: (query) =>
+      query.state.data?.state === "running" ? 1000 : false,
+  });
+
+export const useStartProvision = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: startProvision,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: provisionKey }),
+  });
+};

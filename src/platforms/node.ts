@@ -250,6 +250,15 @@ export const nodePlatform: Platform = {
       renameSync(temporary, path);
     }),
   readStdin: () => readFileSync(0, "utf8"),
+  selfCommand: () => {
+    const script = process.argv[1];
+    // A pkg binary is self-contained; under ts-node (development) the
+    // script is TypeScript, so the child needs ts-node too.
+    if ((process as { pkg?: unknown }).pkg) return [process.execPath];
+    return script.endsWith(".ts")
+      ? [process.execPath, "-r", "ts-node/register/transpile-only", script]
+      : [process.execPath, script];
+  },
   serve: (handler, { host, port }) =>
     new Promise((_, reject) => {
       // DNS rebinding: a web page whose name now resolves to 127.0.0.1 is

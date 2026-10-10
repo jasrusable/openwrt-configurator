@@ -10,6 +10,7 @@ import {
   Title,
 } from "@mantine/core";
 import { useIntent } from "./data/intent";
+import { ProvisionButton } from "./provision/ProvisionButton";
 import { IntentForm, useSaveActions } from "./form/IntentForm";
 import { useHashRoute } from "./kit/useHashRoute";
 import { PageId, pages } from "./pages";
@@ -44,7 +45,10 @@ const Shell = () => {
       <AppShell.Header px="md">
         <Group h="100%" justify="space-between">
           <Title order={4}>Network</Title>
-          <SaveBar />
+          <Group gap="sm">
+            <SaveBar />
+            <ProvisionButton />
+          </Group>
         </Group>
       </AppShell.Header>
       <AppShell.Navbar p="sm">

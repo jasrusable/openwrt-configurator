@@ -618,7 +618,12 @@ export const main = async ({
         try {
           // Read-only: introspection only, the same as print-uci-commands.
           const schema = await getDeviceSchema({ deviceConfig, ssh });
-          const path = join(options.out, `${schema.name}.json`);
+          // The name comes from the device's board.json: keep it to one plain
+          // file name, whatever the device reports.
+          const path = join(
+            options.out,
+            `${schema.name.replace(/[^A-Za-z0-9,._-]/g, "_").replace(/^\.+/, "_")}.json`
+          );
           platform.writeTextFile(path, JSON.stringify(schema, null, 2) + "\n");
           console.log(`${deviceConfig.hostname}: wrote ${path}`);
         } finally {
