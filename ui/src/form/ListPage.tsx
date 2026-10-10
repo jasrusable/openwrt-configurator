@@ -7,6 +7,7 @@ import { IconAlertCircle, IconPlus } from "@tabler/icons-react";
 import { ReactNode } from "react";
 import { useState } from "react";
 import {
+  FieldArray,
   FieldArrayPath,
   FormProvider,
   UseFieldArrayReturn,
@@ -18,10 +19,20 @@ import { useNavigate, useParams } from "react-router";
 import { Intent } from "../../../src/intent/schema";
 import { Column, DataTable } from "../kit/DataTable";
 import { SettingsPage } from "../kit/layout";
-import { useIntentForm, useIntentFormState } from "./IntentForm";
+import { applyIntent, useIntentForm, useIntentFormState } from "./IntentForm";
+
+/** A copy of `value` with the dotted `path` set. */
+const setIn = <T,>(value: T, path: string, next: unknown): T => {
+  const [head, ...rest] = path.split(".");
+  const node = (value ?? {}) as Record<string, unknown>;
+  return {
+    ...node,
+    [head]: rest.length ? setIn(node[head], rest.join("."), next) : next,
+  } as T;
+};
 
 type ListName = FieldArrayPath<Intent>;
-type Item<N extends ListName> = Intent[N] extends (infer I)[] ? I : never;
+type Item<N extends ListName> = FieldArray<Intent, N>;
 
 export type ListSpec<N extends ListName> = {
   /** Which list in the intent. */
@@ -33,6 +44,13 @@ export type ListSpec<N extends ListName> = {
   newItem: (items: Item<N>[], intent: Intent) => Item<N>;
   /** Whether an item may be removed (the main network may not). */
   canRemove?: (item: Item<N>) => boolean;
+  /**
+   * When adding item `index` changes other settings too (a network's zone):
+   * the whole intent after the add. The item is already in the list.
+   */
+  onAdd?: (intent: Intent, index: number) => Intent;
+  /** The whole intent with item `index` removed, if more than the item goes. */
+  onRemove?: (intent: Intent, index: number) => Intent;
   /** Item `index`'s name, for its page title and breadcrumb. */
   itemTitle: (index: number) => ReactNode;
   columns: Column[];
@@ -104,6 +122,7 @@ const ListItemPage = <N extends ListName>({
   index: number;
 }) => {
   const navigate = useNavigate();
+  const draft = useIntentForm();
   const item = useWatch({ name: `${list.name}.${index}` as never }) as Item<N>;
   const removable = !list.canRemove || list.canRemove(item);
   const back = () => navigate("..", { relative: "path" });
@@ -119,7 +138,11 @@ const ListItemPage = <N extends ListName>({
             variant="light"
             color="red"
             onClick={() => {
-              fields.remove(index);
+              if (list.onRemove) {
+                applyIntent(draft, list.onRemove(draft.getValues(), index));
+              } else {
+                fields.remove(index);
+              }
               back();
             }}
           >
@@ -150,9 +173,9 @@ const NewItemPage = <N extends ListName>({
   const draft = useIntentForm();
   const [{ copy, index }] = useState(() => {
     const intent = draft.getValues();
-    const items = intent[list.name] as Item<N>[];
+    const items = draft.getValues(list.name) as Item<N>[];
     return {
-      copy: { ...intent, [list.name]: [...items, list.newItem(items, intent)] },
+      copy: setIn(intent, list.name, [...items, list.newItem(items, intent)]),
       index: items.length,
     };
   });
@@ -160,9 +183,16 @@ const NewItemPage = <N extends ListName>({
   const back = () => navigate("..", { relative: "path" });
   const add = async () => {
     const path = `${list.name}.${index}` as never;
+    // What adding implies (a network's zone) first, so the check sees it.
+    if (list.onAdd) applyIntent(form, list.onAdd(form.getValues(), index));
     // Only a complete item is added; otherwise its errors show here.
     if (!(await form.trigger(path))) return;
-    fields.append(form.getValues(path) as never);
+    if (list.onAdd) {
+      // Everything the new item's page changed, and what adding implied.
+      applyIntent(draft, form.getValues());
+    } else {
+      fields.append(form.getValues(path) as never);
+    }
     back();
   };
   return (

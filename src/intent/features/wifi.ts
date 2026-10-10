@@ -12,7 +12,7 @@ const bands = [
 export const wifi: Feature = (intent) => {
   const posixTimezone = timezones[intent.site.timezone];
   const isolated = (id: string) =>
-    !!intent.networks.find((n) => n.id === id)?.access.isolate_clients;
+    !!intent.networks.find((n) => n.id === id)?.isolate_clients;
   const ap = (section: Record<string, unknown>) => ({
     ".if": onAccessPoints,
     ...section,

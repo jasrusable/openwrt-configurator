@@ -10,6 +10,10 @@ import {
   firewallForwardingSchema,
   oncFirewallForwardingSchema,
 } from "./forwarding";
+import {
+  firewallRedirectSchema,
+  oncFirewallRedirectSchema,
+} from "./redirect";
 import { firewallRuleSchema, oncFirewallRuleSchema } from "./rule";
 import { firewallZoneSchema, oncFirewallZoneSchema } from "./zone";
 
@@ -20,6 +24,7 @@ export const firewallSchema = configSchema(
       zone: sectionSchema(firewallZoneSchema),
       forwarding: sectionSchema(firewallForwardingSchema),
       rule: sectionSchema(firewallRuleSchema),
+      redirect: sectionSchema(firewallRedirectSchema),
     })
     .passthrough()
 );
@@ -31,6 +36,7 @@ export const oncFirewallSchema = makeOncConfigSchema(
       zone: oncSectionSchema(oncFirewallZoneSchema),
       forwarding: oncSectionSchema(oncFirewallForwardingSchema),
       rule: oncSectionSchema(oncFirewallRuleSchema),
+      redirect: oncSectionSchema(oncFirewallRedirectSchema),
     })
     .passthrough()
 );

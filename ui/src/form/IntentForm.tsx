@@ -4,7 +4,13 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { notifications } from "@mantine/notifications";
 import { ReactNode, useEffect } from "react";
-import { FieldPath, FormProvider, useForm, useFormContext } from "react-hook-form";
+import {
+  FieldPath,
+  FormProvider,
+  useForm,
+  useFormContext,
+  UseFormReturn,
+} from "react-hook-form";
 import { Intent, intentSchema } from "../../../src/intent/schema";
 import { SaveError } from "../data/api";
 import { useSaveIntent } from "../data/intent";
@@ -37,6 +43,19 @@ export const IntentForm = ({
 };
 
 export const useIntentForm = () => useFormContext<Intent>();
+
+/**
+ * Make a form hold `next`, setting only the top-level settings that differ:
+ * for a change that spans settings (a network and its firewall zone).
+ */
+export const applyIntent = (form: UseFormReturn<Intent>, next: Intent) => {
+  const current = form.getValues();
+  (Object.keys(next) as (keyof Intent)[]).forEach((key) => {
+    if (JSON.stringify(current[key]) !== JSON.stringify(next[key])) {
+      form.setValue(key, next[key] as never, { shouldDirty: true, shouldValidate: true });
+    }
+  });
+};
 
 /** Save and revert, for the toolbar. */
 export const useSaveActions = () => {

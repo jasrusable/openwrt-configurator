@@ -8,6 +8,8 @@ export const firewallProtocols = [
   "ah",
   "sctp",
   "igmp",
+  // Every protocol: fw4's proto defaults to tcp+udp when unset.
+  "all",
 ] as const;
 export const firewallTargets = ["ACCEPT", "REJECT", "DROP"] as const;
 export const icmpTypes = [

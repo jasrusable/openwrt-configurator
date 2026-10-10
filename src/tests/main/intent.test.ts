@@ -88,7 +88,40 @@ test("on the router: each network routed, served and firewalled by purpose", (t)
   t.is(zone("guest").input, "REJECT");
   t.deepEqual(
     config.firewall.rule.filter((r: any) => r.src === "guest").map((r: any) => r.name),
-    ["guest-DHCP", "guest-DHCPv6", "guest-DNS", "guest-ICMPv6"]
+    ["guest-DHCP", "guest-DHCPv6", "guest-DNS", "guest-NTP", "guest-ICMPv6", "Guests may print"]
+  );
+  t.like(
+    config.firewall.rule.find((r: any) => r.name === "Guests may print"),
+    { src: "guest", dest: "lan", dest_ip: ["10.0.0.20"], proto: ["tcp"], dest_port: "631,9100", target: "ACCEPT" }
+  );
+  // The stock WAN rules are on unless switched off.
+  t.true(config.firewall.rule.some((r: any) => r.name === "Allow-Ping"));
+  // A port forward lands in the zone of the network its target is on.
+  t.like(config.firewall.redirect[0], {
+    name: "Game server",
+    target: "DNAT",
+    src: "wan",
+    src_dport: "27015",
+    proto: ["udp"],
+    dest: "lan",
+    dest_ip: "10.0.0.50",
+    dest_port: "27015",
+  });
+});
+
+test("built-in rules can be switched off, and any-protocol rules say so", (t) => {
+  const intent = sample();
+  intent.firewall.builtin_rules_off = ["ping", "ipsec_passthrough"];
+  intent.firewall.rules.push({ name: "Block IoT", from: "guest", to: "wan", protocol: "any", action: "drop" });
+  const firewallRules: any[] = (compile(intent).config as any).firewall.rule;
+  const rules = firewallRules.map((r) => r.name);
+  t.false(rules.includes("Allow-Ping"));
+  t.false(rules.includes("Allow-ISAKMP"));
+  t.true(rules.includes("Allow-DHCP-Renew"));
+  t.deepEqual(
+    firewallRules.find((r) => r.name === "Block IoT").proto,
+    ["all"],
+    "unset would mean tcp+udp in fw4"
   );
 });
 
@@ -165,6 +198,22 @@ test("rules across settings are checked, at the field they concern", (t) => {
   t.deepEqual(issues((i) => (i.networks[1].vlan = 1)), [
     "networks.1.vlan: 2 to 4094 (1 is the main network)",
   ]);
+  t.deepEqual(issues((i) => (i.firewall.zones[1].networks = [])), [
+    "networks.1.id: not in any firewall zone",
+  ]);
+  t.deepEqual(issues((i) => i.firewall.forwardings.push({ from: "guest", to: "nowhere" })), [
+    "firewall.forwardings.3.to: pick a zone",
+  ]);
+  t.deepEqual(
+    issues((i) => (i.firewall.port_forwards[0].internal_address = "192.168.9.9")),
+    ["firewall.port_forwards.0.internal_address: not on any of your networks"]
+  );
+  t.deepEqual(
+    issues((i) =>
+      i.firewall.port_forwards.push({ ...i.firewall.port_forwards[0], name: "Again", protocol: "tcp+udp" })
+    ),
+    ["firewall.port_forwards.1.external_port: already forwarded"]
+  );
 });
 
 test("a version 1 file is migrated, keeping every setting", (t) => {
@@ -183,18 +232,23 @@ test("a version 1 file is migrated, keeping every setting", (t) => {
     dns: { over_https: "quad9" },
   };
   const migrated = intentSchema.parse(migrateIntent(v1));
-  t.is(migrated.schema, 2);
+  t.is(migrated.schema, 3);
   t.deepEqual(migrated.networks, [
     {
       id: "lan",
       name: "Home",
       purpose: "home",
-      access: { internet: true, other_networks: true, isolate_clients: false },
+      isolate_clients: false,
       subnet: "10.0.0.0/24",
       dhcp: { size: 200, lease: "24h" },
       ipv6: false,
     },
   ]);
+  // Format 2's access became the firewall: a trusted zone that reaches the
+  // internet, and the stock rules on.
+  t.like(migrated.firewall.zones[0], { id: "lan", networks: ["lan"], input: "accept" });
+  t.deepEqual(migrated.firewall.forwardings, [{ from: "lan", to: "wan" }]);
+  t.deepEqual(migrated.firewall.builtin_rules_off, []);
   t.is(migrated.wifi[0].network, "lan");
   t.deepEqual(migrated.dns, { over_https: "quad9", local_domain: "home" });
   t.throws(() => migrateIntent({ ...v1, schema: 99 }), { message: /newer/ });

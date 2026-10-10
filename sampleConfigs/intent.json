@@ -1,5 +1,5 @@
 {
-  "schema": 2,
+  "schema": 3,
   "site": {
     "name": "Home",
     "timezone": "Europe/Zurich",
@@ -9,50 +9,139 @@
     "ssh_key_path": "~/.ssh/id_ed25519"
   },
   "devices": [
-    { "name": "home-router", "role": "router" },
+    {
+      "name": "home-router",
+      "role": "router"
+    },
     {
       "name": "home-ap-1",
       "role": "access-point",
-      "wifi": { "channel": { "2g": 11, "5g": 36 } }
+      "wifi": {
+        "channel": {
+          "2g": 11,
+          "5g": 36
+        }
+      }
     }
   ],
   "internet": {
-    "connection": { "type": "dhcp" },
+    "connection": {
+      "type": "dhcp"
+    },
     "ipv6": true,
-    "speed": { "down_mbps": 950, "up_mbps": 950 }
+    "speed": {
+      "down_mbps": 950,
+      "up_mbps": 950
+    }
+  },
+  "wifi": [
+    {
+      "ssid": "Home",
+      "network": "lan",
+      "password": "change-me-please",
+      "extra_passwords": [
+        "change-me-too"
+      ]
+    },
+    {
+      "ssid": "Home Guests",
+      "network": "guest",
+      "password": "welcome-guests"
+    }
+  ],
+  "dns": {
+    "over_https": "cloudflare",
+    "local_domain": "lan"
   },
   "networks": [
     {
       "id": "lan",
       "name": "Home",
       "purpose": "home",
-      "access": { "internet": true, "other_networks": true, "isolate_clients": false },
       "subnet": "10.0.0.0/24",
-      "dhcp": { "size": 250, "lease": "24h" },
-      "ipv6": true
+      "dhcp": {
+        "size": 250,
+        "lease": "24h"
+      },
+      "ipv6": true,
+      "isolate_clients": false
     },
     {
       "id": "guest",
       "name": "Guests",
       "purpose": "guest",
-      "access": { "internet": true, "other_networks": false, "isolate_clients": true },
       "vlan": 20,
       "subnet": "10.0.20.0/24",
-      "dhcp": { "size": 100, "lease": "2h" },
-      "ipv6": false
+      "dhcp": {
+        "size": 100,
+        "lease": "2h"
+      },
+      "ipv6": false,
+      "isolate_clients": true
     }
   ],
-  "wifi": [
-    {
-      "ssid": "Home",
-      "network": "lan",
-      "password": "change-me-please",
-      "extra_passwords": ["change-me-too"]
-    },
-    { "ssid": "Home Guests", "network": "guest", "password": "welcome-guests" }
-  ],
-  "dns": {
-    "over_https": "cloudflare",
-    "local_domain": "lan"
+  "firewall": {
+    "zones": [
+      {
+        "id": "lan",
+        "networks": [
+          "lan"
+        ],
+        "input": "accept",
+        "forward": "accept",
+        "output": "accept",
+        "router_services": true
+      },
+      {
+        "id": "guest",
+        "networks": [
+          "guest"
+        ],
+        "input": "reject",
+        "forward": "reject",
+        "output": "accept",
+        "router_services": true
+      }
+    ],
+    "forwardings": [
+      {
+        "from": "lan",
+        "to": "wan"
+      },
+      {
+        "from": "lan",
+        "to": "guest"
+      },
+      {
+        "from": "guest",
+        "to": "wan"
+      }
+    ],
+    "rules": [
+      {
+        "name": "Guests may print",
+        "enabled": true,
+        "from": "guest",
+        "to": "lan",
+        "destination_addresses": [
+          "10.0.0.20"
+        ],
+        "protocol": "tcp",
+        "ports": "631,9100",
+        "family": "ipv4",
+        "action": "accept"
+      }
+    ],
+    "port_forwards": [
+      {
+        "name": "Game server",
+        "enabled": true,
+        "protocol": "udp",
+        "external_port": "27015",
+        "internal_address": "10.0.0.50",
+        "reflection": true
+      }
+    ],
+    "builtin_rules_off": []
   }
 }

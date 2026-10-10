@@ -4,6 +4,7 @@
 // and nothing else; src/intent/compile.ts turns it into the low-level config.
 import { z } from "zod";
 import { countries } from "./countries";
+import { firewallSchema } from "./firewall";
 import { timezones } from "./timezones";
 
 const name = z
@@ -46,25 +47,14 @@ const leaseTime = z
     "at least 2 minutes"
   );
 
-export const intentVersion = 2;
+export const intentVersion = 3;
 
+/**
+ * What a network is for. It sets up the network's firewall zone when the
+ * network is created (zoneForPurpose); after that the firewall owns access.
+ */
 export const purposes = ["home", "guest", "iot"] as const;
 export type Purpose = (typeof purposes)[number];
-export type Access = {
-  /** Can reach the internet. */
-  internet: boolean;
-  /** Can reach devices on the other networks. */
-  other_networks: boolean;
-  /** Wi-Fi clients cannot reach each other. */
-  isolate_clients: boolean;
-};
-
-/** What each purpose allows, as a starting point the user can adjust. */
-export const purposeAccess: Record<Purpose, Access> = {
-  home: { internet: true, other_networks: true, isolate_clients: false },
-  guest: { internet: true, other_networks: false, isolate_clients: true },
-  iot: { internet: true, other_networks: false, isolate_clients: false },
-};
 
 const network = z
   .object({
@@ -75,13 +65,11 @@ const network = z
     id: z.string().regex(/^[a-z][a-z0-9]{0,9}$/, "a short id"),
     name: z.string().min(1, "required").max(32),
     purpose: z.enum(purposes),
-    access: z
-      .object({
-        internet: z.boolean(),
-        other_networks: z.boolean(),
-        isolate_clients: z.boolean(),
-      })
-      .strict(),
+    /**
+     * Wi-Fi clients on it cannot reach each other (hostapd isolation: within
+     * one access point and band). Layer 2, so not the firewall's to decide.
+     */
+    isolate_clients: z.boolean().default(false),
     /** Absent for the main network, which is untagged on every port. */
     vlan: z
       .number()
@@ -186,6 +174,8 @@ export const intentSchema = z
      */
     networks: z.array(network).min(1, "at least one network"),
 
+    firewall: firewallSchema,
+
     wifi: z.array(
       z
         .object({
@@ -235,6 +225,66 @@ export const intentSchema = z
     intent.wifi.forEach((wifi, i) => {
       if (!ids.includes(wifi.network)) {
         issue(["wifi", i, "network"], "pick a network");
+      }
+    });
+
+    // The firewall: every network in exactly one zone, and every reference
+    // to a zone a real one.
+    const { zones, forwardings, rules, port_forwards } = intent.firewall;
+    const zoneIds = zones.map((z) => z.id);
+    intent.networks.forEach((network, i) => {
+      const count = zones.filter((z) => z.networks.includes(network.id)).length;
+      if (count !== 1) {
+        issue(
+          ["networks", i, "id"],
+          count === 0 ? "not in any firewall zone" : "in more than one firewall zone"
+        );
+      }
+    });
+    zones.forEach((zone, i) => {
+      if (zones.slice(0, i).some((z) => z.id === zone.id)) {
+        issue(["firewall", "zones", i, "id"], "already used by another zone");
+      }
+      zone.networks.forEach((id) => {
+        if (!ids.includes(id)) {
+          issue(["firewall", "zones", i, "networks"], `no network "${id}"`);
+        }
+      });
+    });
+    const isZone = (id: string) => id === "wan" || zoneIds.includes(id);
+    forwardings.forEach((f, i) => {
+      if (!isZone(f.from)) issue(["firewall", "forwardings", i, "from"], "pick a zone");
+      if (!isZone(f.to)) issue(["firewall", "forwardings", i, "to"], "pick a zone");
+      if (f.from === f.to) issue(["firewall", "forwardings", i, "to"], "a zone to itself is its forward policy");
+    });
+    rules.forEach((rule, i) => {
+      if (!isZone(rule.from)) issue(["firewall", "rules", i, "from"], "pick a zone");
+      if (!isZone(rule.to) && rule.to !== "router") {
+        issue(["firewall", "rules", i, "to"], "pick a zone or the router");
+      }
+      if (rule.ports && !["tcp", "udp", "tcp+udp"].includes(rule.protocol)) {
+        issue(["firewall", "rules", i, "ports"], "ports need TCP or UDP");
+      }
+    });
+    const inANetwork = (address: string) =>
+      intent.networks.some(
+        (n) => address.split(".").slice(0, 3).join(".") === n.subnet.split(".").slice(0, 3).join(".")
+      );
+    port_forwards.forEach((forward, i) => {
+      if (!inANetwork(forward.internal_address)) {
+        issue(["firewall", "port_forwards", i, "internal_address"], "not on any of your networks");
+      }
+      const clash = port_forwards
+        .slice(0, i)
+        .some(
+          (other) =>
+            other.external_port === forward.external_port &&
+            (other.protocol === forward.protocol ||
+              other.protocol === "tcp+udp" ||
+              forward.protocol === "tcp+udp")
+        );
+      if (clash) {
+        issue(["firewall", "port_forwards", i, "external_port"], "already forwarded");
       }
     });
   });

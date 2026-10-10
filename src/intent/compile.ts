@@ -3,6 +3,7 @@
 // everything device-specific is resolved later, against the live device.
 import { devices } from "./features/devices";
 import { dns } from "./features/dns";
+import { firewall } from "./features/firewall";
 import { internet } from "./features/internet";
 import { network } from "./features/network";
 import { roles } from "./features/roles";
@@ -17,6 +18,7 @@ const features: Feature[] = [
   system,
   network,
   internet,
+  firewall,
   dns,
   wifi,
   roles,

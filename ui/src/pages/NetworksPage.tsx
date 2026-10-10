@@ -1,9 +1,7 @@
 import { Badge, Text } from "@mantine/core";
-import {
-  parseSubnet,
-  purposeAccess,
-  Purpose,
-} from "../../../src/intent/schema";
+import { withNetworkZone, withoutNetwork } from "../../../src/intent/edits";
+import { parseSubnet, Purpose } from "../../../src/intent/schema";
+import { ZoneField } from "../firewall/ZoneField";
 import {
   DurationField,
   NumberField,
@@ -24,28 +22,26 @@ const purposes: { value: Purpose; label: string; color: string }[] = [
 ];
 
 /** A fresh network: the next free id, VLAN (10, 20, ...) and address range. */
-const newNetwork = (
-  networks: { id: string; vlan?: number; subnet: string }[],
-) => {
+const newNetwork = (networks: { id: string; vlan?: number; subnet: string }[]) => {
   const free = <T,>(candidates: T[], used: T[]) =>
     candidates.find((c) => !used.includes(c))!;
   const vlan = free(
     Array.from({ length: 400 }, (_, i) => (i + 1) * 10),
-    networks.map((n) => n.vlan),
+    networks.map((n) => n.vlan)
   );
   const [a, b] = parseSubnet(networks[0]?.subnet ?? "") ?? [10, 0];
   const subnet = free(
     Array.from({ length: 256 }, (_, i) => `${a}.${b}.${(vlan + i) % 256}.0/24`),
-    networks.map((n) => n.subnet),
+    networks.map((n) => n.subnet)
   );
   return {
     id: free(
       Array.from({ length: 99 }, (_, i) => `net${i + 2}`),
-      networks.map((n) => n.id),
+      networks.map((n) => n.id)
     ),
     name: "",
     purpose: "guest" as const,
-    access: purposeAccess.guest,
+    isolate_clients: true,
     vlan,
     subnet,
     dhcp: { size: 100, lease: "12h" },
@@ -57,13 +53,14 @@ const networks = defineList({
   name: "networks",
   title: "Networks",
   description:
-    "Each network is kept apart from the others as its purpose says. Every port and access point carries them all.",
+    "Each network is a VLAN on every port and access point, and sits in a firewall zone.",
   addLabel: "Add network",
   newItem: newNetwork,
   canRemove: (network) => network?.vlan !== undefined,
-  itemTitle: (i) => (
-    <Value name={`networks.${i}.name`} fallback="New network" />
-  ),
+  // A new network gets its own zone from its purpose, unless put in one.
+  onAdd: withNetworkZone,
+  onRemove: withoutNetwork,
+  itemTitle: (i) => <Value name={`networks.${i}.name`} fallback="New network" />,
   empty: "No networks yet.",
   columns: [
     {
@@ -96,10 +93,7 @@ const networks = defineList({
       header: "VLAN",
       cell: (i) => (
         <Text size="sm" c="dimmed">
-          <Value
-            name={`networks.${i}.vlan`}
-            format={(vlan) => vlan ?? "Main (untagged)"}
-          />
+          <Value name={`networks.${i}.vlan`} format={(vlan) => vlan ?? "Main (untagged)"} />
         </Text>
       ),
     },
@@ -119,30 +113,19 @@ const networks = defineList({
         <PresetField
           name={`networks.${i}.purpose`}
           label="Purpose"
-          description="Sets the access below, which you can then adjust."
+          description="What it is for: sets up its firewall zone when created, and Wi-Fi isolation."
           options={purposes}
-          fills={`networks.${i}.access`}
-          presets={purposeAccess}
-        />
-      </Section>
-      <Section
-        title="Access"
-        description="Set by the purpose; adjust as needed."
-      >
-        <SwitchField
-          name={`networks.${i}.access.internet`}
-          label="Internet access"
+          fills={`networks.${i}.isolate_clients`}
+          presets={{ home: false, guest: true, iot: false }}
         />
         <SwitchField
-          name={`networks.${i}.access.other_networks`}
-          label="Reach other networks"
-          description="Devices on it can reach devices on your other networks."
-        />
-        <SwitchField
-          name={`networks.${i}.access.isolate_clients`}
+          name={`networks.${i}.isolate_clients`}
           label="Isolate Wi-Fi clients"
           description="Wi-Fi devices on the same access point and band cannot reach each other."
         />
+      </Section>
+      <Section title="Firewall">
+        <ZoneField index={i} />
       </Section>
       <Section title="Addressing">
         <When name={`networks.${i}.vlan`} is={undefined}>
@@ -155,7 +138,7 @@ const networks = defineList({
             </Text>
           </SettingRow>
         </When>
-        <NotMain index={i} />
+        <VlanField index={i} />
         <SubnetField name={`networks.${i}.subnet`} label="Addresses" />
         <SwitchField name={`networks.${i}.ipv6`} label="IPv6" />
       </Section>
@@ -173,7 +156,7 @@ const networks = defineList({
 });
 
 /** The VLAN field, for every network but the main one. */
-const NotMain = ({ index }: { index: number }) => (
+const VlanField = ({ index }: { index: number }) => (
   <Value
     name={`networks.${index}.vlan`}
     format={(vlan) =>
