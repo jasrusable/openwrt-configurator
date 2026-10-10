@@ -53,7 +53,9 @@ export const wifi: Feature = (intent) => {
             mode: "ap",
             device: bands.map(({ name }) => name),
             network: network.network,
-            // Clients of an isolated network cannot reach each other.
+            // hostapd's isolation: only within this access point's BSS. Across
+            // access points, bands or wired ports it needs bridge port
+            // isolation too (TODO.md).
             ...(isolated(network.network) ? { isolate: true } : {}),
             ssid: network.ssid,
             encryption: "psk2+ccmp",

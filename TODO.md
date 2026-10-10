@@ -51,7 +51,14 @@ and the React UI in `ui/`.
       the same rules. Device-only facts (a missing 5 GHz radio) fail at plan
       time, before any change.
 - [ ] Per-port network assignment (today every LAN port carries every
-      network: the main one untagged, the others tagged).
+      network: the main one untagged, the others tagged). Also a security
+      fix: a wired device can tag its frames into any network's VLAN, which
+      bypasses a main network that is not allowed to reach the others.
+      Only access point uplinks should be trunks.
+- [ ] Full client isolation. `isolate` (hostapd) only separates clients of
+      one access point and band; across access points, bands and wired
+      ports it needs bridge port isolation (or routing every client through
+      the router's firewall).
 - [ ] Reach parity with the jaculu config before provisioning from intent:
       model quirk files (R6S packet steering, AP AQL hook, the odhcpd RA
       fix) and admin SSH login. Then diff `print-uci-commands` of both.

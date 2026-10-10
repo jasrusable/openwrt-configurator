@@ -118,7 +118,7 @@ const networks = defineList({
       <SwitchField
         name={`networks.${i}.access.isolate_clients`}
         label="Isolate Wi-Fi clients"
-        description="Wi-Fi devices on it cannot reach each other."
+        description="Wi-Fi devices on the same access point and band cannot reach each other."
       />
       <When name={`networks.${i}.vlan`} is={undefined}>
         <SettingRow

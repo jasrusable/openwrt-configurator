@@ -72,7 +72,8 @@ export const fields: FieldInfo[] = [
   {
     path: "networks.*.access.isolate_clients",
     label: "Isolate Wi-Fi clients",
-    description: "Whether Wi-Fi devices on it are kept from reaching each other.",
+    description:
+      "Whether Wi-Fi devices on the same access point and band are kept from reaching each other.",
   },
   {
     path: "networks.*.vlan",
