@@ -4,7 +4,7 @@
 import { Feature, routerAddress } from "../fragment";
 
 export const devices: Feature = (intent) => ({
-  devices: intent.devices.map((device) => ({
+  devices: intent.hardware.map((device) => ({
     hostname: device.name,
     tags: { role: device.role },
     ipaddr:

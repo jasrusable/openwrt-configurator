@@ -5,6 +5,7 @@ import {
   Feature,
   mainNetwork,
   onAccessPoints,
+  onDevice,
   onRouter,
   routerAddress,
 } from "../fragment";
@@ -37,6 +38,10 @@ export const system: Feature = (intent) => {
       system: {
         system: [
           {
+            // Each piece of hardware's location, as LuCI shows it.
+            ".overrides": intent.hardware
+              .filter((h) => h.location)
+              .map((h) => ({ ".if": onDevice(h.name), override: { description: h.location } })),
             zonename: intent.site.timezone,
             timezone: timezones[intent.site.timezone],
             log_size: "2048",
@@ -67,8 +72,10 @@ export const system: Feature = (intent) => {
             PasswordAuth: "on",
             RootPasswordAuth: "on",
             Port: 22,
-            // Only on the main network: guests and IoT get no SSH.
-            Interface: main,
+            // Only on the main network: guests and IoT get no SSH. Bound to
+            // its device, not an address, so an address from DHCP (as access
+            // points have) changing later does not matter.
+            DirectInterface: main,
             BannerFile: "/etc/banner",
           },
         ],
@@ -89,14 +96,23 @@ export const system: Feature = (intent) => {
                 },
               },
             ],
+            // As 25.12 ships it with LuCI, but HTTPS only. LuCI is the CGI
+            // program /www/cgi-bin/luci (ucode) now: cgi_prefix is what serves
+            // it, and the Lua entry stock still lists no longer exists.
             redirect_https: true,
             home: "/www",
             rfc1918_filter: true,
+            max_requests: 3,
+            max_connections: 100,
             cert: "/etc/uhttpd.crt",
             key: "/etc/uhttpd.key",
             cgi_prefix: "/cgi-bin",
-            lua_prefix: ["/cgi-bin/luci=/usr/lib/lua/luci/sgi/uhttpd.lua"],
+            // LuCI talks to the router over /ubus; first boot adds it with
+            // uhttpd-mod-ubus (00_uhttpd_ubus), so the wipe must keep it.
             ubus_prefix: "/ubus",
+            script_timeout: 60,
+            network_timeout: 30,
+            http_keepalive: 20,
             tcp_keepalive: true,
           },
         ],

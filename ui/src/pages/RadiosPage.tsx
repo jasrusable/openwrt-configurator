@@ -75,8 +75,20 @@ const RadiosTable = () => {
   return (
     <SettingsPage
       title="Radios"
-      description="Each band's radios, on every access point. Channels are picked automatically; to pin one, open the access point under Devices."
+      description="Each band's radios, on every access point. Channels are picked automatically; to pin one, open the access point under Hardware."
     >
+      <Section>
+        <SegmentedField
+          name={"radios.airtime" as never}
+          label="Airtime"
+          description="What every access point's Wi-Fi favours. Low latency keeps calls and games snappy while something downloads; throughput moves the most data. Balanced is OpenWrt's own."
+          options={[
+            { value: "latency", label: "Low latency" },
+            { value: "balanced", label: "Balanced" },
+            { value: "throughput", label: "Throughput" },
+          ]}
+        />
+      </Section>
       <DataTable
         rowCount={bands.length}
         rowKey={(i) => bands[i].band}
@@ -177,14 +189,14 @@ const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
       <Section title="Channel">
         <SettingRow
           label="Channel"
-          description="Each access point picks the clearest channel when it starts. To pin one, open the access point under Devices."
+          description="Each access point picks the clearest channel when it starts. To pin one, open the access point under Hardware."
         >
           <Button
             variant="subtle"
             size="compact-sm"
-            onClick={() => navigate("/devices")}
+            onClick={() => navigate("/hardware")}
           >
-            Auto · Devices
+            Auto · Hardware
           </Button>
         </SettingRow>
       </Section>

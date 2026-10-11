@@ -8,7 +8,7 @@
   "admin": {
     "ssh_key_path": "~/.ssh/id_ed25519"
   },
-  "devices": [
+  "hardware": [
     {
       "name": "home-router",
       "role": "router"
@@ -35,7 +35,10 @@
     }
   },
   "dns": {
-    "over_https": "cloudflare",
+    "upstream": {
+      "type": "encrypted",
+      "provider": "cloudflare"
+    },
     "local_domain": "lan"
   },
   "wifi": [

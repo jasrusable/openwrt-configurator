@@ -21,10 +21,12 @@ import {
   DurationField,
   MultiSelectField,
   NumberField,
+  OptionalField,
   PresetField,
   SegmentedField,
   SubnetField,
   SwitchField,
+  TagsField,
   TextField,
   Value,
   When,
@@ -165,6 +167,18 @@ const networks = defineList({
           max={253}
         />
         <DurationField name={`networks.${i}.dhcp.lease`} label="Lease time" />
+        <OptionalField
+          name={`networks.${i}.dhcp.dns_servers`}
+          label="Hand out other DNS servers"
+          description="Devices ask these instead of the router, e.g. a Pi-hole. They then skip encrypted DNS and local names."
+          initial={[]}
+        >
+          <TagsField
+            name={`networks.${i}.dhcp.dns_servers`}
+            label="DNS servers"
+            placeholder="10.0.0.53"
+          />
+        </OptionalField>
       </Section>
     </>
   ),

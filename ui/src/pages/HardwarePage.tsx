@@ -26,21 +26,21 @@ const roles = [
 const channel = (value?: number | "auto") =>
   value === undefined || value === "auto" ? "Auto" : String(value);
 
-const devices = defineList({
-  name: "devices",
-  title: "Devices",
+const hardware = defineList({
+  name: "hardware",
+  title: "Hardware",
   description:
-    "Your router and access points. Each is set up entirely from these settings.",
-  addLabel: "Add device",
+    "Your router and access points. Each is set up entirely from these settings; what it is (model, ports, radios) is read from it when it is provisioned.",
+  addLabel: "Add access point",
   newItem: () => ({ name: "", role: "access-point" as const }),
-  itemTitle: (i) => <Value name={`devices.${i}.name`} fallback="New device" />,
-  empty: "No devices yet.",
+  itemTitle: (i) => <Value name={`hardware.${i}.name`} fallback="New access point" />,
+  empty: "No hardware yet.",
   columns: [
     {
       header: "Name",
       cell: (i) => (
         <Text size="sm" fw={500}>
-          <Value name={`devices.${i}.name`} fallback="Unnamed" />
+          <Value name={`hardware.${i}.name`} fallback="Unnamed" />
         </Text>
       ),
     },
@@ -48,7 +48,7 @@ const devices = defineList({
       header: "Role",
       cell: (i) => (
         <Value
-          name={`devices.${i}.role`}
+          name={`hardware.${i}.role`}
           format={(role) => (
             <Badge variant="light" color={role === "router" ? "blue" : "gray"}>
               {roles.find((r) => r.value === role)?.label}
@@ -62,7 +62,7 @@ const devices = defineList({
       cell: (i) => (
         <Text size="sm" c="dimmed">
           <Value
-            name={`devices.${i}`}
+            name={`hardware.${i}`}
             format={(device) =>
               device?.role === "access-point"
                 ? `${channel(device.wifi?.channel?.["2g"])} · ${channel(
@@ -79,29 +79,36 @@ const devices = defineList({
     <>
       <Section>
         <TextField
-          name={`devices.${i}.name`}
+          name={`hardware.${i}.name`}
           label="Name"
           description="Also its hostname."
         />
         <SegmentedField
-          name={`devices.${i}.role`}
+          name={`hardware.${i}.role`}
           label="Role"
+          description="The router connects to the internet and runs the networks; access points broadcast Wi-Fi."
           options={roles}
         />
+        <TextField
+          name={`hardware.${i}.location`}
+          label="Location"
+          description="Where it is, for you: shown in LuCI too."
+          placeholder="Living room"
+        />
       </Section>
-      <When name={`devices.${i}.role`} is="access-point">
+      <When name={`hardware.${i}.role`} is="access-point">
         <Section
           title="Wi-Fi"
           description="Pin a channel only to avoid a crowded one; automatic picks for you."
         >
           <SelectField
-            name={`devices.${i}.wifi.channel.2g`}
+            name={`hardware.${i}.wifi.channel.2g`}
             label="2.4 GHz channel"
             options={channels2g}
             emptyLabel="Automatic"
           />
           <SelectField
-            name={`devices.${i}.wifi.channel.5g`}
+            name={`hardware.${i}.wifi.channel.5g`}
             label="5 GHz channel"
             options={channels5g}
             emptyLabel="Automatic"
@@ -112,4 +119,4 @@ const devices = defineList({
   ),
 });
 
-export const DevicesPage = () => <ListPage list={devices} />;
+export const HardwarePage = () => <ListPage list={hardware} />;

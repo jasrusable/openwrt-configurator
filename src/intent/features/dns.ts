@@ -23,7 +23,15 @@ const proxyPort = 5053;
 
 export const dns: Feature = (intent) => {
   const domain = intent.dns.local_domain;
-  const provider = intent.dns.over_https && providers[intent.dns.over_https];
+  const { upstream } = intent.dns;
+  const provider = upstream.type === "encrypted" && providers[upstream.provider];
+  // dnsmasq asks these instead of the provider's resolvers (resolv.conf).
+  const servers =
+    upstream.type === "encrypted"
+      ? [`127.0.0.1#${proxyPort}`]
+      : upstream.type === "custom"
+        ? upstream.servers
+        : undefined;
   return {
     // Installed whether used or not: a setting changes config, not packages.
     package_profiles: [
@@ -50,11 +58,20 @@ export const dns: Feature = (intent) => {
             dnsforwardmax: 1000,
             interface: intent.networks.map((n) => n.id),
             quietdhcp: true,
-            ...(provider
-              ? { noresolv: true, server: [`127.0.0.1#${proxyPort}`] }
+            ...(servers ? { noresolv: true, server: servers } : {}),
+            // Answers from outside may not point inside (DNS rebinding);
+            // the router itself (127.0.0.0/8) stays allowed.
+            ...(intent.dns.rebind_protection
+              ? { rebind_protection: true, rebind_localhost: true }
               : {}),
           },
         ],
+        // Your own names: name.<local domain> answers with the address.
+        domain: intent.dns.records.map((r) => ({
+          ".if": onRouter,
+          name: r.name,
+          ip: r.address,
+        })),
       },
       "https-dns-proxy": {
         main: [

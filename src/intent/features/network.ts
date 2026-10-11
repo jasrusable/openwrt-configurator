@@ -70,8 +70,12 @@ const dhcpServer = (network: Network, ipv6: boolean) => ({
         ra_flags: ["managed-config", "other-config"],
       }
     : { dhcpv6: "disabled", ra: "disabled" }),
-  // Option 42: the router is the network's time server.
-  dhcp_option: [`42,${gatewayOf(network)}`],
+  // Option 42: the router is the network's time server. Option 6: other DNS
+  // servers instead of the router, when the network names them.
+  dhcp_option: [
+    `42,${gatewayOf(network)}`,
+    ...(network.dhcp.dns_servers?.length ? [`6,${network.dhcp.dns_servers.join(",")}`] : []),
+  ],
 });
 
 export const network: Feature = (intent) => {

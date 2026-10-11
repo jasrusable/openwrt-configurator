@@ -59,12 +59,17 @@ and the React UI in `ui/`.
       one access point and band; across access points, bands and wired
       ports it needs bridge port isolation (or routing every client through
       the router's firewall).
-- [ ] Reach parity with the jaculu config before provisioning from intent:
-      model quirk files (R6S packet steering, AP AQL hook, the odhcpd RA
-      fix) and admin SSH login. Then diff `print-uci-commands` of both.
-      Known difference: the intent announces IPv6 routes with
-      `ra_default 1` (only with a public prefix), the jaculu config with
-      `2` (always); check IPv6 on the real line after the first provision.
+- [ ] Provisioning jaculu from its intent. Parity checked offline (both
+      configs through the engine against the captured R6S and NWA50AX Pro
+      schemas, secrets masked): the three model scripts match byte for byte
+      and every other difference is deliberate (rebind protection on, DHCP
+      pool .5-.254, ra_default 1, LuCI's cgi_prefix, DirectInterface, the
+      off states of UPnP/avahi, ubihealthd kept from the device, stock
+      uhttpd limits). Still to decide: the ULA prefix (derived from the site
+      name, so it changes from the hand-written one), curl on the router,
+      conloglevel 8. The intent's Wi-Fi passwords must be the real ones
+      before a provision (the hand config takes them from the keychain).
+      Then a print-uci-commands against the devices, on request.
 - [ ] Open schema questions: a second AP (`jaculu-ap-2`)? Why two SSIDs on
       one LAN? What are the extra Wi-Fi passwords for? Keep LuCI? Wi-Fi on
       a router that has radios (today only access points broadcast)?

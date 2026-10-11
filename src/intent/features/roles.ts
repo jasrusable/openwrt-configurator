@@ -1,7 +1,5 @@
-// What a role, or a particular model, needs beyond the features. Model quirks
-// are conditions on the model the device reports when it is provisioned, so
-// the intent never names a model.
-import { Feature, onAccessPoints, onModel } from "../fragment";
+// What a role needs beyond the features. Fixes over OpenWrt are in patches/.
+import { everyDevice, Feature, onAccessPoints } from "../fragment";
 
 export const roles: Feature = () => ({
   package_profiles: [
@@ -14,14 +12,9 @@ export const roles: Feature = () => ({
   config: {
     // Shipped by the full wpad; no RADIUS server is wanted.
     radius: { radius: [{ ".if": onAccessPoints, disabled: true }] },
-    ubihealthd: {
-      "ubi-device": [
-        {
-          ".if": onModel("zyxel,nwa50ax-pro"),
-          ".name": "ubi0",
-          device: "/dev/ubi0",
-        },
-      ],
-    },
   },
+  // UBI flash health: ubihealthd's own first-boot script sets up a section
+  // for each UBI device the hardware has, so keep what it made, wherever it
+  // made one ("?": devices without UBI flash have no such config).
+  configs_to_not_reset: [{ ".if": everyDevice, configs: ["?ubihealthd.*"] }],
 });

@@ -14,7 +14,7 @@ export const settingPages: { path: string; page: string; item?: (index: string) 
   { path: "wifi", page: "ssids", item: (i) => `/ssids/${i}` },
   { path: "radios", page: "radios", item: (band) => `/radios/${band}` },
   { path: "dns", page: "dns" },
-  { path: "devices", page: "devices", item: (i) => `/devices/${i}` },
+  { path: "hardware", page: "hardware", item: (i) => `/hardware/${i}` },
 ];
 
 /** The page, and the URL, where the setting at `path` is edited. */

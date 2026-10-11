@@ -11,6 +11,7 @@ import { roles } from "./features/roles";
 import { system } from "./features/system";
 import { wifi } from "./features/wifi";
 import { Feature, merge } from "./fragment";
+import { patchesFeature } from "./patches";
 import { Intent, intentSchema } from "./schema";
 
 /** In order: where two add sections of one type, earlier ones come first. */
@@ -24,6 +25,8 @@ const features: Feature[] = [
   wifi,
   discovery,
   roles,
+  // Last: fixes layered over everything else (src/intent/patches).
+  patchesFeature,
 ];
 
 /** Unvalidated: the caller parses it with oncConfigSchema, like any config. */

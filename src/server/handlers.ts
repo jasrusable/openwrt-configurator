@@ -144,7 +144,7 @@ export const provisionApi =
       const live = readIntent(platform, jobPaths(intentPath).live);
       return json(200, {
         ...status,
-        devices: ((draft?.devices as { name: string }[]) || []).map((d) => d.name),
+        devices: ((draft?.hardware as { name: string }[]) || []).map((d) => d.name),
         // Never provisioned from here: everything is new, so no diff.
         changes: live ? diffIntent(live, draft) : [],
       });

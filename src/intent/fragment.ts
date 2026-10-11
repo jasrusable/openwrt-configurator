@@ -19,6 +19,8 @@ export type Fragment = {
     content: string;
     mode?: string;
     run_after?: string;
+    /** After the reload, over a fresh session: for what the reload resets. */
+    run_after_reload?: string;
   }[];
 };
 

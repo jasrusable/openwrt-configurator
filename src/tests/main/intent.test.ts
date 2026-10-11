@@ -3,6 +3,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { deviceSchemaSchema } from "../../deviceSchema";
 import { getOpenWrtConfig } from "../../getOpenWrtConfig";
+import { getOpenWrtState } from "../../getOpenWrtState";
 import { compileIntent } from "../../intent/compile";
 import { ulaPrefix } from "../../intent/features/network";
 import { migrateIntent } from "../../intent/migrations";
@@ -208,7 +209,7 @@ test("internet: a static address", (t) => {
   const issues = (connection: any, dohOn = true) => {
     const intent = sample();
     intent.internet.connection = { type: "static", prefix_length: 29, ...connection };
-    if (!dohOn) delete intent.dns.over_https;
+    if (!dohOn) intent.dns.upstream = { type: "provider" };
     return intentSchema.safeParse(intent).error?.issues.map(
       (i) => `${i.path.join(".")}: ${i.message}`
     );
@@ -220,7 +221,7 @@ test("internet: a static address", (t) => {
     "internet.connection.gateway: not in the address's subnet",
   ]);
   t.deepEqual(issues({ address: "203.0.113.10", gateway: "203.0.113.9" }, false), [
-    "internet.connection.dns: add a DNS server, or turn on encrypted DNS",
+    "internet.connection.dns: add a DNS server, or choose other DNS servers under DNS & DHCP",
   ]);
   t.deepEqual(issues({ address: "203.0.113.300", gateway: "203.0.113.9" }), [
     "internet.connection.address: an IPv4 address, like 203.0.113.10",
@@ -250,7 +251,7 @@ test("packages are fixed per role; a setting off is config, not a removal", (t) 
     (compile(intent).package_profiles ?? []).flatMap((p: any) => p.packages);
   const off = sample();
   delete off.internet.speed;
-  delete off.dns.over_https;
+  off.dns.upstream = { type: "provider" };
   t.deepEqual(packages(off), packages(sample()));
 
   const config = onDevice("home-router", "friendlyarm,nanopi-r6s", off);
@@ -378,6 +379,71 @@ test("SSIDs: security mode, hidden, off, and fast roaming", (t) => {
   );
 });
 
+test("DNS: where names are looked up, rebind protection, own names, DHCP's DNS", (t) => {
+  const dns = (change: (intent: any) => void) => {
+    const config = router(change);
+    return { dnsmasq: config.dhcp.dnsmasq[0], wan: iface(config, "wan"), config };
+  };
+  const encrypted = dns(() => {});
+  t.like(encrypted.dnsmasq, { noresolv: true, server: ["127.0.0.1#5053"], rebind_protection: true, rebind_localhost: true });
+  t.is(encrypted.wan.peerdns, false);
+
+  const provider = dns((i) => (i.dns.upstream = { type: "provider" }));
+  t.false("server" in provider.dnsmasq);
+  t.is(provider.wan.peerdns, true, "the provider's resolvers");
+
+  const custom = dns((i) => (i.dns.upstream = { type: "custom", servers: ["9.9.9.9", "2620:fe::fe"] }));
+  t.like(custom.dnsmasq, { noresolv: true, server: ["9.9.9.9", "2620:fe::fe"] });
+  t.is(custom.wan.peerdns, false);
+
+  t.false("rebind_protection" in dns((i) => (i.dns.rebind_protection = false)).dnsmasq);
+
+  const named = dns((i) => (i.dns.records = [{ name: "printer", address: "10.0.0.30" }])).config;
+  t.like(named.dhcp.domain[0], { name: "printer", ip: "10.0.0.30" });
+
+  const piHole = dns((i) => (i.networks[1].dhcp.dns_servers = ["10.0.0.53"])).config;
+  t.deepEqual(piHole.dhcp.dhcp.find((d: any) => d.interface === "guest").dhcp_option, ["42,10.0.20.1", "6,10.0.0.53"]);
+
+  const issues = (change: (intent: any) => void) => {
+    const intent = sample();
+    change(intent);
+    return intentSchema.safeParse(intent).error?.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
+  };
+  t.deepEqual(issues((i) => (i.dns.records = [{ name: "a", address: "x" }, { name: "a", address: "10.0.0.2" }])), [
+    "dns.records.0.address: an IP address, like 10.0.0.20",
+    "dns.records.1.name: already used",
+  ]);
+  t.deepEqual(issues((i) => (i.dns.upstream = { type: "custom", servers: [] })), [
+    "dns.upstream.servers: at least one server",
+  ]);
+});
+
+test("patches apply only where they say: by model, by role", (t) => {
+  const files = (hostname: string, model: string, change: (i: any) => void = () => {}) => {
+    const intent = sample();
+    change(intent);
+    const oncConfig = compile(intent);
+    const deviceSchema = deviceSchemaSchema.parse(
+      JSON.parse(readFileSync(join(root, "deviceSchemas", `${model}.json`), "utf8"))
+    );
+    const deviceConfig = oncConfig.devices.find((d) => d.hostname === hostname)!;
+    return (getOpenWrtState({ oncConfig, deviceConfig, deviceSchema }).files ?? []).map((f: any) => f.path);
+  };
+  t.deepEqual(files("home-router", "friendlyarm,nanopi-r6s").filter((p: string) => !p.includes("avahi")), [
+    "/usr/libexec/platform/packet-steering.sh",
+    "/etc/hotplug.d/iface/30-odhcpd-ra-fix",
+  ]);
+  t.deepEqual(files("home-ap-1", "zyxel,nwa50ax-pro"), ["/etc/hotplug.d/net/20-aql"]);
+
+  const aql = (airtime: string) => {
+    const intent = sample();
+    intent.radios = { ...(intent.radios ?? {}), airtime };
+    return (compile(intent).files ?? []).find((f: any) => f.path.endsWith("20-aql"))!.content;
+  };
+  t.regex(aql("latency"), /echo "\$ac 2000 4000"/);
+  t.regex(aql("balanced"), /echo "\$ac 5000 12000"/);
+});
+
 test("on the access point: bridged, a DHCP client, Wi-Fi on both bands", (t) => {
   const config = onDevice("home-ap-1", "zyxel,nwa50ax-pro");
   const iface = (name: string) =>
@@ -405,7 +471,9 @@ test("on the access point: bridged, a DHCP client, Wi-Fi on both bands", (t) => 
     Object.values(config.firewall ?? {}).every((s: any) => s.length === 0),
     "no firewall sections"
   );
-  t.is(config.ubihealthd["ubi-device"][0].device, "/dev/ubi0");
+  t.false("ubihealthd" in config, "the device's own ubihealthd config is kept, not written");
+  const keeps = compile().configs_to_not_reset!.flatMap((k: any) => k.configs);
+  t.true(keeps.includes("?ubihealthd.*"));
 });
 
 test("radios are set per band; an SSID can keep to some bands; 6 GHz is WPA3", (t) => {
@@ -439,7 +507,7 @@ test("the intent is checked before it compiles", (t) => {
     return () => intentSchema.parse(intent);
   };
   t.throws(
-    bad((i) => i.devices.push({ name: "second", role: "router" })),
+    bad((i) => i.hardware.push({ name: "second", role: "router" })),
     { message: /exactly one device must be the router/ }
   );
   t.throws(bad((i) => (i.site.timezone = "Mars/Olympus")), {
@@ -448,7 +516,7 @@ test("the intent is checked before it compiles", (t) => {
   t.throws(bad((i) => (i.wifi[0].password = "short")), {
     message: /at least 8/,
   });
-  t.throws(bad((i) => (i.devices[0].model_id = "x")), {
+  t.throws(bad((i) => (i.hardware[0].model_id = "x")), {
     message: /Unrecognized key/,
   });
 });

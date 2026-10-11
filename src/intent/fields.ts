@@ -28,17 +28,18 @@ export const fields: FieldInfo[] = [
   { path: "admin.ssh_key_path", label: "SSH key" },
   { path: "admin.password", label: "Password", secret: true },
 
-  { path: "devices", label: "Devices" },
-  { path: "devices.*", label: (d) => `“${d?.name || "unnamed"}”` },
-  { path: "devices.*.name", label: "Name", description: "Also its hostname." },
+  { path: "hardware", label: "Hardware" },
+  { path: "hardware.*", label: (d) => `“${d?.name || "unnamed"}”` },
+  { path: "hardware.*.name", label: "Name", description: "Also its hostname." },
   {
-    path: "devices.*.role",
+    path: "hardware.*.role",
     label: "Role",
     description: "A router connects to the internet; an access point broadcasts Wi-Fi.",
   },
-  { path: "devices.*.wifi", label: "Wi-Fi" },
-  { path: "devices.*.wifi.channel.2g", label: "2.4 GHz channel" },
-  { path: "devices.*.wifi.channel.5g", label: "5 GHz channel" },
+  { path: "hardware.*.location", label: "Location" },
+  { path: "hardware.*.wifi", label: "Wi-Fi" },
+  { path: "hardware.*.wifi.channel.2g", label: "2.4 GHz channel" },
+  { path: "hardware.*.wifi.channel.5g", label: "5 GHz channel" },
 
   { path: "internet", label: "Internet" },
   {
@@ -99,6 +100,11 @@ export const fields: FieldInfo[] = [
   },
   { path: "networks.*.dhcp.size", label: "Addresses for devices" },
   { path: "networks.*.dhcp.lease", label: "Lease time" },
+  {
+    path: "networks.*.dhcp.dns_servers",
+    label: "DNS servers handed out",
+    description: "Devices ask these instead of the router.",
+  },
   { path: "networks.*.ipv6", label: "IPv6" },
   { path: "networks.*.reservations", label: "Reserved addresses" },
   { path: "networks.*.reservations.*", label: (r) => `“${r?.name || "unnamed"}”` },
@@ -161,6 +167,11 @@ export const fields: FieldInfo[] = [
     description: "Whether devices on it, on the same access point and band, are kept from reaching each other.",
   },
   { path: "radios", label: "Radios" },
+  {
+    path: "radios.airtime",
+    label: "Airtime",
+    description: "What the access points' Wi-Fi queues favour: latency, balance or throughput.",
+  },
   { path: "radios.2g", label: "2.4 GHz" },
   { path: "radios.5g", label: "5 GHz" },
   { path: "radios.6g", label: "6 GHz" },
@@ -204,10 +215,22 @@ export const fields: FieldInfo[] = [
     description: "Devices are reachable as name.domain.",
   },
   {
-    path: "dns.over_https",
-    label: "Encrypted DNS",
-    description: "Lookups go encrypted to this provider instead of your ISP's.",
+    path: "dns.upstream",
+    label: "DNS servers",
+    description: "Where the router looks names up.",
   },
+  { path: "dns.upstream.type", label: "Type" },
+  { path: "dns.upstream.provider", label: "Encrypted DNS provider" },
+  { path: "dns.upstream.servers", label: "Servers" },
+  {
+    path: "dns.rebind_protection",
+    label: "Rebind protection",
+    description: "Answers from the internet may not point at your own addresses.",
+  },
+  { path: "dns.records", label: "Local names" },
+  { path: "dns.records.*", label: (r) => `“${r?.name || "unnamed"}”` },
+  { path: "dns.records.*.name", label: "Name" },
+  { path: "dns.records.*.address", label: "Address" },
 ];
 
 const matches = (pattern: string, path: string[]) => {

@@ -170,6 +170,8 @@ const network = z
       .object({
         size: z.number().int().min(1).max(253),
         lease: leaseTime,
+        /** DNS servers handed to devices instead of the router (a Pi-hole, say). */
+        dns_servers: z.array(ipv4).min(1, "at least one").optional(),
       })
       .strict()
       .default({ size: 150, lease: "12h" }),
@@ -211,12 +213,15 @@ export const intentSchema = z
       .strict()
       .default({}),
 
-    devices: z
+    /** The routers and access points: what each is called and does. */
+    hardware: z
       .array(
         z
           .object({
             name,
             role: z.enum(["router", "access-point"]),
+            /** Where it is, like "Living room": shown in LuCI. */
+            location: z.string().max(64).optional(),
             wifi: z
               .object({
                 /** Pin a channel per band; "auto" (the default) lets it choose. */
@@ -324,16 +329,50 @@ export const intentSchema = z
         "5g": radio({ enabled: true }),
         // Off by default: few access points have it, and it needs WPA3.
         "6g": radio({ enabled: false }),
+        /**
+         * What the access points' Wi-Fi queues favour: little queued for
+         * snappy calls and games (latency), the kernel's own (balanced), or
+         * more queued to fill the air (throughput).
+         */
+        airtime: z.enum(["balanced", "latency", "throughput"]).default("balanced"),
       })
       .strict()
       .default({}),
 
     dns: z
       .object({
-        /** Encrypt lookups to this provider. Unset: use the ISP's resolvers. */
-        over_https: z.enum(["cloudflare", "google", "quad9"]).optional(),
+        /**
+         * Where the router looks names up: the internet provider's servers,
+         * a provider over encrypted DNS (DoH), or servers of your choice.
+         */
+        upstream: z
+          .discriminatedUnion("type", [
+            z.object({ type: z.literal("provider") }).strict(),
+            z
+              .object({
+                type: z.literal("encrypted"),
+                provider: z.enum(["cloudflare", "google", "quad9"]),
+              })
+              .strict(),
+            z
+              .object({
+                type: z.literal("custom"),
+                servers: z.array(dnsServer).min(1, "at least one server"),
+              })
+              .strict(),
+          ])
+          .default({ type: "provider" }),
         /** Devices are reachable as <name>.<local_domain>. */
         local_domain: name.default("lan"),
+        /**
+         * Refuse answers from the internet that point at your own addresses
+         * (DNS rebinding), so a web page cannot reach devices inside.
+         */
+        rebind_protection: z.boolean().default(true),
+        /** Your own names, like nas → 10.0.0.20: name.<local_domain>. */
+        records: z
+          .array(z.object({ name, address: z.string() }).strict())
+          .default([]),
       })
       .strict()
       .default({}),
@@ -361,8 +400,8 @@ export const intentSchema = z
           issue(at("gateway"), "the router's own address");
         }
       }
-      if (!connection.dns?.length && !intent.dns.over_https) {
-        issue(at("dns"), "add a DNS server, or turn on encrypted DNS");
+      if (!connection.dns?.length && intent.dns.upstream.type === "provider") {
+        issue(at("dns"), "add a DNS server, or choose other DNS servers under DNS & DHCP");
       }
     }
     const prefix = intent.internet.ipv6_prefix;
@@ -413,8 +452,17 @@ export const intentSchema = z
       }
     });
 
+    intent.dns.records.forEach((record, i) => {
+      if (parseIpv4(record.address) === undefined && !(record.address.includes(":") && /^[0-9a-f:]+$/i.test(record.address))) {
+        issue(["dns", "records", i, "address"], "an IP address, like 10.0.0.20");
+      }
+      if (intent.dns.records.slice(0, i).some((r) => r.name === record.name)) {
+        issue(["dns", "records", i, "name"], "already used");
+      }
+    });
+
     // Reservations: inside their network, and each name, MAC and address once.
-    const deviceNames = intent.devices.map((d) => d.name);
+    const deviceNames = intent.hardware.map((d) => d.name);
     const seen = { name: new Set<string>(), mac: new Set<string>(), address: new Set<string>() };
     intent.networks.forEach((network, i) => {
       const prefix = network.subnet.split(".").slice(0, 3).join(".");

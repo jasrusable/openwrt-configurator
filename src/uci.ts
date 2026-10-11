@@ -124,11 +124,16 @@ export const declaredConfigs = (config: OpenWrtConfig): UciConfigs =>
 
 /**
  * `configs_to_not_reset` entries are `<config>.*` (keep the whole config) or
- * `<config>.<section type>` (keep every section of that type).
+ * `<config>.<section type>` (keep every section of that type); a leading "?"
+ * makes one optional (see unmatchedKeeps).
  */
-export const isKept = (keep: string[], configKey: string, type?: string) =>
-  keep.includes(`${configKey}.*`) ||
-  (type !== undefined && keep.includes(`${configKey}.${type}`));
+export const isKept = (keep: string[], configKey: string, type?: string) => {
+  const entries = keep.map((entry) => entry.replace(/^\?/, ""));
+  return (
+    entries.includes(`${configKey}.*`) ||
+    (type !== undefined && entries.includes(`${configKey}.${type}`))
+  );
+};
 
 /**
  * The `uci batch` deletes that wipe the device's config, by exact section,
@@ -267,5 +272,10 @@ export const verifyConfigs = ({
 };
 
 /** `configs_to_not_reset` entries naming a config the device does not have. */
+/**
+ * Keep entries naming a config the device lacks: likely a typo. One starting
+ * with "?" (`?ubihealthd.*`) is kept only if present, and never reported:
+ * for a config only some devices have (a package's own, set up per device).
+ */
 export const unmatchedKeeps = (keep: string[], current: UciConfigs) =>
-  keep.filter((entry) => !(entry.split(".")[0] in current));
+  keep.filter((entry) => !entry.startsWith("?") && !(entry.split(".")[0] in current));

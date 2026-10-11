@@ -9,7 +9,7 @@ const base = {
     speed: { down_mbps: 950, up_mbps: 950 },
   },
   wifi: [{ ssid: "Home", password: "hunter2-hunter2" }],
-  dns: { over_https: "cloudflare" },
+  dns: { upstream: { type: "encrypted", provider: "cloudflare" } },
 };
 const edit = (change: (intent: any) => void) => {
   const intent = JSON.parse(JSON.stringify(base));

@@ -39,8 +39,8 @@ const upnpUuid = (siteName: string) => {
 export const internet: Feature = (intent) => {
   const { connection, vlan, ipv6, ipv6_prefix, upnp, speed } = intent.internet;
   const main = mainNetwork(intent);
-  // With encrypted DNS the ISP's resolvers must not be used.
-  const peerdns = !intent.dns.over_https;
+  // Only with the provider's DNS are the resolvers it hands out used.
+  const peerdns = intent.dns.upstream.type === "provider";
   const ptm = speed?.line === "vdsl" ? " ptm" : "";
   const routerOnly = (sections: Record<string, unknown>[]) =>
     sections.map((section) => ({ ".if": onRouter, ...section }));

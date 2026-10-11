@@ -10,7 +10,7 @@ import {
   IconWifi,
   IconWorld,
 } from "@tabler/icons-react";
-import { DevicesPage } from "./DevicesPage";
+import { HardwarePage } from "./HardwarePage";
 import { DnsPage } from "./DnsPage";
 import { FirewallPage } from "./firewall";
 import { GeneralPage } from "./GeneralPage";
@@ -29,8 +29,8 @@ export const pages = [
   { header: true, id: "wifi", label: "Wi-Fi", icon: IconWifi, to: "ssids" },
   { id: "ssids", label: "SSIDs", icon: IconAntenna, Page: WifiPage, indent: true },
   { id: "radios", label: "Radios", icon: IconBroadcast, Page: RadiosPage, indent: true },
-  { id: "dns", label: "DNS", icon: IconShieldLock, Page: DnsPage },
-  { id: "devices", label: "Devices", icon: IconDevices, Page: DevicesPage },
+  { id: "dns", label: "DNS & DHCP", icon: IconShieldLock, Page: DnsPage },
+  { id: "hardware", label: "Hardware", icon: IconDevices, Page: HardwarePage },
 ] as const;
 
 

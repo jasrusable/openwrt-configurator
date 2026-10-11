@@ -243,3 +243,10 @@ test("keep entries naming no config on the device are reported", (t) => {
     ["dropbaer.*"]
   );
 });
+
+test("an optional keep (?config.*) keeps a config if present and is never reported missing", (t) => {
+  const { configs } = parseUciExport("package ubihealthd\n\nconfig ubi-device 'ubi0'\n\toption device '/dev/ubi0'\n");
+  t.deepEqual(wipeOperations(configs, ["?ubihealthd.*"]), []);
+  t.true(wipeOperations(configs, []).length > 0, "without the keep it would be wiped");
+  t.deepEqual(unmatchedKeeps(["?ubihealthd.*", "typo.*"], {}), ["typo.*"]);
+});

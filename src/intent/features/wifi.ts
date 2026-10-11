@@ -48,7 +48,7 @@ export const wifi: Feature = (intent) => {
             cell_density: cellDensity[settings.cell_density],
             ...(settings.power === "auto" ? {} : { txpower: txpower[settings.power] }),
             country: intent.site.country,
-            ".overrides": intent.devices.flatMap((device) => {
+            ".overrides": intent.hardware.flatMap((device) => {
               const channel = (device.wifi?.channel as Record<string, unknown> | undefined)?.[band];
               return channel !== undefined
                 ? [{ ".if": onDevice(device.name), override: { channel } }]
@@ -83,6 +83,8 @@ export const wifi: Feature = (intent) => {
             time_advertisement: 2,
             time_zone: posixTimezone,
             max_inactivity: 3600,
+            // Group key once a day: fewer rekeys, which some clients drop on.
+            wpa_group_rekey: 86400,
             disassoc_low_ack: false,
             bss_load_update_period: "0",
             chan_util_avg_period: "0",
