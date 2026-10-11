@@ -12,12 +12,13 @@ import {
   Stack,
   Switch,
   TagsInput,
+  Text,
   TextInput,
 } from "@mantine/core";
-import { ReactNode } from "react";
-import { useController, useWatch } from "react-hook-form";
+import { ReactNode, useRef } from "react";
 import { SettingRow } from "../kit/layout";
-import { IntentField, useIntentForm } from "./IntentForm";
+import { parseSubnet } from "../../../src/intent/schema";
+import { IntentField, useDraft, useDraftValue, useFieldError } from "./draft";
 
 /** Control widths: fixed in a wide row, shrinking to fit a narrow one. */
 const control = {
@@ -51,27 +52,37 @@ const Row = ({
     </SettingRow>
   );
 
+/** A setting's value, its problem, and how to change it. */
 const useField = (name: IntentField) => {
-  const { field, fieldState } = useController({ name });
+  const draft = useDraft();
   return {
-    value: field.value as any,
-    onChange: field.onChange,
-    onBlur: field.onBlur,
-    error: fieldState.error?.message,
+    value: useDraftValue(name),
+    onChange: (value: unknown) => draft.set(name, value),
+    onBlur: () => {},
+    error: useFieldError(name),
   };
 };
 
 export const TextField = ({
   placeholder,
+  chars,
   ...row
-}: RowProps & { placeholder?: string }) => {
+}: RowProps & {
+  placeholder?: string;
+  /** The characters it takes, e.g. /[\d.]/ for an IPv4 address; others are dropped as typed. */
+  chars?: RegExp;
+}) => {
   const field = useField(row.name);
   return (
     <SettingRow {...row} error={field.error}>
       <TextInput
         value={field.value ?? ""}
         // Cleared is unset: "" would fail a pattern an optional field allows.
-        onChange={(e) => field.onChange(e.currentTarget.value || undefined)}
+        onChange={(e) => {
+          const typed = e.currentTarget.value;
+          const value = chars ? [...typed].filter((c) => chars.test(c)).join("") : typed;
+          field.onChange(value || undefined);
+        }}
         onBlur={field.onBlur}
         placeholder={placeholder}
         error={!!field.error}
@@ -102,8 +113,9 @@ export const NumberField = ({
   unit,
   min,
   max,
+  integer,
   ...row
-}: RowProps & { unit?: string; min?: number; max?: number }) => {
+}: RowProps & { unit?: string; min?: number; max?: number; integer?: boolean }) => {
   const field = useField(row.name);
   return (
     <SettingRow {...row} error={field.error}>
@@ -113,6 +125,8 @@ export const NumberField = ({
         onBlur={field.onBlur}
         min={min}
         max={max}
+        allowDecimal={!integer}
+        allowNegative={min === undefined || min < 0}
         rightSection={unit}
         rightSectionWidth={unit ? 56 : undefined}
         error={!!field.error}
@@ -122,12 +136,19 @@ export const NumberField = ({
   );
 };
 
-export const SwitchField = (row: RowProps) => {
+export const SwitchField = ({
+  disabled,
+  ...row
+}: RowProps & {
+  /** Greyed out and shown off, its value kept for when it applies again. */
+  disabled?: boolean;
+}) => {
   const field = useField(row.name);
   return (
     <Row row={row} error={field.error}>
       <Switch
-        checked={!!field.value}
+        disabled={disabled}
+        checked={!disabled && !!field.value}
         onChange={(e) => field.onChange(e.currentTarget.checked)}
         aria-label={typeof row.label === "string" ? row.label : undefined}
         size="md"
@@ -136,7 +157,7 @@ export const SwitchField = (row: RowProps) => {
   );
 };
 
-export type Option<T> = { value: T; label: string };
+export type Option<T> = { value: T; label: string; disabled?: boolean };
 
 /**
  * A choice from a list. Values may be strings or numbers; with `emptyLabel`
@@ -156,7 +177,11 @@ export const SelectField = <T extends string | number>({
   const empty = "\u0000";
   const data = [
     ...(emptyLabel ? [{ value: empty, label: emptyLabel }] : []),
-    ...options.map((option) => ({ value: String(option.value), label: option.label })),
+    ...options.map((option) => ({
+      value: String(option.value),
+      label: option.label,
+      disabled: option.disabled,
+    })),
   ];
   return (
     <Row row={row} error={field.error}>
@@ -231,12 +256,17 @@ export const OptionalField = ({
 }: RowProps & { initial: unknown; children: ReactNode }) => {
   const field = useField(row.name);
   const on = field.value !== undefined;
+  // Off then on again brings back what it held, not the starting value.
+  const last = useRef(field.value);
+  if (on) last.current = field.value;
   return (
     <>
       <SettingRow {...row} error={field.error}>
         <Switch
           checked={on}
-          onChange={(e) => field.onChange(e.currentTarget.checked ? initial : undefined)}
+          onChange={(e) =>
+            field.onChange(e.currentTarget.checked ? (last.current ?? initial) : undefined)
+          }
           size="md"
         />
       </SettingRow>
@@ -296,7 +326,7 @@ export const When = ({
   test?: (value: any) => boolean;
   children: ReactNode;
 }) => {
-  const value = useWatch({ name });
+  const value = useDraftValue(name);
   return (test ? test(value) : value === is) ? <>{children}</> : null;
 };
 
@@ -313,61 +343,61 @@ export const Value = ({
   fallback?: ReactNode;
   format?: (value: any) => ReactNode;
 }) => {
-  const value = useWatch<any>({ name });
+  const value = useDraftValue(name);
   const shown = format ? format(value) : value;
   return <>{shown === undefined || shown === "" ? fallback : shown}</>;
 };
 
-export { useIntentForm };
 
 /**
  * A private IPv4 /24 ("10.0.0.0/24"): pick one of the three private ranges,
  * then only the parts it leaves free, each limited to what is valid there.
  */
-const ranges = [
-  { value: "10", label: "10.x.x.0", first: 10, second: [0, 255] },
-  { value: "172", label: "172.16–31.x.0", first: 172, second: [16, 31] },
-  { value: "192", label: "192.168.x.0", first: 192, second: [168, 168] },
-] as const;
-
+/**
+ * A network's addresses, set the way people know them: by the router's
+ * address (10.0.20.1), as UniFi does. Stored as the /24 it is in
+ * ("10.0.20.0/24"); what is typed but not yet valid stays in the draft, so
+ * the draft cannot be saved until it is.
+ */
 export const SubnetField = (row: RowProps) => {
   const field = useField(row.name);
-  const [a, b, c] = String(field.value ?? "10.0.0.0/24")
-    .split("/")[0]
-    .split(".")
-    .map(Number);
-  const range = ranges.find((r) => r.first === a) ?? ranges[0];
-  const set = (next: number[]) => field.onChange(`${next.join(".")}.0/24`);
-  const octet = (value: number, min: number, max: number, onChange: (n: number) => void) => (
-    <NumberInput
-      value={value}
-      min={min}
-      max={max}
-      clampBehavior="strict"
-      allowDecimal={false}
-      allowNegative={false}
-      hideControls
-      onChange={(n) => onChange(Number(n))}
-      w={64}
-    />
-  );
+  const toRouter = (subnet: unknown) =>
+    typeof subnet === "string" && parseSubnet(subnet)
+      ? subnet.replace(/\.0\/24$/, ".1")
+      : String(subnet ?? "");
+  const value = toRouter(field.value);
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(value);
+  const subnet = match && `${match[1]}.${match[2]}.${match[3]}.0/24`;
+  const problem = !match
+    ? "an address like 10.0.20.1"
+    : match[4] !== "1"
+    ? "the router's address ends in .1"
+    : !parseSubnet(subnet!)
+    ? "a private range: 10.x.x.1, 172.16–31.x.1 or 192.168.x.1"
+    : undefined;
+  const prefix = match ? `${match[1]}.${match[2]}.${match[3]}` : "";
   return (
-    <SettingRow {...row} error={field.error}>
-      <Group gap={6} wrap="nowrap">
-        <Select
-          data={ranges.map(({ value, label }) => ({ value, label }))}
-          value={range.value}
-          allowDeselect={false}
-          onChange={(value) => {
-            const next = ranges.find((r) => r.value === value)!;
-            set([next.first, next.second[0], 0]);
-          }}
-          w={150}
-        />
-        {range.second[0] !== range.second[1] &&
-          octet(b, range.second[0], range.second[1], (n) => set([a, n, c]))}
-        {octet(c, 0, 255, (n) => set([a, b, n]))}
-      </Group>
+    <SettingRow
+      {...row}
+      description={row.description ?? (problem ? undefined : `Devices get ${prefix}.x addresses.`)}
+      error={problem ?? field.error}
+    >
+      <TextInput
+        value={value}
+        onChange={(e) => {
+          const typed = e.currentTarget.value.replace(/[^\d.]/g, "");
+          const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.1$/.exec(typed);
+          const candidate = m && `${m[1]}.${m[2]}.${m[3]}.0/24`;
+          field.onChange(candidate && parseSubnet(candidate) ? candidate : typed);
+        }}
+        onBlur={field.onBlur}
+        placeholder="10.0.20.1"
+        rightSection={<Text size="sm" c="dimmed">/24</Text>}
+        rightSectionWidth={44}
+        error={!!(problem ?? field.error)}
+        spellCheck={false}
+        style={control.wide}
+      />
     </SettingRow>
   );
 };
@@ -423,7 +453,7 @@ export const PresetField = <T extends string>({
   presets: Record<T, unknown>;
 }) => {
   const field = useField(row.name);
-  const { setValue } = useIntentForm();
+  const draft = useDraft();
   return (
     <SettingRow {...row} error={field.error}>
       <SegmentedControl
@@ -431,10 +461,7 @@ export const PresetField = <T extends string>({
         value={field.value}
         onChange={(value) => {
           field.onChange(value);
-          setValue(fills, presets[value as T] as never, {
-            shouldDirty: true,
-            shouldValidate: true,
-          });
+          draft.set(fills, presets[value as T]);
         }}
       />
     </SettingRow>
@@ -451,7 +478,7 @@ export const ReferenceField = ({
   labelKey,
   ...row
 }: RowProps & { to: IntentField; valueKey: string; labelKey: string }) => {
-  const items: Record<string, any>[] = useWatch<any>({ name: to }) ?? [];
+  const items: Record<string, any>[] = useDraftValue(to) ?? [];
   return (
     <SelectField
       {...row}

@@ -2,7 +2,7 @@ import { Alert, Badge, Group, Loader, Stack, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import type { ProvisionInfo } from "../data/api";
 import { useProvision, useStartProvision } from "../data/provision";
-import { useIntentForm } from "../form/IntentForm";
+import { useDraftChanged } from "../form/IntentForm";
 import { ConfirmButton } from "../kit/ConfirmButton";
 import { Section, SettingRow } from "../kit/layout";
 import { LogView } from "../kit/LogView";
@@ -55,7 +55,7 @@ const Changes = ({ info }: { info: ProvisionInfo }) =>
 export const ProvisionPanel = () => {
   const provision = useProvision();
   const start = useStartProvision();
-  const unsaved = useIntentForm().formState.isDirty;
+  const unsaved = useDraftChanged();
 
   if (provision.isError) {
     return (

@@ -25,14 +25,13 @@ export const dns: Feature = (intent) => {
   const domain = intent.dns.local_domain;
   const provider = intent.dns.over_https && providers[intent.dns.over_https];
   return {
-    package_profiles: provider
-      ? [
-          {
-            ".if": onRouter,
-            packages: ["https-dns-proxy", "luci-app-https-dns-proxy"],
-          },
-        ]
-      : [],
+    // Installed whether used or not: a setting changes config, not packages.
+    package_profiles: [
+      {
+        ".if": onRouter,
+        packages: ["https-dns-proxy", "luci-app-https-dns-proxy"],
+      },
+    ],
     config: {
       dhcp: {
         dnsmasq: [
@@ -57,29 +56,30 @@ export const dns: Feature = (intent) => {
           },
         ],
       },
-      ...(provider
-        ? {
-            "https-dns-proxy": {
-              main: [
-                {
-                  ".if": onRouter,
-                  ".name": "config",
-                  // Leave dnsmasq alone: it is configured above.
-                  dnsmasq_config_update: "-",
-                  force_dns: false,
-                },
-              ],
-              "https-dns-proxy": [
-                {
-                  ".if": onRouter,
-                  resolver_url: provider.url,
-                  bootstrap_dns: provider.bootstrap,
-                  listen_port: String(proxyPort),
-                },
-              ],
-            },
-          }
-        : {}),
+      "https-dns-proxy": {
+        main: [
+          {
+            ".if": onRouter,
+            ".name": "config",
+            // Declared on or off: it has no "enabled", and with this section
+            // missing it defaults to rewriting every dnsmasq instance and
+            // capturing clients' DNS. dnsmasq is configured above, by us.
+            dnsmasq_config_update: "-",
+            force_dns: false,
+          },
+        ],
+        // Off: no instance, so the proxy runs nothing.
+        "https-dns-proxy": provider
+          ? [
+              {
+                ".if": onRouter,
+                resolver_url: provider.url,
+                bootstrap_dns: provider.bootstrap,
+                listen_port: String(proxyPort),
+              },
+            ]
+          : [],
+      },
     },
   };
 };

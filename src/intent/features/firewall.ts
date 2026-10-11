@@ -1,26 +1,103 @@
-// The firewall, on the router, one to one with fw4: defaults, the zones (the
-// WAN zone covering the internet interfaces), forwardings, rules in their
-// order, and port forwards (DNAT) into the zone of their target's network.
-import { wanZone, Zone } from "../firewall";
+// The firewall, on the router, derived for fw4: a zone per network (its
+// policy from the network's router access) plus WAN, forwardings from each
+// network's access, OpenWrt's stock rules, the router's services for
+// networks that get only those, then the user's rules in their order, and
+// port forwards (DNAT) into the zone of their target's network.
+import { anywhere, internet, isIpv6, router, Rule } from "../firewall";
 import { Feature, onRouter } from "../fragment";
 
 type Section = Record<string, unknown>;
 
-const upper = (policy: string) => policy.toUpperCase();
+/** fw4's zone for the internet side. */
+const wan = "wan";
+
+/** OpenWrt's stock rules, as a fresh install has them: always on. */
+const stockRules = (mainZone: string): Section[] => {
+  const icmpv6 = [
+    "echo-request",
+    "echo-reply",
+    "destination-unreachable",
+    "packet-too-big",
+    "time-exceeded",
+    "bad-header",
+    "unknown-header-type",
+  ];
+  return [
+    { name: "Allow-DHCP-Renew", src: wan, proto: ["udp"], dest_port: "68", family: "ipv4", target: "ACCEPT" },
+    { name: "Allow-Ping", src: wan, proto: ["icmp"], icmp_type: ["echo-request"], family: "ipv4", target: "ACCEPT" },
+    { name: "Allow-IGMP", src: wan, proto: ["igmp"], family: "ipv4", target: "ACCEPT" },
+    { name: "Allow-DHCPv6", src: wan, proto: ["udp"], dest_port: "546", family: "ipv6", target: "ACCEPT" },
+    { name: "Allow-MLD", src: wan, proto: ["icmp"], src_ip: ["fe80::/10"], icmp_type: ["130/0", "131/0", "132/0", "143/0"], family: "ipv6", target: "ACCEPT" },
+    {
+      name: "Allow-ICMPv6-Input",
+      src: wan,
+      proto: ["icmp"],
+      icmp_type: [...icmpv6, "router-solicitation", "neighbour-solicitation", "router-advertisement", "neighbour-advertisement"],
+      limit: "1000/sec",
+      family: "ipv6",
+      target: "ACCEPT",
+    },
+    { name: "Allow-ICMPv6-Forward", src: wan, dest: "*", proto: ["icmp"], icmp_type: icmpv6, limit: "1000/sec", family: "ipv6", target: "ACCEPT" },
+    { name: "Allow-IPSec-ESP", src: wan, dest: mainZone, proto: ["esp"], target: "ACCEPT" },
+    { name: "Allow-ISAKMP", src: wan, dest: mainZone, proto: ["udp"], dest_port: "500", target: "ACCEPT" },
+  ];
+};
+
+/**
+ * What a network that may not use the router otherwise needs from it to
+ * work at all: addresses, names, time and IPv6 neighbour discovery.
+ */
+const serviceRules = (zone: string): Section[] => [
+  { name: `Allow-${zone}-DHCP`, src: zone, proto: ["udp"], dest_port: "67", family: "ipv4", target: "ACCEPT" },
+  { name: `Allow-${zone}-DHCPv6`, src: zone, proto: ["udp"], dest_port: "547", family: "ipv6", target: "ACCEPT" },
+  { name: `Allow-${zone}-DNS`, src: zone, proto: ["tcp", "udp"], dest_port: "53", target: "ACCEPT" },
+  { name: `Allow-${zone}-NTP`, src: zone, proto: ["udp"], dest_port: "123", target: "ACCEPT" },
+  {
+    name: `Allow-${zone}-ICMPv6`,
+    src: zone,
+    proto: ["icmp"],
+    icmp_type: ["router-solicitation", "neighbour-solicitation", "neighbour-advertisement", "echo-request"],
+    family: "ipv6",
+    target: "ACCEPT",
+  },
+];
+
+/** A rule's end as an fw4 zone: the internet is WAN; "router" has none. */
+const zoneOf = (end: string) => (end === internet ? wan : end);
+
+const userRule = (rule: Rule): Section => {
+  const addresses = [...(rule.source_addresses ?? []), ...(rule.destination_addresses ?? [])];
+  const family = addresses.length === 0 ? undefined : isIpv6(addresses[0]) ? "ipv6" : "ipv4";
+  const protocol = rule.protocol ?? "tcp+udp";
+  return {
+    name: rule.name,
+    ...(rule.enabled === false ? { enabled: false } : {}),
+    src: zoneOf(rule.from),
+    // To the router is fw4's input: a rule with no destination zone.
+    ...(rule.to === router ? {} : { dest: rule.to === anywhere ? "*" : zoneOf(rule.to) }),
+    ...(rule.source_addresses?.length ? { src_ip: rule.source_addresses } : {}),
+    ...(rule.destination_addresses?.length ? { dest_ip: rule.destination_addresses } : {}),
+    ...(rule.destination_port ? { dest_port: rule.destination_port } : {}),
+    proto: protocol === "tcp+udp" ? ["tcp", "udp"] : protocol === "any" ? ["all"] : [protocol],
+    ...(family ? { family } : {}),
+    // Blocked from the internet: dropped, so a scan learns nothing. From
+    // inside: rejected, so the device gives up at once instead of waiting.
+    target: rule.action === "allow" ? "ACCEPT" : rule.from === internet ? "DROP" : "REJECT",
+  };
+};
 
 export const firewall: Feature = (intent) => {
-  const { defaults, zones, forwardings, rules, port_forwards } = intent.firewall;
-  const { connection, ipv6 } = intent.internet;
+  const { rules, port_forwards } = intent.firewall;
+  const { networks } = intent;
   const routerOnly = (sections: Section[]) =>
     sections.map((section) => ({ ".if": onRouter, ...section }));
+  const main = networks.find((n) => n.vlan === undefined) ?? networks[0];
   // The interfaces the internet connection makes (features/internet.ts).
-  const wanInterfaces = ipv6 && connection.type === "dhcp" ? ["wan", "wan6"] : ["wan"];
-  const zoneOfNetwork = (id: string) => zones.find((z) => z.networks.includes(id))?.id;
-  // The zone of the network an address is on: where a port forward lands.
-  const zoneOfAddress = (address: string) => {
+  const wanInterfaces = intent.internet.ipv6 ? ["wan", "wan6"] : ["wan"];
+  // The network an address is on: where a port forward lands.
+  const networkOf = (address: string) => {
     const prefix = address.split(".").slice(0, 3).join(".");
-    const network = intent.networks.find((n) => n.subnet.startsWith(`${prefix}.`));
-    return network && zoneOfNetwork(network.id);
+    return networks.find((n) => n.subnet.startsWith(`${prefix}.`))?.id;
   };
 
   return {
@@ -28,59 +105,64 @@ export const firewall: Feature = (intent) => {
       firewall: {
         defaults: routerOnly([
           {
-            input: upper(defaults.input),
-            output: upper(defaults.output),
-            forward: upper(defaults.forward),
-            synflood_protect: defaults.syn_flood_protection,
-            drop_invalid: defaults.drop_invalid,
+            input: "REJECT",
+            output: "ACCEPT",
+            forward: "REJECT",
+            synflood_protect: true,
+            drop_invalid: true,
           },
         ]),
-        zone: routerOnly(
-          zones.map((zone: Zone) => ({
-            name: zone.id,
-            input: upper(zone.input),
-            output: upper(zone.output),
-            forward: upper(zone.forward),
-            ...(zone.masquerade ? { masq: true } : {}),
-            ...(zone.mss_clamping ? { mtu_fix: true } : {}),
-            network: zone.id === wanZone ? wanInterfaces : zone.networks,
-          }))
+        zone: routerOnly([
+          // Each network its own zone, named by its id. Between networks only
+          // what forwardings allow; to the router as its access says.
+          ...networks.map((network) => ({
+            name: network.id,
+            input: network.access.router === "full" ? "ACCEPT" : "REJECT",
+            output: "ACCEPT",
+            forward: "REJECT",
+            network: [network.id],
+          })),
+          {
+            name: wan,
+            input: "REJECT",
+            output: "ACCEPT",
+            forward: "REJECT",
+            masq: true,
+            mtu_fix: true,
+            network: wanInterfaces,
+          },
+        ]),
+        forwarding: routerOnly(
+          networks.flatMap((network) => [
+            ...(network.access.internet ? [{ src: network.id, dest: wan }] : []),
+            ...network.access.networks.map((to) => ({ src: network.id, dest: to })),
+          ])
         ),
-        forwarding: routerOnly(forwardings.map((f) => ({ src: f.from, dest: f.to }))),
-        rule: routerOnly(
-          rules.map(
-            (rule): Section => ({
-              name: rule.name,
-              ...(rule.enabled ? {} : { enabled: false }),
-              src: rule.from,
-              // "router" is fw4's input: a rule with no destination zone.
-              ...(rule.to === "router" ? {} : { dest: rule.to }),
-              ...(rule.source_addresses?.length ? { src_ip: rule.source_addresses } : {}),
-              ...(rule.source_port ? { src_port: rule.source_port } : {}),
-              ...(rule.destination_addresses?.length
-                ? { dest_ip: rule.destination_addresses }
-                : {}),
-              ...(rule.destination_port ? { dest_port: rule.destination_port } : {}),
-              proto: rule.protocols,
-              ...(rule.icmp_types?.length ? { icmp_type: rule.icmp_types } : {}),
-              ...(rule.limit ? { limit: rule.limit } : {}),
-              ...(rule.family !== "any" ? { family: rule.family } : {}),
-              target: upper(rule.action),
-            })
-          )
-        ),
+        rule: routerOnly([
+          ...stockRules(main.id),
+          ...networks.filter((n) => n.access.router === "services").flatMap((n) => serviceRules(n.id)),
+          // Sharing devices: the router's reflector must hear the network's mDNS.
+          ...networks
+            .filter((n) => n.share_devices && n.access.router === "services")
+            .map((n) => ({
+              name: `Allow-${n.id}-mDNS`,
+              src: n.id,
+              proto: ["udp"],
+              dest_port: "5353",
+              target: "ACCEPT",
+            })),
+          ...rules.map(userRule),
+        ]),
         redirect: routerOnly(
           port_forwards.map((forward) => ({
             name: forward.name,
             ...(forward.enabled ? {} : { enabled: false }),
             target: "DNAT",
-            src: wanZone,
+            src: wan,
             src_dport: forward.external_port,
             proto: forward.protocol === "tcp+udp" ? ["tcp", "udp"] : [forward.protocol],
-            ...(forward.source_addresses?.length
-              ? { src_ip: forward.source_addresses }
-              : {}),
-            dest: zoneOfAddress(forward.internal_address),
+            ...(forward.source_addresses?.length ? { src_ip: forward.source_addresses } : {}),
+            dest: networkOf(forward.internal_address),
             dest_ip: forward.internal_address,
             dest_port: forward.internal_port ?? forward.external_port,
             family: "ipv4",

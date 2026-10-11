@@ -1,3 +1,4 @@
+import { assertSupportedRelease } from "./release";
 import { DeviceBuildPlan } from "./getBuildPlan";
 import { getDeviceScript, managedFilesManifest } from "./getDeviceScript";
 import {
@@ -251,6 +252,7 @@ export const main = async ({
           });
           try {
             const deviceSchema = await getDeviceSchema({ deviceConfig, ssh });
+            assertSupportedRelease(deviceConfig.hostname, deviceSchema.version);
             // The session stays open: the script is built against it below.
             return { deviceConfig, deviceSchema, ssh };
           } catch (e) {

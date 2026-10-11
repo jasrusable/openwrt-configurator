@@ -1,90 +1,50 @@
-// The whole UI edits one form: the intent file. It validates with the same
-// zod schema the server does, so most mistakes are caught as you type, and
-// the server's answer to a save maps back onto the same field names.
-import { zodResolver } from "@hookform/resolvers/zod";
+// The whole UI edits one draft: the intent file (draft.tsx). This is where
+// it is created from what the server has, and saved or reverted.
 import { notifications } from "@mantine/notifications";
-import { ReactNode, useEffect } from "react";
-import {
-  FieldPath,
-  FormProvider,
-  useForm,
-  useFormContext,
-  UseFormReturn,
-} from "react-hook-form";
-import { Intent, intentSchema } from "../../../src/intent/schema";
+import { ReactNode, useState } from "react";
+import { Intent } from "../../../src/intent/schema";
 import { SaveError } from "../data/api";
 import { useSaveIntent } from "../data/intent";
+import { Draft, DraftProvider, useDraft, useDraftChanged, useIssues } from "./draft";
 
-export type IntentField = FieldPath<Intent>;
+export type { IntentField } from "./draft";
+export { useDraftChanged } from "./draft";
 
-/** A form over a whole intent, checked by the same schema as the server. */
-export const useIntentFormState = (intent: Intent) =>
-  useForm<Intent>({
-    resolver: zodResolver(intentSchema) as never,
-    defaultValues: intent,
-    mode: "onTouched",
-  });
-
-/** The draft: what Save writes. Every field on every page edits it. */
-export const IntentForm = ({
-  intent,
-  children,
-}: {
-  intent: Intent;
-  children: ReactNode;
-}) => {
-  const form = useIntentFormState(intent);
-  // A file edited by hand, or saved under older rules, can already be
-  // invalid: show its problems at once, not only once a field is touched.
-  useEffect(() => {
-    form.trigger();
-  }, [form]);
-  return <FormProvider {...form}>{children}</FormProvider>;
-};
-
-export const useIntentForm = () => useFormContext<Intent>();
-
-/**
- * Make a form hold `next`, setting only the top-level settings that differ:
- * for a change that spans settings (a network and its firewall zone).
- */
-export const applyIntent = (form: UseFormReturn<Intent>, next: Intent) => {
-  const current = form.getValues();
-  (Object.keys(next) as (keyof Intent)[]).forEach((key) => {
-    if (JSON.stringify(current[key]) !== JSON.stringify(next[key])) {
-      form.setValue(key, next[key] as never, { shouldDirty: true, shouldValidate: true });
-    }
-  });
+/** The draft of `intent`, for every page below. */
+export const IntentForm = ({ intent, children }: { intent: Intent; children: ReactNode }) => {
+  const [draft] = useState(() => new Draft(intent));
+  return <DraftProvider draft={draft}>{children}</DraftProvider>;
 };
 
 /** Save and revert, for the toolbar. */
 export const useSaveActions = () => {
-  const form = useIntentForm();
+  const draft = useDraft();
   const save = useSaveIntent();
+  const dirty = useDraftChanged();
+  const issues = useIssues();
 
-  const submit = form.handleSubmit(
-    async (values) => {
-      try {
-        form.reset(await save.mutateAsync(values));
-        notifications.show({ message: "Saved.", color: "green" });
-      } catch (e) {
-        if (e instanceof SaveError) {
-          e.issues.forEach((issue) =>
-            form.setError(issue.path as IntentField, { message: issue.message })
-          );
-        }
-        notifications.show({ message: (e as Error).message, color: "red" });
+  const submit = async () => {
+    if (issues.length) {
+      notifications.show({ message: "Some settings need fixing.", color: "red" });
+      return;
+    }
+    try {
+      draft.reset(await save.mutateAsync(draft.value));
+      notifications.show({ message: "Saved.", color: "green" });
+    } catch (e) {
+      if (e instanceof SaveError) {
+        draft.setServerIssues(e.issues);
       }
-    },
-    () =>
-      notifications.show({ message: "Some settings need fixing.", color: "red" })
-  );
+      notifications.show({ message: (e as Error).message, color: "red" });
+    }
+  };
 
   return {
     save: submit,
-    revert: () => form.reset(),
-    dirty: form.formState.isDirty,
-    valid: form.formState.isValid,
+    revert: () => draft.reset(),
+    dirty,
+    valid: issues.length === 0,
+    issues,
     saving: save.isPending,
   };
 };

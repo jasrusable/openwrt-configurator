@@ -1,17 +1,17 @@
-// LuCI's Traffic Rules: every rule, OpenWrt's stock ones included, in order.
+// Your own rules: exceptions to what each network's access allows, in order.
+import { useDraftValue } from "../../form/draft";
 import { Text } from "@mantine/core";
-import { useWatch } from "react-hook-form";
-import { icmpTypes } from "../../../../src/intent/firewall";
+import { portsApply, ruleDestinationAllowed } from "../../../../src/intent/choices";
 import {
-  PolicyBadge,
-  policyOptions,
+  ActionBadge,
+  actionOptions,
+  EndSelectField,
   protocolOptions,
   useRuleSummary,
-  ZoneSelectField,
-} from "../../firewall/zones";
+} from "../../firewall/ends";
 import {
-  MultiSelectField,
   SegmentedField,
+  SelectField,
   SwitchField,
   TagsField,
   TextField,
@@ -22,7 +22,7 @@ import { defineList, ListPage } from "../../form/ListPage";
 import { Section } from "../../kit/layout";
 
 const RuleMatch = ({ index }: { index: number }) => {
-  const summary = useRuleSummary(useWatch({ name: `firewall.rules.${index}` }));
+  const summary = useRuleSummary(useDraftValue(`firewall.rules.${index}`));
   return (
     <Text size="sm" c="dimmed">
       {summary}
@@ -30,27 +30,35 @@ const RuleMatch = ({ index }: { index: number }) => {
   );
 };
 
+/** Where to: only what the source allows (not the internet, from the internet). */
+const RuleToField = ({ index }: { index: number }) => {
+  const from: string = useDraftValue(`firewall.rules.${index}.from`);
+  return (
+    <EndSelectField
+      name={`firewall.rules.${index}.to`}
+      label="To"
+      destination
+      allowed={(to) => ruleDestinationAllowed(from, to)}
+    />
+  );
+};
+
 const rules = defineList({
   name: "firewall.rules",
-  title: "Traffic rules",
-  description: "Rules apply in order, before the zones' policies.",
+  title: "Rules",
+  description:
+    "Exceptions to what each network may reach (Networks › Access), applied in order.",
   addLabel: "Add rule",
   newItem: (_, intent) => ({
     name: "",
     enabled: true,
-    family: "any" as const,
-    protocols: ["tcp" as const, "udp" as const],
-    from:
-      intent.firewall.zones.find((z) => z.id === "wan")?.id ??
-      intent.firewall.zones[0]?.id ??
-      "*",
-    to: "router",
-    action: "accept" as const,
+    from: intent.networks.find((n) => n.vlan !== undefined)?.id ?? intent.networks[0].id,
+    to: intent.networks.find((n) => n.vlan === undefined)?.id ?? "router",
+    protocol: "tcp+udp" as const,
+    action: "allow" as const,
   }),
-  itemTitle: (i) => (
-    <Value name={`firewall.rules.${i}.name`} fallback="New rule" />
-  ),
-  empty: "No rules.",
+  itemTitle: (i) => <Value name={`firewall.rules.${i}.name`} fallback="New rule" />,
+  empty: "No rules: each network's access decides.",
   columns: [
     {
       header: "Name",
@@ -61,15 +69,12 @@ const rules = defineList({
         </Text>
       ),
     },
-    { header: "Match", cell: (i) => <RuleMatch index={i} /> },
+    { header: "Traffic", cell: (i) => <RuleMatch index={i} /> },
     {
       header: "Action",
       width: 110,
       cell: (i) => (
-        <Value
-          name={`firewall.rules.${i}.action`}
-          format={(a) => <PolicyBadge policy={a} />}
-        />
+        <Value name={`firewall.rules.${i}.action`} format={(a) => <ActionBadge action={a} />} />
       ),
     },
     {
@@ -77,102 +82,52 @@ const rules = defineList({
       width: 90,
       cell: (i) => (
         <Text size="sm" c="dimmed">
-          <Value
-            name={`firewall.rules.${i}.enabled`}
-            format={(on) => (on ? "Yes" : "No")}
-          />
+          <Value name={`firewall.rules.${i}.enabled`} format={(on) => (on ? "Yes" : "No")} />
         </Text>
       ),
     },
   ],
   editor: (i) => (
     <>
-      <Section title="General settings">
+      <Section>
         <TextField name={`firewall.rules.${i}.name`} label="Name" />
+        <SegmentedField name={`firewall.rules.${i}.action`} label="Action" options={actionOptions} />
         <SwitchField name={`firewall.rules.${i}.enabled`} label="Enabled" />
-        <SegmentedField
-          name={`firewall.rules.${i}.action`}
-          label="Action"
-          options={policyOptions}
-        />
       </Section>
-      <Section title="Protocol">
-        <SegmentedField
-          name={`firewall.rules.${i}.family`}
-          label="Restrict to address family"
-          options={[
-            { value: "any", label: "IPv4 and IPv6" },
-            { value: "ipv4", label: "IPv4" },
-            { value: "ipv6", label: "IPv6" },
-          ]}
+      <Section title="Traffic">
+        <EndSelectField name={`firewall.rules.${i}.from`} label="From" />
+        <TagsField
+          name={`firewall.rules.${i}.source_addresses`}
+          label="From devices"
+          description="Addresses or ranges, like 10.0.0.20 or 10.0.0.0/28."
+          placeholder="Any"
         />
-        <MultiSelectField
-          name={`firewall.rules.${i}.protocols`}
+        <RuleToField index={i} />
+        <TagsField
+          name={`firewall.rules.${i}.destination_addresses`}
+          label="To devices"
+          placeholder="Any"
+        />
+        <SelectField
+          name={`firewall.rules.${i}.protocol`}
           label="Protocol"
           options={protocolOptions}
         />
         <When
-          name={`firewall.rules.${i}.protocols`}
-          test={(p?: string[]) => !!p?.includes("icmp")}
+          name={`firewall.rules.${i}.protocol`}
+          test={portsApply}
         >
-          <MultiSelectField
-            name={`firewall.rules.${i}.icmp_types`}
-            label="Match ICMP type"
-            options={icmpTypes.map((t) => ({ value: t, label: t }))}
-            emptyIsUnset
+          <TextField
+            name={`firewall.rules.${i}.destination_port`}
+            label="Ports"
+            description="Like 443, 8000-8100 or 80 443."
             placeholder="Any"
+            chars={/[\d ,-]/}
           />
         </When>
-      </Section>
-      <Section title="Source">
-        <ZoneSelectField
-          name={`firewall.rules.${i}.from`}
-          label="Source zone"
-          any
-        />
-        <TagsField
-          name={`firewall.rules.${i}.source_addresses`}
-          label="Source address"
-          placeholder="Any"
-        />
-        <TextField
-          name={`firewall.rules.${i}.source_port`}
-          label="Source port"
-          placeholder="Any"
-        />
-      </Section>
-      <Section title="Destination">
-        <ZoneSelectField
-          name={`firewall.rules.${i}.to`}
-          label="Destination zone"
-          description="Device (input): traffic to the router itself."
-          any
-          router
-        />
-        <TagsField
-          name={`firewall.rules.${i}.destination_addresses`}
-          label="Destination address"
-          placeholder="Any"
-        />
-        <TextField
-          name={`firewall.rules.${i}.destination_port`}
-          label="Destination port"
-          description="Like 443, 8000-8100 or 80 443."
-          placeholder="Any"
-        />
-      </Section>
-      <Section title="Advanced">
-        <TextField
-          name={`firewall.rules.${i}.limit`}
-          label="Limit matching"
-          description="At most this often, like 1000/sec."
-          placeholder="Unlimited"
-        />
       </Section>
     </>
   ),
 });
 
-export const RulesPage = ({ sub }: { sub: string }) => (
-  <ListPage list={rules} sub={sub} />
-);
+export const RulesPage = ({ sub }: { sub: string }) => <ListPage list={rules} sub={sub} />;

@@ -4,35 +4,27 @@
 // directly, so Save and Revert in the header cover them like any other.
 import { Button, Group, Stack, Text, ThemeIcon } from "@mantine/core";
 import { IconAlertCircle, IconPlus } from "@tabler/icons-react";
-import { ReactNode } from "react";
-import { useState } from "react";
-import {
-  FieldArray,
-  FieldArrayPath,
-  FormProvider,
-  UseFieldArrayReturn,
-  useFieldArray,
-  useFormState,
-  useWatch,
-} from "react-hook-form";
+import { ReactNode, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Intent } from "../../../src/intent/schema";
 import { Column, DataTable } from "../kit/DataTable";
 import { SettingsPage } from "../kit/layout";
-import { applyIntent, useIntentForm, useIntentFormState } from "./IntentForm";
+import { RemoveButton } from "./RemoveButton";
+import {
+  Draft,
+  DraftProvider,
+  getIn,
+  issuesOf,
+  ItemOf,
+  ListPath,
+  setIn,
+  useDraft,
+  useDraftValue,
+  useIssues,
+} from "./draft";
 
-/** A copy of `value` with the dotted `path` set. */
-const setIn = <T,>(value: T, path: string, next: unknown): T => {
-  const [head, ...rest] = path.split(".");
-  const node = (value ?? {}) as Record<string, unknown>;
-  return {
-    ...node,
-    [head]: rest.length ? setIn(node[head], rest.join("."), next) : next,
-  } as T;
-};
-
-type ListName = FieldArrayPath<Intent>;
-type Item<N extends ListName> = FieldArray<Intent, N>;
+type ListName = ListPath;
+type Item<N extends ListName> = ItemOf<N>;
 
 export type ListSpec<N extends ListName> = {
   /** Which list in the intent. */
@@ -65,7 +57,6 @@ export type ListSpec<N extends ListName> = {
 /** Declares a list: only for type inference, it returns its argument. */
 export const defineList = <N extends ListName>(spec: ListSpec<N>) => spec;
 
-type Fields<N extends ListName> = UseFieldArrayReturn<Intent, N>;
 
 /** A page the table sits in, under other settings (LuCI's zones table). */
 export type HostPage = {
@@ -76,19 +67,21 @@ export type HostPage = {
 
 const ListTable = <N extends ListName>({
   list,
-  fields,
   base,
   page,
 }: {
   list: ListSpec<N>;
-  fields: Fields<N>;
   base: string;
   page?: HostPage;
 }) => {
   const navigate = useNavigate();
-  const { errors } = useFormState<Intent>({ name: list.name });
+  const items: unknown[] = useDraftValue(list.name) ?? [];
+  const issues = useIssues();
   const hasErrors = (index: number) =>
-    !!(errors as Record<string, unknown[] | undefined>)[list.name]?.[index];
+    issues.some(
+      (issue) =>
+        issue.path === `${list.name}.${index}` || issue.path.startsWith(`${list.name}.${index}.`)
+    );
   const add = (
     <Button
       variant="light"
@@ -102,8 +95,8 @@ const ListTable = <N extends ListName>({
   const table = (
     <DataTable
       columns={list.columns}
-      rowCount={fields.fields.length}
-      rowKey={(index) => fields.fields[index].id}
+      rowCount={items.length}
+      rowKey={(index) => String(index)}
       onRowClick={(index) => navigate(`${base}/${index}`)}
       rowMarker={(index) =>
         hasErrors(index) && (
@@ -141,18 +134,15 @@ const ListTable = <N extends ListName>({
 
 const ListItemPage = <N extends ListName>({
   list,
-  fields,
   index,
   base,
 }: {
   list: ListSpec<N>;
-  fields: Fields<N>;
   index: number;
   base: string;
 }) => {
   const navigate = useNavigate();
-  const draft = useIntentForm();
-  const item = useWatch({ name: `${list.name}.${index}` as never }) as Item<N>;
+  const item = useDraftValue(`${list.name}.${index}` as never) as Item<N>;
   const removable = !list.canRemove || list.canRemove(item);
   const back = () => navigate(base);
   // Same width and header position as the list: only the title grows a
@@ -165,20 +155,16 @@ const ListItemPage = <N extends ListName>({
       ]}
       actions={
         removable && (
-          <Button
-            variant="light"
-            color="red"
-            onClick={() => {
-              if (list.onRemove) {
-                applyIntent(draft, list.onRemove(draft.getValues(), index));
-              } else {
-                fields.remove(index);
-              }
-              back();
+          <RemoveButton
+            path={`${list.name}.${index}`}
+            remove={(intent) => {
+              const items: unknown[] = getIn(intent, list.name) ?? [];
+              return list.onRemove
+                ? list.onRemove(intent, index)
+                : setIn(intent, list.name, items.filter((_, i) => i !== index));
             }}
-          >
-            Remove
-          </Button>
+            onRemoved={back}
+          />
         )
       }
     >
@@ -195,41 +181,37 @@ const ListItemPage = <N extends ListName>({
  */
 const NewItemPage = <N extends ListName>({
   list,
-  fields,
   base,
 }: {
   list: ListSpec<N>;
-  fields: Fields<N>;
   base: string;
 }) => {
   const navigate = useNavigate();
-  const draft = useIntentForm();
+  const main = useDraft();
+  // Its own draft, over a copy with the item appended. Problems show only
+  // once a field is edited, or Add is pressed: not on a blank form.
   const [{ copy, index }] = useState(() => {
-    const intent = draft.getValues();
-    const items = draft.getValues(list.name) as Item<N>[];
-    return {
-      copy: setIn(intent, list.name, [...items, list.newItem(items, intent)]),
-      index: items.length,
-    };
+    const items: Item<N>[] = main.get(list.name) ?? [];
+    const value = setIn(main.value, list.name, [...items, list.newItem(items, main.value)]);
+    return { copy: new Draft(main.value, value, false), index: items.length };
   });
-  const form = useIntentFormState(copy);
   const back = () => navigate(base);
-  const add = async () => {
-    const path = `${list.name}.${index}` as never;
-    // What adding implies (a network's zone) first, so the check sees it.
-    if (list.onAdd) applyIntent(form, list.onAdd(form.getValues(), index));
-    // Only a complete item is added; otherwise its errors show here.
-    if (!(await form.trigger(path))) return;
-    if (list.onAdd) {
-      // Everything the new item's page changed, and what adding implied.
-      applyIntent(draft, form.getValues());
-    } else {
-      fields.append(form.getValues(path) as never);
+  const add = () => {
+    // What adding implies (home networks reach it) first, so the check sees it.
+    const next = list.onAdd ? list.onAdd(copy.value, index) : copy.value;
+    const path = `${list.name}.${index}`;
+    const incomplete = issuesOf(next).some(
+      (issue) => issue.path === path || issue.path.startsWith(`${path}.`)
+    );
+    if (incomplete) {
+      copy.reveal();
+      return;
     }
+    main.replace(next);
     back();
   };
   return (
-    <FormProvider {...form}>
+    <DraftProvider draft={copy}>
       <SettingsPage
         title={[
           { label: list.title, onClick: back },
@@ -246,7 +228,7 @@ const NewItemPage = <N extends ListName>({
       >
         {list.editor(index)}
       </SettingsPage>
-    </FormProvider>
+    </DraftProvider>
   );
 };
 
@@ -268,8 +250,7 @@ export const ListPage = <N extends ListName>({
   /** Where the items live, when not under the table's own URL. */
   base?: string;
 }) => {
-  // One field array for every view, so they never disagree.
-  const fields = useFieldArray<Intent, N>({ name: list.name });
+  const items: unknown[] = useDraftValue(list.name) ?? [];
   const splat = useParams()["*"];
   const sub = given ?? splat ?? "";
   const { pathname } = useLocation();
@@ -280,10 +261,10 @@ export const ListPage = <N extends ListName>({
       /\/+$/,
       "",
     );
-  const props = { list, fields, base };
+  const props = { list, base };
   if (sub === "new") return <NewItemPage {...props} />;
   const index = /^\d+$/.test(sub) ? Number(sub) : undefined;
-  return index !== undefined && index < fields.fields.length ? (
+  return index !== undefined && index < items.length ? (
     <ListItemPage {...props} index={index} />
   ) : (
     <ListTable {...props} page={page} />

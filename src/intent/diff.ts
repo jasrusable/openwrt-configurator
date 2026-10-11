@@ -31,6 +31,9 @@ const display = (value: unknown, path: string[]): string | undefined => {
   return info?.unit ? `${value} ${info.unit}` : String(value);
 };
 
+/** A setting's path in people's terms, like ["Wi-Fi", "“Home”", "Password"]. */
+export const describePath = (path: string[], intent: unknown) => labelFor(path, intent, intent);
+
 /** The human name of each step of a path, skipping steps with none. */
 const labelFor = (path: string[], before: unknown, after: unknown) => {
   const label: string[] = [];

@@ -1,90 +1,199 @@
+// Wi-Fi › Radios: each band, on every access point. A read-only table, and
+// a page per band (/radios/5g) with its settings explained.
+import { Badge, Button, Text } from "@mantine/core";
+import { useNavigate, useParams } from "react-router";
+import { channelWidths, widthAllowed } from "../../../src/intent/choices";
 import { Band } from "../../../src/intent/schema";
-import { SegmentedField, SelectField, SwitchField } from "../form/fields";
-import { SettingsPage } from "../kit/layout";
-import { SettingsTable } from "../kit/SettingsTable";
+import { useIssues } from "../form/draft";
+import {
+  SegmentedField,
+  SelectField,
+  SwitchField,
+  Value,
+} from "../form/fields";
+import { DataTable } from "../kit/DataTable";
+import { Section, SettingRow, SettingsPage } from "../kit/layout";
+import { ThemeIcon } from "@mantine/core";
+import { IconAlertCircle } from "@tabler/icons-react";
 
-const widths = (band: Band) => [
-  { value: "auto", label: "Auto" },
-  ...(band === "2g" ? ["20", "40"] : ["20", "40", "80", "160"]).map((w) => ({
-    value: w,
-    label: `${w} MHz`,
-  })),
+const bands: { band: Band; label: string; description: string }[] = [
+  {
+    band: "2g",
+    label: "2.4 GHz",
+    description: "Longest range, slowest; many smart-home devices need it.",
+  },
+  {
+    band: "5g",
+    label: "5 GHz",
+    description: "Fast, shorter range: most phones and laptops use it.",
+  },
+  {
+    band: "6g",
+    label: "6 GHz",
+    description:
+      "Fastest, shortest range (Wi-Fi 6E and 7). Only on access points that have it, and always WPA3.",
+  },
 ];
 
-export const RadiosPage = () => (
-  <SettingsPage
-    title="Radios"
-    description="Each band's radios, on every access point. 6 GHz only works on access points that have it, and uses WPA3. Channels are pinned per access point, under Devices."
-  >
-    <SettingsTable<Band>
-      rows={[
-        {
-          key: "2g",
-          label: "2.4 GHz",
-          description: "Longest range; many smart-home devices need it.",
-        },
-        { key: "5g", label: "5 GHz", description: "Faster, shorter range." },
-        {
-          key: "6g",
-          label: "6 GHz",
-          description: "Fastest, shortest range (Wi-Fi 6E).",
-        },
+const widths = (band: Band) =>
+  channelWidths.map((w) => ({
+    value: w,
+    label: w === "auto" ? "Auto" : `${w} MHz`,
+    disabled: !widthAllowed(band, w),
+  }));
+
+const powers = [
+  { value: "auto", label: "Auto" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+];
+
+const densities = [
+  { value: "off", label: "Off" },
+  { value: "normal", label: "Normal" },
+  { value: "high", label: "High" },
+  { value: "very_high", label: "Very high" },
+];
+
+const labelOf =
+  (options: { value: string; label: string }[]) => (value?: string) =>
+    options.find((o) => o.value === value)?.label ?? value;
+
+const RadiosTable = () => {
+  const navigate = useNavigate();
+  const issues = useIssues();
+  const cell = (
+    band: Band,
+    key: string,
+    format: (v: any) => string | undefined,
+  ) => (
+    <Text size="sm" c="dimmed">
+      <Value name={`radios.${band}.${key}` as never} format={format} />
+    </Text>
+  );
+  return (
+    <SettingsPage
+      title="Radios"
+      description="Each band's radios, on every access point. Channels are picked automatically; to pin one, open the access point under Devices."
+    >
+      <DataTable
+        rowCount={bands.length}
+        rowKey={(i) => bands[i].band}
+        onRowClick={(i) => navigate(`/radios/${bands[i].band}`)}
+        rowMarker={(i) =>
+          issues.some((issue) =>
+            issue.path.startsWith(`radios.${bands[i].band}.`),
+          ) && (
+            <ThemeIcon size={18} radius="xl" color="red" variant="light">
+              <IconAlertCircle size={14} />
+            </ThemeIcon>
+          )
+        }
+        empty={null}
+        columns={[
+          {
+            header: "Band",
+            cell: (i) => (
+              <Text size="sm" fw={500}>
+                {bands[i].label}
+              </Text>
+            ),
+          },
+          {
+            header: "Status",
+            cell: (i) => (
+              <Value
+                name={`radios.${bands[i].band}.enabled`}
+                format={(on) => (
+                  <Badge variant="light" color={on ? "green" : "gray"}>
+                    {on ? "On" : "Off"}
+                  </Badge>
+                )}
+              />
+            ),
+          },
+          {
+            header: "Channel width",
+            cell: (i) =>
+              cell(bands[i].band, "width", labelOf(widths(bands[i].band))),
+          },
+          {
+            header: "Transmit power",
+            cell: (i) => cell(bands[i].band, "power", labelOf(powers)),
+          },
+          {
+            header: "Cell density",
+            cell: (i) =>
+              cell(bands[i].band, "cell_density", labelOf(densities)),
+          },
+        ]}
+      />
+    </SettingsPage>
+  );
+};
+
+const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
+  const navigate = useNavigate();
+  const at = (key: string) => `radios.${band}.${key}` as never;
+  return (
+    <SettingsPage
+      title={[
+        { label: "Radios", onClick: () => navigate("/radios") },
+        { label },
       ]}
-      columns={[
-        {
-          header: "Enabled",
-          cell: (band) => (
-            <SwitchField
-              inline
-              name={`radios.${band}.enabled`}
-              label="Enabled"
-            />
-          ),
-        },
-        {
-          header: "Transmit power",
-          cell: (band) => (
-            <SegmentedField
-              inline
-              name={`radios.${band}.power`}
-              label="Transmit power"
-              options={[
-                { value: "auto", label: "Auto" },
-                { value: "low", label: "Low" },
-                { value: "medium", label: "Med" },
-                { value: "high", label: "High" },
-              ]}
-            />
-          ),
-        },
-        {
-          header: "Channel width",
-          cell: (band) => (
-            <SelectField
-              inline
-              name={`radios.${band}.width`}
-              label="Channel width"
-              options={widths(band)}
-            />
-          ),
-        },
-        {
-          header: "Cell density",
-          cell: (band) => (
-            <SegmentedField
-              inline
-              name={`radios.${band}.cell_density`}
-              label="Cell density"
-              options={[
-                { value: "off", label: "Off" },
-                { value: "normal", label: "Normal" },
-                { value: "high", label: "High" },
-                { value: "very_high", label: "Very high" },
-              ]}
-            />
-          ),
-        },
-      ]}
-    />
-  </SettingsPage>
-);
+    >
+      <Section description={description}>
+        <SwitchField
+          name={at("enabled")}
+          label="Enabled"
+          description="Off: no access point uses this band."
+        />
+      </Section>
+      <Section title="Signal">
+        <SelectField
+          name={at("width")}
+          label="Channel width"
+          description={
+            band === "2g"
+              ? "Wider is faster but crowds neighbours; 2.4 GHz is at most 40 MHz, and 20 MHz is best where there are many networks."
+              : "Wider is faster but has fewer clear channels. Auto picks the band's usual width."
+          }
+          options={widths(band)}
+        />
+        <SegmentedField
+          name={at("power")}
+          label="Transmit power"
+          description="Lower power keeps devices on the nearest access point, which helps with several of them. Auto is the most your country allows."
+          options={powers}
+        />
+        <SegmentedField
+          name={at("cell_density")}
+          label="Cell density"
+          description="Higher keeps slow, far-away devices from holding the air: faster for everyone, a little less range. Off lets very old devices connect."
+          options={densities}
+        />
+      </Section>
+      <Section title="Channel">
+        <SettingRow
+          label="Channel"
+          description="Each access point picks the clearest channel when it starts. To pin one, open the access point under Devices."
+        >
+          <Button
+            variant="subtle"
+            size="compact-sm"
+            onClick={() => navigate("/devices")}
+          >
+            Auto · Devices
+          </Button>
+        </SettingRow>
+      </Section>
+    </SettingsPage>
+  );
+};
+
+export const RadiosPage = () => {
+  const sub = useParams()["*"] ?? "";
+  const radio = bands.find((b) => b.band === sub);
+  return radio ? <RadioPage {...radio} /> : <RadiosTable />;
+};

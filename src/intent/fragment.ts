@@ -12,6 +12,14 @@ export type Fragment = {
   configs_to_not_reset?: { ".if": string; configs: string[] }[];
   /** config -> section type -> sections */
   config?: Record<string, Record<string, Section[]>>;
+  /** Files a package reads that are not UCI, e.g. avahi's config. */
+  files?: {
+    ".if": string;
+    path: string;
+    content: string;
+    mode?: string;
+    run_after?: string;
+  }[];
 };
 
 export type Feature = (intent: Intent) => Fragment;
@@ -48,6 +56,7 @@ export const merge = (fragments: Fragment[]) =>
         ...acc.configs_to_not_reset,
         ...(fragment.configs_to_not_reset || []),
       ],
+      files: [...acc.files, ...(fragment.files || [])],
       config: Object.entries(fragment.config || {}).reduce(
         (config, [configKey, types]) => ({
           ...config,
@@ -62,5 +71,5 @@ export const merge = (fragments: Fragment[]) =>
         acc.config
       ),
     }),
-    { devices: [], package_profiles: [], configs_to_not_reset: [], config: {} }
+    { devices: [], package_profiles: [], configs_to_not_reset: [], files: [], config: {} }
   );

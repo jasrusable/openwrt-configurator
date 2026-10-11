@@ -20,6 +20,7 @@ import {
 } from "react-router";
 import { useIntent } from "./data/intent";
 import { IntentForm, useSaveActions } from "./form/IntentForm";
+import { ProblemCount, ProblemsButton, usePageProblems } from "./form/Problems";
 import { pages } from "./pages";
 import { ProvisionButton } from "./provision/ProvisionButton";
 
@@ -27,9 +28,10 @@ const SaveBar = () => {
   const { save, revert, dirty, valid, saving } = useSaveActions();
   return (
     <Group gap="xs">
-      {dirty && (
+      <ProblemsButton />
+      {dirty && valid && (
         <Text size="sm" c="dimmed">
-          {valid ? "Unsaved changes" : "Some settings need fixing"}
+          Unsaved changes
         </Text>
       )}
       <Button variant="default" onClick={revert} disabled={!dirty || saving}>
@@ -45,6 +47,7 @@ const SaveBar = () => {
 const Shell = () => {
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const problems = usePageProblems();
   const isActive = (id: string) =>
     pathname === `/${id}` || pathname.startsWith(`/${id}/`);
   return (
@@ -69,6 +72,7 @@ const Shell = () => {
               key={id}
               label={label}
               leftSection={<Icon size={indent ? 16 : 18} stroke={1.6} />}
+              rightSection={<ProblemCount count={problems(id)} />}
               active={!("header" in page) && isActive(id)}
               onClick={() => navigate(`/${to}`)}
               style={{ borderRadius: 8, ...(indent ? { paddingLeft: 32 } : {}) }}

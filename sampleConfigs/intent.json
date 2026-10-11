@@ -1,5 +1,5 @@
 {
-  "schema": 5,
+  "schema": 1,
   "site": {
     "name": "Home",
     "timezone": "Europe/Zurich",
@@ -65,7 +65,14 @@
         "size": 250,
         "lease": "24h"
       },
-      "ipv6": true
+      "ipv6": true,
+      "access": {
+        "internet": true,
+        "networks": [
+          "guest"
+        ],
+        "router": "full"
+      }
     },
     {
       "id": "guest",
@@ -77,258 +84,26 @@
         "size": 100,
         "lease": "2h"
       },
-      "ipv6": false
+      "ipv6": false,
+      "access": {
+        "internet": true,
+        "networks": [],
+        "router": "services"
+      }
     }
   ],
   "firewall": {
-    "zones": [
-      {
-        "id": "lan",
-        "networks": [
-          "lan"
-        ],
-        "input": "accept",
-        "forward": "accept",
-        "output": "accept",
-        "masquerade": false,
-        "mss_clamping": false
-      },
-      {
-        "id": "guest",
-        "networks": [
-          "guest"
-        ],
-        "input": "reject",
-        "forward": "reject",
-        "output": "accept",
-        "masquerade": false,
-        "mss_clamping": false
-      },
-      {
-        "id": "wan",
-        "networks": [],
-        "input": "reject",
-        "output": "accept",
-        "forward": "drop",
-        "masquerade": true,
-        "mss_clamping": true
-      }
-    ],
-    "forwardings": [
-      {
-        "from": "lan",
-        "to": "wan"
-      },
-      {
-        "from": "lan",
-        "to": "guest"
-      },
-      {
-        "from": "guest",
-        "to": "wan"
-      }
-    ],
     "rules": [
       {
-        "name": "Allow-DHCP-Renew",
-        "from": "wan",
-        "to": "router",
-        "protocols": [
-          "udp"
-        ],
-        "destination_port": "68",
-        "family": "ipv4",
-        "action": "accept"
-      },
-      {
-        "name": "Allow-Ping",
-        "from": "wan",
-        "to": "router",
-        "protocols": [
-          "icmp"
-        ],
-        "icmp_types": [
-          "echo-request"
-        ],
-        "family": "ipv4",
-        "action": "accept"
-      },
-      {
-        "name": "Allow-IGMP",
-        "from": "wan",
-        "to": "router",
-        "protocols": [
-          "igmp"
-        ],
-        "family": "ipv4",
-        "action": "accept"
-      },
-      {
-        "name": "Allow-DHCPv6",
-        "from": "wan",
-        "to": "router",
-        "protocols": [
-          "udp"
-        ],
-        "destination_port": "546",
-        "family": "ipv6",
-        "action": "accept"
-      },
-      {
-        "name": "Allow-MLD",
-        "from": "wan",
-        "to": "router",
-        "protocols": [
-          "icmp"
-        ],
-        "source_addresses": [
-          "fe80::/10"
-        ],
-        "icmp_types": [
-          "130/0",
-          "131/0",
-          "132/0",
-          "143/0"
-        ],
-        "family": "ipv6",
-        "action": "accept"
-      },
-      {
-        "name": "Allow-ICMPv6-Input",
-        "from": "wan",
-        "to": "router",
-        "protocols": [
-          "icmp"
-        ],
-        "icmp_types": [
-          "echo-request",
-          "echo-reply",
-          "destination-unreachable",
-          "packet-too-big",
-          "time-exceeded",
-          "bad-header",
-          "unknown-header-type",
-          "router-solicitation",
-          "neighbour-solicitation",
-          "router-advertisement",
-          "neighbour-advertisement"
-        ],
-        "limit": "1000/sec",
-        "family": "ipv6",
-        "action": "accept"
-      },
-      {
-        "name": "Allow-ICMPv6-Forward",
-        "from": "wan",
-        "to": "*",
-        "protocols": [
-          "icmp"
-        ],
-        "icmp_types": [
-          "echo-request",
-          "echo-reply",
-          "destination-unreachable",
-          "packet-too-big",
-          "time-exceeded",
-          "bad-header",
-          "unknown-header-type"
-        ],
-        "limit": "1000/sec",
-        "family": "ipv6",
-        "action": "accept"
-      },
-      {
-        "name": "Allow-IPSec-ESP",
-        "from": "wan",
-        "to": "lan",
-        "protocols": [
-          "esp"
-        ],
-        "action": "accept"
-      },
-      {
-        "name": "Allow-ISAKMP",
-        "from": "wan",
-        "to": "lan",
-        "protocols": [
-          "udp"
-        ],
-        "destination_port": "500",
-        "action": "accept"
-      },
-      {
-        "name": "Allow-guest-DHCP",
-        "from": "guest",
-        "to": "router",
-        "protocols": [
-          "udp"
-        ],
-        "destination_port": "67",
-        "family": "ipv4",
-        "action": "accept"
-      },
-      {
-        "name": "Allow-guest-DHCPv6",
-        "from": "guest",
-        "to": "router",
-        "protocols": [
-          "udp"
-        ],
-        "destination_port": "547",
-        "family": "ipv6",
-        "action": "accept"
-      },
-      {
-        "name": "Allow-guest-DNS",
-        "from": "guest",
-        "to": "router",
-        "protocols": [
-          "tcp",
-          "udp"
-        ],
-        "destination_port": "53",
-        "action": "accept"
-      },
-      {
-        "name": "Allow-guest-NTP",
-        "from": "guest",
-        "to": "router",
-        "protocols": [
-          "udp"
-        ],
-        "destination_port": "123",
-        "action": "accept"
-      },
-      {
-        "name": "Allow-guest-ICMPv6",
-        "from": "guest",
-        "to": "router",
-        "protocols": [
-          "icmp"
-        ],
-        "icmp_types": [
-          "router-solicitation",
-          "neighbour-solicitation",
-          "neighbour-advertisement",
-          "echo-request"
-        ],
-        "family": "ipv6",
-        "action": "accept"
-      },
-      {
         "name": "Guests may print",
-        "enabled": true,
         "from": "guest",
         "to": "lan",
         "destination_addresses": [
           "10.0.0.20"
         ],
-        "family": "ipv4",
-        "action": "accept",
-        "protocols": [
-          "tcp"
-        ],
-        "destination_port": "631 9100"
+        "protocol": "tcp",
+        "destination_port": "631 9100",
+        "action": "allow"
       }
     ],
     "port_forwards": [

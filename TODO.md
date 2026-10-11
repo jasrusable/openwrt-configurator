@@ -62,6 +62,9 @@ and the React UI in `ui/`.
 - [ ] Reach parity with the jaculu config before provisioning from intent:
       model quirk files (R6S packet steering, AP AQL hook, the odhcpd RA
       fix) and admin SSH login. Then diff `print-uci-commands` of both.
+      Known difference: the intent announces IPv6 routes with
+      `ra_default 1` (only with a public prefix), the jaculu config with
+      `2` (always); check IPv6 on the real line after the first provision.
 - [ ] Open schema questions: a second AP (`jaculu-ap-2`)? Why two SSIDs on
       one LAN? What are the extra Wi-Fi passwords for? Keep LuCI? Wi-Fi on
       a router that has radios (today only access points broadcast)?

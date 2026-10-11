@@ -21,13 +21,14 @@ export const GeneralPage = () => (
       <SelectField
         name="site.country"
         label="Country"
-        description="Sets which Wi-Fi channels and power levels are allowed."
+        description="Sets which Wi-Fi channels and power levels are allowed; access points announce it to clients (802.11d)."
         options={countryOptions}
         searchable
       />
       <SelectField
         name="site.timezone"
         label="Time zone"
+        description="Access points also broadcast it, so clients can set their clocks (802.11v)."
         options={timezoneOptions}
         searchable
       />

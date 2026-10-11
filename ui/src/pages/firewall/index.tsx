@@ -1,21 +1,14 @@
-// The firewall, laid out as LuCI's Network › Firewall: General settings (the
-// defaults and zones), Port forwards and Traffic rules, as tabs above each
-// page's title. A zone's page is under General settings (/firewall/zones/1).
+// The firewall's own settings, as tabs above each page's title: port
+// forwards and rules. Who may reach what is each network's access.
 import { Tabs } from "@mantine/core";
 import { useNavigate, useParams } from "react-router";
 import { SectionNav } from "../../kit/layout";
-import { GeneralSettingsPage } from "./GeneralSettingsPage";
 import { PortForwardsPage } from "./PortForwardsPage";
 import { RulesPage } from "./RulesPage";
 
 const tabs = [
-  { value: "general", label: "General settings", path: "/firewall" },
-  {
-    value: "port-forwards",
-    label: "Port forwards",
-    path: "/firewall/port-forwards",
-  },
-  { value: "rules", label: "Traffic rules", path: "/firewall/rules" },
+  { value: "port-forwards", label: "Port forwards", path: "/firewall" },
+  { value: "rules", label: "Rules", path: "/firewall/rules" },
 ];
 
 const FirewallTabs = ({ tab }: { tab: string }) => {
@@ -40,20 +33,15 @@ const FirewallTabs = ({ tab }: { tab: string }) => {
 
 export const FirewallPage = () => {
   const [first = "", ...rest] = (useParams()["*"] ?? "").split("/");
-  const sub = rest.join("/");
-  const page =
-    first === "port-forwards" ? (
-      <PortForwardsPage sub={sub} />
-    ) : first === "rules" ? (
-      <RulesPage sub={sub} />
-    ) : (
-      // /firewall and /firewall/zones/<n>: the zones live here.
-      <GeneralSettingsPage sub={first === "zones" ? sub : ""} />
-    );
-  const tab =
-    first === "port-forwards" || first === "rules" ? first : "general";
+  const rules = first === "rules";
+  // /firewall/<n> is a port forward; /firewall/rules/<n> a rule.
+  const page = rules ? (
+    <RulesPage sub={rest.join("/")} />
+  ) : (
+    <PortForwardsPage sub={[first, ...rest].filter(Boolean).join("/")} />
+  );
   return (
-    <SectionNav.Provider value={<FirewallTabs tab={tab} />}>
+    <SectionNav.Provider value={<FirewallTabs tab={rules ? "rules" : "port-forwards"} />}>
       {page}
     </SectionNav.Provider>
   );

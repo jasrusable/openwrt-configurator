@@ -3,3 +3,7 @@
 .onc-rows > * + * {
   border-top: 1px solid var(--mantine-color-default-border);
 }
+
+.onc-problem:hover {
+  background: var(--mantine-color-gray-0);
+}

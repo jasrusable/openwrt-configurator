@@ -1,3 +1,4 @@
+import { assertSupportedRelease } from "./release";
 import { getDeviceSchema } from "./getDeviceSchema";
 import { getOpenWrtState } from "./getOpenWrtState";
 import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
@@ -150,6 +151,7 @@ export const provisionConfig = async ({
       const ssh = await connect(deviceConfig);
       try {
         const deviceSchema = await getDeviceSchema({ deviceConfig, ssh });
+        assertSupportedRelease(deviceConfig.hostname, deviceSchema.version);
         // Paired with its own device. Looking the schema up by model_id meant
         // two devices of the same model shared whichever schema was built
         // first, so the second got the other's config_sections and version.

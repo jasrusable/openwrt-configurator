@@ -26,7 +26,7 @@ export const getOpenWrtConfig = ({
 
   // "@wan_port", as any whole value: the port board.json gives the WAN role,
   // so a config can name it without knowing the model (eth1 on one, wan on
-  // another).
+  // another). "@wan_port.10" is that port's VLAN 10 (eth1.10).
   const wanPort = () => {
     const wan = physicalPorts.find((port) => port.default_role === "wan");
     if (!wan || useSwConfig) {
@@ -38,8 +38,8 @@ export const getOpenWrtConfig = ({
     return wan.name;
   };
   const withWanPort = (value: unknown): unknown =>
-    value === "@wan_port"
-      ? wanPort()
+    typeof value === "string" && /^@wan_port(\.\d+)?$/.test(value)
+      ? wanPort() + value.slice("@wan_port".length)
       : Array.isArray(value)
       ? value.map(withWanPort)
       : value && typeof value === "object"

@@ -82,15 +82,14 @@ test("an invalid saved draft is never provisioned", async (t) => {
 test("settings a file leaves out are served as their defaults", async (t) => {
   await withServer(async (handle, intentPath) => {
     const intent = JSON.parse(readFileSync(intentPath, "utf8"));
-    delete intent.firewall.defaults;
+    delete intent.radios;
     writeFileSync(intentPath, JSON.stringify(intent));
     const served = JSON.parse((await handle(request("GET", "/api/intent"))).body);
-    t.deepEqual(served.firewall.defaults, {
-      input: "reject",
-      output: "accept",
-      forward: "reject",
-      syn_flood_protection: true,
-      drop_invalid: true,
+    t.deepEqual(served.radios["6g"], {
+      enabled: false,
+      width: "auto",
+      power: "auto",
+      cell_density: "normal",
     });
   });
 });

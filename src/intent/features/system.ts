@@ -10,6 +10,9 @@ import {
 } from "../fragment";
 import { timezones } from "../timezones";
 
+// Cloudflare's by address first: with encrypted DNS the router cannot look a
+// name up until its clock is right (TLS checks dates), so one server must
+// need no lookup.
 const ntpPool = [
   "162.159.200.123",
   "0.openwrt.pool.ntp.org",
@@ -43,8 +46,8 @@ export const system: Feature = (intent) => {
           {
             ".if": onRouter,
             ".name": "ntp",
+            // On every network: the firewall decides who may ask (WAN may not).
             enable_server: true,
-            interface: main,
             use_dhcp: false,
             server: ntpPool,
           },

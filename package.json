@@ -54,7 +54,6 @@
     "zod": "^3.19.1"
   },
   "devDependencies": {
-    "@hookform/resolvers": "5.9.1",
     "@mantine/core": "9.6.3",
     "@mantine/hooks": "9.6.3",
     "@mantine/notifications": "9.6.3",
@@ -68,7 +67,6 @@
     "esbuild": "^0.28.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "react-hook-form": "7.89.0",
     "react-router": "8.4.0",
     "ts-node": "^10.9.1",
     "typescript": "^6.0.3"

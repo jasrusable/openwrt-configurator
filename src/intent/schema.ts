@@ -3,8 +3,24 @@
 // are read from the devices when they are provisioned. The UI edits this file
 // and nothing else; src/intent/compile.ts turns it into the low-level config.
 import { z } from "zod";
+import {
+  bandAvailable,
+  extraPasswordsAllowed,
+  portsApply,
+  routerAccessAllowed,
+  ruleDestinationAllowed,
+  widthAllowed,
+} from "./choices";
 import { countries } from "./countries";
-import { firewallSchema, wanZone } from "./firewall";
+import {
+  accessSchema,
+  anywhere,
+  firewallSchema,
+  internet,
+  isIpv6,
+  reservedIds,
+  router,
+} from "./firewall";
 import { timezones } from "./timezones";
 
 const name = z
@@ -47,7 +63,47 @@ const leaseTime = z
     "at least 2 minutes"
   );
 
-export const intentVersion = 5;
+/** An IPv4 address as a number, or undefined if it is not one. */
+export const parseIpv4 = (address: string) => {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(address);
+  const octets = match?.slice(1).map(Number);
+  return octets && octets.every((o) => o <= 255)
+    ? octets.reduce((n, o) => n * 256 + o, 0)
+    : undefined;
+};
+
+/** A prefix length as a netmask: 24 -> 255.255.255.0. */
+export const netmask = (length: number) => {
+  const bits = 2 ** 32 - 2 ** (32 - length);
+  return [24, 16, 8, 0].map((shift) => Math.floor(bits / 2 ** shift) % 256).join(".");
+};
+
+const ipv4 = z
+  .string()
+  .refine((a) => parseIpv4(a) !== undefined, "an IPv4 address, like 203.0.113.10");
+
+/** A DNS server: IPv4, or IPv6 (hex and colons). */
+const dnsServer = z
+  .string()
+  .refine(
+    (a) => parseIpv4(a) !== undefined || (a.includes(":") && /^[0-9a-f:]+$/i.test(a)),
+    "an IP address, like 9.9.9.9"
+  );
+
+/**
+ * Smart queueing's per-packet overhead, by the kind of line: what the line
+ * adds to every packet, from OpenWrt's SQM guidance. Too much only costs a
+ * little speed; too little lets the modem's queue fill, which is the lag
+ * queueing is there to prevent.
+ */
+export const lineTypes = ["fibre", "cable", "vdsl", "adsl"] as const;
+
+/** How much IPv6 space to ask the provider for: each network takes a /64. */
+export const ipv6Prefixes = ["auto", "48", "56", "60", "64"] as const;
+
+export const securityModes = ["wpa2", "wpa2-wpa3", "wpa3"] as const;
+
+export const intentVersion = 1;
 
 export const bands = ["2g", "5g", "6g"] as const;
 export type Band = (typeof bands)[number];
@@ -67,6 +123,21 @@ const radio = (defaults: { enabled: boolean }) =>
     .strict()
     .default({});
 
+/** A MAC address, as aa:bb:cc:dd:ee:ff. */
+export const macAddress = z
+  .string()
+  .regex(/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/, "like aa:bb:cc:dd:ee:ff");
+
+/** A device that always gets the same address, and a name in DNS. */
+const reservation = z
+  .object({
+    /** Also its DNS name: name.<local domain>. */
+    name,
+    mac: macAddress,
+    address: z.string(),
+  })
+  .strict();
+
 /**
  * What a network is for. It sets up the network's firewall zone when the
  * network is created (zoneForPurpose); after that the firewall owns access.
@@ -80,7 +151,10 @@ const network = z
      * Stable and hidden: Wi-Fi refers to it, and it names the network on the
      * devices, so renaming never breaks a link. Short, as UCI names must be.
      */
-    id: z.string().regex(/^[a-z][a-z0-9]{0,9}$/, "a short id"),
+    id: z
+      .string()
+      .regex(/^[a-z][a-z0-9]{0,9}$/, "a short id")
+      .refine((id) => !reservedIds.includes(id), "reserved"),
     name: z.string().min(1, "required").max(32),
     purpose: z.enum(purposes),
 
@@ -100,6 +174,13 @@ const network = z
       .strict()
       .default({ size: 150, lease: "12h" }),
     ipv6: z.boolean().default(true),
+    access: accessSchema.default({}),
+    reservations: z.array(reservation).default([]),
+    /**
+     * Devices on it (AirPlay, printers, Chromecast) are seen on the other
+     * networks that share theirs, and theirs here: mDNS, reflected.
+     */
+    share_devices: z.boolean().default(false),
   })
   .strict();
 
@@ -169,13 +250,29 @@ export const intentSchema = z
               password: z.string().min(1, "required"),
             })
             .strict(),
+          z
+            .object({
+              type: z.literal("static"),
+              address: ipv4,
+              prefix_length: z.number().int().min(8).max(30),
+              gateway: ipv4,
+              /** Needed unless encrypted DNS is on. */
+              dns: z.array(dnsServer).optional(),
+            })
+            .strict(),
         ]),
+        /** The provider's VLAN, for a line that must be tagged. */
+        vlan: z.number().int().min(1, "1 to 4094").max(4094, "1 to 4094").optional(),
         ipv6: z.boolean().default(true),
+        ipv6_prefix: z.enum(ipv6Prefixes).default("auto"),
+        /** Devices on the main network may open ports for themselves (UPnP, NAT-PMP). */
+        upnp: z.boolean().default(false),
         /** The line's speed. Set, it turns on smart queueing (less lag under load). */
         speed: z
           .object({
             down_mbps: z.number().positive(),
             up_mbps: z.number().positive(),
+            line: z.enum(lineTypes).default("fibre"),
           })
           .strict()
           .optional(),
@@ -194,6 +291,8 @@ export const intentSchema = z
       z
         .object({
           ssid: z.string().min(1, "required").max(32, "at most 32 characters"),
+          /** Off: kept, but not broadcast. */
+          enabled: z.boolean().default(true),
           /** The id of the network it joins. */
           network: z.string().min(1, "pick a network"),
           /** Where it is broadcast; unset, on every enabled band. */
@@ -203,9 +302,17 @@ export const intentSchema = z
            * access point and band.
            */
           isolate_clients: z.boolean().default(false),
+          /** WPA2; WPA2 and WPA3 side by side; or WPA3 only. 6 GHz is always WPA3. */
+          security: z.enum(securityModes).default("wpa2"),
           password: wifiPassword,
-          /** More passwords for the same network, e.g. one per person. */
+          /** More passwords for the same network, e.g. one per person (WPA2 only). */
           extra_passwords: z.array(wifiPassword).optional(),
+          /** Not announced: devices must be told its name. */
+          hidden: z.boolean().default(false),
+          /** 802.11r: devices move between access points without a pause. */
+          fast_roaming: z.boolean().default(true),
+          /** 802.11k/v: access points tell devices their neighbours, so they roam well. */
+          roaming_assistance: z.boolean().default(true),
         })
         .strict()
     ),
@@ -237,6 +344,39 @@ export const intentSchema = z
     // there. The server applies the same ones: nothing invalid is saved.
     const issue = (path: (string | number)[], message: string) =>
       ctx.addIssue({ code: z.ZodIssueCode.custom, path, message });
+    const { connection } = intent.internet;
+    if (connection.type === "static") {
+      const at = (key: string) => ["internet", "connection", key];
+      const address = parseIpv4(connection.address);
+      const gateway = parseIpv4(connection.gateway);
+      if (address !== undefined) {
+        const size = 2 ** (32 - connection.prefix_length);
+        const offset = address % size;
+        if (offset === 0 || offset === size - 1) {
+          issue(at("address"), "the subnet's own or broadcast address, not a host's");
+        }
+        if (gateway !== undefined && Math.floor(gateway / size) !== Math.floor(address / size)) {
+          issue(at("gateway"), "not in the address's subnet");
+        } else if (gateway === address) {
+          issue(at("gateway"), "the router's own address");
+        }
+      }
+      if (!connection.dns?.length && !intent.dns.over_https) {
+        issue(at("dns"), "add a DNS server, or turn on encrypted DNS");
+      }
+    }
+    const prefix = intent.internet.ipv6_prefix;
+    if (intent.internet.ipv6 && prefix !== "auto") {
+      const room = 2 ** (64 - Number(prefix));
+      const want = intent.networks.filter((n) => n.ipv6).length;
+      if (want > room) {
+        issue(
+          ["internet", "ipv6_prefix"],
+          `a /${prefix} has room for ${room} network${room === 1 ? "" : "s"}; ${want} use IPv6`
+        );
+      }
+    }
+
     const untagged = intent.networks.filter((n) => n.vlan === undefined);
     if (untagged.length !== 1) {
       issue(["networks"], "exactly one network must be the main, untagged one");
@@ -253,11 +393,16 @@ export const intentSchema = z
         issue(["networks", i, "subnet"], "already used by another network");
       }
     });
-    if (intent.radios["2g"].width === "80" || intent.radios["2g"].width === "160") {
-      issue(["radios", "2g", "width"], "2.4 GHz is at most 40 MHz wide");
-    }
+    bands.forEach((band) => {
+      if (!widthAllowed(band, intent.radios[band].width)) {
+        issue(["radios", band, "width"], "2.4 GHz is at most 40 MHz wide");
+      }
+    });
     intent.wifi.forEach((wifi, i) => {
-      if (wifi.bands && !wifi.bands.some((band) => intent.radios[band].enabled)) {
+      if (wifi.extra_passwords?.length && !extraPasswordsAllowed(wifi.security)) {
+        issue(["wifi", i, "extra_passwords"], "only with WPA2: WPA3 has one password per network");
+      }
+      if (wifi.bands && !wifi.bands.some((band) => bandAvailable(intent.radios, band))) {
         issue(["wifi", i, "bands"], "none of its bands is on (Wi-Fi › Radios)");
       }
     });
@@ -268,54 +413,59 @@ export const intentSchema = z
       }
     });
 
-    // The firewall: a WAN zone, every network in exactly one zone, and
-    // every reference to a zone a real one.
-    const { zones, forwardings, rules, port_forwards } = intent.firewall;
-    const zoneIds = zones.map((z) => z.id);
-    if (!zoneIds.includes(wanZone)) {
-      issue(["firewall", "zones"], "the WAN zone is missing");
-    }
+    // Reservations: inside their network, and each name, MAC and address once.
+    const deviceNames = intent.devices.map((d) => d.name);
+    const seen = { name: new Set<string>(), mac: new Set<string>(), address: new Set<string>() };
     intent.networks.forEach((network, i) => {
-      const count = zones.filter((z) => z.networks.includes(network.id)).length;
-      if (count !== 1) {
-        issue(
-          ["networks", i, "id"],
-          count === 0 ? "not in any firewall zone" : "in more than one firewall zone"
-        );
-      }
+      const prefix = network.subnet.split(".").slice(0, 3).join(".");
+      network.reservations.forEach((r, j) => {
+        const at = (key: string) => ["networks", i, "reservations", j, key];
+        const host = Number(r.address.split(".")[3]);
+        if (parseIpv4(r.address) === undefined || !r.address.startsWith(`${prefix}.`)) {
+          issue(at("address"), `an address in ${prefix}.x`);
+        } else if (host < 2 || host > 254) {
+          issue(at("address"), `${prefix}.2 to ${prefix}.254 (.1 is the router)`);
+        }
+        if (deviceNames.includes(r.name)) issue(at("name"), "already a device's name");
+        (["name", "mac", "address"] as const).forEach((key) => {
+          if (seen[key].has(r[key])) issue(at(key), "already used");
+          seen[key].add(r[key]);
+        });
+      });
     });
-    zones.forEach((zone, i) => {
-      if (zones.slice(0, i).some((z) => z.id === zone.id)) {
-        issue(["firewall", "zones", i, "id"], "already used by another zone");
+
+    // Access and rules name real networks.
+    intent.networks.forEach((network, i) => {
+      if (!routerAccessAllowed(intent.networks, i, network.access.router)) {
+        // SSH and the admin pages: this tool manages the devices over it.
+        issue(["networks", i, "access", "router"], "the main network manages the router: it needs full access");
       }
-      if (zone.id === wanZone && zone.networks.length > 0) {
-        issue(["firewall", "zones", i, "networks"], "WAN covers the internet connection only");
-      }
-      zone.networks.forEach((id) => {
-        if (!ids.includes(id)) {
-          issue(["firewall", "zones", i, "networks"], `no network "${id}"`);
+      network.access.networks.forEach((id) => {
+        if (id === network.id) {
+          issue(["networks", i, "access", "networks"], "a network always reaches itself");
+        } else if (!ids.includes(id)) {
+          issue(["networks", i, "access", "networks"], `no network "${id}"`);
         }
       });
     });
-    const isZone = (id: string) => zoneIds.includes(id);
-    forwardings.forEach((f, i) => {
-      if (!isZone(f.from)) issue(["firewall", "forwardings", i, "from"], "pick a zone");
-      if (!isZone(f.to)) issue(["firewall", "forwardings", i, "to"], "pick a zone");
-      if (f.from === f.to) issue(["firewall", "forwardings", i, "to"], "a zone to itself is its forward policy");
-    });
+    const { rules, port_forwards } = intent.firewall;
     rules.forEach((rule, i) => {
-      if (!isZone(rule.from) && rule.from !== "*") {
-        issue(["firewall", "rules", i, "from"], "pick a zone");
+      const at = (key: string) => ["firewall", "rules", i, key];
+      if (!ids.includes(rule.from) && rule.from !== internet && rule.from !== anywhere) {
+        issue(at("from"), "pick a network, the internet or anywhere");
       }
-      if (!isZone(rule.to) && rule.to !== "router" && rule.to !== "*") {
-        issue(["firewall", "rules", i, "to"], "pick a zone, the device or any zone");
+      if (![internet, anywhere, router].includes(rule.to) && !ids.includes(rule.to)) {
+        issue(at("to"), "pick a network, the router, the internet or anywhere");
       }
-      const portable = rule.protocols.every((p) => ["tcp", "udp", "sctp"].includes(p));
-      if ((rule.source_port || rule.destination_port) && !portable) {
-        issue(["firewall", "rules", i, "protocols"], "ports need TCP, UDP or SCTP only");
+      if (!ruleDestinationAllowed(rule.from, rule.to)) {
+        issue(at("to"), "the internet to itself does not pass the router");
       }
-      if (rule.icmp_types?.length && !rule.protocols.includes("icmp")) {
-        issue(["firewall", "rules", i, "icmp_types"], "ICMP types need the ICMP protocol");
+      if (rule.destination_port && !portsApply(rule.protocol)) {
+        issue(at("destination_port"), "ports need TCP or UDP");
+      }
+      const addresses = [...(rule.source_addresses ?? []), ...(rule.destination_addresses ?? [])];
+      if (addresses.some(isIpv6) && addresses.some((a) => !isIpv6(a))) {
+        issue(at("destination_addresses"), "IPv4 and IPv6 addresses cannot share a rule");
       }
     });
     const inANetwork = (address: string) =>
