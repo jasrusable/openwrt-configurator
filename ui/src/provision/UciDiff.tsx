@@ -1,6 +1,7 @@
 // What an apply changes on each device, as OpenWrt sees it (src/applyDiff.ts):
-// a summary per device, and its `uci show` lines on request. Secrets show as
-// "(hidden)"; a device never read cannot be worked out exactly yet.
+// a row per device with a summary, and its `uci show` lines on request.
+// Secrets show as "(hidden)"; a device never read cannot be worked out
+// exactly yet.
 import { Box, Button, Code, Collapse, Text } from "@mantine/core";
 import { useState } from "react";
 import { useNavigate } from "react-router";
@@ -84,18 +85,25 @@ const DeviceChanges = ({ diff }: { diff: DeviceDiff }) => {
   );
 };
 
-/** Each device's changes as UCI, for people who know OpenWrt. */
-export const UciDiff = () => {
+/**
+ * Every device the apply reconfigures, with what changes on it; the uci lines
+ * on request, for people who know OpenWrt.
+ */
+export const DeviceChangesSection = ({ devices }: { devices: string[] }) => {
   const diff = useApplyDiff();
-  if (!diff.data?.length) return null;
   return (
     <Section
-      title="OpenWrt changes"
-      description="What applying writes on each device, as uci shows it. Passwords and keys are hidden."
+      title="Devices"
+      description="What applying writes on each, as uci shows it. Passwords and keys are hidden."
     >
-      {diff.data.map((d) => (
-        <DeviceChanges key={d.hostname} diff={d} />
-      ))}
+      {devices.map((name) => {
+        const d = diff.data?.find((x) => x.hostname === name);
+        return d ? (
+          <DeviceChanges key={name} diff={d} />
+        ) : (
+          <SettingRow key={name} label={name} description={diff.isPending ? "Working out its changes…" : "Will be reconfigured"} />
+        );
+      })}
     </Section>
   );
 };

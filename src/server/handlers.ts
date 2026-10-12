@@ -249,6 +249,11 @@ export const discoverApi =
     if (path === "/api/discover/adopt") {
       const name = typeof input.name === "string" ? input.name.trim() : "";
       if (!/^[a-z0-9][a-z0-9-]{0,30}$/.test(name)) return json(400, { error: "A name like ap-2." });
+      // Adopting writes the facts locating trusts (address, host key): under a
+      // name already in Hardware it would re-pin that device to this one.
+      const saved = intentSchema.safeParse(readIntent(platform, intentPath));
+      if (!saved.success) return json(409, { error: "The saved settings are not valid." });
+      if (saved.data.hardware.some((d) => d.name === name)) return json(409, { error: `${name} is already in Hardware.` });
       let inspected: Inspected;
       try {
         inspected = JSON.parse(platform.readTextFile(inspectedFile(intentPath, address)));

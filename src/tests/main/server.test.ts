@@ -94,3 +94,14 @@ test("settings a file leaves out are served as their defaults", async (t) => {
     });
   });
 });
+
+test("adopting under a name already in Hardware is refused: it would re-pin that device's host key", async (t) => {
+  await withServer(async (handle, intentPath) => {
+    const existing = JSON.parse(readFileSync(intentPath, "utf8")).hardware[0].name;
+    const post = await handle(
+      request("POST", "/api/discover/adopt", JSON.stringify({ address: "10.0.0.66", name: existing }), { "x-onc": "1" })
+    );
+    t.is(post.status, 409);
+    t.regex(JSON.parse(post.body).error, /already in Hardware/);
+  });
+});

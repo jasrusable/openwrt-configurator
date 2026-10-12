@@ -8,7 +8,7 @@ import { ConfirmButton } from "../kit/ConfirmButton";
 import { Section, SettingRow } from "../kit/layout";
 import { LogView } from "../kit/LogView";
 import { applyStatus, lastRun } from "./status";
-import { UciDiff } from "./UciDiff";
+import { DeviceChangesSection } from "./UciDiff";
 
 /** Where the devices stand, and how the last run went, in words. */
 const Status = ({ info }: { info: ProvisionInfo }) => {
@@ -77,13 +77,7 @@ export const ProvisionPanel = () => {
 
       <Changes info={info} />
 
-      <UciDiff />
-
-      <Section title="Devices">
-        {info.devices.map((name) => (
-          <SettingRow key={name} label={name} description="Will be reconfigured" />
-        ))}
-      </Section>
+      <DeviceChangesSection devices={info.devices} />
 
       {info.state !== "idle" && (
         <Section title="Progress">
