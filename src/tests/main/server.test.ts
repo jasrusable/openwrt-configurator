@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { writeFacts } from "../../deviceFacts";
 import { nodePlatform } from "../../platforms/node";
+import { rpcdAuth } from "../../server/auth";
 import { uiHandler } from "../../server/handlers";
 
 const root = join(__dirname, "../../..");
@@ -123,4 +124,38 @@ test("adopting a box already in Hardware under another name is refused: its key 
     t.is(post.status, 409);
     t.regex(JSON.parse(post.body).error, new RegExp(`This is ${existing}`));
   });
+});
+
+test("on a router, the API needs a session from the root password; the UI's files do not", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "onc-auth-"));
+  const intentPath = join(dir, "intent.json");
+  writeFileSync(intentPath, readFileSync(join(__dirname, "../../../sampleConfigs/intent.json")));
+  const sid = "0123456789abcdef0123456789abcdef";
+  const calls: unknown[] = [];
+  // rpcd through ucode's ubus module, as on 25.12.5: the request on stdin.
+  const run = async (argv: string[], options?: { stdin?: string }) => {
+    calls.push({ argv, stdin: options?.stdin });
+    const { method, args } = JSON.parse(options?.stdin ?? "{}");
+    const result =
+      method === "login"
+        ? args.password === "right" ? { ubus_rpc_session: sid } : null
+        : method === "access"
+          ? args.ubus_rpc_session === sid ? { access: true } : null
+          : {};
+    return { code: 0, stdout: JSON.stringify({ result, error: result ? null : "Not found" }), stderr: "" };
+  };
+  const platform = { ...nodePlatform, run, sleep: async () => {} };
+  const handle = uiHandler({ intentPath, uiRoot: dir, platform, auth: rpcdAuth(platform) });
+  const api = (method: string, path: string, body = "", cookie = "") =>
+    handle({ method, path, body, headers: { "x-onc": "1", ...(cookie ? { cookie } : {}) } });
+  t.is((await api("GET", "/api/intent")).status, 401);
+  const wrong = await api("POST", "/api/login", JSON.stringify({ password: "nope" }));
+  t.is(wrong.status, 401);
+  t.false("set-cookie" in wrong.headers);
+  const right = await api("POST", "/api/login", JSON.stringify({ password: "right" }));
+  t.regex(right.headers["set-cookie"], new RegExp(`^onc_session=${sid}; Path=/; HttpOnly; SameSite=Strict$`));
+  t.is((await api("GET", "/api/intent", "", `onc_session=${sid}`)).status, 200);
+  t.is((await api("GET", "/api/intent", "", "onc_session=ffffffffffffffffffffffffffffffff")).status, 401);
+  t.false(calls.some((c: any) => c.argv.join(" ").includes("right")), "the password never on a command line");
+  t.regex((await api("POST", "/api/logout", "", `onc_session=${sid}`)).headers["set-cookie"] ?? "", /Max-Age=0/);
 });

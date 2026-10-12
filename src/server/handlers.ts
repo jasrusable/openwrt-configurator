@@ -2,6 +2,7 @@
 // Transport-free, so the Node server (`ui`) and CGI under uhttpd on a router
 // (`cgi`) answer every request with the same code. The UI uses relative URLs,
 // so it works wherever it is mounted: / on a Mac, /cgi-bin/onc/ on a router.
+import { Auth, sessionSetCookie } from "./auth";
 import { readApplyDiff } from "../applyDiff";
 import { measureLink } from "../meshSpeed";
 import { adopt, discover, Inspected, inspect } from "../discover";
@@ -326,14 +327,46 @@ export const meshSpeedApi =
     return json("error" in result ? 502 : 200, result);
   };
 
+const withCookie = (response: HttpResponse, sid: string | undefined): HttpResponse => ({
+  ...response,
+  headers: { ...response.headers, "set-cookie": sessionSetCookie(sid) },
+});
+
+/** POST {password}: a session (cookie) for the router's root password; or ends it. */
+const sessionApi =
+  ({ auth, platform }: { auth: Auth; platform: Pick<Platform, "sleep"> }): HttpHandler =>
+  async (request) => {
+    if (request.method !== "POST") return json(405, { error: "POST" });
+    if (request.path === "/api/logout") {
+      await auth.logout(request);
+      return withCookie(json(200, { ok: true }), undefined);
+    }
+    let password: unknown;
+    try {
+      password = JSON.parse(request.body || "{}").password;
+    } catch {
+      return json(400, { error: "The body is not JSON." });
+    }
+    const sid = typeof password === "string" && password ? await auth.login(password) : undefined;
+    if (!sid) {
+      // No memory between requests under CGI: a second per wrong guess instead.
+      await platform.sleep(1000);
+      return json(401, { error: "That is not the router's password." });
+    }
+    return withCookie(json(200, { ok: true }), sid);
+  };
+
 export const uiHandler = ({
   intentPath,
   uiRoot,
   platform,
+  auth,
 }: {
   intentPath: string;
   uiRoot: string;
   platform: Platform;
+  /** On a router: every API request must carry a session (src/server/auth.ts). None on the Mac's loopback server. */
+  auth?: Auth;
 }): HttpHandler => {
   const routes: Record<string, HttpHandler> = {
     "/api/intent": intentApi({ intentPath, files: platform }),
@@ -348,14 +381,19 @@ export const uiHandler = ({
     "/api/mesh/speed": meshSpeedApi({ intentPath, platform }),
   };
   const ui = staticFiles({ root: uiRoot, files: platform });
-  return (request) =>
+  const session = auth && sessionApi({ auth, platform });
+  return async (request) => {
+    const api = request.path.startsWith("/api/");
     // Every API request must carry a header a cross-site page cannot send
     // without a CORS preflight, which is never granted: no CSRF on any
     // transport, and no reads either (a GET of /api/status logs in to the
     // devices, which an <img> on any page could otherwise make it do).
-    request.path.startsWith("/api/") && request.headers["x-onc"] !== "1"
-      ? Promise.resolve(json(403, { error: "Missing the X-ONC header." }))
-      : (routes[request.path] ?? ui)(request);
+    if (api && request.headers["x-onc"] !== "1") return json(403, { error: "Missing the X-ONC header." });
+    if (session && (request.path === "/api/login" || request.path === "/api/logout")) return session(request);
+    // On a router, logged in: the UI's own files are no secret, the API is.
+    if (api && auth && !(await auth.check(request))) return json(401, { error: "Log in first.", login: true });
+    return (routes[request.path] ?? ui)(request);
+  };
 };
 
 /** A response in CGI's format: a Status header, the headers, then the body. */

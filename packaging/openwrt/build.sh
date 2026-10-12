@@ -4,7 +4,7 @@
 # every device.
 #
 # Usage: packaging/openwrt/build.sh <version> <out-dir> [private-key.pem]
-#   Run `npm run bundle` first. Without a key the SDK generates a throwaway
+#   Run `npm run bundle` and `node scripts/build-ui.js` first. Without a key the SDK generates a throwaway
 #   one, which is only good for testing: devices trust a feed by its key.
 set -eu
 
@@ -17,7 +17,9 @@ pkg=$root/packaging/openwrt/openwrt-configurator
 
 bundle=$root/dist/qjs/openwrt-configurator.mjs
 [ -f "$bundle" ] || { echo "No bundle at $bundle; run npm run bundle." >&2; exit 1; }
+[ -f "$root/dist/ui/index.html" ] || { echo "No web UI at $root/dist/ui; run node scripts/build-ui.js." >&2; exit 1; }
 cp "$bundle" "$pkg/files/"
+rm -rf "$pkg/files/ui" && cp -R "$root/dist/ui" "$pkg/files/ui"
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 # The SDK runs as its own user, which must be able to write here.

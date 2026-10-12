@@ -177,23 +177,45 @@ const openSsh = (target: SshTarget, host: string): Transport => {
   };
 };
 
+/**
+ * A home of its own for dbclient, whose only known host is the pinned key:
+ * dbclient reads $HOME/.ssh/known_hosts and has no option for another file,
+ * and without -y it refuses any other key (verified on 25.12.5: the match
+ * connects, a different key is refused, the real known_hosts is untouched).
+ */
+const pinnedHome = (host: string, key: { type: string; key: string }) => {
+  const home = tmpPath("pinned-home");
+  const created = spawnSync(
+    ["sh", "-c", 'umask 077 && mkdir -p "$1/.ssh" && cat > "$1/.ssh/known_hosts"', "sh", home],
+    `${host} ${key.type} ${key.key}\n`
+  );
+  if (created.code !== 0) throw new Error(`Could not pin the host key: ${created.stderr}`);
+  return home;
+};
+
 const dropbear = (target: SshTarget, host: string): Transport => {
-  // dbclient keeps its own ~/.ssh/known_hosts and accepts any new host: it
-  // cannot be made to check a given key, so it refuses one (fail closed).
-  if (target.hostKey) {
-    throw new Error("this device's SSH client cannot check a pinned host key, so an address found on the network is not tried");
-  }
+  const home = target.hostKey && pinnedHome(host, target.hostKey);
   const options = [
-    // A single -y accepts an unknown host key and records it in dbclient's
+    // Pinned: no -y, so only the key in its own home is accepted. Otherwise
+    // a single -y accepts an unknown host key and records it in dbclient's
     // own ~/.ssh/known_hosts, but still refuses a changed one.
-    "-y",
+    ...(home ? [] : ["-y"]),
     "-K",
     String(Math.max(1, Math.round(target.keepaliveInterval / 1000))),
     ...(target.privateKeyPath ? ["-i", target.privateKeyPath] : []),
     ...(target.username ? ["-l", target.username] : []),
   ];
-  const env = environment({ DROPBEAR_PASSWORD: target.password });
-  return transport((command) => ["dbclient", ...options, host, command], env);
+  const env = environment({ DROPBEAR_PASSWORD: target.password, ...(home ? { HOME: home } : {}) });
+  return {
+    ...transport((command) => ["dbclient", ...options, host, command], env),
+    ...(home
+      ? {
+          cleanup: () => {
+            spawnSync(["rm", "-rf", home]);
+          },
+        }
+      : {}),
+  };
 };
 
 export const connect = async (target: SshTarget): Promise<Session> => {
@@ -221,7 +243,7 @@ export const connect = async (target: SshTarget): Promise<Session> => {
   if (probe.code !== 0) {
     const detail = probe.stderr.trim() || "no response";
     // OpenSSH and dbclient each announce a changed key in their own words.
-    if (target.hostKey && /HOST IDENTIFICATION HAS CHANGED|Host key verification failed/i.test(detail)) {
+    if (target.hostKey && /HOST IDENTIFICATION HAS CHANGED|Host key verification failed|Host key mismatch|remove the bad entry/i.test(detail)) {
       client.cleanup?.();
       throw new Error(pinnedKeyChangedMessage(host));
     }

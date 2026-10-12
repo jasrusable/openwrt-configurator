@@ -14,9 +14,8 @@ import { Probe, runProbes } from "./deviceProbes";
 import { DeviceSchema } from "./deviceSchema";
 import { getDeviceSchema } from "./getDeviceSchema";
 import type { Intent } from "./intent/schema";
-import { parseKnownHosts } from "./knownHosts";
 import { loadOncConfig } from "./loadConfig";
-import { Located, locateEach, Neighbour, parseNeighbours } from "./locate";
+import { knownKey, Located, locateEach, Neighbour, parseNeighbours } from "./locate";
 import { ONCDeviceConfig } from "./oncConfigSchema";
 import { Platform } from "./platform";
 import { provisionableDevices, sshConnectOptions } from "./provisionConfig";
@@ -207,15 +206,7 @@ export const inspect = async ({
       try {
         const schema = await getDeviceSchema({ deviceConfig: at, ssh: session });
         const read = await runProbes(session, { hostname: hostnameProbe, macs: macsProbe });
-        const key = parseKnownHosts(
-          (() => {
-            try {
-              return platform.readTextFile(options.knownHostsFile!);
-            } catch {
-              return "";
-            }
-          })()
-        ).find((k) => k.host === address);
+        const key = knownKey(platform, options.knownHostsFile!, address);
         const role = suggestRole(schema);
         return {
           address,

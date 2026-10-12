@@ -15,6 +15,32 @@ export type Issue = { path: string; message: string };
 // CORS preflight, so it cannot make this app log in to the devices.
 const writeHeaders = { "x-onc": "1" };
 
+/**
+ * On a router the API needs a login (src/server/auth.ts): a 401 says so,
+ * and whoever listens (the app's root) shows the login page.
+ */
+const loginListeners = new Set<() => void>();
+export const onLoginNeeded = (listener: () => void) => {
+  loginListeners.add(listener);
+  return () => void loginListeners.delete(listener);
+};
+
+const call = async (url: string, init: RequestInit = {}) => {
+  const response = await fetch(url, { ...init, headers: { ...writeHeaders, ...(init.headers as Record<string, string>) } });
+  if (response.status === 401) loginListeners.forEach((listener) => listener());
+  return response;
+};
+
+/** The router's root password for a session (a cookie the browser keeps); false when wrong. */
+export const logIn = async (password: string) => {
+  const response = await call("api/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  return response.ok;
+};
+
 export class SaveError extends Error {
   constructor(message: string, readonly issues: Issue[] = []) {
     super(message);
@@ -22,14 +48,14 @@ export class SaveError extends Error {
 }
 
 export const loadIntent = async (): Promise<Intent> => {
-  const response = await fetch("api/intent", { headers: writeHeaders });
+  const response = await call("api/intent", { headers: writeHeaders });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not load the configuration.");
   return body;
 };
 
 export const saveIntent = async (intent: Intent): Promise<Intent> => {
-  const response = await fetch("api/intent", {
+  const response = await call("api/intent", {
     method: "PUT",
     headers: { "content-type": "application/json", ...writeHeaders },
     body: JSON.stringify(intent),
@@ -49,13 +75,13 @@ export type ProvisionInfo = ProvisionStatus & {
 };
 
 export const loadProvision = async (): Promise<ProvisionInfo> => {
-  const response = await fetch("api/provision", { headers: writeHeaders });
+  const response = await call("api/provision", { headers: writeHeaders });
   if (!response.ok) throw new Error("Could not load the apply status.");
   return response.json();
 };
 
 export const startProvision = async () => {
-  const response = await fetch("api/provision", {
+  const response = await call("api/provision", {
     method: "POST",
     headers: writeHeaders,
   });
@@ -73,7 +99,7 @@ export type Devices = {
 };
 
 export const loadDevices = async (): Promise<Devices> => {
-  const response = await fetch("api/devices", { headers: writeHeaders });
+  const response = await call("api/devices", { headers: writeHeaders });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not load what the devices are.");
   return body;
@@ -81,21 +107,21 @@ export const loadDevices = async (): Promise<Devices> => {
 
 /** Reads the stale devices (read-only); the server decides which, and how often. */
 export const refreshDevices = async (): Promise<Devices> => {
-  const response = await fetch("api/devices", { method: "POST", headers: writeHeaders });
+  const response = await call("api/devices", { method: "POST", headers: writeHeaders });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not read the devices.");
   return body;
 };
 
 export const loadApplyDiff = async (): Promise<DeviceDiff[]> => {
-  const response = await fetch("api/apply/diff", { headers: writeHeaders });
+  const response = await call("api/apply/diff", { headers: writeHeaders });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not work out the changes.");
   return body.devices;
 };
 
 export const loadNetworkStatus = async (): Promise<NetworkStatus> => {
-  const response = await fetch("api/status", { headers: writeHeaders });
+  const response = await call("api/status", { headers: writeHeaders });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not read the network's status.");
   return body;
@@ -103,21 +129,21 @@ export const loadNetworkStatus = async (): Promise<NetworkStatus> => {
 
 /** This app's own public key, from beside its saved SSH key; null when there is none. */
 export const loadOwnKey = async (): Promise<string | null> => {
-  const response = await fetch("api/admin/key", { headers: writeHeaders });
+  const response = await call("api/admin/key", { headers: writeHeaders });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not read this app's key.");
   return body.publicKey;
 };
 
 export const loadCandidates = async (): Promise<{ candidates: Candidate[]; error?: string }> => {
-  const response = await fetch("api/discover", { headers: writeHeaders });
+  const response = await call("api/discover", { headers: writeHeaders });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not look at the network.");
   return body;
 };
 
 const post = async <T>(path: string, input: unknown, failure: string): Promise<T> => {
-  const response = await fetch(path, {
+  const response = await call(path, {
     method: "POST",
     headers: { "content-type": "application/json", ...writeHeaders },
     body: JSON.stringify(input),
@@ -137,7 +163,7 @@ export const adoptDevice = (address: string, name: string) =>
 
 /** A mesh link's speed, measured now from one node to the other (sends test traffic). */
 export const measureMeshLink = async (link: { from: string; to: string }): Promise<{ mbps: number }> => {
-  const response = await fetch("api/mesh/speed", {
+  const response = await call("api/mesh/speed", {
     method: "POST",
     headers: { "content-type": "application/json", ...writeHeaders },
     body: JSON.stringify(link),

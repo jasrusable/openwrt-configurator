@@ -6,6 +6,8 @@ import {
   Center,
   Group,
   NavLink,
+  Paper,
+  PasswordInput,
   Skeleton,
   Stack,
   Text,
@@ -13,7 +15,9 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { IconTopologyStar3 } from "@tabler/icons-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { logIn, onLoginNeeded } from "./data/api";
 import {
   createHashRouter,
   Navigate,
@@ -204,8 +208,68 @@ const Loading = () => (
   </AppShell>
 );
 
+/** The router's root password, when the app runs there (src/server/auth.ts). */
+const LoginPage = ({ onDone }: { onDone: () => void }) => {
+  const [password, setPassword] = useState("");
+  const [wrong, setWrong] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    setBusy(true);
+    const ok = await logIn(password).catch(() => false);
+    setBusy(false);
+    if (ok) onDone();
+    else setWrong(true);
+  };
+  return (
+    <Center h="100vh" bg="var(--onc-page)">
+      <Paper className="onc-card" p="xl" w={340}>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+        >
+          <Stack gap="md">
+            <Group gap={10}>
+              <AppIcon icon={IconTopologyStar3} color="indigo" />
+              <Text fw={600}>Your network</Text>
+            </Group>
+            <PasswordInput
+              label="Router password"
+              description="The router's root password, as for LuCI."
+              value={password}
+              onChange={(e) => {
+                setPassword(e.currentTarget.value);
+                setWrong(false);
+              }}
+              error={wrong && "That is not the router's password."}
+              autoFocus
+            />
+            <Button type="submit" loading={busy} disabled={!password}>
+              Log in
+            </Button>
+          </Stack>
+        </form>
+      </Paper>
+    </Center>
+  );
+};
+
 export const App = () => {
+  const queryClient = useQueryClient();
+  const [loggedOut, setLoggedOut] = useState(false);
+  useEffect(() => onLoginNeeded(() => setLoggedOut(true)), []);
   const intent = useIntent();
+  if (loggedOut) {
+    return (
+      <LoginPage
+        onDone={() => {
+          setLoggedOut(false);
+          void queryClient.resetQueries();
+        }}
+      />
+    );
+  }
   if (intent.isPending) return <Loading />;
   if (intent.isError) {
     return (

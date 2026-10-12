@@ -1,3 +1,4 @@
+import { rpcdAuth } from "./server/auth";
 import { AppliedWithProblems, appliedWithProblemsExit } from "./devicePhases";
 import { assertSupportedRelease } from "./release";
 import { DeviceBuildPlan } from "./getBuildPlan";
@@ -226,12 +227,14 @@ export const main = async ({
         intentPath,
         uiRoot: options.uiDir,
         platform,
+        // On a router, reachable from the network: log in with its root password.
+        auth: rpcdAuth(platform),
       })({
         method: platform.env("REQUEST_METHOD") || "GET",
         path: platform.env("PATH_INFO") || "/",
         body: length > 0 ? platform.readStdin() : "",
         // CGI passes request headers as HTTP_<NAME> variables.
-        headers: { "x-onc": platform.env("HTTP_X_ONC") ?? "" },
+        headers: { "x-onc": platform.env("HTTP_X_ONC") ?? "", cookie: platform.env("HTTP_COOKIE") ?? "" },
       });
       console.log(cgiResponse(response));
       // Answered: a timer still pending (a device read's time limit) must not

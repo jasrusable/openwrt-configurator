@@ -112,14 +112,21 @@ const readKnownHosts = (platform: Platform, file: string) => {
 
 type HostKey = { type: string; key: string };
 
-/** The key the shared known_hosts holds for `host`, if any. */
-const knownKey = (platform: Platform, file: string, host: string): HostKey | undefined => {
-  try {
-    const found = parseKnownHosts(readKnownHosts(platform, file)).find((k) => k.host === host);
-    return found && { type: found.type, key: found.key };
-  } catch {
-    return undefined;
+/**
+ * The key SSH trusted for `host` on first use, if any: in the shared
+ * known_hosts (Node, OpenSSH), else in dbclient's own ~/.ssh/known_hosts
+ * (on a router, which cannot be pointed at another file).
+ */
+export const knownKey = (platform: Platform, file: string, host: string): HostKey | undefined => {
+  for (const path of [file, `${platform.homedir()}/.ssh/known_hosts`]) {
+    try {
+      const found = parseKnownHosts(readKnownHosts(platform, path)).find((k) => k.host === host);
+      if (found) return { type: found.type, key: found.key };
+    } catch {
+      // Unreadable: try the next.
+    }
   }
+  return undefined;
 };
 
 /** An IPv4 or IPv6 address, not a name a DHCP client could claim. */

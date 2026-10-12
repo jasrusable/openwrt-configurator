@@ -92,6 +92,9 @@ jobs:
 
       - run: npm run bundle
 
+      # The web UI ships in the package (served at /cgi-bin/onc/).
+      - run: node scripts/build-ui.js
+
       - name: Build the package and signed index
         env:
           FEED_KEY: ${{ secrets.OPENWRT_FEED_KEY }}

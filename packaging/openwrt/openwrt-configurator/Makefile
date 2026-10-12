@@ -27,11 +27,16 @@ endef
 define Package/openwrt-configurator/description
   Describe a whole network (devices, packages, UCI config and files) in one
   JSON file and provision it over SSH, with a commit-confirm rollback. Runs on
-  the device itself, provisioning itself and the other devices it can reach.
+  the device itself, provisioning itself and the other devices it can reach,
+  with its web UI at /cgi-bin/onc/ (log in with the root password).
   build-images additionally needs curl.
 endef
 
 define Build/Compile
+endef
+
+define Package/openwrt-configurator/conffiles
+/etc/onc/
 endef
 
 define Package/openwrt-configurator/install
@@ -39,6 +44,12 @@ define Package/openwrt-configurator/install
 	$(INSTALL_DATA) ./files/openwrt-configurator.mjs $(1)/usr/share/openwrt-configurator/
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) ./files/openwrt-configurator $(1)/usr/bin/
+	# The web UI, served by uhttpd at /cgi-bin/onc/ behind a login (the root password).
+	$(INSTALL_DIR) $(1)/usr/share/openwrt-configurator/ui
+	$(CP) ./files/ui/. $(1)/usr/share/openwrt-configurator/ui/
+	$(INSTALL_DIR) $(1)/www/cgi-bin
+	$(INSTALL_BIN) ./files/onc.cgi $(1)/www/cgi-bin/onc
+	$(INSTALL_DIR) $(1)/etc/onc
 endef
 
 $(eval $(call BuildPackage,openwrt-configurator))
