@@ -1,0 +1,11 @@
+{
+	"model": {
+		"id": "orbstack,virt"
+	},
+	"network": {
+		"lan": {
+			"device": "eth0",
+			"protocol": "static"
+		}
+	}
+}

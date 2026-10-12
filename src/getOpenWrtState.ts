@@ -57,6 +57,19 @@ export const getOpenWrtState = ({
     })
     .flatMap((a) => a.configs);
 
+  // One entry per service: running if any declaration says so.
+  const services = (oncConfig.services || [])
+    .filter((service) =>
+      conditionMatches({ condition: service[".if"], deviceConfig, deviceSchema })
+    )
+    .reduce<{ name: string; running: boolean }[]>(
+      (acc, { name, running }) =>
+        acc.some((s) => s.name === name)
+          ? acc.map((s) => (s.name === name ? { name, running: s.running || !!running } : s))
+          : [...acc, { name, running: !!running }],
+      []
+    );
+
   // Resolve files (conditional via `.if`), de-duped by path with last-one-wins.
   const filesMap = new Map<
     string,
@@ -92,6 +105,7 @@ export const getOpenWrtState = ({
     packagesToInstall,
     packagesToUninstall,
     configsToNotReset,
+    services,
     files,
   };
 

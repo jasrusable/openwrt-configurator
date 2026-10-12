@@ -83,3 +83,17 @@ test("a device that cannot be reached keeps its facts, says why, and rests befor
   await refreshStale({ intentPath: path, platform: offline, now: () => now + 1000 });
   t.is(attempts, 2, "not tried again so soon");
 });
+
+test("facts in an older format are read again, but keep where the device is and its key", (t) => {
+  const path = intentFile();
+  writeFacts(nodePlatform, path, { hostname: "home-ap-1", readAt: 5, schema, address: "10.0.0.9", hostKey: { type: "ssh-ed25519", key: "K" } });
+  t.is(readFacts(nodePlatform, path, ["home-ap-1"])["home-ap-1"]?.readAt, 5);
+  const file = `${path}.state/devices/home-ap-1.json`;
+  const { format: _, ...older } = JSON.parse(readFileSync(file, "utf8"));
+  writeFileSync(file, JSON.stringify(older));
+  t.like(readFacts(nodePlatform, path, ["home-ap-1"])["home-ap-1"], {
+    readAt: 0,
+    address: "10.0.0.9",
+    hostKey: { type: "ssh-ed25519", key: "K" },
+  });
+});

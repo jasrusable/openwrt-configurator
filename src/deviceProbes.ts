@@ -7,12 +7,10 @@
 //
 // The script protocol (execScript's per-command markers) and the transport's
 // exit-status marker are not here: they wrap commands rather than ask things.
-import { z } from "zod";
-import { allHtModes, wifiBands, wifiTypes } from "./openWrtValues";
 import { ExecResult, Session } from "./platform";
 import { shellQuote } from "./shell";
 import { stagedScriptPath } from "./execScript";
-import { parseJson, parseSchema } from "./utils";
+import { parseJson } from "./utils";
 import { parseUciExport, UNREADABLE } from "./uci";
 
 export type Probe<T> = { command: string; parse: (result: ExecResult) => T };
@@ -71,71 +69,33 @@ const lines = (text: string) =>
 
 // --- what the device is ------------------------------------------------------
 
-export const boardJsonSchema = z.object({
-  model: z.object({
-    id: z.string(),
-    /** For people, e.g. "FriendlyElec NanoPi R6S". */
-    name: z.string().optional(),
-  }),
-  switch: z
-    .record(
-      z.object({
-        enable: z.boolean(),
-        reset: z.boolean(),
-        ports: z.array(
-          z.object({
-            num: z.number(),
-            role: z.enum(["lan", "wan"]).optional(),
-            device: z.string().optional(),
-          })
-        ),
-      })
-    )
-    .optional(),
-  network: z.object({
-    lan: z.object({
-      ports: z.array(z.string()).optional(),
-      device: z.string().optional(),
-      protocol: z.string(),
-    }),
-    wan: z
-      .object({
-        device: z.string().optional(),
-        protocol: z.string(),
-        ports: z.array(z.string()).optional(),
-      })
-      .optional(),
-  }),
-});
-
-export const boardJson: Probe<z.infer<typeof boardJsonSchema>> = {
+/**
+ * /etc/board.json as it is: its layout differs across targets and releases,
+ * so it is interpreted by the tolerant parser in src/facts/board.ts, not here.
+ */
+export const boardJson: Probe<{ model?: { id?: string; name?: string } } & Record<string, unknown>> = {
   command: "cat /etc/board.json",
   parse: ({ stdout, code }) => {
     if (code !== 0 || !stdout) {
       throw new Error("Failed to read /etc/board.json from the device.");
     }
-    return parseSchema(boardJsonSchema, parseJson(stdout, "/etc/board.json"));
+    return parseJson(stdout, "/etc/board.json") as any;
   },
 };
 
-const wirelessConfigSchema = z.object({
-  values: z.record(
-    z.object({
-      ".type": z.enum(["wifi-device"]),
-      ".name": z.string(),
-      type: z.enum(wifiTypes),
-      path: z.string(),
-      channel: z.string(),
-      band: z.enum(wifiBands),
-      htmode: z.enum(allHtModes).optional(),
-    })
-  ),
-});
+/** The model, board and release, from procd: OpenWrt's stable JSON for them. */
+export const systemBoard: Probe<unknown> = {
+  command: "ubus call system board",
+  parse: ({ stdout, code }) => {
+    if (code !== 0 || !stdout) throw new Error("Failed to read ubus system board from the device.");
+    return parseJson(stdout, "ubus call system board");
+  },
+};
 
-export const radios = {
+/** The wifi-device sections, for a device whose board.json has no `wlan`. */
+export const radios: Probe<unknown> = {
   command: `ubus call uci get '{"config": "wireless", "type": "wifi-device"}' || echo '{"values":{}}'`,
-  parse: ({ stdout }: ExecResult) =>
-    Object.values(parseSchema(wirelessConfigSchema, parseJson(stdout)).values),
+  parse: ({ stdout }) => parseJson(stdout || '{"values":{}}'),
 };
 
 /**
@@ -147,21 +107,6 @@ export const radios = {
 export const uciConfigs: Probe<ReturnType<typeof parseUciExport>> = {
   command: `for f in /etc/config/*; do [ -f "$f" ] || continue; c="\${f##*/}"; case "$c" in *[!A-Za-z0-9_-]*) continue ;; esac; uci export "$c" 2>/dev/null || printf '\\n${UNREADABLE} %s\\n' "$c"; done`,
   parse: ({ stdout }) => parseUciExport(stdout),
-};
-
-export const release: Probe<string> = {
-  command: "cat /etc/openwrt_release",
-  parse: ({ stdout }) => {
-    const line = stdout
-      .split("\n")
-      .find((l) => l.startsWith("DISTRIB_RELEASE"));
-    if (!line) {
-      throw new Error(
-        "Failed to determine device version in /etc/openwrt_release"
-      );
-    }
-    return line.split("=")[1].replace(/'/g, "");
-  },
 };
 
 // --- what is on it -----------------------------------------------------------
@@ -277,6 +222,29 @@ export const servicesSettled = (maxSeconds: number): Probe<void> => ({
     "done",
   ].join("\n"),
   parse: () => undefined,
+});
+
+/**
+ * Which of `names` have no running process, as procd sees it ("missing": no
+ * init script at all). Only the counts leave the device: a service's
+ * command line can carry config values.
+ */
+export const notRunning = (names: string[]): Probe<{ name: string; missing: boolean }[]> => ({
+  command: names.length
+    ? [
+        `for s in ${names.map(shellQuote).join(" ")}; do`,
+        '  [ -x "/etc/init.d/$s" ] || { echo "$s -"; continue; }',
+        `  printf '%s %s\\n' "$s" "$(ubus call service list '{"name":"'"$s"'"}' 2>/dev/null | jsonfilter -e '@.*.instances.*.running' 2>/dev/null | grep -c true)"`,
+        "done",
+      ].join("\n")
+    : "true",
+  parse: ({ stdout }) =>
+    lines(stdout).flatMap((line) => {
+      const [name, count] = line.split(" ");
+      return names.includes(name) && (count === "-" || count === "0")
+        ? [{ name, missing: count === "-" }]
+        : [];
+    }),
 });
 
 /**

@@ -6,7 +6,6 @@ import {
   installedPackages,
   managedFiles,
   pendingChanges,
-  release,
   runProbe,
   runProbes,
 } from "../../deviceProbes";
@@ -64,14 +63,10 @@ test("parsers read real device output", (t) => {
       result(
         '{"model":{"id":"friendlyarm,nanopi-r6s"},"network":{"lan":{"protocol":"static"}}}'
       )
-    ).model.id,
+    ).model?.id,
     "friendlyarm,nanopi-r6s"
   );
   t.throws(() => boardJson.parse(result("", 1)), { message: /board\.json/ });
-  t.is(
-    release.parse(result("DISTRIB_ID='OpenWrt'\nDISTRIB_RELEASE='25.12.5'\n")),
-    "25.12.5"
-  );
   t.deepEqual(installedPackages.parse(result("busybox\ndropbear\n")), [
     "busybox",
     "dropbear",

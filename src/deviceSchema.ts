@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { allHtModes, wifiBands, wifiTypes } from "./openWrtValues";
+import { wifiBands, wifiTypes } from "./openWrtValues";
 
 export const deviceSchemaSchema = z.object({
   name: z.string(),
@@ -21,12 +21,20 @@ export const deviceSchemaSchema = z.object({
       z.object({
         name: z.string(),
         type: z.enum(wifiTypes),
-        path: z.string(),
+        /** How OpenWrt finds it: by path, or by phy when the phy has its own name. */
+        path: z.string().optional(),
+        phy: z.string().optional(),
+        /** Which radio of a wiphy several share. */
+        radio: z.number().optional(),
         band: z.enum(wifiBands),
-        htmodes: z.array(z.enum(allHtModes)).optional(),
+        /** The modes it supports, as board.json lists them (HE80, VHT160, …). */
+        htmodes: z.array(z.string()).optional(),
+        max_width: z.number().optional(),
       })
     )
     .optional(),
+  /** What the device has but this app could not use, in words. */
+  skipped: z.array(z.string()).optional(),
 });
 
 export type DeviceSchema = z.infer<typeof deviceSchemaSchema>;

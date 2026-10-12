@@ -10,6 +10,8 @@ export type Fragment = {
   devices?: Section[];
   package_profiles?: { ".if": string; packages: string[] }[];
   configs_to_not_reset?: { ".if": string; configs: string[] }[];
+  /** Services kept enabled and started; `running` ones must have a process. */
+  services?: { ".if": string; name: string; running?: boolean }[];
   /** config -> section type -> sections */
   config?: Record<string, Record<string, Section[]>>;
   /** Files a package reads that are not UCI, e.g. avahi's config. */
@@ -58,6 +60,7 @@ export const merge = (fragments: Fragment[]) =>
         ...acc.configs_to_not_reset,
         ...(fragment.configs_to_not_reset || []),
       ],
+      services: [...acc.services, ...(fragment.services || [])],
       files: [...acc.files, ...(fragment.files || [])],
       config: Object.entries(fragment.config || {}).reduce(
         (config, [configKey, types]) => ({
@@ -73,5 +76,5 @@ export const merge = (fragments: Fragment[]) =>
         acc.config
       ),
     }),
-    { devices: [], package_profiles: [], configs_to_not_reset: [], files: [], config: {} }
+    { devices: [], package_profiles: [], configs_to_not_reset: [], services: [], files: [], config: {} }
   );

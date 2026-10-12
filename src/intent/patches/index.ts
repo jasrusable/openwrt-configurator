@@ -6,8 +6,9 @@ import { odhcpdRaRestart } from "./odhcpd-ra-restart";
 import { Intent } from "../schema";
 import { applyPatches, patchesFor } from "./patch";
 import { r6sPacketSteering } from "./r6s-packet-steering";
+import { ubihealthdConfig } from "./ubihealthd-config";
 
-export const patches = [r6sPacketSteering, odhcpdRaRestart];
+export const patches = [r6sPacketSteering, odhcpdRaRestart, ubihealthdConfig];
 
 export const patchesFeature = applyPatches(patches);
 

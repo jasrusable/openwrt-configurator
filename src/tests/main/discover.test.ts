@@ -70,8 +70,8 @@ const stock = (accepts: { key: boolean }) => {
           ? JSON.stringify({ model: { id: "zyxel,nwa50ax-pro", name: "Zyxel NWA50AX Pro" }, network: { lan: { ports: ["lan1"], protocol: "static" } } })
           : part.includes("ubus call uci get")
           ? JSON.stringify({ values: { radio0: { ".name": "radio0", ".type": "wifi-device", type: "mac80211", path: "p", channel: "auto", band: "5g" } } })
-          : part.includes("openwrt_release")
-          ? "DISTRIB_RELEASE='25.12.5'"
+          : part.includes("ubus call system board")
+          ? JSON.stringify({ board_name: "zyxel,nwa50ax-pro", model: "Zyxel NWA50AX Pro", release: { version: "25.12.5" } })
           : part.includes("hostname")
           ? "OpenWrt"
           : part.includes("/sys/class/net")

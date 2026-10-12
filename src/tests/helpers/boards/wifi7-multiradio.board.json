@@ -1,0 +1,131 @@
+{
+  "_note": "Written to the layout OpenWrt's wifi-detect writes for one wiphy with several radios (info.radios, read by mac80211.uc), not captured from a device.",
+  "model": {
+    "id": "bananapi,bpi-r4",
+    "name": "Bananapi BPI-R4"
+  },
+  "network": {
+    "lan": {
+      "ports": [
+        "lan1",
+        "lan2",
+        "lan3"
+      ],
+      "protocol": "static"
+    },
+    "wan": {
+      "device": "wan",
+      "protocol": "dhcp"
+    }
+  },
+  "wlan": {
+    "defaults": {
+      "country": "US"
+    },
+    "phy0": {
+      "path": "platform/soc/11300000.pcie/pci0000:00/0000:00:00.0/0000:01:00.0",
+      "info": {
+        "bands": {
+          "2G": {
+            "ht": true,
+            "he": true,
+            "eht": true,
+            "max_width": 40,
+            "modes": [
+              "NOHT",
+              "HT20",
+              "HE20",
+              "EHT20",
+              "HT40",
+              "HE40",
+              "EHT40"
+            ]
+          },
+          "5G": {
+            "ht": true,
+            "vht": true,
+            "he": true,
+            "eht": true,
+            "max_width": 160,
+            "modes": [
+              "NOHT",
+              "HT20",
+              "VHT20",
+              "HE20",
+              "EHT20",
+              "HT40",
+              "VHT40",
+              "HE40",
+              "EHT40",
+              "VHT80",
+              "HE80",
+              "EHT80",
+              "VHT160",
+              "HE160",
+              "EHT160"
+            ]
+          },
+          "6G": {
+            "he": true,
+            "eht": true,
+            "max_width": 320,
+            "modes": [
+              "NOHT",
+              "HE20",
+              "EHT20",
+              "HE40",
+              "EHT40",
+              "HE80",
+              "EHT80",
+              "HE160",
+              "EHT160",
+              "EHT320"
+            ]
+          },
+          "60G": {
+            "max_width": 2160,
+            "modes": []
+          }
+        },
+        "radios": [
+          {
+            "index": 0,
+            "bands": {
+              "2G": {}
+            }
+          },
+          {
+            "index": 1,
+            "bands": {
+              "5G": {}
+            }
+          },
+          {
+            "index": 2,
+            "bands": {
+              "6G": {}
+            }
+          }
+        ]
+      }
+    },
+    "wiphy-odd": {
+      "info": {
+        "bands": {
+          "5G": {
+            "vht": true,
+            "max_width": 80,
+            "modes": [
+              "NOHT",
+              "HT20",
+              "VHT20",
+              "HT40",
+              "VHT40",
+              "VHT80"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

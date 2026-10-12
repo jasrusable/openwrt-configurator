@@ -88,6 +88,8 @@ export type OpenWrtState = {
    * `<config>.<section type>`. Everything else on the device is wiped.
    */
   configsToNotReset?: string[];
+  /** Services to keep enabled and started; `running` ones are checked. */
+  services?: { name: string; running: boolean }[];
   files?: {
     path: string;
     content: string;

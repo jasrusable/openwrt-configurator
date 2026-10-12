@@ -21,9 +21,14 @@ import {
   ProvisionFailure,
   rollBackNow,
   runPostReloadHooks,
+  checkServices,
   waitForRecovery,
 } from "./devicePhases";
 import { Session } from "./platform";
+
+/** Services that should be running and are not: said plainly, not fatal. */
+const warnAbout = (problems: string[]) =>
+  problems.forEach((problem) => console.warn(`Warning: ${problem}.`));
 
 /**
  * Devices reached through others go first, then the workstation's gateway,
@@ -129,6 +134,7 @@ export const provisionNetwork = async ({
       // --no-confirm asks for; the hooks still cannot fail silently.
       try {
         await runPostReloadHooks(run, run.ssh);
+        warnAbout(await checkServices(run, run.ssh));
       } finally {
         run.ssh.dispose();
       }
@@ -206,6 +212,7 @@ export const provisionNetwork = async ({
   for (const { run, session } of confirmed) {
     try {
       await runPostReloadHooks(run, session);
+      warnAbout(await checkServices(run, session));
     } catch (e) {
       hookFailures.push((e as Error).message);
     } finally {

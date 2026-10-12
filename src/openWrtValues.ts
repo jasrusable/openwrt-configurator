@@ -47,4 +47,9 @@ export const allHtModes = [
   "HE40",
   "HE80",
   "HE160",
+  "EHT20",
+  "EHT40",
+  "EHT80",
+  "EHT160",
+  "EHT320",
 ] as const;

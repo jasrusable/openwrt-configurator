@@ -1,0 +1,44 @@
+{
+  "model": {
+    "id": "friendlyarm,nanopi-r6s",
+    "name": "FriendlyElec NanoPi R6S"
+  },
+  "led": {
+    "wan": {
+      "name": "WAN",
+      "sysfs": "green:wan",
+      "type": "netdev",
+      "device": "eth1",
+      "mode": "link tx rx"
+    },
+    "lan1": {
+      "name": "LAN1",
+      "sysfs": "green:lan-1",
+      "type": "netdev",
+      "device": "eth2",
+      "mode": "link tx rx"
+    },
+    "lan2": {
+      "name": "LAN2",
+      "sysfs": "green:lan-2",
+      "type": "netdev",
+      "device": "eth0",
+      "mode": "link tx rx"
+    }
+  },
+  "network": {
+    "lan": {
+      "ports": [
+        "eth0",
+        "eth2"
+      ],
+      "protocol": "static",
+      "macaddr": "02:00:00:00:00:01"
+    },
+    "wan": {
+      "device": "eth1",
+      "protocol": "dhcp",
+      "macaddr": "02:00:00:00:00:02"
+    }
+  }
+}

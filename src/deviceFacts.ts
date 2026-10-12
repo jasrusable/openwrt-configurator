@@ -42,13 +42,23 @@ export const listSeen = (files: Pick<Platform, "readTextFile">, intentPath: stri
   }
 };
 
+/**
+ * What facts files hold. Bumped when what is read from a device changes
+ * (2: radios from board.json, with their modes), so older facts are read
+ * again; their address and host key are kept meanwhile, to find the device.
+ */
+const factsFormat = 2;
+
 export const writeFacts = (
   files: Pick<Platform, "mkdirp" | "writeTextFile" | "readTextFile">,
   intentPath: string,
   facts: DeviceFacts
 ) => {
   files.mkdirp(dir(intentPath));
-  files.writeTextFile(file(intentPath, facts.hostname), JSON.stringify(facts, null, 2) + "\n");
+  files.writeTextFile(
+    file(intentPath, facts.hostname),
+    JSON.stringify({ format: factsFormat, ...facts }, null, 2) + "\n"
+  );
   const seen = listSeen(files, intentPath);
   if (!seen.includes(facts.hostname)) {
     files.writeTextFile(seenFile(intentPath), JSON.stringify([...seen, facts.hostname]));
@@ -65,7 +75,7 @@ export const readFacts = (
     hostnames.map((hostname) => {
       try {
         const path = file(intentPath, hostname);
-        const stored = parseJson(files.readTextFile(path), path) as DeviceFacts;
+        const stored = parseJson(files.readTextFile(path), path) as DeviceFacts & { format?: number };
         const schema = deviceSchemaSchema.safeParse(stored?.schema);
         if (!schema.success || typeof stored.readAt !== "number") return [hostname, undefined];
         const hostKey = stored.hostKey;
@@ -73,7 +83,8 @@ export const readFacts = (
           hostname,
           {
             hostname,
-            readAt: stored.readAt,
+            // An older format: as if never read, so it is read again.
+            readAt: stored.format === factsFormat ? stored.readAt : 0,
             schema: schema.data,
             ...(typeof stored.address === "string" ? { address: stored.address } : {}),
             ...(Array.isArray(stored.macs) ? { macs: stored.macs.filter((m) => typeof m === "string") } : {}),

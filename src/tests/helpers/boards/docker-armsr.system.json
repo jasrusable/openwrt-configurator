@@ -1,0 +1,15 @@
+{
+	"kernel": "7.0.14-orbstack-00380-ga7e0a2dc9535",
+	"hostname": "OpenWrt",
+	"system": "ARMv8 Processor rev 0",
+	"board_name": "orbstack,virt",
+	"release": {
+		"distribution": "OpenWrt",
+		"version": "25.12.5",
+		"firmware_url": "https://downloads.openwrt.org/",
+		"revision": "r33051-f5dae5ece4",
+		"target": "armsr/armv8",
+		"description": "OpenWrt 25.12.5 r33051-f5dae5ece4",
+		"builddate": "1782737960"
+	}
+}

@@ -34,6 +34,7 @@ export type Patch = {
     packages?: string[];
     /** configs_to_not_reset entries, like "?ubihealthd.*". */
     keeps?: string[];
+    services?: Omit<NonNullable<Fragment["services"]>[number], ".if">[];
   };
 };
 
@@ -67,7 +68,7 @@ export const applyPatches = (patches: Patch[]): Feature => (intent) =>
   patches.filter(needed(intent)).reduce<Fragment>(
     (acc, patch) => {
       const when = targetCondition(patch.target);
-      const { files = [], config = {}, packages = [], keeps = [] } = patch.apply(intent);
+      const { files = [], config = {}, packages = [], keeps = [], services = [] } = patch.apply(intent);
       return {
         files: [...(acc.files ?? []), ...files.map((f) => ({ ...f, ".if": when }))],
         package_profiles: [
@@ -78,6 +79,7 @@ export const applyPatches = (patches: Patch[]): Feature => (intent) =>
           ...(acc.configs_to_not_reset ?? []),
           ...(keeps.length ? [{ ".if": when, configs: keeps }] : []),
         ],
+        services: [...(acc.services ?? []), ...services.map((s) => ({ ...s, ".if": when }))],
         config: Object.entries(config).reduce(
           (merged, [key, types]) => ({
             ...merged,
@@ -96,7 +98,7 @@ export const applyPatches = (patches: Patch[]): Feature => (intent) =>
         ),
       };
     },
-    { files: [], package_profiles: [], configs_to_not_reset: [], config: {} }
+    { files: [], package_profiles: [], configs_to_not_reset: [], services: [], config: {} }
   );
 
 /**

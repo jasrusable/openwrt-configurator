@@ -1,3 +1,4 @@
+import { resolveHtmode } from "./radioModes";
 import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
 import { OpenWrtConfig, openWrtConfigSchema } from "./openWrtConfigSchema";
@@ -260,7 +261,9 @@ export const getOpenWrtConfig = ({
         channel: wifiDevice?.channel || defaultChannels[radio.band],
         type: radio.type,
         band: radio.band,
-        path: radio.path,
+        ...(radio.path ? { path: radio.path } : { phy: radio.phy }),
+        ...(radio.radio !== undefined ? { radio: radio.radio } : {}),
+        htmode: resolveHtmode(wifiDevice?.htmode, radio.htmodes),
       },
     ];
   }, []);
@@ -268,7 +271,7 @@ export const getOpenWrtConfig = ({
   const { wifiInterfaces, wifiStations } = (
     resolvedOncConfig.wireless?.["wifi-iface"] || []
   ).reduce(
-    (acc, { device, stations, ...wifiIface }, wifiIfaceIndex) => {
+    (acc, { device, stations, ".name": base, ...wifiIface }, wifiIfaceIndex) => {
       const radioDeviceNames = wifiDevices.map((device) => device[".name"]);
 
       // A radio the config declares for a band this device does not have
@@ -290,7 +293,10 @@ export const getOpenWrtConfig = ({
 
       const interfaces = devices.map((deviceName, deviceIndex) => {
         return {
-          ".name": `wifinet${wifiIfaceIndex}${deviceIndex}`,
+          // A named interface is one per radio: the radio's name is added.
+          ".name": base
+            ? `${base}_${sanitizeName(deviceName)}`
+            : `wifinet${wifiIfaceIndex}${deviceIndex}`,
           device: deviceName,
           ...wifiIface,
         };
@@ -300,7 +306,9 @@ export const getOpenWrtConfig = ({
       // iface must be set: an empty wifi-station.iface matches every SSID.
       const stationSections = interfaces.flatMap((iface, deviceIndex) =>
         (stations || []).map((station, stationIndex) => ({
-          ".name": `wifistation${wifiIfaceIndex}${deviceIndex}${stationIndex}`,
+          ".name": base
+            ? `${iface[".name"]}_key${stationIndex}`
+            : `wifistation${wifiIfaceIndex}${deviceIndex}${stationIndex}`,
           iface: iface[".name"],
           key: station.key,
           mac: "00:00:00:00:00:00",
@@ -325,6 +333,21 @@ export const getOpenWrtConfig = ({
       },
     }),
   };
+
+  // Two sections of one name would be merged by uci batch, silently.
+  Object.entries(final as Record<string, Record<string, { ".name": string }[]>>).forEach(
+    ([configKey, types]) => {
+      const names = Object.values(types || {}).flatMap((sections) =>
+        (sections || []).map((section) => section[".name"])
+      );
+      const repeated = names.filter((name, i) => names.indexOf(name) !== i);
+      if (repeated.length > 0) {
+        throw new Error(
+          `${configKey}: more than one section named ${[...new Set(repeated)].join(", ")}`
+        );
+      }
+    }
+  );
 
   const openWrtConfig = parseSchema(openWrtConfigSchema, final);
 

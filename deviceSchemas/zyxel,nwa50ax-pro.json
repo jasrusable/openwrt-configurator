@@ -13,13 +13,35 @@
       "name": "radio0",
       "type": "mac80211",
       "path": "platform/soc/18000000.wifi",
-      "band": "2g"
+      "band": "2g",
+      "htmodes": [
+        "NOHT",
+        "HT20",
+        "HE20",
+        "HT40",
+        "HE40"
+      ],
+      "max_width": 40
     },
     {
       "name": "radio1",
       "type": "mac80211",
       "path": "platform/soc/18000000.wifi+1",
-      "band": "5g"
+      "band": "5g",
+      "htmodes": [
+        "NOHT",
+        "HT20",
+        "VHT20",
+        "HE20",
+        "HT40",
+        "VHT40",
+        "HE40",
+        "VHT80",
+        "HE80",
+        "VHT160",
+        "HE160"
+      ],
+      "max_width": 160
     }
   ]
 }

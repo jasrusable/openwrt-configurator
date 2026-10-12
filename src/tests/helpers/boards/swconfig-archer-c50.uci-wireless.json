@@ -1,0 +1,22 @@
+{
+  "values": {
+    "radio0": {
+      ".type": "wifi-device",
+      ".name": "radio0",
+      "type": "mac80211",
+      "path": "platform/10300000.wmac",
+      "channel": "1",
+      "band": "2g",
+      "htmode": "HT20"
+    },
+    "radio1": {
+      ".type": "wifi-device",
+      ".name": "radio1",
+      "type": "mac80211",
+      "path": "pci0000:00/0000:00:00.0/0000:01:00.0",
+      "channel": "36",
+      "band": "5g",
+      "htmode": "VHT80"
+    }
+  }
+}

@@ -3,6 +3,7 @@
 // Radios are matched to bands on the device, so a band an access point lacks
 // (6 GHz on most) is skipped there; the intent only pins channels per device.
 import { Feature, mainNetwork, onAccessPoints, onDevice } from "../fragment";
+import { uniqueNames } from "../names";
 import { Band, Intent } from "../schema";
 import {
   bandSteering,
@@ -59,6 +60,7 @@ export const wifi: Feature = (intent) => {
     ...section,
   });
   const enabled = radios.filter(({ band }) => intent.radios[band].enabled);
+  const ssidNames = uniqueNames("wifi", intent.wifi, (ssid) => ssid.ssid);
 
   return {
     package_profiles: [
@@ -68,6 +70,10 @@ export const wifi: Feature = (intent) => {
         packages: ["-wpad-basic-mbedtls", "wpad-mbedtls", "usteer", "luci-app-usteer"],
       },
     ],
+    services: [
+      { ".if": onAccessPoints, name: "wpad", running: true },
+      { ".if": onAccessPoints, name: "usteer", running: steeredSsids(intent).length > 0 },
+    ],
     config: {
       wireless: {
         "wifi-device": radios.map(({ band, name, width }) => {
@@ -76,7 +82,8 @@ export const wifi: Feature = (intent) => {
             ".name": name,
             band,
             ...(settings.enabled ? {} : { disabled: true }),
-            htmode: `HE${settings.width === "auto" ? width : settings.width}`,
+            // The best the radio can do at this width: Wi-Fi 7, 6, 5 or 4.
+            htmode: `@best/${settings.width === "auto" ? width : settings.width}`,
             channel: "auto",
             cell_density: cellDensity[settings.cell_density],
             ...(settings.power === "auto" ? {} : { txpower: txpower[settings.power] }),
@@ -89,9 +96,12 @@ export const wifi: Feature = (intent) => {
             }),
           });
         }),
-        "wifi-iface": intent.wifi.flatMap((ssid) => {
+        "wifi-iface": intent.wifi.flatMap((ssid, i) => {
           const on = enabled.filter(({ band }) => !ssid.bands || ssid.bands.includes(band));
           const common = {
+            // Named by the SSID, per radio (the engine adds the radio), so
+            // adding or removing another SSID renames none of these.
+            ".name": ssidNames[i],
             mode: "ap",
             network: ssid.network,
             ssid: ssid.ssid,

@@ -475,13 +475,17 @@ test("patches apply only where they say: by model, by role", (t) => {
   t.deepEqual(files("home-router", "friendlyarm,nanopi-r6s").filter((p: string) => !p.includes("avahi")), [
     "/usr/libexec/platform/packet-steering.sh",
     "/etc/hotplug.d/iface/30-odhcpd-ra-fix",
+    "/usr/libexec/onc/ubihealthd-config",
   ]);
-  t.deepEqual(files("home-ap-1", "zyxel,nwa50ax-pro"), ["/etc/hotplug.d/net/20-aql"]);
+  t.deepEqual(files("home-ap-1", "zyxel,nwa50ax-pro"), [
+    "/etc/hotplug.d/net/20-aql",
+    "/usr/libexec/onc/ubihealthd-config",
+  ]);
   t.deepEqual(
     files("home-router", "friendlyarm,nanopi-r6s", (i) => (i.internet.ipv6 = false)).filter(
       (p: string) => !p.includes("avahi")
     ),
-    ["/usr/libexec/platform/packet-steering.sh"],
+    ["/usr/libexec/platform/packet-steering.sh", "/usr/libexec/onc/ubihealthd-config"],
     "the odhcpd fix only where the internet's IPv6 is on"
   );
 });
@@ -543,8 +547,9 @@ test("radios are set per band; an SSID can keep to some bands; 6 GHz is WPA3", (
   intent.wifi[1].bands = ["2g"];
   const config = compile(intent).config.wireless as any;
   const radio = (band: string) => config["wifi-device"].find((d: any) => d.band === band);
-  t.like(radio("2g"), { htmode: "HE20", txpower: 10, cell_density: 0 });
-  t.like(radio("5g"), { htmode: "HE160", cell_density: 2 });
+  // The best mode at the width: which one, the engine decides per radio.
+  t.like(radio("2g"), { htmode: "@best/20", txpower: 10, cell_density: 0 });
+  t.like(radio("5g"), { htmode: "@best/160", cell_density: 2 });
   t.is(radio("5g").txpower, undefined, "auto: as much as the country allows");
   t.is(radio("6g").disabled, undefined);
   t.deepEqual(
@@ -657,4 +662,29 @@ test("zones and forwardings are named for what they are, so another network neve
   const reordered = sample();
   reordered.networks.reverse();
   t.deepEqual([...names(reordered)].sort(), [...before].sort());
+});
+
+test("services: each role's kept enabled and started; those that must run are checked", (t) => {
+  const services = (hostname: string, model: string, change: (i: any) => void = () => {}) => {
+    const intent = sample();
+    change(intent);
+    const oncConfig = compile(intent);
+    const deviceSchema = deviceSchemaSchema.parse(
+      JSON.parse(readFileSync(join(root, "deviceSchemas", `${model}.json`), "utf8"))
+    );
+    const deviceConfig = oncConfig.devices.find((d) => d.hostname === hostname)!;
+    return getOpenWrtState({ oncConfig, deviceConfig, deviceSchema }).services ?? [];
+  };
+  const router = services("home-router", "friendlyarm,nanopi-r6s");
+  const running = (list: { name: string; running: boolean }[]) => list.filter((s) => s.running).map((s) => s.name).sort();
+  t.true(["sqm", "firewall", "ubihealthd"].every((n) => router.some((s) => s.name === n && !s.running)));
+  t.true(["dnsmasq", "odhcpd", "dropbear", "avahi-daemon"].every((n) => running(router).includes(n)));
+  t.false(router.some((s) => ["wpad", "usteer"].includes(s.name)), "no Wi-Fi on the router");
+  const ap = services("home-ap-1", "zyxel,nwa50ax-pro");
+  t.true(["wpad", "dropbear", "network"].every((n) => running(ap).includes(n)));
+  t.false(ap.some((s) => ["dnsmasq", "odhcpd", "sqm"].includes(s.name)), "an access point routes nothing");
+  t.false(
+    running(services("home-router", "friendlyarm,nanopi-r6s", (i) => (i.internet.upnp = false))).includes("miniupnpd"),
+    "UPnP off: enabled, but nothing should run"
+  );
 });

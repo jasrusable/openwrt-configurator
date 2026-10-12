@@ -130,3 +130,45 @@ test("secrets under any package's option names stay hidden", (t) => {
   t.true(d.config.some((c) => c.key === "wireless.x.r0kh" && c.before === "(hidden)"));
   t.false(/tok-123|r0-secret|wep-secret/.test(JSON.stringify(d)));
 });
+
+test("a section that only changed name reads as a rename, with only what differs", (t) => {
+  const state = stateFor(sample(), "home-router");
+  const now = appliedWith(state);
+  const zone = (name: string) => now.config.firewall.find((s) => s.name === name)!;
+  const main = now.config.dropbear[0];
+  // As another tool left it: the zones the other way round under positional
+  // names, wan's forward policy DROP, and dropbear with an extra option.
+  const d = diff(state, {
+    ...now,
+    config: {
+      ...now.config,
+      firewall: [
+        { ...zone("wan"), name: "zone0", options: { ...zone("wan").options, forward: "DROP" } },
+        { ...zone("lan"), name: "zone1" },
+        ...now.config.firewall.filter((s) => s.type !== "zone"),
+      ],
+      dropbear: [{ ...main, name: "dropbear0", options: { ...main.options, Interface: "lan" } }],
+    },
+  });
+  t.deepEqual(
+    d.config.filter((c) => /^(firewall\.(lan|wan)|dropbear)/.test(c.key)),
+    [
+      { key: "dropbear.main", renamedFrom: "dropbear.dropbear0" },
+      { key: "dropbear.main.Interface", before: "'lan'", after: undefined },
+      { key: "firewall.lan", renamedFrom: "firewall.zone1" },
+      { key: "firewall.wan", renamedFrom: "firewall.zone0" },
+      { key: "firewall.wan.forward", before: "'DROP'", after: "'REJECT'" },
+    ]
+  );
+});
+
+test("sections with little in common are removed and added, not renamed", (t) => {
+  const state = stateFor(sample(), "home-router");
+  const now = appliedWith(state);
+  const d = diff(state, {
+    ...now,
+    config: { ...now.config, dropbear: [{ type: "dropbear", name: "old", options: { Port: "2222", Interface: "wan" } }] },
+  });
+  t.false(d.config.some((c) => c.renamedFrom));
+  t.true(d.config.some((c) => c.key === "dropbear.old" && c.after === undefined));
+});

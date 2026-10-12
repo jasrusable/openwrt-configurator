@@ -27,6 +27,12 @@ export const system: Feature = (intent) => {
   const main = mainNetwork(intent).id;
   return {
     package_profiles: [{ ".if": everyDevice, packages: ["luci-ssl"] }],
+    services: [
+      { ".if": everyDevice, name: "system" },
+      { ".if": everyDevice, name: "sysntpd", running: true },
+      { ".if": everyDevice, name: "dropbear", running: true },
+      { ".if": everyDevice, name: "uhttpd", running: true },
+    ],
     // Who may log in as root. Listed keys replace the device's file; none
     // leaves a hand-installed one alone. dropbear reads it at each login.
     files: intent.admin.authorized_keys.length

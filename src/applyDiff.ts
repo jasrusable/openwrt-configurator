@@ -22,6 +22,8 @@ export type UciChange = {
   key: string;
   before?: string;
   after?: string;
+  /** The section `key` was called before: renamed, its options compared under the new name. */
+  renamedFrom?: string;
 };
 
 export type FileChange = { path: string; change: "added" | "removed" | "changed" };
@@ -76,22 +78,70 @@ type Line = { value: string; secret: boolean };
 
 const show = (value: string | string[]) => (Array.isArray(value) ? value : [value]).map((v) => `'${v}'`).join(" ");
 
-/** Configs as `uci show` lines, by key: anonymous sections as `@type[i]`. */
+/** Each section with its key as `uci show` prints it: anonymous ones as `@type[i]`. */
+const keyed = (configs: UciConfigs) =>
+  Object.entries(configs).flatMap(([configKey, sections]) => {
+    const seen: Record<string, number> = {};
+    return sections.map((section: UciSection) => {
+      const index = (seen[section.type] = (seen[section.type] ?? -1) + 1);
+      return { key: `${configKey}.${section.name ?? `@${section.type}[${index}]`}`, configKey, section };
+    });
+  });
+
+/** Configs as `uci show` lines, by key. */
 export const uciLines = (configs: UciConfigs) => {
   const lines = new Map<string, Line>();
-  Object.entries(configs).forEach(([configKey, sections]) => {
-    const seen: Record<string, number> = {};
-    sections.forEach((section: UciSection) => {
-      const index = (seen[section.type] = (seen[section.type] ?? -1) + 1);
-      const name = `${configKey}.${section.name ?? `@${section.type}[${index}]`}`;
-      lines.set(name, { value: section.type, secret: false });
-      Object.entries(section.options).forEach(([option, value]) =>
-        lines.set(`${name}.${option}`, { value: show(value), secret: isSecret(option) })
-      );
-    });
+  keyed(configs).forEach(({ key, section }) => {
+    lines.set(key, { value: section.type, secret: false });
+    Object.entries(section.options).forEach(([option, value]) =>
+      lines.set(`${key}.${option}`, { value: show(value), secret: isSecret(option) })
+    );
   });
   return lines;
 };
+
+const sameValue = (a?: string | string[], b?: string | string[]) =>
+  a !== undefined && b !== undefined && show(a) === show(b);
+
+/** How alike two sections' options are: the share with equal values, of all either has. */
+const likeness = (a: UciSection, b: UciSection) => {
+  const options = [...new Set([...Object.keys(a.options), ...Object.keys(b.options)])];
+  return options.length === 0 ? 1 : options.filter((o) => sameValue(a.options[o], b.options[o])).length / options.length;
+};
+
+/**
+ * Sections that only changed name: one going and one coming, of the same
+ * config and type, with at least half their options alike; the likest pairs
+ * first. Their options are then compared under the new name, so a rename
+ * (the old tool's zone0, LuCI's cfg030f15) reads as one, not as everything
+ * removed and added.
+ */
+export const renames = (before: UciConfigs, after: UciConfigs) => {
+  const [was, will] = [keyed(before), keyed(after)];
+  const gone = was.filter((b) => !will.some((a) => a.key === b.key));
+  const coming = will.filter((a) => !was.some((b) => b.key === a.key));
+  const pairs = gone
+    .flatMap((b) =>
+      coming
+        .filter((a) => a.configKey === b.configKey && a.section.type === b.section.type)
+        .map((a) => ({ from: b.key, to: a.key, score: likeness(b.section, a.section) }))
+    )
+    .filter((p) => p.score >= 0.5)
+    .sort((x, y) => y.score - x.score);
+  return pairs.reduce<{ from: string; to: string }[]>(
+    (taken, p) => (taken.some((t) => t.from === p.from || t.to === p.to) ? taken : [...taken, { from: p.from, to: p.to }]),
+    []
+  );
+};
+
+/** `lines` with each renamed section's keys under its new name. */
+const renamed = (lines: Map<string, Line>, pairs: { from: string; to: string }[]) =>
+  new Map(
+    [...lines].map(([key, line]) => {
+      const pair = pairs.find((p) => key === p.from || key.startsWith(`${p.from}.`));
+      return [pair ? pair.to + key.slice(pair.from.length) : key, line] as const;
+    })
+  );
 
 const hidden = "(hidden)";
 
@@ -137,9 +187,13 @@ export const deviceDiff = ({
   // As the apply writes it: a final newline added where there is none.
   const written = (content: string) => sha256(content.endsWith("\n") ? content : `${content}\n`);
   const files = state.files ?? [];
+  const pairs = renames(now.config, after);
   return {
     hostname,
-    config: diffLines(uciLines(now.config), uciLines(after)),
+    config: [
+      ...pairs.map(({ from, to }): UciChange => ({ key: to, renamedFrom: from })),
+      ...diffLines(renamed(uciLines(now.config), pairs), uciLines(after)),
+    ].sort((a, b) => a.key.localeCompare(b.key) || (a.renamedFrom ? -1 : 1)),
     packages: {
       added: (state.packagesToInstall ?? []).map((p) => p.packageName).filter((p) => !now.installed.includes(p)),
       removed: (state.packagesToUninstall ?? []).filter((p) => now.installed.includes(p)),

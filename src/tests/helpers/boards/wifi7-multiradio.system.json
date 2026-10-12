@@ -1,0 +1,7 @@
+{
+  "board_name": "bananapi,bpi-r4",
+  "model": "Bananapi BPI-R4",
+  "release": {
+    "version": "25.12.5"
+  }
+}

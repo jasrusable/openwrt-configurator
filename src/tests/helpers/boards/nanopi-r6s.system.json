@@ -1,0 +1,9 @@
+{
+  "board_name": "friendlyarm,nanopi-r6s",
+  "model": "FriendlyElec NanoPi R6S",
+  "release": {
+    "distribution": "OpenWrt",
+    "version": "25.12.5",
+    "revision": "r33051-f5dae5ece4"
+  }
+}

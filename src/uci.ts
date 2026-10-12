@@ -2,6 +2,7 @@
 // what the config file declares, and turned into the exact operations that
 // make one into the other.
 import { OpenWrtConfig } from "./openWrtConfigSchema";
+import { shellQuote } from "./shell";
 
 export type UciSection = {
   type: string;
@@ -121,6 +122,26 @@ export const declaredConfigs = (config: OpenWrtConfig): UciConfigs =>
       ],
     ),
   );
+
+/**
+ * Sections as a config file, the way `uci export` writes them. Values are
+ * quoted as for `uci batch` ('\'' for a quote), which uci's file parser
+ * reads the same (verified on 25.12.5); `hide` stands in for a secret in a
+ * dry run.
+ */
+export const uciFileText = (sections: UciSection[], hide: (value: string) => string = (v) => v) =>
+  sections
+    .map((section) =>
+      [
+        `config ${section.type}${section.name !== undefined ? ` ${shellQuote(section.name)}` : ""}`,
+        ...Object.entries(section.options).flatMap(([option, value]) =>
+          Array.isArray(value)
+            ? value.map((item) => `\tlist ${option} ${shellQuote(hide(item))}`)
+            : [`\toption ${option} ${shellQuote(hide(value))}`]
+        ),
+      ].join("\n")
+    )
+    .join("\n\n") + "\n";
 
 /**
  * `configs_to_not_reset` entries are `<config>.*` (keep the whole config) or

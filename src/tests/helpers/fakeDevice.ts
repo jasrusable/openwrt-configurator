@@ -46,6 +46,8 @@ const kindOf = (script: string) =>
     ? "prepare"
     : script.includes("reload_config")
     ? "packages"
+    : script.includes('/etc/init.d/$s')
+    ? "services"
     : "revert";
 
 const clone = (configs: UciConfigs): UciConfigs =>

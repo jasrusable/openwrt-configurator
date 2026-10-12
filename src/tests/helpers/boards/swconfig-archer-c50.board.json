@@ -1,0 +1,68 @@
+{
+  "_note": "Written to OpenWrt's ramips swconfig layout (ucidef_add_switch), not captured from a device.",
+  "model": {
+    "id": "tplink,archer-c50-v4",
+    "name": "TP-Link Archer C50 v4"
+  },
+  "switch": {
+    "switch0": {
+      "enable": true,
+      "reset": true,
+      "ports": [
+        {
+          "num": 0,
+          "role": "wan",
+          "index": 5
+        },
+        {
+          "num": 1,
+          "role": "lan",
+          "index": 4
+        },
+        {
+          "num": 2,
+          "role": "lan",
+          "index": 3
+        },
+        {
+          "num": 3,
+          "role": "lan",
+          "index": 2
+        },
+        {
+          "num": 4,
+          "role": "lan",
+          "index": 1
+        },
+        {
+          "num": 6,
+          "device": "eth0",
+          "need_tag": false,
+          "want_untag": false
+        }
+      ],
+      "roles": [
+        {
+          "role": "wan",
+          "ports": "0 6t",
+          "device": "eth0.2"
+        },
+        {
+          "role": "lan",
+          "ports": "1 2 3 4 6t",
+          "device": "eth0.1"
+        }
+      ]
+    }
+  },
+  "network": {
+    "lan": {
+      "device": "eth0.1",
+      "protocol": "static"
+    },
+    "wan": {
+      "device": "eth0.2",
+      "protocol": "dhcp"
+    }
+  }
+}

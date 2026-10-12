@@ -40,6 +40,11 @@ export const dns: Feature = (intent) => {
         packages: ["https-dns-proxy", "luci-app-https-dns-proxy"],
       },
     ],
+    services: [
+      { ".if": onRouter, name: "dnsmasq", running: true },
+      // Unconfigured (no encryption), it runs nothing.
+      { ".if": onRouter, name: "https-dns-proxy", running: upstream.type === "encrypted" },
+    ],
     config: {
       dhcp: {
         dnsmasq: [

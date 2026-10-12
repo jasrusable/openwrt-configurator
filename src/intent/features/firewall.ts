@@ -6,6 +6,7 @@
 import { portsApply } from "../choices";
 import { anywhere, internet, isIpv6, router, Rule } from "../firewall";
 import { Feature, onRouter } from "../fragment";
+import { named } from "../names";
 
 type Section = Record<string, unknown>;
 
@@ -103,6 +104,8 @@ export const firewall: Feature = (intent) => {
   };
 
   return {
+    // fw4 loads its rules and exits: enabled, with nothing left running.
+    services: [{ ".if": onRouter, name: "firewall" }],
     config: {
       firewall: {
         defaults: routerOnly([
@@ -144,7 +147,9 @@ export const firewall: Feature = (intent) => {
             ...network.access.networks.map((to) => ({ ".name": `${network.id}_${to}`, src: network.id, dest: to })),
           ])
         ),
-        rule: routerOnly([
+        // Named by their names: order still matters to fw4, but inserting
+        // one renames no other.
+        rule: routerOnly(named("rule", [
           ...stockRules(main.id),
           ...networks.filter((n) => n.access.router === "services").flatMap((n) => serviceRules(n.id)),
           // Sharing devices: the router's reflector must hear the network's mDNS.
@@ -158,22 +163,26 @@ export const firewall: Feature = (intent) => {
               target: "ACCEPT",
             })),
           ...rules.map(userRule),
-        ]),
+        ], (r) => String(r.name))),
         redirect: routerOnly(
-          port_forwards.map((forward) => ({
-            name: forward.name,
-            ...(forward.enabled ? {} : { enabled: false }),
-            target: "DNAT",
-            src: wan,
-            src_dport: forward.external_port,
-            proto: forward.protocol === "tcp+udp" ? ["tcp", "udp"] : [forward.protocol],
-            ...(forward.source_addresses?.length ? { src_ip: forward.source_addresses } : {}),
-            dest: networkOf(forward.internal_address),
-            dest_ip: forward.internal_address,
-            dest_port: forward.internal_port ?? forward.external_port,
-            family: "ipv4",
-            reflection: forward.reflection,
-          }))
+          named(
+            "redirect",
+            port_forwards.map((forward) => ({
+              name: forward.name,
+              ...(forward.enabled ? {} : { enabled: false }),
+              target: "DNAT",
+              src: wan,
+              src_dport: forward.external_port,
+              proto: forward.protocol === "tcp+udp" ? ["tcp", "udp"] : [forward.protocol],
+              ...(forward.source_addresses?.length ? { src_ip: forward.source_addresses } : {}),
+              dest: networkOf(forward.internal_address),
+              dest_ip: forward.internal_address,
+              dest_port: forward.internal_port ?? forward.external_port,
+              family: "ipv4",
+              reflection: forward.reflection,
+            })),
+            (f) => String(f.name)
+          )
         ),
       },
     },

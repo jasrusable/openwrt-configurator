@@ -1,6 +1,7 @@
 // The router's internet side: the WAN connection, and smart queueing when the
 // line's speed is known. The firewall is its own feature (firewall.ts).
 import { Feature, mainNetwork, onRouter } from "../fragment";
+import { named } from "../names";
 import { fnv } from "./network";
 import { lineTypes, netmask } from "../schema";
 
@@ -77,6 +78,11 @@ export const internet: Feature = (intent) => {
         ],
       },
     ],
+    services: [
+      // sqm sets up queues and exits; miniupnpd runs only when UPnP is on.
+      { ".if": onRouter, name: "sqm" },
+      { ".if": onRouter, name: "miniupnpd", running: upnp },
+    ],
     config: {
       network: {
         interface: routerOnly([
@@ -119,7 +125,7 @@ export const internet: Feature = (intent) => {
             uuid: upnpUuid(intent.site.name),
           },
         ]),
-        perm_rule: routerOnly([
+        perm_rule: routerOnly(named("perm", [
           {
             action: "allow",
             ext_ports: "1024-65535",
@@ -134,7 +140,7 @@ export const internet: Feature = (intent) => {
             int_ports: "0-65535",
             comment: "Default deny",
           },
-        ]),
+        ], (r) => r.comment)),
       },
       sqm: {
         queue: routerOnly([

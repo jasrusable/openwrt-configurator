@@ -9,18 +9,21 @@ import { Section, SettingRow } from "../kit/layout";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-/** "12 settings · 1 package · 2 files", or that nothing changes. */
+/** "12 settings · 3 renamed · 1 package · 2 files", or that nothing changes. */
 const summary = (d: Exclude<DeviceDiff, { error: string }>) => {
   const packages = d.packages.added.length + d.packages.removed.length;
+  const renamed = d.config.filter((c) => c.renamedFrom).length;
+  const settings = d.config.length - renamed;
   const parts = [
-    d.config.length && plural(d.config.length, "setting"),
+    settings && plural(settings, "setting"),
+    renamed && `${renamed} renamed`,
     packages && plural(packages, "package"),
     d.files.length && plural(d.files.length, "file"),
   ].filter(Boolean);
   return parts.length ? parts.join(" · ") : "Nothing changes";
 };
 
-/** Its changes as lines: + added, − removed, before → after. */
+/** Its changes as lines: + added, − removed, before → after, renamed. */
 const Lines = ({ diff }: { diff: Exclude<DeviceDiff, { error: string }> }) => {
   const line = (sign: "+" | "−" | "~", text: string, key: string) => (
     <Text
@@ -37,7 +40,9 @@ const Lines = ({ diff }: { diff: Exclude<DeviceDiff, { error: string }> }) => {
   return (
     <Code block p="sm" style={{ background: "var(--onc-page)" }}>
       {diff.config.map((c) =>
-        c.before === undefined
+        c.renamedFrom
+          ? line("~", `${c.renamedFrom} renamed ${c.key.slice(c.key.indexOf(".") + 1)}`, `r${c.key}`)
+          : c.before === undefined
           ? line("+", `${c.key}=${c.after}`, c.key)
           : c.after === undefined
           ? line("−", `${c.key}=${c.before}`, c.key)

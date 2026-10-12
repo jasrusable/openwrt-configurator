@@ -57,6 +57,7 @@ const example: Patch = {
     config: { system: { example: [{ enabled: true }] } },
     packages: ["example-pkg"],
     keeps: ["?example.*"],
+    services: [{ name: "example", running: true }],
   }),
 };
 
@@ -67,6 +68,7 @@ test("everything a patch emits carries its target; one the intent does not need 
   t.deepEqual(fragment.config, { system: { example: [{ enabled: true, ".if": when }] } });
   t.deepEqual(fragment.package_profiles, [{ ".if": when, packages: ["example-pkg"] }]);
   t.deepEqual(fragment.configs_to_not_reset, [{ ".if": when, configs: ["?example.*"] }]);
+  t.deepEqual(fragment.services, [{ name: "example", running: true, ".if": when }]);
 
   const intent = sample();
   intent.internet.ipv6 = false;
@@ -75,6 +77,7 @@ test("everything a patch emits carries its target; one the intent does not need 
     config: {},
     package_profiles: [],
     configs_to_not_reset: [],
+    services: [],
   });
 });
 

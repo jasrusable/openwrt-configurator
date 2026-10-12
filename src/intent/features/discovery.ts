@@ -13,6 +13,7 @@ export const discovery: Feature = (intent) => {
   const interfaces = (reflect ? sharing : [mainNetwork(intent)]).map(deviceOf);
   return {
     package_profiles: [{ ".if": onRouter, packages: ["avahi-nodbus-daemon"] }],
+    services: [{ ".if": onRouter, name: "avahi-daemon", running: true }],
     files: [
       {
         ".if": onRouter,

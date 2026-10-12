@@ -23,10 +23,12 @@ import {
   disarmWatchdog,
   installedPackages as installedPackagesProbe,
   managedFiles as managedFilesProbe,
+  notRunning,
   pendingChanges as pendingChangesProbe,
   removalCascade as removalCascadeProbe,
   runProbe,
   runProbes,
+  servicesSettled,
   uciConfigs,
 } from "./deviceProbes";
 import { execScript } from "./execScript";
@@ -80,6 +82,8 @@ export type DeviceRun = DeviceRunOptions & {
   /** Set by configureDevice: they depend on the config it read. */
   finaliseCommands?: string[];
   postReloadCommands: string[];
+  /** Services that must have a running process once the run is done. */
+  servicesToCheck: string[];
   /** Package or file changes, which only the watchdog can undo. */
   hasIrreversibleSteps: boolean;
   /** Set by armRollback: when the watchdog started, and when it will fire. */
@@ -111,9 +115,9 @@ export const planDevice = async (
     managedFiles: managedFilesProbe(managedFilesManifest),
   });
   const { boardJson, installedPackages, managedFiles } = facts;
-  if (deviceModelId !== undefined && boardJson.model.id !== deviceModelId) {
+  if (deviceModelId !== undefined && boardJson.model?.id !== deviceModelId) {
     throw new ProvisionFailure(
-      `Mismatching device model id. Expected ${deviceModelId} but found ${boardJson.model.id} in /etc/board.json`,
+      `Mismatching device model id. Expected ${deviceModelId} but found ${boardJson.model?.id} in /etc/board.json`,
       false
     );
   }
@@ -162,6 +166,7 @@ export const planDevice = async (
     removalCascade,
     prepareCommands: getPrepareCommands({ state, installedPackages }),
     postReloadCommands,
+    servicesToCheck: (state.services || []).filter((s) => s.running).map((s) => s.name),
     // `uci revert` undoes staged UCI changes and nothing else. Package
     // removals and written files are already on disk, and only the watchdog
     // can undo those.
@@ -568,6 +573,22 @@ export const runPostReloadHooks = async (run: DeviceRun, session: Session) => {
     );
   }
   console.log("Post-reload hooks completed.");
+};
+
+/**
+ * After the hooks: once services settle, those that must be running are.
+ * Returns what is not, in words; a warning, not a failure, since the
+ * config is live and rolling a healthy network back for one daemon would
+ * do more harm than the daemon.
+ */
+export const checkServices = async (run: DeviceRun, session: Session) => {
+  const { servicesToCheck, hostname } = run;
+  if (servicesToCheck.length === 0) return [];
+  await runProbe(session, servicesSettled(10));
+  const down = await runProbe(session, notRunning(servicesToCheck));
+  return down.map(({ name, missing }) =>
+    missing ? `${hostname}: ${name} is not installed` : `${hostname}: ${name} is not running`
+  );
 };
 
 // --- undoing a committed change ----------------------------------------------

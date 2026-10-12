@@ -79,6 +79,23 @@ export const oncConfigSchema = z
           .strict()
       )
       .optional(),
+    /**
+     * Services the device must have enabled at boot and started (procd then
+     * reloads them on their config's changes; a stopped one would ignore
+     * them). `running`: it must also have a running process afterwards,
+     * which is checked. An init script the device lacks is skipped.
+     */
+    services: z
+      .array(
+        z
+          .object({
+            ".if": conditionSchema.optional(),
+            name: z.string().regex(/^[A-Za-z0-9_-]+$/, "must be an init script name"),
+            running: z.boolean().optional(),
+          })
+          .strict()
+      )
+      .optional(),
     files: z
       .array(
         z

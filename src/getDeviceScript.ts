@@ -2,6 +2,7 @@ import { getUciCommands } from "./getUciCommands";
 import {
   changedConfigs,
   declaredConfigs,
+  uciFileText,
   UciConfigs,
   wipeOperations,
 } from "./uci";
@@ -105,10 +106,38 @@ export const getFinaliseCommands = ({
  * networking, while the tool still reported success. Running them once the
  * device has been reconnected to makes that impossible.
  */
-export const getPostReloadCommands = (state: OpenWrtState) =>
-  (state.files || []).flatMap((file) =>
+export const getPostReloadCommands = (state: OpenWrtState) => [
+  ...servicesCommands(state),
+  ...(state.files || []).flatMap((file) =>
     file.run_after_reload ? [file.run_after_reload] : []
-  );
+  ),
+];
+
+/**
+ * Every declared service enabled at boot and started. A package enables its
+ * service only when first installed, so one disabled since stays off after a
+ * reboot; and a stopped service has no reload triggers in procd, so changes
+ * to its config are ignored until something starts it. "Started" is procd
+ * knowing the service at all (it then holds its triggers), not a running
+ * process: sqm and the firewall have none, and starting them again would
+ * re-apply them for nothing. An init script the device lacks (ubihealthd
+ * without UBI flash) is skipped. A failure is reported, not fatal: the
+ * config is already live, and the check after says what is not running.
+ */
+export const servicesCommands = (state: OpenWrtState) => {
+  const names = (state.services || []).map((s) => shellQuote(s.name));
+  return names.length === 0
+    ? []
+    : [
+        [
+          `for s in ${names.join(" ")}; do`,
+          '  [ -x "/etc/init.d/$s" ] || continue',
+          '  "/etc/init.d/$s" enabled || "/etc/init.d/$s" enable || echo "could not enable $s" >&2',
+          `  ubus call service list '{"name":"'"$s"'"}' 2>/dev/null | grep -q "^[[:space:]]*\\"$s\\"" || "/etc/init.d/$s" start || echo "could not start $s" >&2`,
+          "done",
+        ].join("\n"),
+      ];
+};
 
 /**
  * Enter every existing config into procd's change baseline, before staging.
@@ -261,15 +290,59 @@ const packageCommands = ({
 export const getPrepareCommands = ({
   state,
   installedPackages,
+  redact,
 }: {
   state: OpenWrtState;
   /** From the installedPackages probe. */
   installedPackages?: string[];
-}) => [
-  ...revertPendingCommands,
-  ...packageCommands({ state, installedPackages }),
-  ...baselineRefreshCommands,
-];
+  redact?: (value: string) => string;
+}) => {
+  const packages = packageCommands({ state, installedPackages });
+  return [
+    ...revertPendingCommands,
+    ...(packages.length ? [...seedCommands({ state, redact }), ...packages, ...stockConfigCleanup(state)] : []),
+    ...baselineRefreshCommands,
+  ];
+};
+
+/** Declared configs nothing of which is kept: the ones the tool writes whole. */
+const ownedConfigs = (state: OpenWrtState) => {
+  const keep = (state.configsToNotReset || []).map((entry) => entry.replace(/^\?/, "").split(".")[0]);
+  return Object.entries(declaredConfigs(state.config)).filter(
+    ([configKey, sections]) => sections.length > 0 && !keep.includes(configKey)
+  );
+};
+
+/**
+ * Each owned config the device does not have yet (checked there), written
+ * before packages are installed, so a package never starts on its stock
+ * config: apk keeps a config file that exists, setting its own aside as
+ * <name>.apk-new, and the service's first start reads ours. https-dns-proxy's
+ * stock config, for one, rewrites dnsmasq and captures clients' DNS the
+ * moment it starts. Not a config anything of which is kept: a package that
+ * makes its own on first boot (ubihealthd) skips that when the file exists.
+ * The wipe and verify still follow, as for any config; a rollback restores
+ * /etc/config whole, seeded files included.
+ */
+export const seedCommands = ({
+  state,
+  redact,
+}: {
+  state: OpenWrtState;
+  redact?: (value: string) => string;
+}) =>
+  ownedConfigs(state).map(([configKey, sections]) => {
+    const path = shellQuote(`/etc/config/${configKey}`);
+    const text = uciFileText(sections, redact);
+    const delimiter = heredocDelimiter(text);
+    return [`if [ ! -e ${path} ]; then`, `cat > ${path} <<'${delimiter}'`, `${text}${delimiter}`, "fi"].join("\n");
+  });
+
+/** The stock configs apk set aside for an owned config: never used. */
+const stockConfigCleanup = (state: OpenWrtState) => {
+  const paths = ownedConfigs(state).map(([configKey]) => shellQuote(`/etc/config/${configKey}.apk-new`));
+  return paths.length ? [`rm -f ${paths.join(" ")}`] : [];
+};
 
 /**
  * Stage the declared config over a wiped one, in a single `uci batch`: delete
@@ -345,7 +418,7 @@ export const getDeviceScript = ({
   current?: UciConfigs;
   redact?: (value: string) => string;
 }) => [
-  ...getPrepareCommands({ state, installedPackages }),
+  ...getPrepareCommands({ state, installedPackages, redact }),
   ...getStageCommands({ state, current, managedFiles, redact }),
   ...getFinaliseCommands({ state, current }),
   // Printed so a dry run shows the whole sequence, but `provision` runs these

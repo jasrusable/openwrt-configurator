@@ -12,6 +12,7 @@ import {
   onRouter,
 } from "../fragment";
 import { networkIpv6Applies } from "../choices";
+import { named } from "../names";
 
 /** FNV-1a, 32-bit, as 8 hex digits: a stable value derived from a name. */
 export const fnv = (text: string) => {
@@ -85,6 +86,10 @@ export const network: Feature = (intent) => {
   // local range, which would be announced as if it went somewhere.
   const ipv6 = (n: Network) => networkIpv6Applies(intent.internet.ipv6) && n.ipv6;
   return {
+    services: [
+      { ".if": everyDevice, name: "network", running: true },
+      { ".if": onRouter, name: "odhcpd", running: true },
+    ],
     config: {
       network: {
         // The VLANs, on each kind of switch: DSA bridges VLAN-filter in the
@@ -95,11 +100,13 @@ export const network: Feature = (intent) => {
             override: {
               switch: [{ name: "switch0", reset: true, enable_vlan: true }],
               switch_vlan: networks.map((n) => ({
+                ".name": `vlan_${vlanOf(n)}`,
                 device: "switch0",
                 vlan: vlanOf(n),
                 ports: isMain(n) ? "*" : "*t",
               })),
               device: networks.map((n) => ({
+                ".name": `bridge_${vlanOf(n)}`,
                 name: deviceOf(n),
                 type: "bridge",
                 ports: [`@cpu_port.${vlanOf(n)}`],
@@ -111,6 +118,7 @@ export const network: Feature = (intent) => {
             override: {
               device: [{ name: "br-lan", type: "bridge", ports: "*" }],
               "bridge-vlan": networks.map((n) => ({
+                ".name": `vlan_${vlanOf(n)}`,
                 device: "br-lan",
                 vlan: vlanOf(n),
                 ports: isMain(n) ? "*" : "*t",
@@ -188,7 +196,7 @@ export const network: Feature = (intent) => {
           ],
         })),
         // Reservations: the same address every time, and a name in DNS.
-        host: networks.flatMap((n) =>
+        host: named("host", networks.flatMap((n) =>
           n.reservations.map((r) => ({
             ".if": onRouter,
             name: r.name,
@@ -196,7 +204,7 @@ export const network: Feature = (intent) => {
             ip: r.address,
             dns: true,
           }))
-        ),
+        ), (h) => h.name),
         odhcpd: [
           {
             ".if": everyDevice,

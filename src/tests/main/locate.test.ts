@@ -24,8 +24,8 @@ const session = (m: Machine): Session => ({
         ? m.board
         : part.includes("ubus call uci get")
         ? '{"values":{}}'
-        : part.includes("openwrt_release")
-        ? "DISTRIB_RELEASE='25.12.5'"
+        : part.includes("ubus call system board")
+        ? JSON.stringify({ board_name: JSON.parse(m.board).model.id, release: { version: "25.12.5" } })
         : part.includes("/sys/class/net")
         ? m.macs.join("\n")
         : part.includes("dhcp.leases")
