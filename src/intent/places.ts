@@ -4,6 +4,10 @@
 // `where`, so renaming a page renames every pointer to it.
 export const places = {
   overview: ["Overview"],
+  clients: ["Clients"],
+  devices: ["Devices"],
+  performance: ["Performance"],
+  activity: ["Activity"],
   system: ["System"],
   internet: ["Internet"],
   networks: ["Networks"],

@@ -39,6 +39,10 @@ export type ClientView = {
   state: "online" | "recent" | "away";
   /** A fixed address in your settings. */
   reserved: boolean;
+  /** Bytes it downloaded and uploaded: the router's count (nlbwmon), else its access point's. */
+  traffic?: { down: number; up: number };
+  /** Every access point that hears it, how well, and which it is on (usteer): for roaming. */
+  heardBy: { accessPoint: string; band?: string; signal?: number; connected: boolean }[];
 };
 
 export type DeviceView = {
@@ -55,6 +59,7 @@ export type DeviceView = {
   temperature?: number;
   /** Its physical ports (from its facts), each with its link. */
   ports: PortLink[];
+  cores?: number;
 };
 
 export type RadioView = {
@@ -69,7 +74,9 @@ export type RadioView = {
   clients: number;
 };
 
-export type ActivityView = { at: number; device: string; text: string };
+/** What kind of event: for its icon and the page's filter. Absent on events kept before kinds were. */
+export type ActivityKind = "up" | "down" | "start" | "apply" | "problem" | "note";
+export type ActivityView = { at: number; device: string; text: string; kind?: ActivityKind };
 
 /** The band a frequency is in. */
 export const bandOf = (freq?: number) =>
@@ -92,7 +99,13 @@ export const clientsOf = (
     d.wifi.flatMap((w) => w.clients.map((c) => ({ ...c, accessPoint: d.hostname, ssid: w.ssid, band: bandOf(w.freq) })))
   );
   const leases = reached(router) ? router.leases : [];
-  const neighbours = reached(router) ? router.neighbours : [];
+  // Not what is seen on an internet line (the provider's modem): those are not your devices.
+  const lineDevices = new Set(
+    reached(router)
+      ? intent.internet.connections.flatMap((c) => router.interfaces.filter((i) => i.id === c.id || i.id === `${c.id}6`).map((i) => i.device))
+      : []
+  );
+  const neighbours = reached(router) ? router.neighbours.filter((n) => !n.device || !lineDevices.has(n.device)) : [];
   const v6 = reached(router) ? router.ipv6Leases : [];
   const macs = [
     ...new Set([...leases.map((l) => l.mac), ...wifi.map((c) => c.mac), ...neighbours.filter((n) => !n.address.startsWith("fe80")).map((n) => n.mac)]),
@@ -111,6 +124,21 @@ export const clientsOf = (
         ]),
       ];
       const active = seen.some((n) => ["REACHABLE", "DELAY", "PROBE"].includes(n.state));
+      const counted = reached(router) ? router.traffic[mac] : undefined;
+      // usteer's own nodes on each access point (another's are "<address>#hostapd…").
+      const heardBy = devices.filter(reached).flatMap((d) =>
+        d.heardBy
+          .filter((h) => h.mac === mac && !h.node.includes("#"))
+          .map((h) => {
+            const radio = d.wifi.find((w) => `hostapd.${w.ifname}` === h.node);
+            return {
+              accessPoint: d.hostname,
+              ...(bandOf(radio?.freq) ? { band: bandOf(radio?.freq) } : {}),
+              ...(h.signal !== undefined ? { signal: h.signal } : {}),
+              connected: h.connected,
+            };
+          })
+      );
       const network = ipv4 ? networkOfAddress(intent, ipv4)?.name : undefined;
       return {
         mac,
@@ -134,6 +162,12 @@ export const clientsOf = (
             : { kind: "unknown" as const },
         state: air || active ? ("online" as const) : seen.length ? ("recent" as const) : ("away" as const),
         reserved: !!reservation,
+        ...(counted
+          ? { traffic: { down: counted.rx, up: counted.tx } }
+          : air?.rxBytes !== undefined && air.txBytes !== undefined
+            ? { traffic: { down: air.txBytes, up: air.rxBytes } }
+            : {}),
+        heardBy,
       };
     })
     .sort((a, b) => (a.state === b.state ? (a.name ?? a.mac).localeCompare(b.name ?? b.mac) : a.state === "online" ? -1 : b.state === "online" ? 1 : a.state === "recent" ? -1 : 1));
@@ -158,6 +192,7 @@ export const devicesOf = (intent: Intent, devices: Reachability[], facts: Record
             memoryUsed: status.memory.total ? 1 - status.memory.available / status.memory.total : 0,
             ...(status.storage ? { storage: status.storage } : {}),
             ...(status.temperature !== undefined ? { temperature: status.temperature } : {}),
+            ...(status.cores ? { cores: status.cores } : {}),
           }
         : {}),
       ports: portNames.map((name) => (reached(status) ? status.links.find((l) => l.name === name) : undefined) ?? { name, up: false }),
@@ -179,7 +214,7 @@ export const radiosOf = (devices: Reachability[]): RadioView[] =>
     }))
   );
 
-/** The router's Internet checks, when the Internet view read them. */
+/** The router's Internet checks, when the Performance view read them. */
 export const internetOf = (intent: Intent, devices: Reachability[]): InternetCheck | undefined => {
   const routerName = intent.hardware.find((d) => d.role === "router")?.name;
   const router = devices.find((d) => d.hostname === routerName);
@@ -192,23 +227,24 @@ export const activityOf = (intent: Intent, devices: Reachability[]): ActivityVie
     intent.networks.find((n) => n.id === id)?.name ??
     intent.internet.connections.find((c) => c.id === id || `${c.id}6` === id)?.name ??
     id;
-  const say = (text: string): string | undefined => {
+  const say = (text: string): { text: string; kind: ActivityKind } | undefined => {
     let m: RegExpExecArray | null;
-    if ((m = /netifd: Interface '([^']+)' is now (up|down)/.exec(text))) return `${nameOf(m[1])} ${m[2] === "up" ? "came up" : "went down"}`;
-    if ((m = /netifd: Network device '([^']+)' link is (up|down)/.exec(text))) return `Port ${m[1]} ${m[2] === "up" ? "connected" : "disconnected"}`;
-    if (/procd: - init complete -/.test(text)) return "Started up";
-    if ((m = /hostapd: (\S+): AP-(ENABLED|DISABLED)/.exec(text))) return `Wi-Fi ${m[1]} ${m[2] === "ENABLED" ? "on" : "off"}`;
-    if ((m = /mwan3\S*: .*interface (\S+) is (online|offline)/i.exec(text))) return `${nameOf(m[1])} is ${m[2]}`;
-    if (/odhcpd.*Failed to send/.test(text)) return "IPv6 announcements are failing";
-    if ((m = /onc[\w-]*(?:\[\d+\])?: (.*)/.exec(text))) return m[1].charAt(0).toUpperCase() + m[1].slice(1);
+    const upDown = (up: boolean, text: string) => ({ text, kind: up ? ("up" as const) : ("down" as const) });
+    if ((m = /netifd: Interface '([^']+)' is now (up|down)/.exec(text))) return upDown(m[2] === "up", `${nameOf(m[1])} ${m[2] === "up" ? "came up" : "went down"}`);
+    if ((m = /netifd: Network device '([^']+)' link is (up|down)/.exec(text))) return upDown(m[2] === "up", `Port ${m[1]} ${m[2] === "up" ? "connected" : "disconnected"}`);
+    if (/procd: - init complete -/.test(text)) return { text: "Started up", kind: "start" };
+    if ((m = /hostapd: (\S+): AP-(ENABLED|DISABLED)/.exec(text))) return upDown(m[2] === "ENABLED", `Wi-Fi ${m[1]} ${m[2] === "ENABLED" ? "on" : "off"}`);
+    if ((m = /mwan3\S*: .*interface (\S+) is (online|offline)/i.exec(text))) return upDown(m[2].toLowerCase() === "online", `${nameOf(m[1])} is ${m[2]}`);
+    if (/odhcpd.*Failed to send/.test(text)) return { text: "IPv6 announcements are failing", kind: "problem" };
+    if ((m = /onc[\w-]*(?:\[\d+\])?: (.*)/.exec(text))) return { text: m[1].charAt(0).toUpperCase() + m[1].slice(1), kind: "note" };
     return undefined;
   };
   return devices
     .filter(reached)
     .flatMap((d) =>
       (d.log ?? []).flatMap((line) => {
-        const text = say(line.text);
-        return text ? [{ at: line.at, device: d.hostname, text }] : [];
+        const said = say(line.text);
+        return said ? [{ at: line.at, device: d.hostname, ...said }] : [];
       })
     )
     .filter((e, i, all) => i === all.findIndex((o) => o.device === e.device && o.text === e.text && Math.abs(o.at - e.at) < 2000))
@@ -326,3 +362,24 @@ export const attentionOf = ({
   const order = { problem: 0, warning: 1, info: 2 };
   return out.sort((a, b) => order[a.severity] - order[b.severity]);
 };
+
+/** The internet lines' byte counters now, on the router: throughput comes from two reads. */
+export const internetCountersOf = (intent: Intent, devices: Reachability[]) => {
+  const routerName = intent.hardware.find((d) => d.role === "router")?.name;
+  const router = devices.find((d) => d.hostname === routerName);
+  if (!reached(router)) return undefined;
+  const lines = intent.internet.connections.flatMap((c) => {
+    const device = router.interfaces.find((i) => i.id === c.id)?.device;
+    return device && router.counters[device] ? [router.counters[device]] : [];
+  });
+  return lines.length
+    ? { rx: lines.reduce((n, l) => n + l.rx, 0), tx: lines.reduce((n, l) => n + l.tx, 0), at: router.readAt }
+    : undefined;
+};
+
+/** What was kept from earlier reads, newer first; the same event twice kept once. Logs roll over: this does not. */
+export const keepActivity = (kept: ActivityView[], fresh: ActivityView[], limit = 1000): ActivityView[] =>
+  [...fresh, ...kept]
+    .filter((e, i, all) => i === all.findIndex((o) => o.device === e.device && o.text === e.text && Math.abs(o.at - e.at) < 2000))
+    .sort((a, b) => b.at - a.at)
+    .slice(0, limit);

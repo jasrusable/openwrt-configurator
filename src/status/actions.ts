@@ -106,3 +106,69 @@ export const latestRelease = async ({ intentPath, platform }: { intentPath: stri
     return { error: `Could not ask openwrt.org: ${(e as Error).message}` };
   }
 };
+
+export type Survey = {
+  accessPoint: string;
+  /** Each channel the radios measured: how busy it was (anyone's traffic, ours included), %. */
+  channels: { band: string; channel: number; busy: number; ours: boolean }[];
+  /** Networks around, ours left out: for picking a quieter channel. */
+  neighbours: { ssid?: string; band: string; channel: number; signal: number }[];
+};
+
+const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+const list = (v: unknown) => (Array.isArray(v) ? v : []);
+const channelOf = (mhz: number) => (mhz === 2484 ? 14 : mhz < 2500 ? (mhz - 2407) / 5 : mhz >= 5955 ? (mhz - 5950) / 5 : (mhz - 5000) / 5);
+const bandOfMhz = (mhz: number) => (mhz < 3000 ? "2.4 GHz" : mhz < 5925 ? "5 GHz" : "6 GHz");
+
+/** The survey probe's array: each radio's ifname, iwinfo scan and survey. */
+export const parseSurvey = (accessPoint: string, value: unknown, ours: string[]): Survey => {
+  const radios = list(value).map(obj);
+  const seen = new Map<string, Survey["channels"][number]>();
+  const neighbours: Survey["neighbours"] = [];
+  for (const radio of radios) {
+    for (const s of list(obj(radio.survey).results).map(obj)) {
+      const mhz = Number(s.mhz);
+      const active = Number(s.active_time);
+      const busy = Number(s.busy_time);
+      if (!(mhz > 0) || !(active > 0) || !(busy >= 0)) continue;
+      const key = `${mhz}`;
+      const entry = { band: bandOfMhz(mhz), channel: channelOf(mhz), busy: Math.min(100, Math.round((busy / active) * 100)), ours: s.in_use === true };
+      if (!seen.has(key) || entry.ours) seen.set(key, entry);
+    }
+    for (const n of list(obj(radio.scan).results).map(obj)) {
+      const channel = Number(n.channel);
+      const signal = Number(n.signal);
+      const ssid = typeof n.ssid === "string" ? n.ssid : undefined;
+      if (!(channel > 0) || !Number.isFinite(signal) || (ssid && ours.includes(ssid))) continue;
+      neighbours.push({ ...(ssid ? { ssid } : {}), band: channel > 14 ? (channel > 177 || Number(n.band) === 6 ? "6 GHz" : "5 GHz") : "2.4 GHz", channel, signal });
+    }
+  }
+  return {
+    accessPoint,
+    channels: [...seen.values()].sort((a, b) => a.channel - b.channel),
+    neighbours: neighbours.sort((a, b) => b.signal - a.signal),
+  };
+};
+
+/** Each access point's survey: on request only, as a scan can briefly disturb its clients. */
+export const wifiSurvey = async ({ intentPath, platform }: { intentPath: string; platform: Platform }) => {
+  const { oncConfig, intent } = await loadOncConfig({ path: intentPath, platform });
+  const ours = (intent?.wifi ?? []).map((w) => w.ssid);
+  const hosts = provisionableDevices(oncConfig).ready.map((d) => d.hostname);
+  const command = [
+    "printf '['; sep=''",
+    "for o in $(ubus list 'hostapd.*' 2>/dev/null); do d=${o#hostapd.}",
+    `  printf '%s{"ifname":"%s","scan":' "$sep" "$d"; ubus call iwinfo scan "{\\"device\\":\\"$d\\"}" 2>/dev/null || printf 'null'`,
+    `  printf ',"survey":'; ubus call iwinfo survey "{\\"device\\":\\"$d\\"}" 2>/dev/null || printf 'null'`,
+    "  printf '}'; sep=','",
+    "done; printf ']'",
+  ].join("\n");
+  const surveys = await Promise.all(
+    hosts.map((hostname) =>
+      onDevice(intentPath, platform, hostname, async (session) =>
+        runProbe(session, { command, parse: ({ stdout }) => parseSurvey(hostname, JSON.parse(stdout || "[]"), ours) } as Probe<Survey>)
+      )
+    )
+  );
+  return { surveys: surveys.filter((s): s is Survey => !("error" in s) && (s.channels.length > 0 || s.neighbours.length > 0)) };
+};

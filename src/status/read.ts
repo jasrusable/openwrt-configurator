@@ -11,10 +11,47 @@ import { getOpenWrtState } from "../getOpenWrtState";
 import { provisionStatus } from "../server/provisionJob";
 import { readDeviceStatus } from "./device";
 import { NetworkStatus, networkStatus, Reachability } from "./network";
-import { activityOf, attentionOf, clientsOf, devicesOf, internetOf, radiosOf } from "./views";
+import { ActivityView, activityOf, attentionOf, clientsOf, devicesOf, internetCountersOf, internetOf, keepActivity, radiosOf } from "./views";
+import { parseJson } from "../parseJson";
+
+/** This app's own last run, as an event: applied, or rolled back. */
+const appliesOf = async (intentPath: string, platform: Platform): Promise<ActivityView[]> => {
+  const run = await provisionStatus({ intentPath, files: platform }).catch(() => undefined);
+  if (!run?.startedAt || run.state === "running" || run.state === "idle") return [];
+  const outcome = run.progress.outcome;
+  const text =
+    run.state === "succeeded"
+      ? "Settings applied"
+      : run.state === "applied-with-problems"
+        ? "Settings applied, with a problem after"
+        : outcome === "rolled-back"
+          ? "An apply was rolled back: every device kept its settings"
+          : "An apply stopped before changing anything";
+  return [{ at: run.startedAt, device: "This app", text, kind: run.state === "succeeded" ? "apply" : "problem" }];
+};
+
+/** Activity kept beside the intent across reads (device logs roll over), with what was just read. */
+const keptActivity = (intentPath: string, platform: Platform, fresh: ActivityView[], applies: ActivityView[]) => {
+  const file = `${intentPath}.state/activity.json`;
+  let kept: ActivityView[] = [];
+  try {
+    const value = parseJson(platform.readTextFile(file), file);
+    if (Array.isArray(value)) kept = value as ActivityView[];
+  } catch {
+    // None kept yet.
+  }
+  const all = keepActivity(kept, [...fresh, ...applies]);
+  try {
+    platform.mkdirp(`${intentPath}.state`);
+    platform.writeTextFile(file, JSON.stringify(all));
+  } catch {
+    // Kept next time.
+  }
+  return all.slice(0, 300);
+};
 
 /** A Status tab: each reads what all read, and some a little more (the Internet checks, the log). */
-export const statusViews = ["overview", "clients", "internet", "wifi", "devices", "activity"] as const;
+export const statusViews = ["overview", "clients", "performance", "devices", "activity"] as const;
 export type StatusView = (typeof statusViews)[number];
 
 /**
@@ -65,7 +102,7 @@ export const readNetworkStatus = async ({
         .filter((q: any) => q.enabled)
         .map((q: any) => String(q.interface));
       return readDeviceStatus(f.hostname, f.session, now, mustRun, {
-        ...(view === "internet" && router ? { internet: { shaped } } : {}),
+        ...(view === "performance" && router ? { internet: { shaped } } : {}),
         ...(view === "activity" ? { log: true } : {}),
       });
     },
@@ -79,7 +116,8 @@ export const readNetworkStatus = async ({
     clientList: clientsOf(intent, read, facts),
     deviceViews: devicesOf(intent, read, facts),
     radios: radiosOf(read),
-    ...(view === "internet" && internetOf(intent, read) ? { internetCheck: internetOf(intent, read) } : {}),
-    ...(view === "activity" ? { activity: activityOf(intent, read) } : {}),
+    ...(internetCountersOf(intent, read) ? { internetCounters: internetCountersOf(intent, read) } : {}),
+    ...(view === "performance" && internetOf(intent, read) ? { internetCheck: internetOf(intent, read) } : {}),
+    ...(view === "activity" ? { activity: keptActivity(intentPath, platform, activityOf(intent, read), await appliesOf(intentPath, platform)) } : {}),
   };
 };

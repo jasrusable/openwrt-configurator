@@ -51,10 +51,11 @@ export const persistDeviceReads = (queryClient: QueryClient) => {
   });
 };
 
-/** Forget everything kept: a router session ended. */
+/** Forget everything kept, the Status graphs' history too: a router session ended. */
 export const forgetDeviceReads = () => {
   try {
     localStorage.removeItem(storageKey());
+    localStorage.removeItem(`onc-history:${location.pathname}`);
   } catch {
     // Nothing was kept.
   }

@@ -26,6 +26,9 @@ const device = (hostname: string, parts: Partial<DeviceStatus>): DeviceStatus =>
   neighbours: [],
   ipv6Leases: [],
   notRunning: [],
+  counters: {},
+  traffic: {},
+  heardBy: [],
   ...parts,
 });
 
@@ -64,9 +67,12 @@ test("clients: one row per device, from leases, neighbours and Wi-Fi; our own de
       { mac: "aa:00:00:00:00:09", address: "10.0.0.50", name: "home-ap-1", expires: 1 },
     ],
     neighbours: [
-      { address: "10.0.0.24", mac: "aa:00:00:00:00:02", state: "REACHABLE" },
-      { address: "2001:db8::24", mac: "aa:00:00:00:00:02", state: "STALE" },
+      { address: "10.0.0.24", mac: "aa:00:00:00:00:02", state: "REACHABLE", device: "br-lan" },
+      { address: "2001:db8::24", mac: "aa:00:00:00:00:02", state: "STALE", device: "br-lan" },
+      // The provider's modem, seen on the internet line: not a client.
+      { address: "192.168.178.1", mac: "aa:00:00:00:00:77", state: "REACHABLE", device: "eth1" },
     ],
+    interfaces: [{ id: "wan", up: true, ipv4: [], ipv6: [], device: "eth1" }],
   });
   const ap = device("home-ap-1", { wifi: [{ ifname: "phy1-ap0", ssid: "Home", freq: 5180, clients: [{ mac: "aa:00:00:00:00:01", signal: -58 }] }] });
   const clients = clientsOf(intent, [router, ap], { "home-ap-1": { hostname: "home-ap-1", readAt: 0, schema: { name: "x", version: "25.12.5" }, macs: ["aa:00:00:00:00:09"] } });
@@ -92,10 +98,10 @@ test("activity: log lines in words, newest first; the rest left out", (t) => {
     { at: 3000, text: "user.notice onc-ipv6: wan6 has an IPv6 default route, restarting odhcpd" },
     { at: 4000, text: "daemon.info dnsmasq[1]: read /etc/hosts" },
   ];
-  t.deepEqual(activityOf(intent, [device("home-router", { log })]).map((e) => e.text), [
-    "Wan6 has an IPv6 default route, restarting odhcpd",
-    "Port eth1 disconnected",
-    `${intent.networks[0].name} came up`,
+  t.deepEqual(activityOf(intent, [device("home-router", { log })]).map(({ text, kind }) => [text, kind]), [
+    ["Wan6 has an IPv6 default route, restarting odhcpd", "note"],
+    ["Port eth1 disconnected", "down"],
+    [`${intent.networks[0].name} came up`, "up"],
   ]);
 });
 

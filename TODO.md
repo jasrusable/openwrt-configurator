@@ -114,7 +114,5 @@ and the React UI in `ui/`.
 
 ## Status
 
-- Wi-Fi: channel airtime and neighbouring networks (a survey; iwinfo's scan, on request), and usteer's roaming moves.
-- Clients: traffic per device (needs nlbwmon or conntrack accounting), and names learnt from mDNS.
-- Activity: kept across reads (the logs roll over), and this app's own applies in the timeline.
-- Upload in the speed test.
+- Clients: names learnt from mDNS; a client's type is guessed from its name only (icons).
+- Wi-Fi survey and usteer roaming: run on the user's AP only once usteer and the survey are exercised there (verified in Docker).

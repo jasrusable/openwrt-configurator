@@ -5,8 +5,8 @@
 import { meshMtu } from "../../../src/intent/features/mesh";
 import { where } from "../../../src/intent/places";
 import { weakMeshLinkMbps } from "../../../src/status/network";
-import { Anchor, Button, Group, Text } from "@mantine/core";
-import { IconChevronRight } from "@tabler/icons-react";
+import { Anchor, Box, Button, Group, SimpleGrid, Stack, Text } from "@mantine/core";
+import { IconAccessPoint, IconChevronRight, IconRouter, IconWorld } from "@tabler/icons-react";
 import { ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { Intent } from "../../../src/intent/schema";
@@ -14,11 +14,13 @@ import { internetIpv6 } from "../../../src/intent/connections";
 import { templateOf } from "../../../src/intent/networkTemplates";
 import { useFreshDevices } from "../data/devices";
 import { useProvision } from "../data/provision";
+import { bitsWords, useSeries } from "../data/history";
 import { useNetworkStatus } from "../data/status";
 import { useMeasureLink } from "../data/mesh";
-import { ago, duration, modelOf, portsOf, routerFacts } from "../facts";
+import { ago, duration, portsOf, routerFacts } from "../facts";
 import { useDraftValue } from "../form/draft";
-import { Section, SettingRow, SettingsPage, StatusDot } from "../kit/layout";
+import { AreaChart, Tile } from "../kit/charts";
+import { ItemIcon, Section, SettingRow, SettingsPage, StatusDot } from "../kit/layout";
 import { applyStatus } from "../provision/status";
 import { AttentionSection } from "./status/shared";
 
@@ -66,6 +68,134 @@ const LinkSpeed = ({ from, to, throughput }: { from: string; to: string; through
 
 const devicesWord = (n: number) => `${n} device${n === 1 ? "" : "s"}`;
 
+/** One box of the topology: what it is, its name, and a line about it. */
+const Node = ({ icon, name, sub, up }: { icon: typeof IconRouter; name: string; sub?: string; up?: boolean }) => (
+  <Box className="onc-card" px="sm" py={8} style={{ display: "inline-flex", maxWidth: "100%" }}>
+    <Group gap={10} wrap="nowrap" style={{ minWidth: 0 }}>
+      <ItemIcon icon={icon} color={up === false ? "red" : "teal"} off={up === undefined} />
+      <Stack gap={0} style={{ minWidth: 0 }}>
+        <Group gap={6} wrap="nowrap">
+          <Text size="sm" fw={600} truncate>
+            {name}
+          </Text>
+          {up !== undefined && <StatusDot color={up ? "green" : "red"} />}
+        </Group>
+        {sub && (
+          <Text size="xs" c="dimmed" truncate>
+            {sub}
+          </Text>
+        )}
+      </Stack>
+    </Group>
+  </Box>
+);
+
+const Wire = () => <Box w={2} h={18} mx="auto" style={{ background: "var(--onc-separator)" }} />;
+
+/** The network as it hangs together now: the internet, the router, each access point and who is on it. */
+const Topology = ({ intent }: { intent: Intent }) => {
+  const live = useNetworkStatus().data;
+  const down = useSeries("down");
+  const up = useSeries("up");
+  const clients = live?.clientList?.filter((c) => c.state === "online") ?? [];
+  const onWifi = (name: string) => clients.filter((c) => c.connection.kind === "wifi" && c.connection.accessPoint === name).length;
+  const reached = (name: string) => (live ? !!live.devices.find((d) => d.name === name)?.health : undefined);
+  const router = intent.hardware.find((d) => d.role === "router");
+  const aps = intent.hardware.filter((d) => d.role !== "router");
+  const routerWifi = router ? onWifi(router.name) : 0;
+  const wired = clients.filter((c) => c.connection.kind === "wired").length;
+  return (
+    <Box className="onc-card" p="md">
+      <Stack gap={0} align="center">
+        <Node
+          icon={IconWorld}
+          name="Internet"
+          up={live?.internet?.up}
+          sub={down.length ? `↓ ${bitsWords(down[down.length - 1][1])} · ↑ ${bitsWords(up[up.length - 1]?.[1])}` : undefined}
+        />
+        {router && (
+          <>
+            <Wire />
+            <Node
+              icon={IconRouter}
+              name={router.name}
+              up={reached(router.name)}
+              sub={[`${wired} by cable`, routerWifi ? `${routerWifi} on Wi-Fi` : undefined].filter(Boolean).join(" · ")}
+            />
+          </>
+        )}
+        {aps.length > 0 && (
+          <>
+            <Wire />
+            {/* Several hang off one bar; one hangs off the router directly. */}
+            <SimpleGrid
+              cols={{ base: 1, xs: Math.min(aps.length, 3) }}
+              spacing="sm"
+              w="100%"
+              style={aps.length > 1 ? { borderTop: "2px solid var(--onc-separator)", paddingTop: 14 } : undefined}
+            >
+              {aps.map((ap) => {
+                const mesh = live?.mesh?.find((m) => m.name === ap.name);
+                const best = Math.max(0, ...(mesh?.links ?? []).map((l) => l.throughput));
+                const link = ap.uplink === "mesh" ? (best ? `Mesh ~${Math.round(best)} Mbit/s` : "Mesh, no link") : "Cable";
+                return (
+                  <Box key={ap.name} style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
+                    <Node icon={IconAccessPoint} name={ap.name} up={reached(ap.name)} sub={`${onWifi(ap.name)} on Wi-Fi · ${link}`} />
+                  </Box>
+                );
+              })}
+            </SimpleGrid>
+          </>
+        )}
+      </Stack>
+    </Box>
+  );
+};
+
+/** The four numbers that say how the network is: internet, clients, devices, Wi-Fi. */
+const Tiles = ({ intent }: { intent: Intent }) => {
+  const live = useNetworkStatus().data;
+  const down = useSeries("down");
+  const up = useSeries("up");
+  const history = useSeries("clients");
+  const online = live?.clientList?.filter((c) => c.state === "online") ?? [];
+  const wifi = online.filter((c) => c.connection.kind === "wifi");
+  const views = live?.deviceViews ?? [];
+  const reachedCount = views.filter((d) => d.reachable).length;
+  const hottest = Math.max(-Infinity, ...views.flatMap((d) => (d.temperature !== undefined ? [d.temperature] : [])));
+  const onAir = live?.ssids.filter((s) => s.accessPoints.length > 0).length ?? 0;
+  const bands = ["2.4 GHz", "5 GHz", "6 GHz"]
+    .map((b) => [b, wifi.filter((c) => c.connection.kind === "wifi" && c.connection.band === b).length] as const)
+    .filter(([, n]) => n);
+  return (
+    <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
+      <Tile
+        label="Internet"
+        value={!live ? "—" : live.internet?.up ? "Online" : "Down"}
+        color={!live ? undefined : live.internet?.up ? "green" : "red"}
+        sub={down.length ? `↓ ${bitsWords(down[down.length - 1][1])} · ↑ ${bitsWords(up[up.length - 1]?.[1])}` : "Throughput after two reads"}
+      >
+        <AreaChart series={[down, up]} colors={["blue", "teal"]} height={28} />
+      </Tile>
+      <Tile label="Clients online" value={live ? online.length : "—"} color="cyan" sub={live ? `${wifi.length} on Wi-Fi` : undefined}>
+        <AreaChart series={[history]} colors={["cyan"]} height={28} />
+      </Tile>
+      <Tile
+        label="Devices"
+        value={live ? `${reachedCount} of ${intent.hardware.length}` : "—"}
+        color={live ? (reachedCount === intent.hardware.length ? "green" : "red") : undefined}
+        sub={Number.isFinite(hottest) ? `Warmest ${Math.round(hottest)} °C` : live ? "answering" : undefined}
+      />
+      <Tile
+        label="Wi-Fi"
+        value={live ? `${onAir} on air` : "—"}
+        color="blue"
+        sub={bands.map(([b, n]) => `${n} on ${b}`).join(" · ") || (live ? "No one on Wi-Fi" : undefined)}
+      />
+    </SimpleGrid>
+  );
+};
+
 export const OverviewPage = () => {
   const intent: Intent = useDraftValue();
   const devices = useFreshDevices();
@@ -98,13 +228,17 @@ export const OverviewPage = () => {
       }
     >
       <AttentionSection items={live?.attention} />
-      {apply && (
+      {/* Saved but not applied is in Needs attention; up to date says nothing. */}
+      {apply && provision && (provision.state === "running" || provision.live === "none") && (
         <Section title="Devices and settings">
           <SettingRow label={apply.title} description={apply.detail}>
             <Link to="?apply">Apply</Link>
           </SettingRow>
         </Section>
       )}
+
+      <Tiles intent={intent} />
+      <Topology intent={intent} />
 
       <Section title="Internet" description={onBackup}>
         {intent.internet.connections.map((c) => {
@@ -153,31 +287,6 @@ export const OverviewPage = () => {
               : "Your provider's"}
           </State>
         </SettingRow>
-        {live && (
-          <SettingRow label="Connected devices" description={`${live.clients.wifi} on Wi-Fi`}>
-            <State>{devicesWord(live.clients.total)}</State>
-          </SettingRow>
-        )}
-      </Section>
-
-      <Section title="Devices">
-        {intent.hardware.map((device) => {
-          const known = facts?.[device.name];
-          const now = live?.devices.find((d) => d.name === device.name);
-          const what = known ? `${modelOf(known.schema)} · OpenWrt ${known.schema.version}` : undefined;
-          const health = now?.health
-            ? `up ${duration(now.health.uptime)} · load ${now.health.load.toFixed(2)} · memory ${Math.round(now.health.memoryUsed * 100)}%`
-            : now?.error
-            ? `not reached: ${now.error}`
-            : devices.reading
-            ? "reading…"
-            : undefined;
-          return (
-            <SettingRow key={device.name} label={device.name} description={[what, health].filter(Boolean).join(" · ")}>
-              <State up={now ? !!now.health : undefined}>{device.role === "router" ? "Router" : "Access point"}</State>
-            </SettingRow>
-          );
-        })}
       </Section>
 
       {live?.mesh && (

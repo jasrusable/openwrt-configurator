@@ -27,7 +27,7 @@ test("neighbours: each address with its MAC and state; one that failed has none 
   t.is(table.length, 2);
   t.like(table[0], { address: "192.168.215.2", state: "REACHABLE" });
   t.deepEqual(parseNeighbourTable("fe80::1 dev br-lan lladdr AA:BB:CC:DD:EE:01 router STALE"), [
-    { address: "fe80::1", mac: "aa:bb:cc:dd:ee:01", state: "STALE" },
+    { address: "fe80::1", mac: "aa:bb:cc:dd:ee:01", state: "STALE", device: "br-lan" },
   ]);
 });
 

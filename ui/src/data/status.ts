@@ -4,16 +4,15 @@
 // with its own reads (the Internet checks, the log).
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { StatusView } from "../../../src/status/read";
-import { loadLatestRelease, loadNetworkStatus, restartService, runSpeedTest } from "./api";
+import { loadLatestRelease, loadNetworkStatus, restartService, runSpeedTest, runWifiSurvey } from "./api";
 
 export const statusKey = (view: StatusView = "overview") => ["network-status", view] as const;
 
-/** How often each tab reads: the Internet tab's latency moves, the devices' health less so. */
+/** How often each tab reads: Performance's latency and throughput move, the devices' health less so. */
 const every: Record<StatusView, number> = {
   overview: 30_000,
   clients: 15_000,
-  internet: 10_000,
-  wifi: 15_000,
+  performance: 10_000,
   devices: 30_000,
   activity: 30_000,
 };
@@ -43,6 +42,9 @@ export const useRestartService = () => {
 };
 
 export const useSpeedTest = () => useMutation({ mutationFn: runSpeedTest });
+
+/** Each access point's survey: on request, as a scan can briefly disturb its clients. */
+export const useWifiSurvey = () => useMutation({ mutationFn: runWifiSurvey });
 
 /** OpenWrt's latest release: asked once a day at most (the server keeps it). */
 export const useLatestRelease = () =>

@@ -6,6 +6,7 @@ import type { DeviceFacts, ReadAttempt } from "../../../src/deviceFacts";
 import type { Change } from "../../../src/intent/diff";
 import type { NetworkStatus } from "../../../src/status/network";
 import type { StatusView } from "../../../src/status/read";
+import type { Survey } from "../../../src/status/actions";
 import type { Intent } from "../../../src/intent/schema";
 import type { ProvisionStatus } from "../../../src/server/provisionJob";
 
@@ -151,6 +152,9 @@ export const restartService = (device: string, service: string) =>
   postJson<{ ok: true }>("api/fix", { device, service }, "Could not restart it.");
 
 /** The router's download speed now. */
+export const runWifiSurvey = () =>
+  postJson<{ surveys: Survey[] }>("api/wifi/survey", {}, "The survey did not finish.");
+
 export const runSpeedTest = () => postJson<{ downMbps: number }>("api/internet/speed", {}, "The speed test did not finish.");
 
 /** OpenWrt's latest stable release. */

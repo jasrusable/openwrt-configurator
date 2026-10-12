@@ -10,7 +10,7 @@ import { readFacts, readFailures, refreshStale, staleDevices } from "../deviceFa
 import { compileIntent } from "../intent/compile";
 import { lockoutReason, ownPublicKey } from "../loginAccess";
 import { readNetworkStatus, StatusView, statusViews } from "../status/read";
-import { latestRelease, restartService, speedTest } from "../status/actions";
+import { latestRelease, restartService, speedTest, wifiSurvey } from "../status/actions";
 import { diffIntent } from "../intent/diff";
 import { migrateIntent } from "../intent/migrations";
 import { intentSchema } from "../intent/schema";
@@ -327,6 +327,14 @@ export const internetSpeedApi =
     return json("error" in result ? 502 : 200, result);
   };
 
+/** POST: each access point's Wi-Fi survey (neighbouring networks, how busy each channel is); on request. */
+export const surveyApi =
+  ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
+  async ({ method }) => {
+    if (method !== "POST") return json(405, { error: "POST" });
+    return json(200, await wifiSurvey({ intentPath, platform }));
+  };
+
 export const firmwareApi =
   ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
   async ({ method }) => {
@@ -460,6 +468,7 @@ export const uiHandler = ({
     "/api/fix": fixApi({ intentPath, platform }),
     "/api/internet/speed": internetSpeedApi({ intentPath, platform }),
     "/api/firmware": firmwareApi({ intentPath, platform }),
+    "/api/wifi/survey": surveyApi({ intentPath, platform }),
     ...Object.fromEntries(statusViews.map((v) => [`/api/status/${v}`, statusApi({ intentPath, platform })])),
   };
   const ui = staticFiles({ root: uiRoot, files: platform });

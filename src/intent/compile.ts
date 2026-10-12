@@ -12,6 +12,7 @@ import { vpn } from "./features/vpn";
 import { network } from "./features/network";
 import { roles } from "./features/roles";
 import { system } from "./features/system";
+import { traffic } from "./features/traffic";
 import { wifi } from "./features/wifi";
 import { Feature, merge } from "./fragment";
 import { patchesFeature } from "./patches";
@@ -30,6 +31,7 @@ const features: Feature[] = [
   mesh,
   vpn,
   discovery,
+  traffic,
   roles,
   // Last: fixes layered over everything else (src/intent/patches).
   patchesFeature,

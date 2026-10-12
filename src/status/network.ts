@@ -73,6 +73,8 @@ export type NetworkStatus = {
   radios?: RadioView[];
   internetCheck?: InternetCheck;
   activity?: ActivityView[];
+  /** The internet lines' byte counters, and when: two reads give the throughput. */
+  internetCounters?: { rx: number; tx: number; at: number };
 };
 
 const reached = (r: Reachability | undefined): r is DeviceStatus => !!r && !("error" in r);

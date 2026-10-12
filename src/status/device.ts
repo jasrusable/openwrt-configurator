@@ -50,12 +50,13 @@ export type PortLink = { name: string; up: boolean; speed?: number };
 export type Adverts = { device: string; sent: number; solicits: number };
 
 /** The kernel's neighbour table: who answered on which address lately. */
-export type NeighbourEntry = { address: string; mac: string; state: string };
+/** One entry of the router's neighbour table, with the interface it was seen on. */
+export type NeighbourEntry = { address: string; mac: string; state: string; device?: string };
 
 /** odhcpd's IPv6 leases: by DUID, the MAC where the DUID holds one. */
 export type Ipv6Lease = { duid: string; mac?: string; hostname?: string; addresses: string[] };
 
-/** Read only for the Internet view: how the line is doing from the router. */
+/** Read only for the Performance view: how the line is doing from the router. */
 export type InternetCheck = {
   /** Average round trip to a public resolver, ms; undefined when none answered. */
   latencyMs?: number;
@@ -114,6 +115,14 @@ export type DeviceStatus = {
   notRunning: { name: string; missing: boolean }[];
   internet?: InternetCheck;
   log?: LogLine[];
+  /** Bytes received and sent on each network device since it came up: rates come from two reads. */
+  counters: Record<string, { rx: number; tx: number }>;
+  /** Processor cores: a load of 1 per core is busy. */
+  cores?: number;
+  /** nlbwmon's traffic per client MAC since its database began (the router). */
+  traffic: Record<string, { rx: number; tx: number }>;
+  /** usteer's view of each client: which of its nodes hear it, how well, which it is on. */
+  heardBy: { mac: string; node: string; signal?: number; connected: boolean }[];
 };
 
 export type WireguardPeer = {
@@ -392,7 +401,8 @@ export const parseAdverts = (text: string): Adverts[] =>
 export const parseNeighbourTable = (text: string): NeighbourEntry[] =>
   text.split("\n").flatMap((line) => {
     const m = /^(\S+)\s.*\blladdr\s+([0-9a-f:]{17})\b.*\s([A-Z]+)\s*$/i.exec(line.trim());
-    return m ? [{ address: m[1], mac: m[2].toLowerCase(), state: m[3] }] : [];
+    const device = /\bdev\s+(\S+)/.exec(line)?.[1];
+    return m ? [{ address: m[1], mac: m[2].toLowerCase(), state: m[3], ...(device ? { device } : {}) }] : [];
   });
 
 /** A MAC inside a DUID: DUID-LLT (0001, hardware type, time) and DUID-LL (0003, hardware type). */
@@ -417,7 +427,7 @@ export const parseIpv6Leases = (value: unknown): Ipv6Lease[] =>
   );
 
 /**
- * The Internet view's checks, one per line: "ping <avg ms or ->", "ip <address
+ * The Performance view's checks, one per line: "ping <avg ms or ->", "ip <address
  * or ->", "dns <ok or fail>", then "qdisc <device> <sent bytes> <dropped>" per
  * shaped device.
  */
@@ -447,6 +457,60 @@ export const parseLog = (text: string): LogLine[] =>
     return Number.isFinite(at) ? [{ at, text: m[5] }] : [];
   });
 
+/** "<device> <rx bytes> <tx bytes>" per line. */
+export const parseCounters = (text: string) =>
+  Object.fromEntries(
+    text.split("\n").flatMap((line) => {
+      const [device, rx, tx] = line.trim().split(/\s+/);
+      return device && rx !== undefined && tx !== undefined && /^\d+$/.test(rx) && /^\d+$/.test(tx)
+        ? [[device, { rx: Number(rx), tx: Number(tx) }]]
+        : [];
+    })
+  );
+
+/** `nlbw -c json -g mac`: columns, then a row per client. */
+export const parseTraffic = (value: unknown) => {
+  const o = obj(value);
+  const columns = arr(o.columns).map((c) => str(c) ?? "");
+  const at = (name: string) => columns.indexOf(name);
+  return Object.fromEntries(
+    arr(o.data).flatMap((row) => {
+      const r = arr(row);
+      const mac = str(r[at("mac")]);
+      const rx = num(r[at("rx_bytes")]);
+      const tx = num(r[at("tx_bytes")]);
+      return mac && rx !== undefined && tx !== undefined ? [[mac.toLowerCase(), { rx, tx }]] : [];
+    })
+  );
+};
+
+/** `ubus call usteer get_clients`: per client, per node (this one's or another's), connected and signal. */
+export const parseHeardBy = (value: unknown) =>
+  Object.entries(obj(value)).flatMap(([mac, nodes]) =>
+    Object.entries(obj(nodes)).map(([node, info]) => {
+      const i = obj(info);
+      return {
+        mac: mac.toLowerCase(),
+        node,
+        ...(num(i.signal) !== undefined ? { signal: num(i.signal) } : {}),
+        connected: i.connected === true,
+      };
+    })
+  );
+
+const counters = raw(
+  'for d in /sys/class/net/*; do echo "${d##*/} $(cat "$d/statistics/rx_bytes" 2>/dev/null) $(cat "$d/statistics/tx_bytes" 2>/dev/null)"; done'
+);
+const cores = raw("grep -c ^processor /proc/cpuinfo 2>/dev/null || true");
+const traffic: Probe<unknown> = {
+  command: "nlbw -c json -g mac 2>/dev/null || echo '{}'",
+  parse: ({ stdout }) => json(stdout || "{}", "nlbw"),
+};
+const heardBy: Probe<unknown> = {
+  command: "ubus call usteer get_clients 2>/dev/null || echo '{}'",
+  parse: ({ stdout }) => json(stdout || "{}", "usteer get_clients"),
+};
+
 const storage = raw("df -k /overlay 2>/dev/null || df -k / 2>/dev/null");
 const temperature = raw("cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null || true");
 // Devices with hardware behind them (a port, a radio), not bridges or VLANs.
@@ -462,7 +526,7 @@ const ipv6Leases: Probe<unknown> = {
   parse: ({ stdout }) => json(stdout || "{}", "dhcp ipv6leases"),
 };
 
-/** The Internet view's checks, from the router (see parseInternetCheck). */
+/** The Performance view's checks, from the router (see parseInternetCheck). */
 const internetCheck = (shaped: string[]) =>
   raw(
     [
@@ -481,7 +545,7 @@ const logProbe = raw(
   "logread -l 400 2>/dev/null | grep -E 'onc|netifd: Interface|link is (up|down)|odhcpd.*(Failed|error)|AP-ENABLED|AP-DISABLED|init complete|mwan3.*(online|offline)' | tail -n 120"
 );
 
-/** What only some views read: the Internet view's checks, the Activity view's log. */
+/** What only some views read: the Performance view's checks, the Activity view's log. */
 export type StatusExtras = { internet?: { shaped: string[] }; log?: boolean };
 
 /** Read what `hostname` is doing, over an open session. */
@@ -509,6 +573,10 @@ export const readDeviceStatus = async (
     neighbourTable,
     ipv6Leases,
     notRunning: notRunning(mustRun),
+    counters,
+    cores,
+    traffic,
+    heardBy,
     // Device names only (eth1, pppoe-wan): they go inside an awk program, unquoted.
     internetCheck: extras.internet
       ? internetCheck(extras.internet.shaped.filter((d) => /^[A-Za-z0-9._@-]+$/.test(d)))
@@ -537,6 +605,10 @@ export const readDeviceStatus = async (
     neighbours: parseNeighbourTable(read.neighbourTable),
     ipv6Leases: parseIpv6Leases(read.ipv6Leases),
     notRunning: read.notRunning,
+    counters: parseCounters(read.counters),
+    ...(Number(read.cores) > 0 ? { cores: Number(read.cores) } : {}),
+    traffic: parseTraffic(read.traffic),
+    heardBy: parseHeardBy(read.heardBy),
     ...(extras.internet ? { internet: parseInternetCheck(read.internetCheck) } : {}),
     ...(extras.log ? { log: parseLog(read.log) } : {}),
   };

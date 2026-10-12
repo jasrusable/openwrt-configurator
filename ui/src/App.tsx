@@ -188,6 +188,9 @@ const router = createHashRouter([
       // Old addresses: General is System, SSIDs and Radios are Wi-Fi's tabs.
       { path: "ssids/*", element: <MovedTo base="/wifi" /> },
       { path: "radios/*", element: <MovedTo base="/wifi/radios" /> },
+      // Status's tabs were under the Overview: each is its own page now.
+      ...["clients", "devices", "activity"].map((tab) => ({ path: `overview/${tab}`, element: <Navigate to={`/${tab}`} replace /> })),
+      ...["internet", "wifi"].map((tab) => ({ path: `overview/${tab}`, element: <Navigate to="/performance" replace /> })),
       { path: "*", element: <Navigate to="overview" replace /> },
     ],
   },
