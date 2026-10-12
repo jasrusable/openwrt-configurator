@@ -37,6 +37,11 @@ export type NetworkStatus = {
   networks: { id: string; name: string; up?: boolean; clients: number }[];
   ssids: { ssid: string; accessPoints: string[]; clients: number }[];
   clients: { total: number; wifi: number };
+  /**
+   * With the mesh on: each device reached, and the nodes it links to
+   * directly (by name where its MAC is known from facts) with the quality.
+   */
+  mesh?: { name: string; links: { to: string; quality: number }[] }[];
   /** On the devices but not in your settings: shown, so a mismatch is never hidden. */
   unexpected: { interfaces: string[]; ssids: string[] };
 };
@@ -46,7 +51,12 @@ const reached = (r: Reachability | undefined): r is DeviceStatus => !!r && !("er
 /** The /24 a network hands addresses out in: "10.0.20." for 10.0.20.0/24. */
 const prefixOf = (subnet: string) => subnet.split(".").slice(0, 3).join(".") + ".";
 
-export const networkStatus = (intent: Intent, devices: Reachability[]): NetworkStatus => {
+export const networkStatus = (
+  intent: Intent,
+  devices: Reachability[],
+  /** Each device's MACs (from its facts): who a mesh neighbour is. */
+  macs: Record<string, string[] | undefined> = {}
+): NetworkStatus => {
   const byName = new Map(devices.map((d) => [d.hostname, d]));
   const routerName = intent.hardware.find((d) => d.role === "router")?.name;
   const router = routerName ? byName.get(routerName) : undefined;
@@ -107,6 +117,17 @@ export const networkStatus = (intent: Intent, devices: Reachability[]): NetworkS
         }
       : {}),
     connections,
+    ...(intent.mesh?.enabled
+      ? {
+          mesh: intent.hardware.flatMap((d) => {
+            const status = byName.get(d.name);
+            if (!reached(status)) return [];
+            const nameOf = (mac: string) =>
+              Object.entries(macs).find(([, list]) => list?.includes(mac))?.[0] ?? mac;
+            return [{ name: d.name, links: status.mesh.map((n) => ({ to: nameOf(n.mac), quality: n.quality })) }];
+          }),
+        }
+      : {}),
     devices: intent.hardware.map((d) => {
       const status = byName.get(d.name);
       return {

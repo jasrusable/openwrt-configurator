@@ -3,6 +3,7 @@
 // (`cgi`) answer every request with the same code. The UI uses relative URLs,
 // so it works wherever it is mounted: / on a Mac, /cgi-bin/onc/ on a router.
 import { readApplyDiff } from "../applyDiff";
+import { measureLink } from "../meshSpeed";
 import { adopt, discover, Inspected, inspect } from "../discover";
 import { readFacts, readFailures, refreshStale, staleDevices } from "../deviceFacts";
 import { compileIntent } from "../intent/compile";
@@ -294,6 +295,24 @@ export const applyDiffApi =
     return json(200, { devices: await readApplyDiff({ intentPath, platform }) });
   };
 
+/** POST {from, to}: a mesh link's speed, measured now (src/meshSpeed.ts). Sends test traffic; changes nothing. */
+export const meshSpeedApi =
+  ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
+  async ({ method, body }) => {
+    if (method !== "POST") return json(405, { error: "POST" });
+    let input: { from?: unknown; to?: unknown };
+    try {
+      input = JSON.parse(body || "{}");
+    } catch {
+      return json(400, { error: "The body is not JSON." });
+    }
+    if (typeof input.from !== "string" || typeof input.to !== "string" || input.from === input.to) {
+      return json(400, { error: "Give two devices: from and to." });
+    }
+    const result = await measureLink({ intentPath, platform, from: input.from, to: input.to });
+    return json("error" in result ? 502 : 200, result);
+  };
+
 export const uiHandler = ({
   intentPath,
   uiRoot,
@@ -313,6 +332,7 @@ export const uiHandler = ({
     "/api/discover": discoverApi({ intentPath, platform }),
     "/api/discover/inspect": discoverApi({ intentPath, platform }),
     "/api/discover/adopt": discoverApi({ intentPath, platform }),
+    "/api/mesh/speed": meshSpeedApi({ intentPath, platform }),
   };
   const ui = staticFiles({ root: uiRoot, files: platform });
   return (request) =>

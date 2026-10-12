@@ -19,6 +19,14 @@ export const conditionMatches = ({
     "device.ipaddr": deviceConfig.ipaddr,
     "device.model_id": deviceConfig.model_id ?? deviceSchema.name,
     "device.version": deviceSchema.version,
+    // Whether it has a radio in each band: for config only a radio there can
+    // carry (a mesh on a router that may or may not have Wi-Fi).
+    ...Object.fromEntries(
+      ["2g", "5g", "6g"].map((band) => [
+        `device.wifi_${band}`,
+        (deviceSchema.radios ?? []).some((r) => r.band === band),
+      ])
+    ),
   };
   return evaluateCondition(condition, (name) => {
     if (name.startsWith("device.tag.")) {

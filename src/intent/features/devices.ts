@@ -6,7 +6,10 @@ import { Feature, routerAddress } from "../fragment";
 export const devices: Feature = (intent) => ({
   devices: intent.hardware.map((device) => ({
     hostname: device.name,
-    tags: { role: device.role },
+    // Reached over the mesh, through a cabled one: changed first, while the
+    // path to it is still the one it has.
+    ...(intent.mesh.enabled && device.uplink === "mesh" ? { provision_order: -1 } : {}),
+    tags: { role: device.role, ...(intent.mesh.enabled && device.uplink === "mesh" ? { uplink: "mesh" } : {}) },
     ipaddr:
       device.role === "router"
         ? routerAddress(intent)

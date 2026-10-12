@@ -9,7 +9,9 @@ import {
 import { defineList, ListPage } from "../form/ListPage";
 import { IconAccessPoint, IconRouter } from "@tabler/icons-react";
 import { useDraftValue } from "../form/draft";
-import { useFreshDevices } from "../data/devices";
+import { useDevices, useFreshDevices } from "../data/devices";
+import { Intent } from "../../../src/intent/schema";
+import { rescueAddress, rescueAfterMinutes, rescueSsid } from "../../../src/intent/features/mesh";
 import { AddHardwarePage } from "./AddHardwarePage";
 import { useNetworkStatus } from "../data/status";
 import { ago, bandsOf, duration, modelOf, portsOf } from "../facts";
@@ -144,6 +146,45 @@ const DeviceFacts = ({ index }: { index: number }) => {
   );
 };
 
+/**
+ * How an access point reaches the network, once the mesh is on: a cable, or
+ * the mesh. "Mesh" is greyed out where its radio in the mesh's band cannot
+ * (from its facts: a warning, never a refusal; the schema's rules refuse).
+ */
+const UplinkSection = ({ index }: { index: number }) => {
+  const intent: Intent = useDraftValue();
+  const facts = useDevices().data?.facts;
+  const device = intent.hardware[index];
+  if (!intent.mesh.enabled || device?.role !== "access-point") return null;
+  const radios = facts?.[device.name]?.schema.radios?.filter((r) => r.band === intent.mesh.band);
+  const cannot =
+    radios === undefined
+      ? undefined
+      : !radios.length
+        ? `It has no ${intent.mesh.band === "2g" ? "2.4" : "5"} GHz radio.`
+        : !radios.some((r) => r.mesh !== false)
+          ? "Its radio cannot mesh."
+          : undefined;
+  return (
+    <Section>
+      <SegmentedField
+        name={`hardware.${index}.uplink`}
+        label="Connected"
+        options={[
+          { value: "cable", label: "Cable" },
+          { value: "mesh", label: "Mesh", disabled: !!cannot && device.uplink !== "mesh", reason: cannot },
+        ]}
+      />
+      {device.uplink === "mesh" && (
+        <SettingRow
+          label="If it loses the mesh"
+          description={`After ${rescueAfterMinutes} minutes it shows “${rescueSsid(device.name)}” (the mesh key): join it, then ssh root@${rescueAddress(device.name)}.`}
+        />
+      )}
+    </Section>
+  );
+};
+
 const hardware = defineList({
   name: "hardware",
   title: "Hardware",
@@ -151,7 +192,7 @@ const hardware = defineList({
     "Your router and access points.",
   addLabel: "Add hardware",
   newPage: <AddHardwarePage />,
-  newItem: () => ({ name: "", role: "access-point" as const }),
+  newItem: () => ({ name: "", role: "access-point" as const, uplink: "cable" as const }),
   itemTitle: (i) => <Value name={`hardware.${i}.name`} fallback="New access point" />,
   empty: "No hardware yet.",
   columns: [
@@ -217,6 +258,7 @@ const hardware = defineList({
           placeholder="Living room"
         />
       </Section>
+      <UplinkSection index={i} />
       <When name={`hardware.${i}.role`} is="access-point">
         <Section
           title="Wi-Fi"

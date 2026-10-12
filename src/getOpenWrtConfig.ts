@@ -57,8 +57,10 @@ export const getOpenWrtConfig = ({
   // lists count as uses — so two "*" devices would each claim every free port,
   // and netifd would put each port in whichever it set up last. Resolved per
   // device, so "*" bridges whose .if never both apply are fine.
+  // A list may hold "*" beside named ports (["*", "bat0"]): the same.
+  const hasWildcard = (ports: unknown) => ports === "*" || (Array.isArray(ports) && ports.includes("*"));
   const wildcardDevices = (resolvedOncConfig.network?.device || [])
-    .filter((device) => device.ports === "*")
+    .filter((device) => hasWildcard(device.ports))
     .map((device) => device.name);
   if (wildcardDevices.length > 1) {
     const names = wildcardDevices.map((name) => `"${name}"`);
@@ -75,7 +77,7 @@ export const getOpenWrtConfig = ({
   const bridgedDevices = (resolvedOncConfig.network?.device || [])
     .filter((device) => device.type === "bridge")
     .reduce<string[]>((acc, device) => {
-      const devices = (Array.isArray(device.ports) ? device.ports : []).map(
+      const devices = (Array.isArray(device.ports) ? device.ports.filter((p: string) => p !== "*") : []).map(
         (device) =>
           device.startsWith("@cpu_port")
             ? device.replace("@cpu_port", expectCpuPort().sw_config_cpu_name)
@@ -130,7 +132,9 @@ export const getOpenWrtConfig = ({
         ? (deviceSection.ports === "*" ? unusedPhysicalPorts : []).map(
             (port) => port.name
           )
-        : deviceSection.ports
+        : deviceSection.ports.flatMap((port: string) =>
+            port === "*" ? unusedPhysicalPorts.map((p) => p.name) : [port]
+          )
     ).map((portName: string) => {
       const vlan = portName.split(".")[1];
       return portName.startsWith("@cpu_port")
@@ -181,10 +185,15 @@ export const getOpenWrtConfig = ({
                 configKey === "network" &&
                 sectionKey === "bridge-vlan" && {
                   // "*" / "*t": every port of the bridge, untagged / tagged.
-                  // A list is taken as written. (It used to be repeated once
-                  // per bridge port, nesting lists, so it never worked.)
+                  // In a list, "*" / "*t" are the free physical ports only (a
+                  // VLAN for cables alone, not the bridge's other members such
+                  // as the mesh), beside ports named as written.
                   ports: Array.isArray(resolvedSection.ports)
-                    ? resolvedSection.ports
+                    ? resolvedSection.ports.flatMap((port: string) =>
+                        port === "*" || port === "*t"
+                          ? unusedPhysicalPorts.map((p) => (port === "*t" ? `${p.name}:t` : p.name))
+                          : [port]
+                      )
                     : getDevicePorts(resolvedSection.device).map((port) =>
                         resolvedSection.ports === "*t" ? `${port}:t` : port
                       ),

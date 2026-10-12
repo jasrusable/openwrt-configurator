@@ -92,6 +92,16 @@ export const systemBoard: Probe<unknown> = {
   },
 };
 
+/**
+ * Which wiphys can be a mesh point (802.11s), by name: { "phy0": true }.
+ * Through ucode's nl80211 module, which 25.12 ships for its own Wi-Fi
+ * scripts (iw may be absent). Nothing where ucode is missing: unknown.
+ */
+export const meshSupport: Probe<unknown> = {
+  command: `ucode -e 'import * as nl from "nl80211"; let d = nl.request(nl.const.NL80211_CMD_GET_WIPHY, nl.const.NLM_F_DUMP, { split_wiphy_dump: true }) ?? []; let n = {}, m = {}; for (let w in d) { if (w.wiphy_name) n[w.wiphy] = w.wiphy_name; if (w.supported_iftypes) m[w.wiphy] = m[w.wiphy] || !!w.supported_iftypes.mesh_point; } let o = {}; for (let i in n) o[n[i]] = !!m[i]; print(o);' 2>/dev/null || echo '{}'`,
+  parse: ({ stdout }) => parseJson(stdout.trim() || "{}"),
+};
+
 /** The wifi-device sections, for a device whose board.json has no `wlan`. */
 export const radios: Probe<unknown> = {
   command: `ubus call uci get '{"config": "wireless", "type": "wifi-device"}' || echo '{"values":{}}'`,

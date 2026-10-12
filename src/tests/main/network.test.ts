@@ -41,7 +41,7 @@ test("network", async (t) => {
   t.is(routerOpenWrtConfig.network?.device?.[0][".name"], "device0");
   t.is(routerOpenWrtConfig.network?.device?.[0].name, "br-lan");
   t.is(routerOpenWrtConfig.network?.device?.[0].type, "bridge");
-  t.is(routerOpenWrtConfig.network?.device?.[0].ports.length, 4);
+  t.is(routerOpenWrtConfig.network?.device?.[0].ports?.length, 4);
   t.deepEqual(routerOpenWrtConfig.network?.device?.[0].ports, [
     "eth1",
     "eth2",
@@ -126,14 +126,14 @@ test("network", async (t) => {
   t.is(apOpenWrtConfig.network?.device?.[0][".name"], "device0");
   t.is(apOpenWrtConfig.network?.device?.[0].name, "br-lan.1");
   t.is(apOpenWrtConfig.network?.device?.[0].type, "bridge");
-  t.is(apOpenWrtConfig.network?.device?.[0].ports.length, 1);
+  t.is(apOpenWrtConfig.network?.device?.[0].ports?.length, 1);
   t.deepEqual(apOpenWrtConfig.network?.device?.[0].ports, ["eth0.1"]);
 
   // Ensure br-lan.2 device is defined.
   t.is(apOpenWrtConfig.network?.device?.[1][".name"], "device1");
   t.is(apOpenWrtConfig.network?.device?.[1].name, "br-lan.2");
   t.is(apOpenWrtConfig.network?.device?.[1].type, "bridge");
-  t.is(apOpenWrtConfig.network?.device?.[1].ports.length, 1);
+  t.is(apOpenWrtConfig.network?.device?.[1].ports?.length, 1);
   t.deepEqual(apOpenWrtConfig.network?.device?.[1].ports, ["eth0.2"]);
 
   // Ensure loopback interface is defined

@@ -4,6 +4,7 @@ import { join } from "path";
 import { deviceSchemaSchema } from "../../deviceSchema";
 import { getOpenWrtConfig } from "../../getOpenWrtConfig";
 import { getOpenWrtState } from "../../getOpenWrtState";
+import { availability } from "../../intent/choices";
 import { compileIntent } from "../../intent/compile";
 import { ulaPrefix } from "../../intent/features/network";
 import { migrateIntent } from "../../intent/migrations";
@@ -789,4 +790,106 @@ test("several lines: a network keeps to one, a metered line is a last resort, a 
   t.true(
     (intentSchema.safeParse(intent) as any).error.issues.some((i: any) => i.path.join(".") === "networks.1.line.connection")
   );
+});
+
+test("mesh: access points (and a router with a radio) link over 802.11s with batman-adv, the bridge carrying every network over it", (t) => {
+  const meshed = () => {
+    const intent = sample();
+    intent.mesh = { enabled: true, band: "5g", channel: 44, key: "mesh-key-123456", dedicated: false, wired: false };
+    intent.hardware.push({ name: "home-ap-2", role: "access-point", uplink: "mesh" });
+    return intent;
+  };
+  const ap = onDevice("home-ap-1", "zyxel,nwa50ax-pro", meshed());
+  const iface = (name: string) => ap.network.interface.find((i: any) => i[".name"] === name);
+  t.like(iface("bat0"), { proto: "batadv", routing_algo: "BATMAN_V", bridge_loop_avoidance: true, hop_penalty: 30, gw_mode: "off" });
+  t.like(iface("batmesh"), { proto: "batadv_hardif", master: "bat0" });
+  t.like(ap.network.device.find((d: any) => d.name === "mesh0"), { mtu: 1532 });
+  t.true(ap.network.device.find((d: any) => d.name === "br-lan").ports.includes("bat0"));
+  t.true(ap.network["bridge-vlan"].find((v: any) => v.vlan === 20).ports.includes("bat0:t"), "other networks tagged over it");
+  const meshIface = ap.wireless["wifi-iface"].find((w: any) => w.mode === "mesh");
+  t.like(meshIface, { ifname: "mesh0", encryption: "sae", mesh_fwding: false, network: "batmesh", key: "mesh-key-123456" });
+  t.is(meshIface.device, "radio1");
+  t.is(ap.wireless["wifi-device"].find((d: any) => d.band === "5g").channel, 44, "the mesh's channel");
+
+  const router = onDevice("home-router", "friendlyarm,nanopi-r6s", meshed());
+  t.is(router.network.interface.find((i: any) => i[".name"] === "bat0"), undefined, "no radio: not a node");
+  t.false(router.network.device[0].ports.includes("bat0"));
+  // A router with Wi-Fi: the R6S's ports, the access point's radios.
+  const radioRouter = (() => {
+    const oncConfig = compile(meshed());
+    const read = (model: string) => JSON.parse(readFileSync(join(root, "deviceSchemas", `${model}.json`), "utf8"));
+    const deviceSchema = deviceSchemaSchema.parse({ ...read("friendlyarm,nanopi-r6s"), radios: read("zyxel,nwa50ax-pro").radios });
+    const deviceConfig = oncConfig.devices.find((d) => d.hostname === "home-router")!;
+    return getOpenWrtConfig({ oncConfig, deviceConfig, deviceSchema }) as any;
+  })();
+  t.truthy(radioRouter.network.interface.find((i: any) => i[".name"] === "bat0"), "a router with a radio is a node");
+  t.like(radioRouter.wireless["wifi-device"].find((d: any) => d.band === "5g"), { channel: 44 });
+
+  const devices = compile(meshed()).devices;
+  t.is(devices.find((d: any) => d.hostname === "home-ap-2")!.provision_order, -1, "the repeater first");
+  t.is(devices.find((d: any) => d.hostname === "home-ap-1")!.provision_order, undefined);
+  t.is(onDevice("home-ap-1", "zyxel,nwa50ax-pro").network.interface.find((i: any) => i[".name"] === "bat0"), undefined, "off: nothing");
+});
+
+test("mesh: turning it on makes its key; a channel a radar could move is refused", (t) => {
+  const intent = intentSchema.parse(sample());
+  const on = availability(intent, "mesh.enabled").option(true).swap!.apply(intent);
+  t.true(on.mesh.enabled);
+  t.regex(on.mesh.key!, /^[A-Za-z0-9]{32}$/);
+  t.not(availability(intent, "mesh.enabled").option(true).swap!.apply(intent).mesh.key, on.mesh.key);
+  const issues = intentSchema.safeParse({ ...on, mesh: { ...on.mesh, channel: 52 } });
+  t.true(!issues.success && issues.error.issues.some((i) => i.path.join(".") === "mesh.channel"));
+});
+
+test("mesh: its band is at most 80 MHz wide, as 160 reaches radar channels", (t) => {
+  const intent = sample();
+  intent.radios = { ...(intent.radios ?? {}), "5g": { enabled: true, width: "160" } };
+  const width = (mesh: boolean) => {
+    intent.mesh = { enabled: mesh, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false };
+    return (compile(intent).config.wireless as any)["wifi-device"].find((d: any) => d.band === "5g").htmode;
+  };
+  t.is(width(false), "@best/160");
+  t.is(width(true), "@best/80");
+});
+
+test("mesh: a band kept for it carries no SSID", (t) => {
+  const intent = sample();
+  intent.radios = { ...(intent.radios ?? {}), "6g": { enabled: true } };
+  intent.mesh = { enabled: true, band: "6g", channel: 37, key: "mesh-key-123456", dedicated: true, wired: false };
+  const ifaces = (compile(intent).config.wireless as any)["wifi-iface"];
+  t.false(ifaces.some((w: any) => w.mode === "ap" && w.device.includes("radio2")), "no SSID on 6 GHz");
+  t.true(ifaces.some((w: any) => w.mode === "mesh" && w.device.includes("radio2")));
+});
+
+test("mesh over cables: a VLAN of its own on every device's physical ports, batman on it on the nodes", (t) => {
+  const intent = sample();
+  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: true };
+  const ap = onDevice("home-ap-1", "zyxel,nwa50ax-pro", intent);
+  t.deepEqual(ap.network["bridge-vlan"].find((v: any) => v.vlan === 4000).ports, ["eth0:t"], "the cable, not bat0");
+  t.like(ap.network.interface.find((i: any) => i[".name"] === "batwired"), { proto: "batadv_hardif", master: "bat0", device: "br-lan.4000" });
+  const router = onDevice("home-router", "friendlyarm,nanopi-r6s", intent);
+  t.deepEqual(router.network["bridge-vlan"].find((v: any) => v.vlan === 4000).ports, ["eth0:t", "eth2:t"], "passed on");
+  t.is(router.network.interface.find((i: any) => i[".name"] === "batwired"), undefined);
+  intent.networks[1].vlan = 4000;
+  const result = intentSchema.safeParse(intent);
+  t.true(!result.success && result.error.issues.some((i) => i.path.join(".") === "networks.1.vlan"));
+});
+
+test("mesh rescue: a repeater gets a rescue Wi-Fi (off), its own link-local address, and the watcher", (t) => {
+  const intent = sample();
+  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false };
+  intent.hardware[1].uplink = "mesh";
+  const ap = onDevice("home-ap-1", "zyxel,nwa50ax-pro", intent);
+  const rescue = ap.wireless["wifi-iface"].find((w: any) => w.ifname === "rescue0");
+  t.like(rescue, { ssid: "home-ap-1 rescue", disabled: true, network: "rescue", key: "mesh-key-123456", device: "radio0" });
+  t.regex(ap.network.interface.find((i: any) => i[".name"] === "rescue").ipaddr, /^169\.254\.\d+\.\d+$/);
+  const state = getOpenWrtState({
+    oncConfig: compile(intent),
+    deviceConfig: compile(intent).devices.find((d) => d.hostname === "home-ap-1")!,
+    deviceSchema: deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", "zyxel,nwa50ax-pro.json"), "utf8"))),
+  });
+  t.true(state.files!.some((f) => f.path === "/etc/init.d/onc-mesh-rescue"));
+  t.true(state.services!.some((s) => s.name === "onc-mesh-rescue" && s.running));
+  intent.hardware[1].uplink = "cable";
+  t.is(onDevice("home-ap-1", "zyxel,nwa50ax-pro", intent).wireless["wifi-iface"].find((w: any) => w.ifname === "rescue0"), undefined, "cabled: none");
 });

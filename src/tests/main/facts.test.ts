@@ -6,10 +6,10 @@ import { parseDeviceFacts } from "../../facts/board";
 import { resolveHtmode } from "../../radioModes";
 
 const boards = join(__dirname, "../helpers/boards");
-const read = (file: string) => JSON.parse(readFileSync(join(boards, file), "utf8"));
+const read_ = (file: string) => JSON.parse(readFileSync(join(boards, file), "utf8"));
 const facts = (name: string, uciWireless?: unknown) =>
   deviceSchemaSchema.parse(
-    parseDeviceFacts({ board: read(`${name}.board.json`), system: read(`${name}.system.json`), uciWireless })
+    parseDeviceFacts({ board: read_(`${name}.board.json`), system: read_(`${name}.system.json`), uciWireless })
   );
 
 test("a DSA router: ports from network.lan's list and network.wan's device; model and release from ubus", (t) => {
@@ -49,7 +49,7 @@ test("a single port under any name, as a container or a new board names it", (t)
 });
 
 test("an older switch (swconfig), under any switch name; radios from UCI where board.json has no wlan", (t) => {
-  const c50 = facts("swconfig-archer-c50", read("swconfig-archer-c50.uci-wireless.json"));
+  const c50 = facts("swconfig-archer-c50", read_("swconfig-archer-c50.uci-wireless.json"));
   t.true(c50.sw_config);
   t.deepEqual(c50.ports, [
     { name: "eth0", default_role: "wan" },
@@ -66,9 +66,9 @@ test("an older switch (swconfig), under any switch name; radios from UCI where b
       ["radio1", "5g", "pci0000:00/0000:00:00.0/0000:01:00.0"],
     ]
   );
-  const renamed = read("swconfig-archer-c50.board.json");
+  const renamed = read_("swconfig-archer-c50.board.json");
   renamed.switch = { rtl8367: renamed.switch.switch0 };
-  t.is(parseDeviceFacts({ board: renamed, system: read("swconfig-archer-c50.system.json") }).ports?.length, 6);
+  t.is(parseDeviceFacts({ board: renamed, system: read_("swconfig-archer-c50.system.json") }).ports?.length, 6);
 });
 
 test("one wiphy with several radios: one each, told apart by radio; a phy with its own name by phy", (t) => {
@@ -112,4 +112,14 @@ test("a radio's mode: the newest standard it has, at the widest width up to the 
   t.is(resolveHtmode("@best/80", undefined), "HE80", "modes unknown: as before");
   t.is(resolveHtmode("@best/20", []), undefined, "nothing fits: OpenWrt's default");
   t.is(resolveHtmode("VHT40", ac.htmodes), "VHT40", "a mode given outright is kept");
+});
+
+test("whether each radio can be a mesh point: as read on the access point; unknown where not read", (t) => {
+  // Recorded from the Zyxel NWA50AX Pro on 25.12.5 with the meshSupport probe.
+  const read = { phy0: true, phy1: true };
+  const ap = deviceSchemaSchema.parse(
+    parseDeviceFacts({ board: read_("nwa50ax-pro.board.json"), system: read_("nwa50ax-pro.system.json"), meshSupport: read })
+  );
+  t.deepEqual(ap.radios?.map((r) => r.mesh), [true, true]);
+  t.deepEqual(facts("nwa50ax-pro").radios?.map((r) => r.mesh), [undefined, undefined]);
 });

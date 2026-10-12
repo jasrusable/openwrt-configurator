@@ -3,7 +3,7 @@
 // are read from the devices when they are provisioned. The UI edits this file
 // and nothing else; src/intent/compile.ts turns it into the low-level config.
 import { z } from "zod";
-import { choiceIssues } from "./choices";
+import { choiceIssues, meshBands, meshChannels, meshWiredVlan } from "./choices";
 import { countries } from "./countries";
 import { where } from "./places";
 import { steeringLevels } from "./roaming";
@@ -101,6 +101,7 @@ export const securityModes = ["wpa2", "wpa2-wpa3", "wpa3"] as const;
 export const intentVersion = 1;
 
 export const bands = ["2g", "5g", "6g"] as const;
+
 export type Band = (typeof bands)[number];
 
 /** One band's radios, on every access point. */
@@ -303,6 +304,8 @@ export const intentSchema = z
             role: z.enum(["router", "access-point"]),
             /** Where it is, like "Living room": shown in LuCI. */
             location: z.string().max(64).optional(),
+            /** How an access point reaches the network: a cable, or the mesh. */
+            uplink: z.enum(["cable", "mesh"]).default("cable"),
             wifi: z
               .object({
                 /** Pin a channel per band; "auto" (the default) lets it choose. */
@@ -406,6 +409,27 @@ export const intentSchema = z
       .strict()
       .default({}),
 
+    /**
+     * Wireless backhaul: access points (and the router, with a radio) link
+     * to each other over Wi-Fi (802.11s, with batman-adv routing over it), so
+     * an access point needs no cable. Every node uses one band and channel.
+     */
+    mesh: z
+      .object({
+        enabled: z.boolean().default(false),
+        band: z.enum(meshBands).default("5g"),
+        /** Fixed: every node must be on it. Never a radar (DFS) channel, which a radar would move. */
+        channel: z.number().int().default(36),
+        /** Generated when the mesh is turned on; every node must have the same. */
+        key: wifiPassword.optional(),
+        /** The band is the mesh's alone: no SSID uses it (a tri-band access point's 6 GHz, say). */
+        dedicated: z.boolean().default(false),
+        /** batman also over the cables between nodes, on a VLAN of its own: a cable when there is one, Wi-Fi when not. */
+        wired: z.boolean().default(false),
+      })
+      .strict()
+      .default({}),
+
     dns: z
       .object({
         /**
@@ -480,6 +504,17 @@ export const intentSchema = z
         issue(at("dns"), `add a DNS server, or choose other DNS servers under ${where("dns")}`);
       }
     });
+    if (intent.mesh.enabled) {
+      if (!intent.mesh.key) issue(["mesh", "key"], "required");
+      if (intent.mesh.wired) {
+        intent.networks.forEach((n, i) => {
+          if (n.vlan === meshWiredVlan) issue(["networks", i, "vlan"], `VLAN ${meshWiredVlan} carries the mesh over cables`);
+        });
+      }
+      if (!meshChannels[intent.mesh.band].includes(intent.mesh.channel)) {
+        issue(["mesh", "channel"], `one of ${meshChannels[intent.mesh.band].join(", ")}`);
+      }
+    }
     // What one setting may be given the rest: the rules the UI greys out by.
     choiceIssues(intent).forEach(({ path, message }) => issue(path, message));
 

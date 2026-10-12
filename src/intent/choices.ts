@@ -32,7 +32,28 @@ export const portsApply = (protocol: string | undefined) =>
 
 export const channelWidths = ["auto", "20", "40", "80", "160"] as const;
 
+/** The VLAN that carries the mesh over cables (mesh.wired): no network may use it. */
+export const meshWiredVlan = 4000;
+
+/** The bands a mesh can use, and their channels no radar (DFS) can move it off. */
+export const meshBands = ["2g", "5g", "6g"] as const;
+type MeshBand = (typeof meshBands)[number];
+export const meshChannels: Record<MeshBand, number[]> = {
+  "2g": [1, 6, 11],
+  "5g": [36, 40, 44, 48],
+  // 6 GHz has no radar channels: its preferred (PSC) ones, which devices scan first.
+  "6g": [37, 53, 69, 85],
+};
+
 const bandLabels: Record<Band, string> = { "2g": "2.4 GHz", "5g": "5 GHz", "6g": "6 GHz" };
+
+/** A mesh key: 32 random letters and digits, from the platform's strong random source. */
+export const newMeshKey = () => {
+  const alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = new Uint8Array(32);
+  globalThis.crypto.getRandomValues(bytes);
+  return [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
+};
 
 /** How many /64s a delegated prefix of this length holds. */
 const roomIn = (prefix: string) => 2 ** (64 - Number(prefix));
@@ -97,6 +118,19 @@ export const choices: Choice[] = [
     path: "radios.*.width",
     values: ["80", "160"],
     unavailable: (_, [band]) => band === "2g" && "2.4 GHz is at most 40 MHz wide.",
+  },
+  {
+    // 160 MHz on 5 GHz spans 36 to 64, radar channels among them: a radar
+    // would move the access point off the mesh's channel.
+    path: "radios.*.width",
+    values: ["160"],
+    unavailable: (intent, [band]) =>
+      intent.mesh?.enabled &&
+      intent.mesh.band === band &&
+      band === "5g" &&
+      `The mesh keeps to channels without radar (${where("mesh")}): 80 MHz at most.`,
+    // Capped at 80 by the compiler meanwhile.
+    refuses: false,
   },
   {
     // Off would leave an SSID that only uses this band broadcasting nowhere.
@@ -261,6 +295,72 @@ export const choices: Choice[] = [
       (!multiWan(intent) || intent.internet.mode !== "balance") && "Only used when connections share traffic.",
     refuses: false,
   },
+  {
+    // The mesh carries everything between its nodes on one radio band.
+    path: "mesh.enabled",
+    values: [true],
+    unavailable: (intent) =>
+      !intent.radios[intent.mesh.band]?.enabled &&
+      `The ${bandLabels[intent.mesh.band]} radios are off (${where("radios")}).`,
+    // Turning it on makes its key: every node must have the same, and nobody types it.
+    swap: (intent) =>
+      intent.mesh.key
+        ? undefined
+        : {
+            note: "Makes a key the access points share.",
+            apply: (next) => ({ ...next, mesh: { ...next.mesh, enabled: true, key: newMeshKey() } }),
+          },
+  },
+  {
+    path: "mesh.band",
+    values: ["2g", "5g"],
+    unavailable: (intent, _, band) =>
+      intent.mesh.enabled && !intent.radios[band as Band]?.enabled && `The ${bandLabels[band as Band]} radios are off.`,
+    // Each band has its own channels: the channel moves with it.
+    swap: (intent, _, band) => {
+      const channels = meshChannels[band as MeshBand];
+      return channels.includes(intent.mesh.channel)
+        ? undefined
+        : {
+            note: `Moves the mesh to channel ${channels[0]}.`,
+            apply: (next) => ({ ...next, mesh: { ...next.mesh, band: band as MeshBand, channel: channels[0] } }),
+          };
+    },
+  },
+  {
+    path: "radios.*.enabled",
+    values: [false],
+    unavailable: (intent, [band]) =>
+      intent.mesh.enabled &&
+      intent.mesh.band === band &&
+      `The mesh links your access points on this band (${where("mesh")}): turn it off, or move it, first.`,
+  },
+  {
+    // An SSID only on the mesh's band would be broadcast nowhere.
+    path: "mesh.dedicated",
+    values: [true],
+    unavailable: (intent) => {
+      const only = intent.wifi.find((w) => w.bands?.length && w.bands.every((b) => b === intent.mesh.band));
+      return only && `“${only.ssid || "An SSID"}” only uses this band (${where("ssids")}).`;
+    },
+  },
+  {
+    path: "hardware.*.uplink",
+    values: ["mesh"],
+    unavailable: (intent, [i]) =>
+      intent.hardware[Number(i)]?.role === "router"
+        ? "The router is where the network starts: it is cabled."
+        : !intent.mesh.enabled && `Turn on the mesh first (${where("mesh")}).`,
+  },
+  // Every mesh node is on the mesh's channel: one access point elsewhere would drop out of it.
+  ...(["2g", "5g"] as const).map(
+    (band): Choice => ({
+      path: `hardware.*.wifi.channel.${band}`,
+      unavailable: (intent) =>
+        intent.mesh.enabled && band === intent.mesh.band && `Set by the mesh (${where("mesh")}): every node uses its channel.`,
+      refuses: false,
+    })
+  ),
   {
     path: "admin.password_login",
     values: [false],

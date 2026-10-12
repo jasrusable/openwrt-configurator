@@ -132,3 +132,15 @@ export const inspectDevice = (address: string) =>
 /** Keeps the read device's facts under `name`, so it is found by identity from now on. */
 export const adoptDevice = (address: string, name: string) =>
   post<{ ok: true }>("api/discover/adopt", { address, name }, "Could not take on the device.");
+
+/** A mesh link's speed, measured now from one node to the other (sends test traffic). */
+export const measureMeshLink = async (link: { from: string; to: string }): Promise<{ mbps: number }> => {
+  const response = await fetch("api/mesh/speed", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...writeHeaders },
+    body: JSON.stringify(link),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error ?? "Could not measure the link.");
+  return body;
+};

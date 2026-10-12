@@ -68,7 +68,7 @@ test("network", async (t) => {
   t.is(routerOpenWrtConfig.network?.device?.[0][".name"], "device0");
   t.is(routerOpenWrtConfig.network?.device?.[0].name, "br-lan.1");
   t.is(routerOpenWrtConfig.network?.device?.[0].type, "bridge");
-  t.is(routerOpenWrtConfig.network?.device?.[0].ports.length, 1);
+  t.is(routerOpenWrtConfig.network?.device?.[0].ports?.length, 1);
   t.deepEqual(routerOpenWrtConfig.network?.device?.[0].ports, ["eth0.1"]);
 
   // Ensure loopback interface is defined

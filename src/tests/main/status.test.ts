@@ -7,6 +7,7 @@ import {
   parseInterfaces,
   parseLeases,
   parseLines,
+  parseOriginators,
   parseSystemInfo,
   parseWifi,
 } from "../../status/device";
@@ -79,6 +80,7 @@ const device = (hostname: string, parts: Partial<DeviceStatus>): DeviceStatus =>
   wifi: [],
   leases: [],
   lines: [],
+  mesh: [],
   ...parts,
 });
 
@@ -156,4 +158,53 @@ test("several lines: mwan3's view of each, and which carry traffic", (t) => {
   intent.internet.mode = "balance";
   t.deepEqual(using(networkStatus(intent, [router("online", "online")])), ["wan"], "sharing: a metered line held back");
   t.deepEqual(using(networkStatus(intent, [router("disconnecting", "online")])), ["wan"], "failing is still working");
+});
+
+test("the mesh: each node's direct neighbours and their link quality, named by their MACs", (t) => {
+  // batctl's documented "originators -H" layout (not recorded: no mesh hardware
+  // to read): the best route marked *, a neighbour being its own next hop.
+  const table = [
+    " * 02:aa:00:00:00:02    0.420s   (230) 02:aa:00:00:00:02 [     mesh0]",
+    "   02:aa:00:00:00:02    0.900s   (120) 02:aa:00:00:00:03 [     mesh0]",
+    " * 02:aa:00:00:00:03    1.100s   (180) 02:aa:00:00:00:02 [     mesh0]",
+  ].join("\n");
+  t.deepEqual(parseOriginators(table), [{ mac: "02:aa:00:00:00:02", quality: 230 / 255, lastSeen: 0.42 }]);
+  t.deepEqual(parseOriginators(""), [], "no batman: no neighbours");
+
+  const intent = sample();
+  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false };
+  const status = networkStatus(
+    intent,
+    [device("home-ap-1", { mesh: parseOriginators(table) })],
+    { "home-router": ["02:aa:00:00:00:02"] }
+  );
+  t.deepEqual(status.mesh, [{ name: "home-ap-1", links: [{ to: "home-router", quality: 230 / 255 }] }]);
+  t.is(networkStatus(sample(), []).mesh, undefined, "mesh off: nothing about it");
+});
+
+test("mesh depth: from the cabled nodes' routes, a repeater through another is deeper", async (t) => {
+  const { meshDepths, parseMeshView } = await import("../../meshOrder");
+  // ap-1 cabled; ap-2 its neighbour; ap-3 reached through ap-2 (batctl's layout, not recorded).
+  const views = {
+    "ap-1": parseMeshView(
+      [
+        "02:aa:00:00:00:01",
+        "---",
+        " * 02:aa:00:00:00:02    0.400s   (240) 02:aa:00:00:00:02 [     mesh0]",
+        " * 02:aa:00:00:00:03    0.800s   (150) 02:aa:00:00:00:02 [     mesh0]",
+      ].join("\n")
+    ),
+    "ap-2": parseMeshView("02:aa:00:00:00:02\n---\n"),
+    "ap-3": parseMeshView("02:aa:00:00:00:03\n---\n"),
+    "ap-4": parseMeshView("\n---\n"),
+  };
+  t.deepEqual(meshDepths({ views, cabled: ["ap-1"] }), { "ap-1": 0, "ap-2": 1, "ap-3": 2 });
+});
+
+test("a mesh link's measured speed, from batctl's throughput meter", async (t) => {
+  const { parseThroughput } = await import("../../meshSpeed");
+  // batctl's documented output (not recorded: no mesh hardware to read).
+  t.is(parseThroughput("Test duration 5030ms.\nSent 29880512 Bytes.\nThroughput: 5.67 MB/s (47.52 Mbps)\n"), 47.52);
+  t.is(parseThroughput("Throughput: 120.1 MB/s (1.01 Gbps)"), 1010);
+  t.is(parseThroughput("Error - can't find bat0"), undefined);
 });

@@ -30,6 +30,8 @@ export const deviceSchemaSchema = z.object({
         /** The modes it supports, as board.json lists them (HE80, VHT160, …). */
         htmodes: z.array(z.string()).optional(),
         max_width: z.number().optional(),
+        /** Whether it can be a mesh point (802.11s); unknown when not read. */
+        mesh: z.boolean().optional(),
       })
     )
     .optional(),

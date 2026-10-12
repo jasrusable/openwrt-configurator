@@ -14,6 +14,7 @@ import {
 import { networkIpv6Applies } from "../choices";
 import { internetIpv6, ipv6Interface, primaryConnection } from "../connections";
 import { named } from "../names";
+import { meshNode } from "./mesh";
 
 /** FNV-1a, 32-bit, as 8 hex digits: a stable value derived from a name. */
 export const fnv = (text: string) => {
@@ -88,6 +89,9 @@ export const network: Feature = (intent) => {
   const ipv6 = (n: Network) => networkIpv6Applies(internetIpv6(intent)) && n.ipv6;
   // Prefixes from the main connection's IPv6 interface (wan6 for wan).
   const ipv6Upstream = ipv6Interface(primaryConnection(intent));
+  // What a section changes on a mesh node (features/mesh.ts), when the mesh is on.
+  const onMeshNode = (override: Record<string, unknown>) =>
+    intent.mesh.enabled ? { ".overrides": [{ ".if": meshNode(intent), override }] } : {};
   return {
     services: [
       { ".if": everyDevice, name: "network", running: true },
@@ -96,37 +100,46 @@ export const network: Feature = (intent) => {
     config: {
       network: {
         // The VLANs, on each kind of switch: DSA bridges VLAN-filter in the
-        // bridge; older swconfig switches tag in the switch, one bridge per VLAN.
-        ".overrides": [
-          {
+        // bridge; older swconfig switches tag in the switch, one bridge per
+        // VLAN. Sections of their own, each for its kind (not an override's
+        // list), so other features' (the mesh's backbone) are kept beside them.
+        switch: [{ ".if": "device.sw_config == true", name: "switch0", reset: true, enable_vlan: true }],
+        switch_vlan: networks.map((n) => ({
+          ".if": "device.sw_config == true",
+          ".name": `vlan_${vlanOf(n)}`,
+          device: "switch0",
+          vlan: vlanOf(n),
+          ports: isMain(n) ? "*" : "*t",
+        })),
+        "bridge-vlan": networks.map((n) => ({
+          ".if": "device.sw_config == false",
+          ".name": `vlan_${vlanOf(n)}`,
+          device: "br-lan",
+          vlan: vlanOf(n),
+          ports: isMain(n) ? "*" : "*t",
+        })),
+        // The bridges, each for its kind of switch. Sections of their own
+        // (not an override's list), so other features' devices (the mesh's)
+        // are kept beside them.
+        device: [
+          ...networks.map((n) => ({
             ".if": "device.sw_config == true",
-            override: {
-              switch: [{ name: "switch0", reset: true, enable_vlan: true }],
-              switch_vlan: networks.map((n) => ({
-                ".name": `vlan_${vlanOf(n)}`,
-                device: "switch0",
-                vlan: vlanOf(n),
-                ports: isMain(n) ? "*" : "*t",
-              })),
-              device: networks.map((n) => ({
-                ".name": `bridge_${vlanOf(n)}`,
-                name: deviceOf(n),
-                type: "bridge",
-                ports: [`@cpu_port.${vlanOf(n)}`],
-              })),
-            },
-          },
+            ".name": `bridge_${vlanOf(n)}`,
+            name: deviceOf(n),
+            type: "bridge",
+            ports: [`@cpu_port.${vlanOf(n)}`],
+            // A mesh node: the mesh in each network's bridge, the main one
+            // untagged, as on DSA.
+            ...onMeshNode({ ports: [`@cpu_port.${vlanOf(n)}`, isMain(n) ? "bat0" : `bat0.${vlanOf(n)}`] }),
+          })),
           {
             ".if": "device.sw_config == false",
-            override: {
-              device: [{ name: "br-lan", type: "bridge", ports: "*" }],
-              "bridge-vlan": networks.map((n) => ({
-                ".name": `vlan_${vlanOf(n)}`,
-                device: "br-lan",
-                vlan: vlanOf(n),
-                ports: isMain(n) ? "*" : "*t",
-              })),
-            },
+            name: "br-lan",
+            type: "bridge",
+            ports: "*",
+            // A mesh node: the mesh joins the bridge like a port, so the
+            // VLANs below carry each network over it as over a cable.
+            ...onMeshNode({ ports: ["*", "bat0"] }),
           },
         ],
         interface: [

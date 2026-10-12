@@ -31,12 +31,13 @@ const warnAbout = (problems: string[]) =>
   problems.forEach((problem) => console.warn(`Warning: ${problem}.`));
 
 /**
- * Devices reached through others go first, then the workstation's gateway,
- * then the device running this tool: changing either of those first could
- * cut the path to the rest. Config order is kept within each group.
+ * Devices reached through others go first (by the config's provision_order,
+ * lower first), then the workstation's gateway, then the device running this
+ * tool: changing either of those first could cut the path to the rest.
+ * Config order is kept within each group.
  */
 export const provisioningOrder = <
-  T extends { ipAddress: string; ssh: Pick<Session, "local"> }
+  T extends { ipAddress: string; ssh: Pick<Session, "local">; order?: number }
 >(
   devices: T[],
   gateway?: string
@@ -45,7 +46,12 @@ export const provisioningOrder = <
     device.ssh.local ? 2 : device.ipAddress === gateway ? 1 : 0;
   return devices
     .map((device, index) => ({ device, index }))
-    .sort((a, b) => rank(a.device) - rank(b.device) || a.index - b.index)
+    .sort(
+      (a, b) =>
+        rank(a.device) - rank(b.device) ||
+        (a.device.order ?? 0) - (b.device.order ?? 0) ||
+        a.index - b.index
+    )
     .map(({ device }) => device);
 };
 

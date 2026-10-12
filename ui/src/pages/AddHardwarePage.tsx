@@ -192,7 +192,13 @@ export const AddHardwarePage = () => {
             ...intent,
             hardware: [
               ...intent.hardware,
-              { name: choice.name, role: "access-point", ...(choice.location ? { location: choice.location } : {}) },
+              // Read just now, directly: cabled, as a first setup must be.
+              {
+                name: choice.name,
+                role: "access-point",
+                uplink: "cable",
+                ...(choice.location ? { location: choice.location } : {}),
+              },
             ],
           };
           const swap =

@@ -2,7 +2,7 @@
 // is (facts), and what the network is doing now (status, read from the
 // devices every 30 seconds while this page is open), interpreted against the
 // settings: what does not match them is shown, never hidden.
-import { Button, Group, Text } from "@mantine/core";
+import { Anchor, Button, Group, Text } from "@mantine/core";
 import { IconChevronRight } from "@tabler/icons-react";
 import { ReactNode } from "react";
 import { useNavigate } from "react-router";
@@ -12,6 +12,7 @@ import { templateOf } from "../../../src/intent/networkTemplates";
 import { useFreshDevices } from "../data/devices";
 import { useProvision } from "../data/provision";
 import { useNetworkStatus } from "../data/status";
+import { useMeasureLink } from "../data/mesh";
 import { ago, duration, modelOf, portsOf, routerFacts } from "../facts";
 import { useDraftValue } from "../form/draft";
 import { Section, SettingRow, SettingsPage, StatusDot } from "../kit/layout";
@@ -39,6 +40,25 @@ const State = ({ up, children }: { up?: boolean; children: ReactNode }) => (
     </Text>
   </Group>
 );
+
+/** A mesh link, its quality, and its measured speed on request (sends test traffic for a few seconds). */
+const LinkSpeed = ({ from, to, quality }: { from: string; to: string; quality: number }) => {
+  const measure = useMeasureLink();
+  return (
+    <Text component="span" size="xs" c="dimmed">
+      {to} {Math.round(quality * 100)}% ·{" "}
+      {measure.data ? (
+        `${Math.round(measure.data.mbps)} Mbit/s`
+      ) : measure.isError ? (
+        (measure.error as Error).message
+      ) : (
+        <Anchor component="button" size="xs" onClick={() => measure.mutate({ from, to })} disabled={measure.isPending}>
+          {measure.isPending ? "Measuring…" : "Test speed"}
+        </Anchor>
+      )}
+    </Text>
+  );
+};
 
 const devicesWord = (n: number) => `${n} device${n === 1 ? "" : "s"}`;
 
@@ -154,6 +174,38 @@ export const OverviewPage = () => {
           );
         })}
       </Section>
+
+      {live?.mesh && (
+        <Section title="Mesh">
+          {intent.hardware
+            .filter((d) => d.uplink === "mesh" || live.mesh!.some((m) => m.name === d.name && m.links.length))
+            .map((d) => {
+              const links = live.mesh!.find((m) => m.name === d.name)?.links ?? [];
+              const best = Math.max(0, ...links.map((l) => l.quality));
+              return (
+                <SettingRow
+                  key={d.name}
+                  label={d.name}
+                  description={
+                    links.length ? (
+                      <Group gap={10} component="span">
+                        {links.map((l) => (
+                          <LinkSpeed key={l.to} from={d.name} to={l.to} quality={l.quality} />
+                        ))}
+                      </Group>
+                    ) : d.uplink === "mesh" ? (
+                      "No mesh link: it cannot be reached but by cable"
+                    ) : undefined
+                  }
+                >
+                  <State up={links.length ? best >= 0.4 : false}>
+                    {links.length ? (best >= 0.4 ? "Linked" : "Weak link") : "No link"}
+                  </State>
+                </SettingRow>
+              );
+            })}
+        </Section>
+      )}
 
       <Section title="Networks">
         {intent.networks.map((network, i) => {

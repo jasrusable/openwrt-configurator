@@ -145,4 +145,10 @@ test.serial("the gateway and the device running the tool go last", (t) => {
     ordered.map((d) => d.ipAddress),
     ["10.0.0.2", "10.0.0.3", "10.0.0.1", "10.0.0.5"]
   );
+  const repeater = { ...device("10.0.0.9"), order: -1 };
+  t.deepEqual(
+    provisioningOrder([device("10.0.0.2"), repeater, device("10.0.0.3")], "10.0.0.1").map((d) => d.ipAddress),
+    ["10.0.0.9", "10.0.0.2", "10.0.0.3"],
+    "a mesh repeater before what it hangs off"
+  );
 });

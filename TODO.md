@@ -104,3 +104,11 @@ and the React UI in `ui/`.
       LAN could use it. Likely reuse rpcd's login session (`ubus call
       session access`), as LuCI does. The Mac server is loopback-only, with
       Host/Origin checks against DNS rebinding.
+
+## Mesh
+
+- Run it on real hardware (two access points), then drop "Experimental".
+- Mesh over cables (`mesh.wired`) on swconfig nodes: there the VLAN is only carried, not used.
+- Tri-band access points with two 5 GHz radios: the mesh uses the first; a dedicated second 5 GHz radio needs each radio's channels in the facts.
+- A QEMU OpenWrt VM with `kmod-mac80211-hwsim` for an end-to-end mesh test in CI.
+

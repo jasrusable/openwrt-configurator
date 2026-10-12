@@ -16,7 +16,7 @@ import {
 } from "../roaming";
 import { timezones } from "../timezones";
 
-const radios: { band: Band; name: string; width: string }[] = [
+export const radios: { band: Band; name: string; width: string }[] = [
   { band: "2g", name: "radio0", width: "20" },
   { band: "5g", name: "radio1", width: "80" },
   { band: "6g", name: "radio2", width: "160" },
@@ -61,6 +61,8 @@ export const wifi: Feature = (intent) => {
   });
   const enabled = radios.filter(({ band }) => intent.radios[band].enabled);
   const ssidNames = uniqueNames("wifi", intent.wifi, (ssid) => ssid.ssid);
+  const meshBand = intent.mesh.enabled ? intent.mesh.band : undefined;
+  const dedicatedBand = intent.mesh.enabled && intent.mesh.dedicated ? intent.mesh.band : undefined;
 
   return {
     package_profiles: [
@@ -83,12 +85,15 @@ export const wifi: Feature = (intent) => {
             band,
             ...(settings.enabled ? {} : { disabled: true }),
             // The best the radio can do at this width: Wi-Fi 7, 6, 5 or 4.
-            htmode: `@best/${settings.width === "auto" ? width : settings.width}`,
-            channel: "auto",
+            // The mesh's band at most 80 MHz: wider reaches radar channels.
+            htmode: `@best/${meshBand === "5g" && band === "5g" ? Math.min(80, Number(settings.width === "auto" ? width : settings.width)) : settings.width === "auto" ? width : settings.width}`,
+            // The mesh's band: every node on its channel, pinned or not.
+            channel: meshBand === band ? intent.mesh.channel : "auto",
             cell_density: cellDensity[settings.cell_density],
             ...(settings.power === "auto" ? {} : { txpower: txpower[settings.power] }),
             country: intent.site.country,
             ".overrides": intent.hardware.flatMap((device) => {
+              if (meshBand === band) return [];
               const channel = (device.wifi?.channel as Record<string, unknown> | undefined)?.[band];
               return channel !== undefined
                 ? [{ ".if": onDevice(device.name), override: { channel } }]
@@ -97,7 +102,10 @@ export const wifi: Feature = (intent) => {
           });
         }),
         "wifi-iface": intent.wifi.flatMap((ssid, i) => {
-          const on = enabled.filter(({ band }) => !ssid.bands || ssid.bands.includes(band));
+          // Not the mesh's band when it has it to itself.
+          const on = enabled.filter(
+            ({ band }) => (!ssid.bands || ssid.bands.includes(band)) && !(dedicatedBand === band)
+          );
           const common = {
             // Named by the SSID, per radio (the engine adds the radio), so
             // adding or removing another SSID renames none of these.

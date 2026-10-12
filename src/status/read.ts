@@ -38,5 +38,10 @@ export const readNetworkStatus = async ({
     read: (f) => readDeviceStatus(f.hostname, f.session, now),
     failed: (hostname, error) => ({ hostname, error }),
   });
-  return networkStatus(intent, read);
+  const facts = readFacts(platform, intentPath, ready.map((d) => d.hostname));
+  return networkStatus(
+    intent,
+    read,
+    Object.fromEntries(Object.entries(facts).map(([name, f]) => [name, f?.macs]))
+  );
 };

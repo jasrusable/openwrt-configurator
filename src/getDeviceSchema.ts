@@ -3,6 +3,7 @@ import { ONCDeviceConfig } from "./oncConfigSchema";
 import {
   boardJson as boardJsonProbe,
   radios as radiosProbe,
+  meshSupport,
   runProbes,
   systemBoard,
 } from "./deviceProbes";
@@ -44,6 +45,7 @@ export const getDeviceSchema = async ({
     board: boardJsonProbe,
     system: systemBoard,
     uciWireless: radiosProbe,
+    meshSupport,
   });
   const deviceSchema = parseSchema(deviceSchemaSchema, parseDeviceFacts(raw));
   (deviceSchema.skipped ?? []).forEach((what) =>

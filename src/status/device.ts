@@ -47,6 +47,17 @@ export type DeviceStatus = {
   leases: Lease[];
   /** mwan3's view of each line, where it runs (a router with several connections). */
   lines: LineStatus[];
+  /** Its mesh neighbours, where batman-adv runs: each directly linked node and the link's quality. */
+  mesh: MeshNeighbour[];
+};
+
+export type MeshNeighbour = {
+  /** The neighbour's mesh address (its mesh interface's MAC). */
+  mac: string;
+  /** batman's link quality, 0 to 1 (TQ / 255). */
+  quality: number;
+  /** Seconds since it was last heard. */
+  lastSeen: number;
 };
 
 export type LineStatus = {
@@ -176,6 +187,40 @@ export const parseLines = (status: unknown): LineStatus[] =>
     return { id, state, since: Number.isFinite(since) ? since : 0 };
   });
 
+/** batman-adv's originator table, without its header; nothing where batman does not run. */
+const originators: Probe<string> = {
+  command: "batctl meshif bat0 originators -H 2>/dev/null || true",
+  parse: ({ stdout }) => stdout,
+};
+
+/**
+ * The best route (marked *) to each originator in `batctl o -H`, through
+ * which neighbour. A line reads
+ * " * 02:aa:bb:cc:dd:01    0.420s   (255) 02:aa:bb:cc:dd:01 [     mesh0]";
+ * BATMAN_V prints a throughput ("( 54.0)") where IV prints a quality: read
+ * as a share of 255 either way, only for its order.
+ */
+export const parseRoutes = (text: string) =>
+  text.split("\n").flatMap((line) => {
+    const m = /^\s*\*\s*([0-9a-f:]{17})\s+([\d.]+)s\s+\(\s*([\d.]+)\)\s+([0-9a-f:]{17})/i.exec(line);
+    return m
+      ? [
+          {
+            originator: m[1].toLowerCase(),
+            nexthop: m[4].toLowerCase(),
+            quality: Math.min(1, Number(m[3]) / 255),
+            lastSeen: Number(m[2]),
+          },
+        ]
+      : [];
+  });
+
+/** The direct neighbours: originators that are their own next hop. */
+export const parseOriginators = (text: string): MeshNeighbour[] =>
+  parseRoutes(text)
+    .filter((r) => r.originator === r.nexthop)
+    .map((r) => ({ mac: r.originator, quality: r.quality, lastSeen: r.lastSeen }));
+
 const leases: Probe<string> = {
   command: "cat /tmp/dhcp.leases 2>/dev/null || true",
   parse: ({ stdout }) => stdout,
@@ -187,7 +232,7 @@ export const readDeviceStatus = async (
   session: Session,
   now: () => number
 ): Promise<DeviceStatus> => {
-  const read = await runProbes(session, { systemInfo, interfaces, wifi, leases, mwan3 });
+  const read = await runProbes(session, { systemInfo, interfaces, wifi, leases, mwan3, originators });
   return {
     hostname,
     readAt: now(),
@@ -196,5 +241,6 @@ export const readDeviceStatus = async (
     wifi: parseWifi(read.wifi),
     leases: parseLeases(read.leases),
     lines: parseLines(read.mwan3),
+    mesh: parseOriginators(read.originators),
   };
 };

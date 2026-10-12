@@ -11,6 +11,7 @@ export const places = {
   ssids: ["Wi-Fi", "SSIDs"],
   radios: ["Wi-Fi", "Radios"],
   roaming: ["Wi-Fi", "Roaming"],
+  mesh: ["Wi-Fi", "Mesh"],
   firewall: ["Firewall"],
   portForwards: ["Firewall", "Port forwards"],
   rules: ["Firewall", "Rules"],

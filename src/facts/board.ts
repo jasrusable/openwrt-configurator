@@ -118,6 +118,7 @@ export const parseDeviceFacts = ({
   board: boardRaw,
   system: systemRaw,
   uciWireless,
+  meshSupport,
 }: {
   /** /etc/board.json. */
   board: unknown;
@@ -125,6 +126,8 @@ export const parseDeviceFacts = ({
   system: unknown;
   /** `ubus call uci get` for wireless wifi-devices: only used without board.json's `wlan`. */
   uciWireless?: unknown;
+  /** Which wiphys can be a mesh point, by name (deviceProbes' meshSupport); unknown where absent. */
+  meshSupport?: unknown;
 }): DeviceSchema => {
   const board = object(boardRaw);
   const system = object(systemRaw);
@@ -144,7 +147,10 @@ export const parseDeviceFacts = ({
   if (fromSwitch && !fromSwitch.some((p) => p.sw_config_cpu_name)) {
     throw new Error(`${name}: board.json's switch has no CPU port.`);
   }
-  const radios = wlanRadios(board, skipped) ?? uciRadios(uciWireless, skipped);
+  const mesh = object(meshSupport);
+  const radios = (wlanRadios(board, skipped) ?? uciRadios(uciWireless, skipped)).map((radio) =>
+    typeof mesh[radio.phy ?? radio.name] === "boolean" ? { ...radio, mesh: mesh[radio.phy ?? radio.name] as boolean } : radio
+  );
   const model = string(system.model) ?? string(object(board.model).name);
   return {
     name,

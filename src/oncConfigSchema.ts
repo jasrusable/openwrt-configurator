@@ -48,6 +48,12 @@ export const oncConfigSchema = z
           /** Only needed to provision or inspect the device over SSH. */
           ipaddr: z.string().optional(),
           hostname: z.string(),
+          /**
+           * Earlier first: a device reached through another (a mesh
+           * repeater, through the access point it hangs off) is changed
+           * before it, or changing that one first cuts it off. Default 0.
+           */
+          provision_order: z.number().int().optional(),
           tags: z.record(z.union([z.string(), z.array(z.string())])),
           provisioning_config: z
             .object({

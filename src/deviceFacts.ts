@@ -44,10 +44,11 @@ export const listSeen = (files: Pick<Platform, "readTextFile">, intentPath: stri
 
 /**
  * What facts files hold. Bumped when what is read from a device changes
- * (2: radios from board.json, with their modes), so older facts are read
- * again; their address and host key are kept meanwhile, to find the device.
+ * (2: radios from board.json, with their modes; 3: whether each can mesh),
+ * so older facts are read again; their address and host key are kept
+ * meanwhile, to find the device.
  */
-const factsFormat = 2;
+const factsFormat = 3;
 
 export const writeFacts = (
   files: Pick<Platform, "mkdirp" | "writeTextFile" | "readTextFile">,

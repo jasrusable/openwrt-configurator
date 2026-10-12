@@ -296,3 +296,35 @@ test('a VLAN on a port (a tagged internet line) keeps the port out of a "*" brid
   );
   t.deepEqual(config.network.device[0].ports, ["eth1", "eth2"]);
 });
+
+test('"*" beside named ports: every free physical port, and the named ones (a mesh joining the bridge)', (t) => {
+  const config = build(
+    {
+      network: {
+        device: [{ name: "br-lan", type: "bridge", ports: ["*", "bat0"] }],
+        "bridge-vlan": [
+          { device: "br-lan", vlan: 1, ports: "*" },
+          { device: "br-lan", vlan: 20, ports: "*t" },
+        ],
+        interface: [{ ".name": "wan", device: "@wan_port", proto: "dhcp" }],
+      },
+    },
+    dsa
+  );
+  t.deepEqual(config.network.device[0].ports, ["eth1", "eth2", "bat0"]);
+  t.deepEqual(config.network["bridge-vlan"][1].ports, ["eth1:t", "eth2:t", "bat0:t"]);
+});
+
+test('in a bridge VLAN\'s list, "*t" is the free physical ports alone, not the bridge\'s other members', (t) => {
+  const config = build(
+    {
+      network: {
+        device: [{ name: "br-lan", type: "bridge", ports: ["*", "bat0"] }],
+        "bridge-vlan": [{ device: "br-lan", vlan: 4000, ports: ["*t"] }],
+        interface: [{ ".name": "wan", device: "@wan_port", proto: "dhcp" }],
+      },
+    },
+    dsa
+  );
+  t.deepEqual(config.network["bridge-vlan"][0].ports, ["eth1:t", "eth2:t"]);
+});
