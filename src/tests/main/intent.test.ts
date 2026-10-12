@@ -80,9 +80,13 @@ test("on the router: each network routed, served and firewalled by purpose", (t)
     [
       ["lan", 5, 250],
       ["guest", 155, 100],
+      ["wan", undefined, undefined],
     ]
   );
-  t.deepEqual(config.dhcp.dnsmasq[0].interface, ["lan", "guest"]);
+  t.true(config.dhcp.dhcp[2].ignore, "as stock: no DHCP on an internet line");
+  // As stock 25.12: one instance on every attached network, leases in RAM.
+  t.like(config.dhcp.dnsmasq[0], { localservice: true, nonwildcard: true, boguspriv: true, ednspacket_max: 1232, cachesize: 1000, leasefile: "/tmp/dhcp.leases" });
+  t.is(config.dhcp.dnsmasq[0].interface, undefined);
   // Home reaches everything; guests only the internet and the router's
   // DHCP and DNS.
   t.deepEqual(

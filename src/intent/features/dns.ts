@@ -47,29 +47,37 @@ export const dns: Feature = (intent) => {
     ],
     config: {
       dhcp: {
+        // OpenWrt 25.12's own dnsmasq section (one instance, answering every
+        // network it is attached to: localservice), with only what settings
+        // decide changed; checked against a stock image's /etc/config/dhcp.
         dnsmasq: [
           {
             ".if": onRouter,
             domainneeded: true,
+            boguspriv: true,
+            filterwin2k: false,
             localise_queries: true,
+            // Answers from outside may not point inside (DNS rebinding);
+            // the router itself (127.0.0.0/8) stays allowed.
+            ...(intent.dns.rebind_protection ? { rebind_protection: true, rebind_localhost: true } : {}),
             local: `/${domain}/`,
             domain,
             expandhosts: true,
+            nonegcache: false,
+            cachesize: 1000,
             authoritative: true,
             readethers: true,
-            leasefile: "/etc/dhcp.leases",
+            // In RAM, as stock: a lease file on flash is written on every lease.
+            leasefile: "/tmp/dhcp.leases",
+            ...(servers
+              ? { noresolv: true, server: servers }
+              : { resolvfile: "/tmp/resolv.conf.d/resolv.conf.auto" }),
+            nonwildcard: true,
             localservice: true,
-            cachesize: 5000,
-            dnsforwardmax: 1000,
-            // Remote access's clients ask the router too.
-            interface: [...intent.networks.map((n) => n.id), ...(intent.vpn.enabled ? ["vpn"] : [])],
-            quietdhcp: true,
-            ...(servers ? { noresolv: true, server: servers } : {}),
-            // Answers from outside may not point inside (DNS rebinding);
-            // the router itself (127.0.0.0/8) stays allowed.
-            ...(intent.dns.rebind_protection
-              ? { rebind_protection: true, rebind_localhost: true }
-              : {}),
+            // DNS flag day 2020: replies small enough never to be fragmented.
+            ednspacket_max: 1232,
+            filter_aaaa: false,
+            filter_a: false,
           },
         ],
         // Your own names: name.<local domain> answers with the address.

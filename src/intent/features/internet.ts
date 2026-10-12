@@ -278,6 +278,8 @@ export const internet: Feature = (intent) => {
     ],
     config: {
       network: { interface: routerOnly(interfaces) },
+      // As stock: no DHCP served on an internet line.
+      dhcp: { dhcp: routerOnly(connections.map((c) => ({ ".name": c.id, interface: c.id, ignore: true }))) },
       // Declared on or off: with its section missing, miniupnpd's init script
       // defaults to enabled. Its firewall hooks are nftables.d includes.
       upnpd: {
