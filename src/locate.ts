@@ -8,15 +8,16 @@
 // The app logs in as root, so a wrong guess must never reach another box,
 // nor be handed a password. Only the address the settings give may be
 // trusted on first use (as before). Any address the app found itself is
-// tried only for a device whose host key is on record, pinned to that key
-// first: any other machine there is refused by the usual host-key check
-// before credentials are sent; an address already pinned to another key is
-// skipped. Once in, the board must be the one recorded.
+// tried only for a device whose host key is on record, and the connection
+// is held to that key by the SSH client itself (SshTarget.hostKey): any
+// other machine there is refused before credentials are sent, and a client
+// that cannot check a given key (dbclient) refuses to try. Once in, the
+// board must be the one recorded.
 import type { DeviceFacts } from "./deviceFacts";
 import { Probe, runProbes } from "./deviceProbes";
 import { DeviceSchema } from "./deviceSchema";
 import { getDeviceSchema } from "./getDeviceSchema";
-import { checkHostKey, formatKnownHost, KnownHost, parseKnownHosts } from "./knownHosts";
+import { parseKnownHosts } from "./knownHosts";
 import { ONCDeviceConfig } from "./oncConfigSchema";
 import { Platform, Session } from "./platform";
 import { ProvisionableDevice, sshConnectOptions } from "./provisionConfig";
@@ -99,11 +100,7 @@ export type Located = {
 
 export type NotLocated = { hostname: string; error: string };
 
-/**
- * The known_hosts file's text: empty only when there is no file yet. One
- * that exists but cannot be read stops the attempt (fail closed): treating it
- * as empty would accept any key, and rewriting it would lose every other.
- */
+/** The known_hosts file's text, empty when there is no file yet. */
 const readKnownHosts = (platform: Platform, file: string) => {
   if (platform.fileMode(file) === undefined) return "";
   return platform.readTextFile(file);
@@ -121,17 +118,13 @@ const tryAddress = async (
 ): Promise<Located> => {
   const at = { ...deviceConfig, ipaddr: address } as ONCDeviceConfig;
   const file = sshConnectOptions({ deviceConfig: at, platform }).knownHostsFile!;
-  if (facts?.hostKey) {
-    const pin: KnownHost = { host: address, ...facts.hostKey };
-    const existing = readKnownHosts(platform, file);
-    const seen = checkHostKey(parseKnownHosts(existing), pin);
-    if (seen === "changed") throw new Error(`${address} has another device's host key`);
-    if (seen === "new") platform.writeFileAtomic(file, existing + formatKnownHost(pin), 0o600);
-  }
   // A shorter handshake than an apply's: a wrong guess should give way quickly.
+  // A known device is held to its recorded key, by the SSH client itself:
+  // another machine at this address is refused before credentials are sent.
   const session = await platform.connect({
     ...sshConnectOptions({ deviceConfig: at, agentSocket: platform.env("SSH_AUTH_SOCK"), platform }),
     readyTimeout: attemptTimeoutMs,
+    ...(facts?.hostKey ? { hostKey: facts.hostKey } : {}),
   });
   try {
     const schema = await getDeviceSchema({ deviceConfig: at, ssh: session });
@@ -139,7 +132,16 @@ const tryAddress = async (
       throw new Error(`${address} is a ${schema.model ?? schema.name}, not ${deviceConfig.hostname}`);
     }
     const read = await runProbes(session, { macs });
-    const key = parseKnownHosts(readKnownHosts(platform, file)).find((k) => k.host === address);
+    // Its key: the pinned one, or the one just trusted on first use.
+    const key =
+      facts?.hostKey ??
+      (() => {
+        try {
+          return parseKnownHosts(readKnownHosts(platform, file)).find((k) => k.host === address);
+        } catch {
+          return undefined;
+        }
+      })();
     return {
       hostname: deviceConfig.hostname,
       session,

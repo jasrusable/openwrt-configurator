@@ -75,6 +75,18 @@ const withPath = <T>(path: string, fn: () => T): T => {
  * negotiated, so a server cannot dodge the check by offering another.
  */
 const hostKeyOptions = (target: SshTarget, onChanged: () => void) => {
+  const pinned = target.hostKey;
+  if (pinned) {
+    // Exactly this key, of this type only; the shared file is not involved.
+    return {
+      algorithms: { serverHostKey: hostKeyAlgorithms(pinned.type) },
+      hostVerifier: (key: Buffer) => {
+        const ok = keyTypeOfBlob(key) === pinned.type && key.toString("base64") === pinned.key;
+        if (!ok) onChanged();
+        return ok;
+      },
+    };
+  }
   const file = target.knownHostsFile;
   const host = target.host;
   if (!file || !host) return {};

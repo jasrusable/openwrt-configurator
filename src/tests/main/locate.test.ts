@@ -52,6 +52,11 @@ const network = (machines: Record<string, Machine>) => {
       const m = machines[host];
       if (!m) throw new Error("connect ECONNREFUSED");
       const offered = { host, type: "ssh-ed25519", key: m.key };
+      // A pinned key is checked by the client itself; the file is not involved.
+      if (target.hostKey) {
+        if (target.hostKey.key !== m.key || target.hostKey.type !== offered.type) throw new Error("host key changed");
+        return session(m);
+      }
       const seen = checkHostKey(parseKnownHosts(readFileSync(knownHosts, "utf8")), offered);
       if (seen === "changed") throw new Error("host key changed");
       if (seen === "new") writeFileSync(knownHosts, readFileSync(knownHosts, "utf8") + formatKnownHost(offered));
@@ -109,7 +114,7 @@ test("a device that moved is found by its MAC in the router's leases, and pinned
   t.true("session" in r);
   t.like(a, { hostname: "home-ap-1", address: "10.0.0.77", macs: ["aa:bb:cc:00:00:01"] });
   t.deepEqual(net.tried, ["10.0.0.1", "10.0.0.50", "home-ap-1.lan", "10.0.0.77"]);
-  t.true(readFileSync(net.knownHosts, "utf8").includes("10.0.0.77 ssh-ed25519 AP-KEY"));
+  t.false(readFileSync(net.knownHosts, "utf8").includes("AP-KEY"), "pinned in the connection, not the shared file");
 });
 
 test("another machine using its name is refused by its host key", async (t) => {
@@ -151,12 +156,21 @@ test("fail closed: an address the app found is never tried without a host key to
   }
 });
 
-test("a known_hosts that cannot be read stops the attempt and is left as it is", async (t) => {
+test("a known device is held to its key by the SSH client, and the shared known_hosts is never touched", async (t) => {
   const net = network({ "10.0.0.1": routerMachine(""), "10.0.0.50": apMachine });
   const unreadable = join(mkdtempSync(join(tmpdir(), "onc-locate-")), "known_hosts");
-  mkdirSync(unreadable); // exists, but reading it fails
-  const platform = { ...net.platform, env: (name: string) => (name === "ONC_KNOWN_HOSTS" ? unreadable : undefined) };
-  const [, a] = await settle(locateEach({ devices: [router, ap], facts: { "home-ap-1": apFacts }, platform }));
-  t.false("session" in a);
-  t.true(statSync(unreadable).isDirectory(), "not rewritten");
+  mkdirSync(unreadable); // reading it would fail: a pinned attempt must not need it
+  const pins: unknown[] = [];
+  const platform = {
+    ...net.platform,
+    env: (name: string) => (name === "ONC_KNOWN_HOSTS" ? unreadable : undefined),
+    connect: (target: SshTarget) => {
+      pins.push(target.hostKey);
+      return net.platform.connect(target);
+    },
+  };
+  const [a] = await settle(locateEach({ devices: [ap], facts: { "home-ap-1": apFacts }, platform }));
+  t.like(a, { address: "10.0.0.50", hostKey: apFacts.hostKey });
+  t.deepEqual(pins, [apFacts.hostKey]);
+  t.true(statSync(unreadable).isDirectory(), "left as it was");
 });

@@ -37,6 +37,13 @@ export type SshTarget = {
    * recorded on first connect and a different key is refused afterwards.
    */
   knownHostsFile?: string;
+  /**
+   * The key this host must present: any other is refused, and the
+   * known_hosts file is neither read nor written. For an address the app
+   * found itself, which anyone could have claimed (src/locate.ts). A client
+   * that cannot check a given key must refuse to connect.
+   */
+  hostKey?: { type: string; key: string };
   /** Handshake timeout. */
   readyTimeout: number;
   keepaliveInterval: number;

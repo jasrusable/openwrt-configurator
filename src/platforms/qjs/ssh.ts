@@ -87,13 +87,31 @@ const askpass = () => {
   return askpassPath;
 };
 
+/** A known_hosts holding only the pinned key, for OpenSSH to check strictly. */
+const pinnedKnownHosts = (host: string, key: { type: string; key: string }) => {
+  const path = tmpPath("pinned-host");
+  const created = spawnSync(["sh", "-c", 'umask 077 && cat > "$1"', "sh", path], `${host} ${key.type} ${key.key}\n`);
+  if (created.code !== 0) throw new Error(`Could not pin the host key: ${created.stderr}`);
+  return path;
+};
+
 const openSsh = (target: SshTarget, host: string): Transport => {
   const seconds = (ms: number) => String(Math.max(1, Math.round(ms / 1000)));
   const options = [
     "-T",
-    // Trust on first use, sharing the Node platform's file; unhashed so that
-    // it can read the entries too.
-    ...(target.knownHostsFile
+    // A pinned key: exactly it, from a file of its own, never recorded.
+    // Otherwise trust on first use, sharing the Node platform's file;
+    // unhashed so that it can read the entries too.
+    ...(target.hostKey
+      ? [
+          "-o",
+          "StrictHostKeyChecking=yes",
+          "-o",
+          `UserKnownHostsFile=${pinnedKnownHosts(host, target.hostKey)}`,
+          "-o",
+          `HostKeyAlgorithms=${target.hostKey.type}`,
+        ]
+      : target.knownHostsFile
       ? [
           "-o",
           "StrictHostKeyChecking=accept-new",
@@ -143,6 +161,11 @@ const openSsh = (target: SshTarget, host: string): Transport => {
 };
 
 const dropbear = (target: SshTarget, host: string): Transport => {
+  // dbclient keeps its own ~/.ssh/known_hosts and accepts any new host: it
+  // cannot be made to check a given key, so it refuses one (fail closed).
+  if (target.hostKey) {
+    throw new Error("this device's SSH client cannot check a pinned host key, so an address found on the network is not tried");
+  }
   const options = [
     // A single -y accepts an unknown host key and records it in dbclient's
     // own ~/.ssh/known_hosts, but still refuses a changed one.
