@@ -49,6 +49,18 @@ export type DeviceStatus = {
   lines: LineStatus[];
   /** Its mesh neighbours, where batman-adv runs: each directly linked node and the link's quality. */
   mesh: MeshNeighbour[];
+  /**
+   * The largest frame the mesh over cables carries whole here: the smallest
+   * MTU of its VLAN and the bridge's ports (a bridge may claim more than its
+   * ports take). Undefined where there is none.
+   */
+  meshWiredMtu?: number;
+  /**
+   * Over that VLAN, how many nodes answered a small ping and how many a
+   * full-size one (all on-link, ff02::1): fewer for the large means a switch
+   * between drops the mesh's larger frames, which would lose packets.
+   */
+  meshWiredPath?: { small: number; large: number };
   /** Its WireGuard peers: when each last completed a handshake. */
   wireguard: WireguardPeer[];
 };
@@ -206,6 +218,23 @@ export const parseLines = (status: unknown): LineStatus[] =>
     return { id, state, since: Number.isFinite(since) ? since : 0 };
   });
 
+/**
+ * See DeviceStatus.meshWiredMtu and meshWiredPath: "<mtu> <small> <large>".
+ * The large ping fills the MTU exactly (IPv6 and ICMP take 48 bytes).
+ */
+const meshWired: Probe<{ mtu: number; small: number; large: number } | undefined> = {
+  command: [
+    "d=/sys/class/net/br-lan.4000; [ -e $d ] || exit 0",
+    "m=$(cat $d/mtu); for i in /sys/class/net/br-lan/brif/*; do n=${i##*/}; [ \"$n\" = bat0 ] && continue; v=$(cat /sys/class/net/$n/mtu); [ \"$v\" -lt \"$m\" ] && m=$v; done",
+    'heard() { ping -6 -c 1 -W 1 -I br-lan.4000 "$@" ff02::1 2>/dev/null | grep -o "from [0-9a-f:]*" | sort -u | grep -c .; }',
+    'echo "$m $(heard) $(heard -s $(($m - 48)))"',
+  ].join("; "),
+  parse: ({ stdout }) => {
+    const m = /^(\d+) (\d+) (\d+)$/.exec(stdout.trim());
+    return m ? { mtu: Number(m[1]), small: Number(m[2]), large: Number(m[3]) } : undefined;
+  },
+};
+
 /** batman-adv's originator table, without its header; nothing where batman does not run. */
 const originators: Probe<string> = {
   command: "batctl meshif bat0 originators -H 2>/dev/null || true",
@@ -273,7 +302,7 @@ export const readDeviceStatus = async (
   session: Session,
   now: () => number
 ): Promise<DeviceStatus> => {
-  const read = await runProbes(session, { systemInfo, interfaces, wifi, leases, mwan3, originators, handshakes });
+  const read = await runProbes(session, { systemInfo, interfaces, wifi, leases, mwan3, originators, handshakes, meshWired });
   return {
     hostname,
     readAt: now(),
@@ -283,6 +312,9 @@ export const readDeviceStatus = async (
     leases: parseLeases(read.leases),
     lines: parseLines(read.mwan3),
     mesh: parseOriginators(read.originators),
+    ...(read.meshWired
+      ? { meshWiredMtu: read.meshWired.mtu, meshWiredPath: { small: read.meshWired.small, large: read.meshWired.large } }
+      : {}),
     wireguard: parseHandshakes(read.handshakes),
   };
 };

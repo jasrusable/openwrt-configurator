@@ -618,6 +618,8 @@ export const intentSchema = z
         dedicated: z.boolean().default(false),
         /** batman also over the cables between nodes, on a VLAN of its own: a cable when there is one, Wi-Fi when not. */
         wired: z.boolean().default(false),
+        /** Over cables, batman's whole 1532-byte frames: every switch between nodes must pass them. Off, it splits its packets there. */
+        jumbo: z.boolean().default(true),
       })
       .strict()
       .default({}),

@@ -291,6 +291,14 @@ export const fields: FieldInfo[] = [
       `batman-adv also runs over your cables, on VLAN ${meshWiredVlan}, carried tagged on every device's ports (the router and access points without Wi-Fi in the mesh's band only pass it on). Between two nodes with a cable it then prefers the cable, and falls back to the mesh when it breaks. Without it, a cabled node still links the mesh to the network, and its devices still move to another one if its cable breaks; this adds the cable as a path of the mesh itself. No network may use VLAN ${meshWiredVlan}.`,
   },
   {
+    path: "mesh.jumbo",
+    label: "Larger frames over cable",
+    description: "Faster; any switch between nodes must pass them.",
+    openwrt: `MTU ${meshMtu}`,
+    explain: () =>
+      `The mesh adds its own header to every packet, so over cables it sends frames of ${meshMtu} bytes, ${meshMtu - 1500} more than usual: every port of your devices is set to take them, your networks' own stay at 1500. Most switches pass them; one that does not drops full-size packets, which the Overview shows. Off, the mesh splits such packets in two over cable instead: it always works, a little slower.`,
+  },
+  {
     path: "hardware.*.uplink",
     label: "Connected",
     description: "By a cable, or over the mesh.",

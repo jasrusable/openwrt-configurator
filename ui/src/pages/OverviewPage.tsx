@@ -2,6 +2,8 @@
 // is (facts), and what the network is doing now (status, read from the
 // devices every 30 seconds while this page is open), interpreted against the
 // settings: what does not match them is shown, never hidden.
+import { meshMtu } from "../../../src/intent/features/mesh";
+import { where } from "../../../src/intent/places";
 import { weakMeshLinkMbps } from "../../../src/status/network";
 import { Anchor, Button, Group, Text } from "@mantine/core";
 import { IconChevronRight } from "@tabler/icons-react";
@@ -179,9 +181,14 @@ export const OverviewPage = () => {
       {live?.mesh && (
         <Section title="Mesh">
           {intent.hardware
-            .filter((d) => d.uplink === "mesh" || live.mesh!.some((m) => m.name === d.name && m.links.length))
+            .filter(
+              (d) =>
+                d.uplink === "mesh" ||
+                live.mesh!.some((m) => m.name === d.name && (m.links.length || m.fragmentsOverCable || m.dropsLargeFrames))
+            )
             .map((d) => {
-              const links = live.mesh!.find((m) => m.name === d.name)?.links ?? [];
+              const node = live.mesh!.find((m) => m.name === d.name);
+              const links = node?.links ?? [];
               const best = Math.max(0, ...links.map((l) => l.throughput));
               return (
                 <SettingRow
@@ -198,9 +205,24 @@ export const OverviewPage = () => {
                       "No mesh link: it cannot be reached but by cable"
                     ) : undefined
                   }
+                  explain={
+                    node?.dropsLargeFrames
+                      ? `Something between this node and another (a switch) drops the mesh's ${meshMtu}-byte frames, so full-size packets over the cable are lost. Turn off ${where("mesh", "Larger frames over cable")}, or replace that switch.`
+                      : node?.fragmentsOverCable
+                        ? `A port here does not take ${meshMtu}-byte frames, so the mesh splits its packets over cable: slower. Another port, or a switch that takes them, fixes it.`
+                        : undefined
+                  }
                 >
-                  <State up={links.length ? best >= 0.4 : false}>
-                    {links.length ? (best >= weakMeshLinkMbps ? "Linked" : "Weak link") : "No link"}
+                  <State up={links.length ? best >= weakMeshLinkMbps && !node?.fragmentsOverCable && !node?.dropsLargeFrames : false}>
+                    {node?.dropsLargeFrames
+                      ? "Cable drops large packets"
+                      : links.length
+                      ? best < weakMeshLinkMbps
+                        ? "Weak link"
+                        : node?.fragmentsOverCable
+                          ? "Linked, splitting over cable"
+                          : "Linked"
+                      : "No link"}
                   </State>
                 </SettingRow>
               );

@@ -402,6 +402,12 @@ export const choices: Choice[] = [
     },
   },
   {
+    // Only over cables: the Wi-Fi links always take them.
+    path: "mesh.jumbo",
+    unavailable: (intent) => !intent.mesh?.wired && "Only for the mesh over cables.",
+    refuses: false,
+  },
+  {
     path: "hardware.*.uplink",
     values: ["mesh"],
     unavailable: (intent, [i]) =>

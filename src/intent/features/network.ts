@@ -15,7 +15,7 @@ import {
 import { networkIpv6Applies } from "../choices";
 import { internetIpv6, ipv6Interface, primaryConnection } from "../connections";
 import { named } from "../names";
-import { meshNode } from "./mesh";
+import { meshMtu, meshNode } from "./mesh";
 
 /** FNV-1a, 32-bit, as 8 hex digits: a stable value derived from a name. */
 export const fnv = (text: string) => {
@@ -101,6 +101,10 @@ export const network: Feature = (intent) => {
   // Prefixes from the main connection's IPv6 interface (wan6 for wan).
   const ipv6Upstream = ipv6Interface(primaryConnection(intent));
   // What a section changes on a mesh node (features/mesh.ts), when the mesh is on.
+  // The mesh over cables: the bridge and its ports carry 1532-byte frames
+  // (DSA), so each network's own VLAN device is held to 1500, or it would
+  // take the bridge's and send its clients frames they cannot take.
+  const wiredMesh = intent.mesh.enabled && intent.mesh.wired && intent.mesh.jumbo;
   const onMeshNode = (override: Record<string, unknown>) =>
     intent.mesh.enabled ? { ".overrides": [{ ".if": meshNode(intent), override }] } : {};
   return {
@@ -133,6 +137,9 @@ export const network: Feature = (intent) => {
         // (not an override's list), so other features' devices (the mesh's)
         // are kept beside them.
         device: [
+          ...(wiredMesh
+            ? networks.map((n) => ({ ".if": "device.sw_config == false", ".name": `mtu_${vlanOf(n)}`, name: deviceOf(n), mtu: 1500 }))
+            : []),
           ...networks.map((n) => ({
             ".if": "device.sw_config == true",
             ".name": `bridge_${vlanOf(n)}`,
@@ -148,6 +155,8 @@ export const network: Feature = (intent) => {
             name: "br-lan",
             type: "bridge",
             ports: "*",
+            // The mesh over cables carries batman's larger frames (features/mesh.ts).
+            ...(wiredMesh ? { mtu: meshMtu } : {}),
             // A mesh node: the mesh joins the bridge like a port, so the
             // VLANs below carry each network over it as over a cable.
             ...onMeshNode({ ports: ["*", "bat0"] }),

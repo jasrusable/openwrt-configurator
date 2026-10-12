@@ -97,6 +97,7 @@ export const MeshPage = () => {
             />
             <SwitchField name="mesh.dedicated" label="Only for the mesh" />
             <SwitchField name="mesh.wired" label="Also over cables" />
+            <SwitchField name="mesh.jumbo" label="Larger frames over cable" />
             <PasswordField name="mesh.key" label="Mesh key" />
           </Section>
           <Nodes />

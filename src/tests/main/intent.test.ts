@@ -826,7 +826,7 @@ test("several lines: a network keeps to one, a metered line is a last resort, a 
 test("mesh: access points (and a router with a radio) link over 802.11s with batman-adv, the bridge carrying every network over it", (t) => {
   const meshed = () => {
     const intent = sample();
-    intent.mesh = { enabled: true, band: "5g", channel: 44, key: "mesh-key-123456", dedicated: false, wired: false };
+    intent.mesh = { enabled: true, band: "5g", channel: 44, key: "mesh-key-123456", dedicated: false, wired: false, jumbo: true };
     intent.hardware.push({ name: "home-ap-2", role: "access-point", uplink: "mesh" });
     return intent;
   };
@@ -876,7 +876,7 @@ test("mesh: its band is at most 80 MHz wide, as 160 reaches radar channels", (t)
   const intent = sample();
   intent.radios = { ...(intent.radios ?? {}), "5g": { enabled: true, width: "160" } };
   const width = (mesh: boolean) => {
-    intent.mesh = { enabled: mesh, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false };
+    intent.mesh = { enabled: mesh, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false, jumbo: true };
     return (compile(intent).config.wireless as any)["wifi-device"].find((d: any) => d.band === "5g").htmode;
   };
   t.is(width(false), "@best/160");
@@ -886,7 +886,7 @@ test("mesh: its band is at most 80 MHz wide, as 160 reaches radar channels", (t)
 test("mesh: a band kept for it carries no SSID", (t) => {
   const intent = sample();
   intent.radios = { ...(intent.radios ?? {}), "6g": { enabled: true } };
-  intent.mesh = { enabled: true, band: "6g", channel: 37, key: "mesh-key-123456", dedicated: true, wired: false };
+  intent.mesh = { enabled: true, band: "6g", channel: 37, key: "mesh-key-123456", dedicated: true, wired: false, jumbo: true };
   const ifaces = (compile(intent).config.wireless as any)["wifi-iface"];
   t.false(ifaces.some((w: any) => w.mode === "ap" && w.device.includes("radio2")), "no SSID on 6 GHz");
   t.true(ifaces.some((w: any) => w.mode === "mesh" && w.device.includes("radio2")));
@@ -894,7 +894,7 @@ test("mesh: a band kept for it carries no SSID", (t) => {
 
 test("mesh over cables: a VLAN of its own on every device's physical ports, batman on it on the nodes", (t) => {
   const intent = sample();
-  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: true };
+  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: true, jumbo: true };
   const ap = onDevice("home-ap-1", "zyxel,nwa50ax-pro", intent);
   t.deepEqual(ap.network["bridge-vlan"].find((v: any) => v.vlan === 4000).ports, ["eth0:t"], "the cable, not bat0");
   t.like(ap.network.interface.find((i: any) => i[".name"] === "batwired"), { proto: "batadv_hardif", master: "bat0", device: "br-lan.4000" });
@@ -908,7 +908,7 @@ test("mesh over cables: a VLAN of its own on every device's physical ports, batm
 
 test("mesh rescue: a repeater gets a rescue Wi-Fi (off), its own link-local address, and the watcher", (t) => {
   const intent = sample();
-  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false };
+  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false, jumbo: true };
   intent.hardware[1].uplink = "mesh";
   const ap = onDevice("home-ap-1", "zyxel,nwa50ax-pro", intent);
   const rescue = ap.wireless["wifi-iface"].find((w: any) => w.ifname === "rescue0");
@@ -1005,7 +1005,7 @@ test("remote access, sites and a provider's tunnel: WireGuard on the router, zon
 
 test("mesh rescue watcher: on once after the quiet, off once when the mesh is back, gone when its network is", (t) => {
   const intent = sample();
-  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false };
+  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false, jumbo: true };
   intent.hardware[1].uplink = "mesh";
   const state = getOpenWrtState({
     oncConfig: compile(intent),
@@ -1065,7 +1065,7 @@ test("the main connection's IPv6 moves with the role: promoting a backup or remo
 
 test("a radio that cannot mesh (facts say so) makes its device no mesh node", (t) => {
   const intent = sample();
-  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false };
+  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false, jumbo: true };
   const oncConfig = compile(intent);
   const schema = deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", "zyxel,nwa50ax-pro.json"), "utf8")));
   const on = (deviceSchema: typeof schema) =>
@@ -1106,4 +1106,29 @@ test("a DNS server on a network this one cannot reach is refused", (t) => {
   t.true(!r.success && r.error.issues.some((i) => i.path.join(".") === "networks.1.dhcp.dns_servers.0"));
   intent.networks[1].access.networks = ["lan"];
   t.true(intentSchema.safeParse(intent).success);
+});
+
+test("the mesh over cables: 1532-byte frames on every DSA port, bridge and VLAN 4000; the networks' own devices held to 1500", (t) => {
+  const intent = sample();
+  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: true, jumbo: true };
+  const mtus = (host: string, model: string) =>
+    Object.fromEntries(onDevice(host, model, intent).network.device.filter((d: any) => d.mtu).map((d: any) => [d.name, d.mtu]));
+  t.deepEqual(mtus("home-router", "friendlyarm,nanopi-r6s"), {
+    "br-lan.1": 1500,
+    "br-lan.20": 1500,
+    "br-lan": 1532,
+    eth0: 1532,
+    eth2: 1532,
+    "br-lan.4000": 1532,
+  }, "the WAN port (eth1) is not the bridge's: untouched");
+  t.like(mtus("home-ap-1", "zyxel,nwa50ax-pro"), { "br-lan": 1532, eth0: 1532, mesh0: 1532, "br-lan.1": 1500 });
+  intent.mesh.wired = false;
+  t.deepEqual(mtus("home-router", "friendlyarm,nanopi-r6s"), {}, "not over cables: nothing changes");
+});
+
+test("larger frames over cable off: the mesh splits its packets there, and no MTU is touched", (t) => {
+  const intent = sample();
+  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: true, jumbo: false };
+  const devices = onDevice("home-router", "friendlyarm,nanopi-r6s", intent).network.device;
+  t.deepEqual(devices.filter((d: any) => d.mtu), []);
 });

@@ -180,7 +180,7 @@ test("the mesh: each node's direct neighbours and their throughput, named by any
   t.deepEqual(parseOriginators(""), [], "no batman: no neighbours");
 
   const intent = sample();
-  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false };
+  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false, jumbo: true };
   const status = networkStatus(intent, [device("home-ap-1", { mesh: parseOriginators(table) })], {
     "home-router": ["02:aa:00:00:00:02"],
     "home-ap-2": ["02:cc:00:00:00:04", "02:dd:00:00:00:04"],
@@ -194,6 +194,15 @@ test("the mesh: each node's direct neighbours and their throughput, named by any
       ],
     },
   ]);
+  const wired = { ...intent, mesh: { ...intent.mesh, wired: true, jumbo: true } };
+  const split = networkStatus(wired, [device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1500 })], {});
+  t.true(split.mesh![0].fragmentsOverCable, "a port at 1500: batman splits its frames over cable");
+  const whole = networkStatus(wired, [device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1532 })], {});
+  t.is(whole.mesh![0].fragmentsOverCable, undefined);
+  const dropped = networkStatus(wired, [device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1532, meshWiredPath: { small: 3, large: 1 } })], {});
+  t.true(dropped.mesh![0].dropsLargeFrames, "neighbours that answer small but not full-size pings: a switch drops the larger frames");
+  const fine = networkStatus(wired, [device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1532, meshWiredPath: { small: 3, large: 3 } })], {});
+  t.is(fine.mesh![0].dropsLargeFrames, undefined);
   t.is(networkStatus(sample(), []).mesh, undefined, "mesh off: nothing about it");
 });
 

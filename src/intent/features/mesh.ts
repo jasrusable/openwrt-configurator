@@ -197,7 +197,18 @@ start_service() {
                     ]
                   : []),
               ],
-              device: [{ ".if": node, ".name": meshInterface, name: meshInterface, mtu: meshMtu }],
+              device: [
+                { ".if": node, ".name": meshInterface, name: meshInterface, mtu: meshMtu },
+                // Over cables, on every DSA device (the router switches it
+                // too): its ports and VLAN take batman's frames whole. A port
+                // that cannot keeps 1500 and batman fragments there; status says so.
+                ...(intent.mesh.wired && intent.mesh.jumbo
+                  ? [
+                      { ".if": "device.sw_config == false", ".name": "meshport", name: "@bridge_ports", mtu: meshMtu },
+                      { ".if": "device.sw_config == false", ".name": "meshwired", name: `br-lan.${meshWiredVlan}`, mtu: meshMtu },
+                    ]
+                  : []),
+              ],
               // Over cables too: a VLAN of its own on every device's ports
               // (switched through those that are not nodes, the router
               // without Wi-Fi included), batman on it where there is one.

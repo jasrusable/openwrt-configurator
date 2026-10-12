@@ -3,6 +3,7 @@
 // never assumes it does: what lines up is matched (interface lan is network
 // lan, an SSID with your SSID's name is that SSID), and what does not is
 // listed as unexpected, never hidden. Pure: tested against recorded output.
+import { meshMtu } from "../intent/features/mesh";
 import { failoverOrder, ipv6Interface } from "../intent/connections";
 import type { Intent } from "../intent/schema";
 import { DeviceStatus } from "./device";
@@ -44,7 +45,14 @@ export type NetworkStatus = {
    * With the mesh on: each device reached, and the nodes it links to
    * directly (by name where its MAC is known from facts) with the quality.
    */
-  mesh?: { name: string; links: { to: string; throughput: number }[] }[];
+  mesh?: {
+    name: string;
+    links: { to: string; throughput: number }[];
+    /** Over cables, a port here takes only 1500: batman splits its frames, slower. */
+    fragmentsOverCable?: boolean;
+    /** Over cables, a switch between drops batman's larger frames: full-size packets are lost. */
+    dropsLargeFrames?: boolean;
+  }[];
   /**
    * Remote access's clients and the linked sites, by their keys: how long
    * since each last made a handshake (a few minutes is connected); and each
@@ -164,7 +172,19 @@ export const networkStatus = (
               Object.entries(macs).find(([, list]) => list?.includes(mac))?.[0] ?? mac;
             // Direct: the next hop is the node itself, by any of its MACs.
             const direct = status.mesh.filter((n) => n.originator === n.mac || nameOf(n.originator) === nameOf(n.mac));
-            return [{ name: d.name, links: direct.map((n) => ({ to: nameOf(n.mac), throughput: n.throughput })) }];
+            return [
+              {
+                name: d.name,
+                links: direct.map((n) => ({ to: nameOf(n.mac), throughput: n.throughput })),
+                // Over cables, a port that would not take batman's frames: it fragments there.
+                ...(intent.mesh.wired && status.meshWiredMtu !== undefined && status.meshWiredMtu < meshMtu
+                  ? { fragmentsOverCable: true }
+                  : {}),
+                ...(intent.mesh.wired && status.meshWiredPath && status.meshWiredPath.large < status.meshWiredPath.small
+                  ? { dropsLargeFrames: true }
+                  : {}),
+              },
+            ];
           }),
         }
       : {}),

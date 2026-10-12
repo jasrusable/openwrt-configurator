@@ -217,14 +217,37 @@ export const getOpenWrtConfig = ({
     return name.replace(/[^0-9a-z]/gi, "");
   };
 
-  const resolvedOpenWrtConfig = Object.keys(resolvedOncConfig)
+  // A device section named "@bridge_ports" is one per physical port of the
+  // "*" bridge (a setting every one of them needs: the wired mesh's MTU),
+  // each named for its port.
+  const withPortDevices = {
+    ...resolvedOncConfig,
+    ...(resolvedOncConfig.network
+      ? {
+          network: {
+            ...resolvedOncConfig.network,
+            device: (resolvedOncConfig.network.device || []).flatMap((device: any) =>
+              device.name === "@bridge_ports"
+                ? unusedPhysicalPorts.map((port) => ({
+                    ...device,
+                    ".name": `${device[".name"] ?? "port"}_${sanitizeName(port.name)}`,
+                    name: port.name,
+                  }))
+                : [device]
+            ),
+          },
+        }
+      : {}),
+  };
+
+  const resolvedOpenWrtConfig = Object.keys(withPortDevices)
     .filter((key) => key !== "wireless")
     .reduce((config, configKey) => {
       const resolvedConfig = Object.keys(
-        (resolvedOncConfig as any)[configKey]
+        (withPortDevices as any)[configKey]
       ).reduce((section, sectionKey) => {
         const sections: any[] =
-          (resolvedOncConfig as any)[configKey][sectionKey] || [];
+          (withPortDevices as any)[configKey][sectionKey] || [];
         const resolvedSections = sections.map(
           (oncSection: any, sectionIndex) => {
             const defaultName = sanitizeName(`${sectionKey}${sectionIndex}`);

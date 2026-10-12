@@ -114,7 +114,6 @@ and the React UI in `ui/`.
 - Mesh over cables (`mesh.wired`) on swconfig nodes: there the VLAN is only carried, not used.
 - Tri-band access points with two 5 GHz radios: the mesh uses the first; a dedicated second 5 GHz radio needs each radio's channels in the facts.
 - A QEMU OpenWrt VM with `kmod-mac80211-hwsim` for an end-to-end mesh test in CI.
-- Wired batman (`br-lan.4000`) runs at MTU 1500, so batman fragments there; 1532 needs every switch port to take it.
-- Mesh packages (`kmod-batman-adv`, `batctl-default`, full wpad) on every access point whether the mesh is on or not: tight on 8 MB flash (Archer C50).
+- The wired mesh's MTU and path check on real switches (verified only in Docker, and a 1500-only Docker bridge as the bad switch).
 - A mesh neighbour's name comes from facts' MACs: until they are re-read (a day), a new neighbour shows as a MAC and its speed test is refused.
 
