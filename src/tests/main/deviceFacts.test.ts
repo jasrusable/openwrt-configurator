@@ -78,7 +78,7 @@ test("a device that cannot be reached keeps its facts, says why, and rests befor
   t.deepEqual(readFacts(nodePlatform, path, ["home-router"])["home-router"], old);
   t.deepEqual(readFailures(nodePlatform, path, ["home-ap-1"])["home-ap-1"], {
     at: now,
-    error: "connect ECONNREFUSED",
+    error: "home-ap-1.lan (where your settings put it): connect ECONNREFUSED",
   });
   await refreshStale({ intentPath: path, platform: offline, now: () => now + 1000 });
   t.is(attempts, 2, "not tried again so soon");

@@ -5,17 +5,24 @@
 // them as it reads the devices; never a timer. No config values are kept:
 // device UCI holds Wi-Fi keys. See CLAUDE.md, "Reading devices".
 import { DeviceSchema, deviceSchemaSchema } from "./deviceSchema";
-import { getDeviceSchema } from "./getDeviceSchema";
 import { loadOncConfig } from "./loadConfig";
 import { parseJson } from "./parseJson";
 import { Platform } from "./platform";
-import { connectToDevice, provisionableDevices } from "./provisionConfig";
+import { Located, locateEach } from "./locate";
+import { ONCConfig } from "./oncConfigSchema";
+import { provisionableDevices } from "./provisionConfig";
 
 export type DeviceFacts = {
   hostname: string;
   /** When it was read, ms since the epoch. */
   readAt: number;
   schema: DeviceSchema;
+  /** Where it was last reached (src/locate.ts tries it first). */
+  address?: string;
+  /** Its interfaces' MACs: how the router's leases and neighbours recognise it. */
+  macs?: string[];
+  /** Its SSH host key (public): another address is trusted only if it shows this. */
+  hostKey?: { type: string; key: string };
 };
 
 const dir = (intentPath: string) => `${intentPath}.state/devices`;
@@ -44,11 +51,20 @@ export const readFacts = (
         const path = file(intentPath, hostname);
         const stored = parseJson(files.readTextFile(path), path) as DeviceFacts;
         const schema = deviceSchemaSchema.safeParse(stored?.schema);
+        if (!schema.success || typeof stored.readAt !== "number") return [hostname, undefined];
+        const hostKey = stored.hostKey;
         return [
           hostname,
-          schema.success && typeof stored.readAt === "number"
-            ? { hostname, readAt: stored.readAt, schema: schema.data }
-            : undefined,
+          {
+            hostname,
+            readAt: stored.readAt,
+            schema: schema.data,
+            ...(typeof stored.address === "string" ? { address: stored.address } : {}),
+            ...(Array.isArray(stored.macs) ? { macs: stored.macs.filter((m) => typeof m === "string") } : {}),
+            ...(hostKey && typeof hostKey.type === "string" && typeof hostKey.key === "string"
+              ? { hostKey: { type: hostKey.type, key: hostKey.key } }
+              : {}),
+          },
         ];
       } catch {
         return [hostname, undefined];
@@ -103,10 +119,47 @@ export const staleDevices = ({
     return old && !resting;
   });
 
+/** Keep what was learnt while locating a device: where it is, its MACs and host key, its schema. */
+export const rememberLocated = (
+  files: Pick<Platform, "mkdirp" | "writeTextFile">,
+  intentPath: string,
+  located: Located,
+  now: number
+) =>
+  writeFacts(files, intentPath, {
+    hostname: located.hostname,
+    readAt: now,
+    schema: located.schema,
+    address: located.address,
+    macs: located.macs,
+    ...(located.hostKey ? { hostKey: located.hostKey } : {}),
+  });
+
+/** A read that failed: the device is rested for a while (staleDevices). */
+export const recordFailure = (
+  files: Pick<Platform, "mkdirp" | "writeTextFile">,
+  intentPath: string,
+  hostname: string,
+  attempt: ReadAttempt
+) => {
+  files.mkdirp(dir(intentPath));
+  files.writeTextFile(attemptFile(intentPath, hostname), JSON.stringify(attempt));
+};
+
+/** A read that worked: any failure before it is forgotten. */
+export const clearFailure = (files: Pick<Platform, "removeFile">, intentPath: string, hostname: string) => {
+  try {
+    files.removeFile(attemptFile(intentPath, hostname));
+  } catch {
+    // It never failed: nothing to clear.
+  }
+};
+
 /**
  * Read the devices whose facts are stale, at most one read at a time (a
- * lock file, so the Node server and CGI requests agree). A failure is kept,
- * so the device is not tried again for a while; a success clears it.
+ * lock file, so the Node server and CGI requests agree). Each is found
+ * first (src/locate.ts), the router too, as its leases help find the rest.
+ * A failure is kept, so the device is not tried again for a while.
  */
 export const refreshStale = async ({
   intentPath,
@@ -120,42 +173,59 @@ export const refreshStale = async ({
   const { oncConfig } = await loadOncConfig({ path: intentPath, platform });
   const { ready } = provisionableDevices(oncConfig);
   const hostnames = ready.map((d) => d.hostname);
-  const stale = staleDevices({
-    facts: readFacts(platform, intentPath, hostnames),
-    failures: readFailures(platform, intentPath, hostnames),
-    now: now(),
-  });
+  const facts = readFacts(platform, intentPath, hostnames);
+  const stale = staleDevices({ facts, failures: readFailures(platform, intentPath, hostnames), now: now() });
   const lock = readJson<{ at: number }>(platform, lockFile(intentPath));
   if (stale.length === 0 || (lock && now() - lock.at < lockTimeoutMs)) return;
   platform.mkdirp(dir(intentPath));
   platform.writeTextFile(lockFile(intentPath), JSON.stringify({ at: now() }));
   try {
+    const wanted = ready.filter((d) => stale.includes(d.hostname) || d.tags?.role === "router");
     await Promise.all(
-      ready
-        .filter((d) => stale.includes(d.hostname))
-        .map(async (deviceConfig) => {
-          try {
-            const ssh = await connectToDevice({ deviceConfig, platform });
+      locateEach({ devices: wanted, facts, platform }).map((found) =>
+        found.then((f) => {
+          if ("session" in f) {
             try {
-              const schema = await getDeviceSchema({ deviceConfig, ssh });
-              writeFacts(platform, intentPath, { hostname: deviceConfig.hostname, readAt: now(), schema });
-              try {
-                platform.removeFile(attemptFile(intentPath, deviceConfig.hostname));
-              } catch {
-                // Never failed: nothing to clear.
-              }
+              rememberLocated(platform, intentPath, f, now());
+              clearFailure(platform, intentPath, f.hostname);
             } finally {
-              ssh.dispose();
+              f.session.dispose();
             }
-          } catch (e) {
-            platform.writeTextFile(
-              attemptFile(intentPath, deviceConfig.hostname),
-              JSON.stringify({ at: now(), error: (e as Error).message })
-            );
+          } else if (stale.includes(f.hostname)) {
+            recordFailure(platform, intentPath, f.hostname, { at: now(), error: f.error });
           }
         })
+      )
     );
   } finally {
     platform.removeFile(lockFile(intentPath));
   }
+};
+
+/**
+ * The config with each device's address where it was found (src/locate.ts),
+ * for an apply: a device that moved is applied where it is, and only once it
+ * has shown it is that device. One not found keeps its configured address,
+ * and the apply reports it as unreachable as before.
+ */
+export const withLocatedAddresses = async (oncConfig: ONCConfig, intentPath: string, platform: Platform) => {
+  const { ready } = provisionableDevices(oncConfig);
+  const facts = readFacts(platform, intentPath, ready.map((d) => d.hostname));
+  const found = await Promise.all(locateEach({ devices: ready, facts, platform }));
+  const addresses = new Map<string, string>();
+  for (const f of found) {
+    if (!("session" in f)) continue;
+    f.session.dispose();
+    rememberLocated(platform, intentPath, f, Date.now());
+    if (f.address !== ready.find((d) => d.hostname === f.hostname)?.ipaddr) {
+      console.log(`${f.hostname}: found at ${f.address}.`);
+    }
+    addresses.set(f.hostname, f.address);
+  }
+  return {
+    ...oncConfig,
+    devices: oncConfig.devices.map((d) =>
+      addresses.has(d.hostname) ? { ...d, ipaddr: addresses.get(d.hostname)! } : d
+    ),
+  };
 };

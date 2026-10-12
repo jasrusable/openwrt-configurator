@@ -1,4 +1,4 @@
-import { Text } from "@mantine/core";
+import { Group, Text } from "@mantine/core";
 import {
   SegmentedField,
   SelectField,
@@ -10,8 +10,9 @@ import { defineList, ListPage } from "../form/ListPage";
 import { IconAccessPoint, IconRouter } from "@tabler/icons-react";
 import { useDraftValue } from "../form/draft";
 import { useFreshDevices } from "../data/devices";
-import { ago, bandsOf, modelOf, portsOf } from "../facts";
-import { ItemIcon, ItemName, Section, SettingRow } from "../kit/layout";
+import { useNetworkStatus } from "../data/status";
+import { ago, bandsOf, duration, modelOf, portsOf } from "../facts";
+import { ItemIcon, ItemName, Section, SettingRow, StatusDot } from "../kit/layout";
 
 // Unset is automatic, so it is offered by `emptyLabel`, not listed here.
 const channels = (numbers: number[]) =>
@@ -47,6 +48,43 @@ const useFactsOf = (index: number) => {
   return { known, unreached, reading: devices.reading };
 };
 
+/**
+ * Device `index` online, offline or not known yet, from the live status read
+ * while the page is open; the list and the device's page say it the same way.
+ */
+const useOnline = (index: number) => {
+  const name: string | undefined = useDraftValue(`hardware.${index}.name`);
+  const now = useNetworkStatus().data?.devices.find((d) => d.name === name);
+  const health = now?.health;
+  return !now
+    ? { color: "gray" as const, label: "Checking…" }
+    : health
+    ? {
+        color: "green" as const,
+        label: "Online",
+        detail: `Up ${duration(health.uptime)} · load ${health.load.toFixed(2)} · memory ${Math.round(health.memoryUsed * 100)}%`,
+      }
+    : { color: "orange" as const, label: "Offline", detail: `Not reached: ${now.error}` };
+};
+
+const Online = ({ index }: { index: number }) => {
+  const { color, label, detail } = useOnline(index);
+  return (
+    <Group gap={6} wrap="nowrap" title={detail}>
+      <StatusDot color={color} />
+      <Text size="sm" c="dimmed">
+        {label}
+      </Text>
+    </Group>
+  );
+};
+
+const StatusRow = ({ index }: { index: number }) => (
+  <SettingRow label="Status" description={useOnline(index).detail}>
+    <Online index={index} />
+  </SettingRow>
+);
+
 const ModelCell = ({ index }: { index: number }) => {
   const { known, unreached, reading } = useFactsOf(index);
   return (
@@ -70,6 +108,7 @@ const DeviceFacts = ({ index }: { index: number }) => {
   if (!known) {
     return (
       <Section title="Device" description={note}>
+        <StatusRow index={index} />
         <SettingRow
           label={reading ? "Reading…" : "Not read yet"}
           description="Its model, OpenWrt version, ports and radios, once it can be reached."
@@ -82,6 +121,7 @@ const DeviceFacts = ({ index }: { index: number }) => {
   const bands = bandsOf(schema);
   return (
     <Section title="Device" description={note}>
+      <StatusRow index={index} />
       <SettingRow label="Model">
         <Text size="sm" c="dimmed">{modelOf(schema)}</Text>
       </SettingRow>
@@ -121,6 +161,7 @@ const hardware = defineList({
         </ItemName>
       ),
     },
+    { header: "Status", cell: (i) => <Online index={i} /> },
     {
       header: "Role",
       cell: (i) => (

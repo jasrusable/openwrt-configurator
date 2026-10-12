@@ -57,7 +57,11 @@ and the React UI in `ui/`.
       (WAN port, bands), and a live Overview (`src/status/`, `ubus` over
       SSH for now; parsers tested against output recorded from 25.12, the
       hostapd one from its documented shape, as no Wi-Fi runs in Docker:
-      check it against a real access point). Next, in order: a read-only
+      check it against a real access point), and finding devices where they
+      are, identity checked (`src/locate.ts`: last address, settings, router
+      leases by name and MAC; pinned host key and board). Next: onboarding
+      an unclaimed OpenWrt device from the router's leases ("pick yours");
+      then, in order: a read-only
       rpcd "monitor" login compiled
       onto every device (status objects only, never UCI; its own reviewed
       step: hashed password with a stable salt); `/api/status` and a live

@@ -17,7 +17,7 @@ import {
   reportSkipped,
 } from "./provisionConfig";
 import { confirmTiming } from "./confirm";
-import { writeFacts } from "./deviceFacts";
+import { withLocatedAddresses, writeFacts } from "./deviceFacts";
 import { DeviceSchema } from "./deviceSchema";
 import { getDeviceSchema } from "./getDeviceSchema";
 import { loadOncConfig } from "./loadConfig";
@@ -113,7 +113,12 @@ export const main = async ({
       },
     ],
     action: async ([configPath], options) => {
-      const { oncConfig } = await loadOncConfig({ path: configPath, platform });
+      const loaded = await loadOncConfig({ path: configPath, platform });
+      // From the UI: each device is found where it is (src/locate.ts), its
+      // identity checked, before anything is applied to it.
+      const oncConfig = options.factsFor
+        ? await withLocatedAddresses(loaded.oncConfig, options.factsFor, platform)
+        : loaded.oncConfig;
       await provisionConfig({
         oncConfig,
         ...(options.factsFor

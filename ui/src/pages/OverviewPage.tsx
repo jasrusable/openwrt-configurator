@@ -2,7 +2,7 @@
 // is (facts), and what the network is doing now (status, read from the
 // devices every 30 seconds while this page is open), interpreted against the
 // settings: what does not match them is shown, never hidden.
-import { Box, Button, Group, Text } from "@mantine/core";
+import { Button, Group, Text } from "@mantine/core";
 import { IconChevronRight } from "@tabler/icons-react";
 import { ReactNode } from "react";
 import { useNavigate } from "react-router";
@@ -13,7 +13,7 @@ import { useProvision } from "../data/provision";
 import { useNetworkStatus } from "../data/status";
 import { ago, duration, modelOf, portsOf, routerFacts } from "../facts";
 import { useDraftValue } from "../form/draft";
-import { Section, SettingRow, SettingsPage } from "../kit/layout";
+import { Section, SettingRow, SettingsPage, StatusDot } from "../kit/layout";
 import { applyStatus } from "../provision/status";
 
 const connections: Record<string, string> = { dhcp: "DHCP", pppoe: "PPPoE", static: "Static IP" };
@@ -32,9 +32,7 @@ const Link = ({ to, children }: { to: string; children: ReactNode }) => {
 /** A value, with a dot when its state is known: green up, red down. */
 const State = ({ up, children }: { up?: boolean; children: ReactNode }) => (
   <Group gap={6} wrap="nowrap" justify="flex-end">
-    {up !== undefined && (
-      <Box w={8} h={8} style={{ borderRadius: 4, background: `var(--mantine-color-${up ? "green" : "red"}-6)` }} />
-    )}
+    {up !== undefined && <StatusDot color={up ? "green" : "red"} />}
     <Text size="sm" c="dimmed" ta="right">
       {children}
     </Text>

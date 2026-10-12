@@ -238,3 +238,13 @@ export const ItemName = ({ icon, children }: { icon: ReactNode; children: ReactN
     </Text>
   </Group>
 );
+
+/** A small coloured dot for a state; always next to words, never the only cue. */
+export const StatusDot = ({ color }: { color: "green" | "orange" | "red" | "gray" }) => (
+  <Box
+    component="span"
+    w={8}
+    h={8}
+    style={{ display: "inline-block", flexShrink: 0, borderRadius: 4, background: `var(--mantine-color-${color}-6)` }}
+  />
+);
