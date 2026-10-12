@@ -882,6 +882,7 @@ test("mesh rescue: a repeater gets a rescue Wi-Fi (off), its own link-local addr
   const ap = onDevice("home-ap-1", "zyxel,nwa50ax-pro", intent);
   const rescue = ap.wireless["wifi-iface"].find((w: any) => w.ifname === "rescue0");
   t.like(rescue, { ssid: "home-ap-1 rescue", disabled: true, network: "rescue", key: "mesh-key-123456", device: "radio0" });
+  t.is(rescue.encryption, "sae", "WPA3, as the mesh: its key never offered to a WPA2 handshake");
   t.regex(ap.network.interface.find((i: any) => i[".name"] === "rescue").ipaddr, /^169\.254\.\d+\.\d+$/);
   const state = getOpenWrtState({
     oncConfig: compile(intent),

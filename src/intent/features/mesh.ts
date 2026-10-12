@@ -233,7 +233,9 @@ start_service() {
                   mesh_rssi_threshold: meshRssiThreshold,
                   network: "batmesh",
                 },
-                // Off until the watcher turns it on; its key is the mesh's.
+                // Off until the watcher turns it on; its key is the mesh's,
+                // so WPA3 (SAE) as the mesh has it: under WPA2 a captured
+                // handshake would expose the mesh's key to offline guessing.
                 ...repeaters.map((d) => ({
                   ".if": onDevice(d.name),
                   ".name": "rescue",
@@ -241,7 +243,7 @@ start_service() {
                   mode: "ap",
                   ifname: "rescue0",
                   ssid: rescueSsid(d.name),
-                  encryption: "psk2+ccmp",
+                  encryption: "sae",
                   key,
                   network: "rescue",
                   disabled: true,
