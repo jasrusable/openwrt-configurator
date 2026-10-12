@@ -1,25 +1,57 @@
-import { Alert, Loader, Stack, Text, ThemeIcon } from "@mantine/core";
-import { IconCheck, IconCloudUpload, IconLoader2 } from "@tabler/icons-react";
+import { Alert, Button, Loader, Stack, Text, ThemeIcon } from "@mantine/core";
+import { ReactNode, useState } from "react";
+import { IconAlertTriangle, IconCheck, IconCloudUpload, IconLoader2 } from "@tabler/icons-react";
 import type { ProvisionInfo } from "../data/api";
 import { useProvision } from "../data/provision";
 import { useDraftChanged } from "../form/IntentForm";
 import { Section, SettingRow } from "../kit/layout";
 import { LogView } from "../kit/LogView";
-import { applyStatus, lastRun } from "./status";
+import { applyStatus } from "./status";
 import { DeviceChangesSection } from "./UciDiff";
 
-/** Where the devices stand, and how the last run went, in words. */
-const Status = ({ info }: { info: ProvisionInfo }) => {
-  const status = applyStatus(info);
-  const run = info.state === "running" ? undefined : lastRun(info.state);
+/** Hidden until asked for. */
+const Details = ({ children }: { children: ReactNode }) => {
+  const [open, setOpen] = useState(false);
   return (
-    <Section title="Status">
-      <SettingRow label={status.title} description={status.detail}>
-        <ThemeIcon variant="light" color={status.color} radius="xl" size={26}>
-          {status.pending ? <IconCloudUpload size={15} /> : status.color === "blue" ? <IconLoader2 size={15} /> : <IconCheck size={15} />}
+    <Stack gap="md">
+      <Button variant="subtle" color="gray" size="xs" w="fit-content" onClick={() => setOpen(!open)}>
+        {open ? "Hide details" : "Details"}
+      </Button>
+      {open && children}
+    </Stack>
+  );
+};
+
+/** One line on where things stand: the run now, else the last one, else what is pending. */
+const summaryOf = (info: ProvisionInfo) => {
+  const log = info.log ?? "";
+  const rolledBack = /rolled back|rolling back/i.test(log);
+  if (info.state === "running") {
+    return rolledBack
+      ? { title: "Rolling back…", detail: "A device could not be reached afterwards, so every device is going back to its previous settings.", color: "orange", icon: IconLoader2 }
+      : { title: "Applying…", detail: "Your devices are being reconfigured. This takes a few minutes.", color: "blue", icon: IconLoader2 };
+  }
+  if (info.state === "failed") {
+    return rolledBack
+      ? { title: "Not applied", detail: "A device could not be reached afterwards, so every device went back to its previous settings.", color: "red", icon: IconAlertTriangle }
+      : { title: "Not applied", detail: "The run stopped before changing anything. Details below.", color: "red", icon: IconAlertTriangle };
+  }
+  if (info.state === "applied-with-problems") {
+    return { title: "Applied, with a problem", detail: "Your devices have the new settings, but a step after it failed. Details below.", color: "orange", icon: IconAlertTriangle };
+  }
+  const status = applyStatus(info);
+  return { title: status.title, detail: status.detail, color: status.color, icon: status.pending ? IconCloudUpload : IconCheck };
+};
+
+const Summary = ({ info }: { info: ProvisionInfo }) => {
+  const { title, detail, color, icon: Icon } = summaryOf(info);
+  return (
+    <Section>
+      <SettingRow label={title} description={detail}>
+        <ThemeIcon variant="light" color={color} radius="xl" size={26}>
+          <Icon size={15} />
         </ThemeIcon>
       </SettingRow>
-      {run && <SettingRow label={run.title} />}
     </Section>
   );
 };
@@ -48,31 +80,6 @@ const Changes = ({ info }: { info: ProvisionInfo }) =>
     </Section>
   );
 
-/**
- * A rollback, said plainly at the top: while it happens, and after, with the
- * run's own reason and what became of each device (from its log).
- */
-const RollbackNotice = ({ info }: { info: ProvisionInfo }) => {
-  const log = info.log ?? "";
-  const rolling = info.state === "running" && /Rolling back|rolled back|roll(s)? (itself )?back/i.test(log);
-  if (rolling) {
-    return (
-      <Alert color="orange" title="Rolling back">
-        A device could not be confirmed, so every device is going back to its previous settings. This can take a few minutes.
-      </Alert>
-    );
-  }
-  if (info.state !== "failed" || !/rolled back|rolling back/i.test(log)) return null;
-  const error = log.slice(log.lastIndexOf("Error:") + "Error:".length).trim();
-  return (
-    <Alert color="red" title="Not applied: your devices kept their previous settings">
-      <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-        {log.includes("Error:") ? error : "The run rolled back. Its log is below."}
-      </Text>
-    </Alert>
-  );
-};
-
 /** The preview of a provision, the button that starts it, and its progress. */
 export const ProvisionPanel = () => {
   const provision = useProvision();
@@ -90,8 +97,7 @@ export const ProvisionPanel = () => {
 
   return (
     <Stack gap="xl">
-      <RollbackNotice info={info} />
-      <Status info={info} />
+      <Summary info={info} />
 
       {unsaved && (
         <Alert color="orange" title="Unsaved changes">
@@ -101,13 +107,15 @@ export const ProvisionPanel = () => {
 
       <Changes info={info} />
 
-      <DeviceChangesSection devices={info.devices} running={info.state === "running"} />
-
-      {info.state !== "idle" && (
-        <Section title="Progress">
-          <LogView text={info.log} />
-        </Section>
-      )}
+      {/* For people who know OpenWrt: what each device gets, and the run's log. */}
+      <Details>
+        <DeviceChangesSection devices={info.devices} running={info.state === "running"} />
+        {info.state !== "idle" && (
+          <Section title="Log">
+            <LogView text={info.log} />
+          </Section>
+        )}
+      </Details>
     </Stack>
   );
 };
