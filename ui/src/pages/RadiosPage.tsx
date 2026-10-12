@@ -4,8 +4,10 @@ import { Badge, Button, Text } from "@mantine/core";
 import { useNavigate } from "react-router";
 import { channelWidths } from "../../../src/intent/choices";
 import { placeName, where } from "../../../src/intent/places";
-import { Band } from "../../../src/intent/schema";
-import { useIssues } from "../form/draft";
+import { Band, Intent } from "../../../src/intent/schema";
+import { useDeviceFacts } from "../data/devices";
+import { bandsOf } from "../facts";
+import { useDraftValue, useIssues } from "../form/draft";
 import {
   SegmentedField,
   SelectField,
@@ -143,8 +145,21 @@ const RadiosTable = () => {
   );
 };
 
+/** Which access points have this band, from their facts; nothing if none has been read. */
+const useHaveBand = (label: string) => {
+  const intent: Intent = useDraftValue();
+  const facts = useDeviceFacts().data;
+  const read = intent.hardware
+    .filter((d) => d.role === "access-point")
+    .flatMap((d) => (facts?.[d.name] ? [{ name: d.name, bands: bandsOf(facts[d.name]!.schema) }] : []));
+  if (read.length === 0) return undefined;
+  const have = read.filter((d) => d.bands.includes(label)).map((d) => d.name);
+  return have.length ? `On ${have.join(", ")}.` : "None of your access points has it.";
+};
+
 const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
   const navigate = useNavigate();
+  const haveBand = useHaveBand(label);
   const at = (key: string) => `radios.${band}.${key}` as never;
   return (
     <SettingsPage
@@ -153,7 +168,7 @@ const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
         { label },
       ]}
     >
-      <Section description={description}>
+      <Section description={haveBand ? `${description} ${haveBand}` : description}>
         <SwitchField
           name={at("enabled")}
           label="Enabled"

@@ -3,6 +3,8 @@ import { allHtModes, wifiBands, wifiTypes } from "./openWrtValues";
 
 export const deviceSchemaSchema = z.object({
   name: z.string(),
+  /** The model for people, from board.json (e.g. "FriendlyElec NanoPi R6S"); name is its id. */
+  model: z.string().optional(),
   sw_config: z.boolean().optional(),
   version: z.string(),
   ports: z

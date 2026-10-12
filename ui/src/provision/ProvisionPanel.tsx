@@ -8,6 +8,7 @@ import { ConfirmButton } from "../kit/ConfirmButton";
 import { Section, SettingRow } from "../kit/layout";
 import { LogView } from "../kit/LogView";
 import { applyStatus, lastRun } from "./status";
+import { UciDiff } from "./UciDiff";
 
 /** Where the devices stand, and how the last run went, in words. */
 const Status = ({ info }: { info: ProvisionInfo }) => {
@@ -75,6 +76,8 @@ export const ProvisionPanel = () => {
       )}
 
       <Changes info={info} />
+
+      <UciDiff />
 
       <Section title="Devices">
         {info.devices.map((name) => (

@@ -50,6 +50,20 @@ and the React UI in `ui/`.
       overlapping the WAN's range, and the choices the UI offers served from
       the same rules. Device-only facts (a missing 5 GHz radio) fail at plan
       time, before any change.
+- [ ] **Reading devices** (CLAUDE.md, "Reading devices"; the app replaces
+      LuCI, status included). Done: device facts (`src/deviceFacts.ts`,
+      "Read from devices" on Hardware), the offline UCI diff on Apply
+      (`src/applyDiff.ts`), a basic Overview, facts in hints (WAN port,
+      bands). Next, in order: every apply writes facts too (provision
+      already reads the schema); a read-only rpcd "monitor" login compiled
+      onto every device (status objects only, never UCI; its own reviewed
+      step: hashed password with a stable salt); `/api/status` and a live
+      Overview plus a Clients page (leases, Wi-Fi stations, reservations),
+      with realtime graphs kept only in the browser; logs per device; "Check
+      devices" for drift (SSH, on request, results without values); actions
+      (reboot, restart Wi-Fi, ping) over SSH with a confirmation; then LuCI
+      off the devices (uhttpd and rpcd stay; `rpcd-mod-iwinfo` explicit);
+      long-term history last.
 - [ ] Per-port network assignment (today every LAN port carries every
       network: the main one untagged, the others tagged). Also a security
       fix: a wired device can tag its frames into any network's VLAN, which

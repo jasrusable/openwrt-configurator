@@ -2,6 +2,8 @@
 // Transport-free, so the Node server (`ui`) and CGI under uhttpd on a router
 // (`cgi`) answer every request with the same code. The UI uses relative URLs,
 // so it works wherever it is mounted: / on a Mac, /cgi-bin/onc/ on a router.
+import { applyDiff } from "../applyDiff";
+import { readDevices, readFacts } from "../deviceFacts";
 import { compileIntent } from "../intent/compile";
 import { diffIntent } from "../intent/diff";
 import { migrateIntent } from "../intent/migrations";
@@ -173,6 +175,46 @@ export const provisionApi =
   };
 
 /** Everything the UI needs, behind any transport. */
+/** The saved intent's device names, and the low-level config it compiles to, if it does. */
+const compiled = (files: Files, path: string) => {
+  const parsed = intentSchema.safeParse(readIntent(files, path));
+  if (!parsed.success) return undefined;
+  const config = oncConfigSchema.safeParse(compileIntent(parsed.data));
+  return config.success ? { intent: parsed.data, config: config.data } : undefined;
+};
+
+/**
+ * GET: what each device is, as last read (none for one never read). POST:
+ * read every device now, read-only, and answer with the same plus how each
+ * read went. A network action, so only ever on the user's request.
+ */
+export const devicesApi =
+  ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
+  async ({ method }) => {
+    const names = () =>
+      ((readIntent(platform, intentPath)?.hardware as { name: string }[]) ?? []).map((d) => d.name);
+    if (method === "GET") {
+      return json(200, { facts: readFacts(platform, intentPath, names()) });
+    }
+    if (method === "POST") {
+      const results = await readDevices({ intentPath, platform });
+      return json(200, { results, facts: readFacts(platform, intentPath, names()) });
+    }
+    return json(405, { error: "GET or POST" });
+  };
+
+/** GET: what an apply would change on each device, as UCI (src/applyDiff.ts). */
+export const applyDiffApi =
+  ({ intentPath, files }: { intentPath: string; files: Files }): HttpHandler =>
+  async ({ method }) => {
+    if (method !== "GET") return json(405, { error: "GET" });
+    const after = compiled(files, intentPath);
+    if (!after) return json(409, { error: "The saved settings are not valid." });
+    const before = compiled(files, jobPaths(intentPath).live);
+    const facts = readFacts(files, intentPath, after.intent.hardware.map((d) => d.name));
+    return json(200, { devices: applyDiff({ before: before?.config, after: after.config, facts }) });
+  };
+
 export const uiHandler = ({
   intentPath,
   uiRoot,
@@ -180,11 +222,13 @@ export const uiHandler = ({
 }: {
   intentPath: string;
   uiRoot: string;
-  platform: JobPlatform;
+  platform: Platform;
 }): HttpHandler => {
   const routes: Record<string, HttpHandler> = {
     "/api/intent": intentApi({ intentPath, files: platform }),
     "/api/provision": provisionApi({ intentPath, platform }),
+    "/api/devices": devicesApi({ intentPath, platform }),
+    "/api/apply/diff": applyDiffApi({ intentPath, files: platform }),
   };
   const ui = staticFiles({ root: uiRoot, files: platform });
   return (request) =>

@@ -29,7 +29,7 @@ import { useDraftValue } from "./form/draft";
 import { IntentForm, useDraftChanged, useSaveActions } from "./form/IntentForm";
 import { ProblemCount, ProblemsButton, usePageProblems } from "./form/Problems";
 import { AppIcon } from "./kit/layout";
-import { pages } from "./pages";
+import { groups, pages } from "./pages";
 import { ApplyPage } from "./provision/ApplyPage";
 import { ProvisionButton } from "./provision/ProvisionButton";
 
@@ -99,22 +99,32 @@ const Shell = () => {
         </Group>
       </AppShell.Header>
       <AppShell.Navbar p="sm" className="onc-chrome">
-        {pages.map(({ id, label, icon, color }) => (
-          <NavLink
-            key={id}
-            label={label}
-            leftSection={<AppIcon icon={icon} color={color} />}
-            rightSection={<ProblemCount count={problems(id)} />}
-            active={isActive(id)}
-            // A soft fill, as macOS selects among coloured icons.
-            className="onc-nav"
-            onClick={() => {
-              navigate(`/${id}`);
-              nav.close();
-            }}
-            style={{ borderRadius: 8 }}
-            mb={2}
-          />
+        {groups.map((group) => (
+          <Stack key={group.id} gap={0} mb="md">
+            {/* A group's title: a quiet label, not a page. */}
+            <Text size="xs" fw={600} c="dimmed" px={12} pb={6}>
+              {group.label}
+            </Text>
+            {pages
+              .filter((page) => page.group === group.id)
+              .map(({ id, label, icon, color }) => (
+                <NavLink
+                  key={id}
+                  label={label}
+                  leftSection={<AppIcon icon={icon} color={color} />}
+                  rightSection={<ProblemCount count={problems(id)} />}
+                  active={isActive(id)}
+                  // A soft fill, as macOS selects among coloured icons.
+                  className="onc-nav"
+                  onClick={() => {
+                    navigate(`/${id}`);
+                    nav.close();
+                  }}
+                  style={{ borderRadius: 8 }}
+                  mb={2}
+                />
+              ))}
+          </Stack>
         ))}
       </AppShell.Navbar>
       <AppShell.Main>
@@ -156,14 +166,14 @@ const router = createHashRouter([
     element: <Shell />,
     errorElement: <PageError />,
     children: [
-      { index: true, element: <Navigate to="system" replace /> },
+      { index: true, element: <Navigate to="overview" replace /> },
       ...pages.map((page) => ({ path: `${page.id}/*`, element: <page.Page /> })),
       { path: "apply", element: <ApplyPage /> },
       { path: "general/*", element: <MovedTo base="/system" /> },
       // Old addresses: General is System, SSIDs and Radios are Wi-Fi's tabs.
       { path: "ssids/*", element: <MovedTo base="/wifi" /> },
       { path: "radios/*", element: <MovedTo base="/wifi/radios" /> },
-      { path: "*", element: <Navigate to="system" replace /> },
+      { path: "*", element: <Navigate to="overview" replace /> },
     ],
   },
 ]);

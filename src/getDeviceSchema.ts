@@ -53,6 +53,7 @@ export const getDeviceSchema = async ({
 
   const deviceSchemaTmp: DeviceSchema = {
     name: boardJson.model.id,
+    ...(boardJson.model.name ? { model: boardJson.model.name } : {}),
     version,
     sw_config: isSwConfig,
     ports: isSwConfig

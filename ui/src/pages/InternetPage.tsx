@@ -1,4 +1,7 @@
-import { netmask } from "../../../src/intent/schema";
+import { Intent, netmask } from "../../../src/intent/schema";
+import { useDeviceFacts } from "../data/devices";
+import { modelOf, portsOf, routerFacts } from "../facts";
+import { useDraftValue } from "../form/draft";
 import {
   NumberField,
   OptionalField,
@@ -34,12 +37,23 @@ const lines = [
   { value: "adsl", label: "ADSL" },
 ] as const;
 
-export const InternetPage = () => (
+/** Which port the internet is on, from the router's facts: "wan on eth1 of jaculu-router (…)". */
+const useWanPort = () => {
+  const intent: Intent = useDraftValue();
+  const router = routerFacts(intent, useDeviceFacts().data);
+  const wan = router && portsOf(router.schema).wan[0];
+  return router && wan ? `wan on ${wan} of ${router.name} (${modelOf(router.schema)})` : undefined;
+};
+
+export const InternetPage = () => {
+  const wan = useWanPort();
+  return (
   <SettingsPage title="Internet" description="How your router connects.">
     <Section>
       <VariantField
         name="internet.connection"
         label="Connection"
+        openwrt={wan}
         variants={[
           { value: "dhcp", label: "DHCP", initial: { type: "dhcp" } },
           {
@@ -127,4 +141,5 @@ export const InternetPage = () => (
       </OptionalField>
     </Section>
   </SettingsPage>
-);
+  );
+};

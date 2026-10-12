@@ -74,6 +74,8 @@ const lines = (text: string) =>
 export const boardJsonSchema = z.object({
   model: z.object({
     id: z.string(),
+    /** For people, e.g. "FriendlyElec NanoPi R6S". */
+    name: z.string().optional(),
   }),
   switch: z
     .record(

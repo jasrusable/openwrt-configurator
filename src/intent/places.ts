@@ -3,6 +3,7 @@
 // somewhere (a rule's reason, a description, an explainer) is built with
 // `where`, so renaming a page renames every pointer to it.
 export const places = {
+  overview: ["Overview"],
   system: ["System"],
   internet: ["Internet"],
   networks: ["Networks"],

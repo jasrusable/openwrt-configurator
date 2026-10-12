@@ -6,6 +6,7 @@
 import {
   IconAdjustments,
   IconFlame,
+  IconLayoutDashboard,
   IconNetwork,
   IconRouter,
   IconShieldLock,
@@ -19,15 +20,23 @@ import { SystemPage } from "./SystemPage";
 import { HardwarePage } from "./HardwarePage";
 import { InternetPage } from "./InternetPage";
 import { NetworksPage } from "./NetworksPage";
+import { OverviewPage } from "./OverviewPage";
 import { WifiSection } from "./wifi";
 
 export const pages = [
-  { id: "system", label: placeName("system"), icon: IconAdjustments, color: "gray", Page: SystemPage },
-  { id: "internet", label: placeName("internet"), icon: IconWorld, color: "indigo", Page: InternetPage },
-  { id: "networks", label: placeName("networks"), icon: IconNetwork, color: "green", Page: NetworksPage },
-  { id: "wifi", label: placeName("wifi"), icon: IconWifi, color: "blue", Page: WifiSection },
+  { group: "status", id: "overview", label: placeName("overview"), icon: IconLayoutDashboard, color: "teal", Page: OverviewPage },
+  { group: "settings", id: "system", label: placeName("system"), icon: IconAdjustments, color: "gray", Page: SystemPage },
+  { group: "settings", id: "internet", label: placeName("internet"), icon: IconWorld, color: "indigo", Page: InternetPage },
+  { group: "settings", id: "networks", label: placeName("networks"), icon: IconNetwork, color: "green", Page: NetworksPage },
+  { group: "settings", id: "wifi", label: placeName("wifi"), icon: IconWifi, color: "blue", Page: WifiSection },
   // After Networks: who may reach what is each network's access; this is the exceptions.
-  { id: "firewall", label: placeName("firewall"), icon: IconFlame, color: "red", Page: FirewallPage },
-  { id: "dns", label: placeName("dns"), icon: IconShieldLock, color: "violet", Page: DnsPage },
-  { id: "hardware", label: placeName("hardware"), icon: IconRouter, color: "orange", Page: HardwarePage },
+  { group: "settings", id: "firewall", label: placeName("firewall"), icon: IconFlame, color: "red", Page: FirewallPage },
+  { group: "settings", id: "dns", label: placeName("dns"), icon: IconShieldLock, color: "violet", Page: DnsPage },
+  { group: "settings", id: "hardware", label: placeName("hardware"), icon: IconRouter, color: "orange", Page: HardwarePage },
+] as const;
+
+/** The sidebar's groups, in order: what the network is doing, then how it is set up. */
+export const groups = [
+  { id: "status", label: "Status" },
+  { id: "settings", label: "Settings" },
 ] as const;
