@@ -17,6 +17,8 @@ import {
   reportSkipped,
 } from "./provisionConfig";
 import { confirmTiming } from "./confirm";
+import { writeFacts } from "./deviceFacts";
+import { DeviceSchema } from "./deviceSchema";
 import { getDeviceSchema } from "./getDeviceSchema";
 import { loadOncConfig } from "./loadConfig";
 import { cgiResponse, uiHandler } from "./server/handlers";
@@ -82,6 +84,10 @@ export const main = async ({
         default: "reload-then-reboot",
       },
       {
+        flags: "--facts-for <intent>",
+        description: "keep each device's facts (model, ports, radios) beside this intent file, as the UI reads them",
+      },
+      {
         flags: "--confirm-timeout <seconds>",
         description:
           "seconds to reconnect and confirm before the device rolls back",
@@ -110,6 +116,12 @@ export const main = async ({
       const { oncConfig } = await loadOncConfig({ path: configPath, platform });
       await provisionConfig({
         oncConfig,
+        ...(options.factsFor
+          ? {
+              onDeviceSchema: (hostname: string, schema: DeviceSchema) =>
+                writeFacts(platform, options.factsFor, { hostname, readAt: Date.now(), schema }),
+            }
+          : {}),
         confirm: options.confirm,
         confirmTimeoutSeconds: options.confirmTimeout,
         rollbackMode: options.rollback,
@@ -211,6 +223,9 @@ export const main = async ({
         headers: { "x-onc": platform.env("HTTP_X_ONC") ?? "" },
       });
       console.log(cgiResponse(response));
+      // Answered: a timer still pending (a device read's time limit) must not
+      // keep this process, and so the response, open. exit flushes first.
+      platform.exit(0);
     },
   });
 

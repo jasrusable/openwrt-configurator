@@ -1,16 +1,17 @@
-// Status › Overview: the network at a glance. For now what the app knows for
-// sure: your settings, each device's facts as last read, and where the
-// devices stand against the saved settings. Live status (clients, traffic,
-// health) arrives with the read-only monitor (CLAUDE.md, "Reading devices").
-import { Button, Text } from "@mantine/core";
+// Status › Overview: the network at a glance. Your settings, what each device
+// is (facts), and what the network is doing now (status, read from the
+// devices every 30 seconds while this page is open), interpreted against the
+// settings: what does not match them is shown, never hidden.
+import { Box, Button, Group, Text } from "@mantine/core";
 import { IconChevronRight } from "@tabler/icons-react";
 import { ReactNode } from "react";
 import { useNavigate } from "react-router";
-import { templateOf } from "../../../src/intent/networkTemplates";
 import { Intent } from "../../../src/intent/schema";
-import { useDeviceFacts } from "../data/devices";
+import { templateOf } from "../../../src/intent/networkTemplates";
+import { useFreshDevices } from "../data/devices";
 import { useProvision } from "../data/provision";
-import { ago, modelOf, portsOf, routerFacts } from "../facts";
+import { useNetworkStatus } from "../data/status";
+import { ago, duration, modelOf, portsOf, routerFacts } from "../facts";
 import { useDraftValue } from "../form/draft";
 import { Section, SettingRow, SettingsPage } from "../kit/layout";
 import { applyStatus } from "../provision/status";
@@ -19,7 +20,6 @@ const connections: Record<string, string> = { dhcp: "DHCP", pppoe: "PPPoE", stat
 const providers: Record<string, string> = { cloudflare: "Cloudflare", google: "Google", quad9: "Quad9" };
 const types: Record<string, string> = { home: "Home", guest: "Guest", iot: "IoT", custom: "Custom" };
 
-/** A row that leads to where it is set. */
 const Link = ({ to, children }: { to: string; children: ReactNode }) => {
   const navigate = useNavigate();
   return (
@@ -29,25 +29,46 @@ const Link = ({ to, children }: { to: string; children: ReactNode }) => {
   );
 };
 
-const Dim = ({ children }: { children: ReactNode }) => (
-  <Text size="sm" c="dimmed" ta="right">
-    {children}
-  </Text>
+/** A value, with a dot when its state is known: green up, red down. */
+const State = ({ up, children }: { up?: boolean; children: ReactNode }) => (
+  <Group gap={6} wrap="nowrap" justify="flex-end">
+    {up !== undefined && (
+      <Box w={8} h={8} style={{ borderRadius: 4, background: `var(--mantine-color-${up ? "green" : "red"}-6)` }} />
+    )}
+    <Text size="sm" c="dimmed" ta="right">
+      {children}
+    </Text>
+  </Group>
 );
+
+const devicesWord = (n: number) => `${n} device${n === 1 ? "" : "s"}`;
 
 export const OverviewPage = () => {
   const intent: Intent = useDraftValue();
-  const facts = useDeviceFacts().data;
+  const devices = useFreshDevices();
+  const facts = devices.data?.facts;
   const provision = useProvision().data;
-  const status = provision && applyStatus(provision);
+  const status = useNetworkStatus();
+  const live = status.data;
+  const apply = provision && applyStatus(provision);
   const router = routerFacts(intent, facts);
   const wan = router && portsOf(router.schema).wan[0];
   const dns = intent.dns.upstream;
+  const unexpected = live && [...live.unexpected.interfaces, ...live.unexpected.ssids];
   return (
-    <SettingsPage title="Overview" description={intent.site.name}>
-      {status && (
+    <SettingsPage
+      title="Overview"
+      description={
+        live
+          ? `${intent.site.name} · live, read from the devices ${ago(status.dataUpdatedAt)}`
+          : status.isFetching
+          ? `${intent.site.name} · reading the devices…`
+          : intent.site.name
+      }
+    >
+      {apply && (
         <Section title="Devices and settings">
-          <SettingRow label={status.title} description={status.detail}>
+          <SettingRow label={apply.title} description={apply.detail}>
             <Link to="/apply">Apply</Link>
           </SettingRow>
         </Section>
@@ -56,62 +77,112 @@ export const OverviewPage = () => {
       <Section title="Internet">
         <SettingRow
           label="Connection"
-          description={wan && router ? `On ${wan} of ${router.name} (${modelOf(router.schema)})` : undefined}
+          description={
+            [
+              live?.internet?.ipv4[0],
+              wan && router ? `on ${wan} of ${router.name}` : undefined,
+              live?.internet?.up && live.internet.uptime !== undefined ? `up ${duration(live.internet.uptime)}` : undefined,
+            ]
+              .filter(Boolean)
+              .join(" · ") || undefined
+          }
         >
-          <Dim>{connections[intent.internet.connection.type]}</Dim>
+          <State up={live?.internet?.up}>
+            {live?.internet ? (live.internet.up ? "Connected" : "Down") : connections[intent.internet.connection.type]}
+          </State>
         </SettingRow>
-        <SettingRow label="IPv6">
-          <Dim>{intent.internet.ipv6 ? "On" : "Off"}</Dim>
+        <SettingRow label="IPv6" description={live?.internet?.ipv6[0]}>
+          <State>{intent.internet.ipv6 ? "On" : "Off"}</State>
         </SettingRow>
         <SettingRow label="DNS">
-          <Dim>
+          <State>
             {dns.type === "encrypted"
               ? `Encrypted · ${providers[dns.provider]}`
               : dns.type === "custom"
               ? dns.servers.join(", ")
               : "Your provider's"}
-          </Dim>
+          </State>
         </SettingRow>
+        {live && (
+          <SettingRow label="Connected devices" description={`${live.clients.wifi} on Wi-Fi`}>
+            <State>{devicesWord(live.clients.total)}</State>
+          </SettingRow>
+        )}
       </Section>
 
       <Section title="Devices">
         {intent.hardware.map((device) => {
           const known = facts?.[device.name];
+          const now = live?.devices.find((d) => d.name === device.name);
+          const what = known ? `${modelOf(known.schema)} · OpenWrt ${known.schema.version}` : undefined;
+          const health = now?.health
+            ? `up ${duration(now.health.uptime)} · load ${now.health.load.toFixed(2)} · memory ${Math.round(now.health.memoryUsed * 100)}%`
+            : now?.error
+            ? `not reached: ${now.error}`
+            : devices.reading
+            ? "reading…"
+            : undefined;
           return (
-            <SettingRow
-              key={device.name}
-              label={device.name}
-              description={
-                known
-                  ? `${modelOf(known.schema)} · OpenWrt ${known.schema.version} · read ${ago(known.readAt)}`
-                  : "Not read yet"
-              }
-            >
-              <Dim>{device.role === "router" ? "Router" : "Access point"}</Dim>
+            <SettingRow key={device.name} label={device.name} description={[what, health].filter(Boolean).join(" · ")}>
+              <State up={now ? !!now.health : undefined}>{device.role === "router" ? "Router" : "Access point"}</State>
             </SettingRow>
           );
         })}
       </Section>
 
       <Section title="Networks">
-        {intent.networks.map((network, i) => (
-          <SettingRow key={network.id} label={network.name} description={network.subnet}>
-            <Dim>{types[templateOf(intent.networks, i)]}</Dim>
-          </SettingRow>
-        ))}
+        {intent.networks.map((network, i) => {
+          const now = live?.networks.find((n) => n.id === network.id);
+          return (
+            <SettingRow
+              key={network.id}
+              label={network.name}
+              description={[network.subnet, types[templateOf(intent.networks, i)], now?.up === false ? "not up on the router" : undefined]
+                .filter(Boolean)
+                .join(" · ")}
+            >
+              <State up={now?.up}>{now ? devicesWord(now.clients) : ""}</State>
+            </SettingRow>
+          );
+        })}
       </Section>
 
       <Section title="Wi-Fi">
-        {intent.wifi.map((ssid) => (
-          <SettingRow
-            key={ssid.ssid}
-            label={ssid.ssid || "Unnamed"}
-            description={intent.networks.find((n) => n.id === ssid.network)?.name}
-          >
-            <Dim>{ssid.enabled === false ? "Off" : "On"}</Dim>
-          </SettingRow>
-        ))}
+        {intent.wifi.map((ssid) => {
+          const now = live?.ssids.find((s) => s.ssid === ssid.ssid);
+          const on = now && now.accessPoints.length > 0;
+          return (
+            <SettingRow
+              key={ssid.ssid}
+              label={ssid.ssid || "Unnamed"}
+              description={[
+                intent.networks.find((n) => n.id === ssid.network)?.name,
+                now ? (on ? `on ${now.accessPoints.join(", ")}` : "not broadcast") : undefined,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            >
+              <State up={now ? !!on : undefined}>
+                {now ? devicesWord(now.clients) : ssid.enabled === false ? "Off" : "On"}
+              </State>
+            </SettingRow>
+          );
+        })}
       </Section>
+
+      {unexpected && unexpected.length > 0 && (
+        <Section
+          title="Not in your settings"
+          description="On the devices, but not something you have set up: applying your settings removes it."
+        >
+          {live!.unexpected.interfaces.map((id) => (
+            <SettingRow key={`i-${id}`} label={id} description="An interface on the router" />
+          ))}
+          {live!.unexpected.ssids.map((ssid) => (
+            <SettingRow key={`s-${ssid}`} label={ssid} description="An SSID an access point broadcasts" />
+          ))}
+        </Section>
+      )}
     </SettingsPage>
   );
 };

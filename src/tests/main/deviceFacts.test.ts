@@ -2,7 +2,15 @@ import test from "ava";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { readDevices, readFacts, writeFacts } from "../../deviceFacts";
+import {
+  factsMaxAgeMs,
+  readFacts,
+  readFailures,
+  refreshStale,
+  retryAfterMs,
+  staleDevices,
+  writeFacts,
+} from "../../deviceFacts";
 import { deviceSchemaSchema } from "../../deviceSchema";
 import { nodePlatform } from "../../platforms/node";
 
@@ -35,22 +43,43 @@ test("a file that is not facts reads as none, not an error", (t) => {
   t.is(readFacts(nodePlatform, path, ["home-router"])["home-router"], undefined);
 });
 
-test("a device that cannot be reached says why, and keeps the facts it had", async (t) => {
+test("stale: never read, or older than a day; not one that failed a moment ago", (t) => {
+  const now = 10 * factsMaxAgeMs;
+  const fresh = { hostname: "a", readAt: now - 1000, schema };
+  const old = { hostname: "b", readAt: now - factsMaxAgeMs - 1, schema };
+  t.deepEqual(
+    staleDevices({
+      facts: { fresh: fresh, old: old, never: undefined, failedNow: undefined, failedLong: undefined },
+      failures: {
+        failedNow: { at: now - 1000, error: "x" },
+        failedLong: { at: now - retryAfterMs - 1, error: "x" },
+      },
+      now,
+    }),
+    ["old", "never", "failedLong"]
+  );
+});
+
+test("a device that cannot be reached keeps its facts, says why, and rests before a retry", async (t) => {
   const path = intentFile();
-  writeFacts(nodePlatform, path, { hostname: "home-router", readAt: 1, schema });
+  const old = { hostname: "home-router", readAt: 1, schema };
+  writeFacts(nodePlatform, path, old);
+  let attempts = 0;
   const offline = {
     ...nodePlatform,
     connect: async () => {
+      attempts++;
       throw new Error("connect ECONNREFUSED");
     },
   };
-  const results = await readDevices({ intentPath: path, platform: offline });
-  t.deepEqual(
-    results.map((r) => [r.hostname, r.ok, !r.ok && r.error]),
-    [
-      ["home-router", false, "connect ECONNREFUSED"],
-      ["home-ap-1", false, "connect ECONNREFUSED"],
-    ]
-  );
-  t.is(readFacts(nodePlatform, path, ["home-router"])["home-router"]?.readAt, 1);
+  const now = factsMaxAgeMs + 5000;
+  await refreshStale({ intentPath: path, platform: offline, now: () => now });
+  t.is(attempts, 2, "both devices were stale");
+  t.deepEqual(readFacts(nodePlatform, path, ["home-router"])["home-router"], old);
+  t.deepEqual(readFailures(nodePlatform, path, ["home-ap-1"])["home-ap-1"], {
+    at: now,
+    error: "connect ECONNREFUSED",
+  });
+  await refreshStale({ intentPath: path, platform: offline, now: () => now + 1000 });
+  t.is(attempts, 2, "not tried again so soon");
 });

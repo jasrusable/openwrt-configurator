@@ -51,11 +51,14 @@ and the React UI in `ui/`.
       the same rules. Device-only facts (a missing 5 GHz radio) fail at plan
       time, before any change.
 - [ ] **Reading devices** (CLAUDE.md, "Reading devices"; the app replaces
-      LuCI, status included). Done: device facts (`src/deviceFacts.ts`,
-      "Read from devices" on Hardware), the offline UCI diff on Apply
-      (`src/applyDiff.ts`), a basic Overview, facts in hints (WAN port,
-      bands). Next, in order: every apply writes facts too (provision
-      already reads the schema); a read-only rpcd "monitor" login compiled
+      LuCI, status included). Done: device facts that keep themselves fresh
+      (`src/deviceFacts.ts`; pages ask for stale ones, applies write them),
+      the offline UCI diff on Apply (`src/applyDiff.ts`), facts in hints
+      (WAN port, bands), and a live Overview (`src/status/`, `ubus` over
+      SSH for now; parsers tested against output recorded from 25.12, the
+      hostapd one from its documented shape, as no Wi-Fi runs in Docker:
+      check it against a real access point). Next, in order: a read-only
+      rpcd "monitor" login compiled
       onto every device (status objects only, never UCI; its own reviewed
       step: hashed password with a stable salt); `/api/status` and a live
       Overview plus a Clients page (leases, Wi-Fi stations, reservations),

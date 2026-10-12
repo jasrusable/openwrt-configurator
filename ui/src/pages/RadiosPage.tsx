@@ -5,7 +5,7 @@ import { useNavigate } from "react-router";
 import { channelWidths } from "../../../src/intent/choices";
 import { placeName, where } from "../../../src/intent/places";
 import { Band, Intent } from "../../../src/intent/schema";
-import { useDeviceFacts } from "../data/devices";
+import { useDevices } from "../data/devices";
 import { bandsOf } from "../facts";
 import { useDraftValue, useIssues } from "../form/draft";
 import {
@@ -148,7 +148,7 @@ const RadiosTable = () => {
 /** Which access points have this band, from their facts; nothing if none has been read. */
 const useHaveBand = (label: string) => {
   const intent: Intent = useDraftValue();
-  const facts = useDeviceFacts().data;
+  const facts = useDevices().data?.facts;
   const read = intent.hardware
     .filter((d) => d.role === "access-point")
     .flatMap((d) => (facts?.[d.name] ? [{ name: d.name, bands: bandsOf(facts[d.name]!.schema) }] : []));

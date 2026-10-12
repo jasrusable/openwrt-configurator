@@ -32,8 +32,6 @@ export type ListSpec<N extends ListName> = {
   title: string;
   description?: ReactNode;
   addLabel: string;
-  /** More actions beside Add, e.g. Hardware's "Read from devices". */
-  actions?: ReactNode;
   /** What Add creates, given the items already there and the whole draft. */
   newItem: (items: Item<N>[], intent: Intent) => Item<N>;
   /** Whether an item may be removed (the main network may not). */
@@ -127,12 +125,7 @@ const ListTable = <N extends ListName>({
     <SettingsPage
       title={list.title}
       description={list.description}
-      actions={
-        <>
-          {list.actions}
-          {add}
-        </>
-      }
+      actions={add}
     >
       {table}
     </SettingsPage>

@@ -1,4 +1,5 @@
 import { assertSupportedRelease } from "./release";
+import { DeviceSchema } from "./deviceSchema";
 import { getDeviceSchema } from "./getDeviceSchema";
 import { getOpenWrtState } from "./getOpenWrtState";
 import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
@@ -128,8 +129,11 @@ export const provisionConfig = async ({
   identityPath,
   platform,
   timing,
+  onDeviceSchema,
 }: {
   oncConfig: ONCConfig;
+  /** Told each device's schema as it is read: an apply keeps the device facts fresh. */
+  onDeviceSchema?: (hostname: string, schema: DeviceSchema) => void;
   confirm?: boolean;
   confirmTimeoutSeconds?: number;
   rollbackMode?: RollbackMode;
@@ -151,6 +155,7 @@ export const provisionConfig = async ({
       const ssh = await connect(deviceConfig);
       try {
         const deviceSchema = await getDeviceSchema({ deviceConfig, ssh });
+        onDeviceSchema?.(deviceConfig.hostname, deviceSchema);
         assertSupportedRelease(deviceConfig.hostname, deviceSchema.version);
         // Paired with its own device. Looking the schema up by model_id meant
         // two devices of the same model shared whichever schema was built

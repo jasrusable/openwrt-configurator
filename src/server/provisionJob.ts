@@ -127,7 +127,8 @@ export const startProvision = async ({
   }
   const paths = jobPaths(intentPath);
   const q = shellQuote;
-  const command = [...files.selfCommand(), "provision", paths.snapshot]
+  // It refreshes the device facts as it reads the devices (deviceFacts.ts).
+  const command = [...files.selfCommand(), "provision", paths.snapshot, "--facts-for", intentPath]
     .map(q)
     .join(" ");
   // The subshell is backgrounded with every stream redirected, so `sh` returns

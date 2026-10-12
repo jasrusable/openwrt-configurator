@@ -36,3 +36,12 @@ export const routerFacts = (intent: Intent | undefined, facts: FactsByDevice | u
   const known = router && facts?.[router.name];
   return router && known ? { name: router.name, schema: known.schema } : undefined;
 };
+
+/** "3 days", "5 h", "12 min": how long something has been up. */
+export const duration = (seconds: number) => {
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} h`;
+  return `${Math.floor(hours / 24)} days`;
+};

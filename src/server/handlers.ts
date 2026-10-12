@@ -3,8 +3,9 @@
 // (`cgi`) answer every request with the same code. The UI uses relative URLs,
 // so it works wherever it is mounted: / on a Mac, /cgi-bin/onc/ on a router.
 import { applyDiff } from "../applyDiff";
-import { readDevices, readFacts } from "../deviceFacts";
+import { readFacts, readFailures, refreshStale, staleDevices } from "../deviceFacts";
 import { compileIntent } from "../intent/compile";
+import { readNetworkStatus } from "../status/read";
 import { diffIntent } from "../intent/diff";
 import { migrateIntent } from "../intent/migrations";
 import { intentSchema } from "../intent/schema";
@@ -184,23 +185,34 @@ const compiled = (files: Files, path: string) => {
 };
 
 /**
- * GET: what each device is, as last read (none for one never read). POST:
- * read every device now, read-only, and answer with the same plus how each
- * read went. A network action, so only ever on the user's request.
+ * GET: what each device is, as last read, which last read failed, and which
+ * are stale. POST: read the stale ones now (read-only), which a page that
+ * shows facts asks for as it opens; then the same as GET.
  */
 export const devicesApi =
   ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
   async ({ method }) => {
-    const names = () =>
-      ((readIntent(platform, intentPath)?.hardware as { name: string }[]) ?? []).map((d) => d.name);
-    if (method === "GET") {
-      return json(200, { facts: readFacts(platform, intentPath, names()) });
-    }
+    const answer = () => {
+      const names = ((readIntent(platform, intentPath)?.hardware as { name: string }[]) ?? []).map((d) => d.name);
+      const facts = readFacts(platform, intentPath, names);
+      const failures = readFailures(platform, intentPath, names);
+      return json(200, { facts, failures, stale: staleDevices({ facts, failures, now: Date.now() }) });
+    };
+    if (method === "GET") return answer();
     if (method === "POST") {
-      const results = await readDevices({ intentPath, platform });
-      return json(200, { results, facts: readFacts(platform, intentPath, names()) });
+      await refreshStale({ intentPath, platform });
+      return answer();
     }
     return json(405, { error: "GET or POST" });
+  };
+
+/** GET: what the network is doing now, read from the devices (src/status/). Polled only while a page shows it. */
+export const statusApi =
+  ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
+  async ({ method }) => {
+    if (method !== "GET") return json(405, { error: "GET" });
+    const status = await readNetworkStatus({ intentPath, platform });
+    return status ? json(200, status) : json(409, { error: "The saved settings are not valid." });
   };
 
 /** GET: what an apply would change on each device, as UCI (src/applyDiff.ts). */
@@ -229,6 +241,7 @@ export const uiHandler = ({
     "/api/provision": provisionApi({ intentPath, platform }),
     "/api/devices": devicesApi({ intentPath, platform }),
     "/api/apply/diff": applyDiffApi({ intentPath, files: platform }),
+    "/api/status": statusApi({ intentPath, platform }),
   };
   const ui = staticFiles({ root: uiRoot, files: platform });
   return (request) =>

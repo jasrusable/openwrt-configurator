@@ -1,8 +1,9 @@
 // Device facts: what each device is (model, OpenWrt version, ports, radios),
 // as the engine's probes read it, kept beside the intent file and never in
-// it. Read when asked ("Read from devices") or by an apply; never on a timer.
-// No config values are kept: device UCI holds Wi-Fi keys. See CLAUDE.md,
-// "Reading devices".
+// it. They keep themselves fresh: a page that shows them asks for the stale
+// ones (missing, or older than a day) to be read, and an apply refreshes
+// them as it reads the devices; never a timer. No config values are kept:
+// device UCI holds Wi-Fi keys. See CLAUDE.md, "Reading devices".
 import { DeviceSchema, deviceSchemaSchema } from "./deviceSchema";
 import { getDeviceSchema } from "./getDeviceSchema";
 import { loadOncConfig } from "./loadConfig";
@@ -55,14 +56,59 @@ export const readFacts = (
     })
   );
 
-export type ReadResult = { hostname: string; ok: true } | { hostname: string; ok: false; error: string };
+/** Facts older than this are read again when a page asks. */
+export const factsMaxAgeMs = 24 * 60 * 60 * 1000;
+/** After a failed read, a device is left alone this long. */
+export const retryAfterMs = 10 * 60 * 1000;
+/** A read still marked running after this is taken to have died. */
+const lockTimeoutMs = 60 * 1000;
+
+export type ReadAttempt = { at: number; error: string };
+
+const attemptFile = (intentPath: string, hostname: string) =>
+  file(intentPath, hostname).replace(/\.json$/, ".failed.json");
+const lockFile = (intentPath: string) => `${dir(intentPath)}/.reading`;
+
+const readJson = <T>(files: Pick<Platform, "readTextFile">, path: string): T | undefined => {
+  try {
+    return parseJson(files.readTextFile(path), path) as T;
+  } catch {
+    return undefined;
+  }
+};
+
+/** The last failed read of each of `hostnames`, if its last read failed. */
+export const readFailures = (
+  files: Pick<Platform, "readTextFile">,
+  intentPath: string,
+  hostnames: string[]
+): Record<string, ReadAttempt | undefined> =>
+  Object.fromEntries(hostnames.map((h) => [h, readJson<ReadAttempt>(files, attemptFile(intentPath, h))]));
+
+/** Which devices a page should have read: no facts, or old ones; not one that just failed. */
+export const staleDevices = ({
+  facts,
+  failures,
+  now,
+}: {
+  facts: Record<string, DeviceFacts | undefined>;
+  failures: Record<string, ReadAttempt | undefined>;
+  now: number;
+}) =>
+  Object.keys(facts).filter((hostname) => {
+    const known = facts[hostname];
+    const failed = failures[hostname];
+    const old = !known || now - known.readAt > factsMaxAgeMs;
+    const resting = !!failed && now - failed.at < retryAfterMs && (!known || failed.at > known.readAt);
+    return old && !resting;
+  });
 
 /**
- * Read every device's facts now, read-only, all at once, and keep them. Each
- * device gets its own session, closed when done; one that cannot be reached
- * keeps the facts it had.
+ * Read the devices whose facts are stale, at most one read at a time (a
+ * lock file, so the Node server and CGI requests agree). A failure is kept,
+ * so the device is not tried again for a while; a success clears it.
  */
-export const readDevices = async ({
+export const refreshStale = async ({
   intentPath,
   platform,
   now = Date.now,
@@ -70,27 +116,46 @@ export const readDevices = async ({
   intentPath: string;
   platform: Platform;
   now?: () => number;
-}): Promise<ReadResult[]> => {
+}) => {
   const { oncConfig } = await loadOncConfig({ path: intentPath, platform });
-  const { ready, skipped } = provisionableDevices(oncConfig);
-  const read = await Promise.all(
-    ready.map(async (deviceConfig): Promise<ReadResult> => {
-      try {
-        const ssh = await connectToDevice({ deviceConfig, platform });
-        try {
-          const schema = await getDeviceSchema({ deviceConfig, ssh });
-          writeFacts(platform, intentPath, { hostname: deviceConfig.hostname, readAt: now(), schema });
-          return { hostname: deviceConfig.hostname, ok: true };
-        } finally {
-          ssh.dispose();
-        }
-      } catch (e) {
-        return { hostname: deviceConfig.hostname, ok: false, error: (e as Error).message };
-      }
-    })
-  );
-  return [
-    ...read,
-    ...skipped.map(({ hostname, reason }) => ({ hostname, ok: false as const, error: reason })),
-  ];
+  const { ready } = provisionableDevices(oncConfig);
+  const hostnames = ready.map((d) => d.hostname);
+  const stale = staleDevices({
+    facts: readFacts(platform, intentPath, hostnames),
+    failures: readFailures(platform, intentPath, hostnames),
+    now: now(),
+  });
+  const lock = readJson<{ at: number }>(platform, lockFile(intentPath));
+  if (stale.length === 0 || (lock && now() - lock.at < lockTimeoutMs)) return;
+  platform.mkdirp(dir(intentPath));
+  platform.writeTextFile(lockFile(intentPath), JSON.stringify({ at: now() }));
+  try {
+    await Promise.all(
+      ready
+        .filter((d) => stale.includes(d.hostname))
+        .map(async (deviceConfig) => {
+          try {
+            const ssh = await connectToDevice({ deviceConfig, platform });
+            try {
+              const schema = await getDeviceSchema({ deviceConfig, ssh });
+              writeFacts(platform, intentPath, { hostname: deviceConfig.hostname, readAt: now(), schema });
+              try {
+                platform.removeFile(attemptFile(intentPath, deviceConfig.hostname));
+              } catch {
+                // Never failed: nothing to clear.
+              }
+            } finally {
+              ssh.dispose();
+            }
+          } catch (e) {
+            platform.writeTextFile(
+              attemptFile(intentPath, deviceConfig.hostname),
+              JSON.stringify({ at: now(), error: (e as Error).message })
+            );
+          }
+        })
+    );
+  } finally {
+    platform.removeFile(lockFile(intentPath));
+  }
 };

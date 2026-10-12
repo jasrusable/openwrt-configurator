@@ -1,5 +1,5 @@
 import { Intent, netmask } from "../../../src/intent/schema";
-import { useDeviceFacts } from "../data/devices";
+import { useDevices } from "../data/devices";
 import { modelOf, portsOf, routerFacts } from "../facts";
 import { useDraftValue } from "../form/draft";
 import {
@@ -40,7 +40,7 @@ const lines = [
 /** Which port the internet is on, from the router's facts: "wan on eth1 of jaculu-router (…)". */
 const useWanPort = () => {
   const intent: Intent = useDraftValue();
-  const router = routerFacts(intent, useDeviceFacts().data);
+  const router = routerFacts(intent, useDevices().data?.facts);
   const wan = router && portsOf(router.schema).wan[0];
   return router && wan ? `wan on ${wan} of ${router.name} (${modelOf(router.schema)})` : undefined;
 };
