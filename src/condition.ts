@@ -5,10 +5,15 @@
 //   and        := not ( (AND | "&&") not )*
 //   not        := (NOT | "!") not | primary
 //   primary    := "(" expr ")" | "*" | name ( "==" | "!=" ) value
+//                                       | name ( "<" | "<=" | ">" | ">=" ) value
 //                                       | name IN "[" value ( "," value )* "]"
 //   value      := 'string' | "string" | number | true | false
 //
 // Keywords are case-insensitive. Strings keep their spaces and take `\` escapes.
+// The ordering operators compare releases (device.version < '25.12.6'): an
+// rc before its release, a snapshot after its line; anything that is not a
+// release, or an absent value, matches nothing.
+import { compareReleases } from "./release";
 
 type Value = string | number | boolean;
 
@@ -17,12 +22,15 @@ type Node =
   | { kind: "or" | "and"; left: Node; right: Node }
   | { kind: "not"; operand: Node }
   | { kind: "compare"; op: "==" | "!="; name: string; value: Value }
+  | { kind: "order"; op: Order; name: string; value: string }
   | { kind: "in"; name: string; values: Value[] };
+
+type Order = "<" | "<=" | ">" | ">=";
 
 type Token =
   | { type: "punct"; text: string; at: number }
   | { type: "string"; value: string; at: number }
-  | { type: "number"; value: number; at: number }
+  | { type: "number"; value: number; text: string; at: number }
   | { type: "word"; text: string; at: number }
   | { type: "end"; at: number };
 
@@ -35,10 +43,10 @@ const tokenize = (source: string): Token[] => {
     const c = source[i];
     if (/\s/.test(c)) {
       i++;
-    } else if (["==", "!=", "&&", "||"].includes(source.slice(i, i + 2))) {
+    } else if (["==", "!=", "&&", "||", "<=", ">="].includes(source.slice(i, i + 2))) {
       tokens.push({ type: "punct", text: source.slice(i, i + 2), at: i });
       i += 2;
-    } else if ("()[],!*".includes(c)) {
+    } else if ("()[],!*<>".includes(c)) {
       tokens.push({ type: "punct", text: c, at: i });
       i++;
     } else if (c === "'" || c === '"') {
@@ -55,7 +63,7 @@ const tokenize = (source: string): Token[] => {
       tokens.push({ type: "string", value, at: start });
     } else if (/[-\d]/.test(c) && /^-?\d+(\.\d+)?/.test(source.slice(i))) {
       const text = /^-?\d+(\.\d+)?/.exec(source.slice(i))![0];
-      tokens.push({ type: "number", value: Number(text), at: i });
+      tokens.push({ type: "number", value: Number(text), text, at: i });
       i += text.length;
     } else if (/[A-Za-z_]/.test(c)) {
       const text = /^[A-Za-z_][\w.-]*/.exec(source.slice(i))![0];
@@ -120,6 +128,19 @@ const parse = (source: string): Node => {
         value: value(),
       };
     }
+    if (isPunct(op, "<", "<=", ">", ">=")) {
+      // Kept as written: 25.10 is not 25.1.
+      const literal = tokens[pos++];
+      if (literal.type !== "string" && literal.type !== "number") {
+        throw new ConditionError(`expected a release like '25.12.6' ${where(literal)}`);
+      }
+      return {
+        kind: "order",
+        op: (op as { text: Order }).text,
+        name: token.text,
+        value: literal.type === "string" ? literal.value : literal.text,
+      };
+    }
     if (isKeyword(op, "IN")) {
       expect("[");
       const values = [value()];
@@ -130,7 +151,7 @@ const parse = (source: string): Node => {
       expect("]");
       return { kind: "in", name: token.text, values };
     }
-    throw new ConditionError(`expected "==", "!=" or "in" ${where(op)}`);
+    throw new ConditionError(`expected "==", "!=", "<", "<=", ">", ">=" or "in" ${where(op)}`);
   };
 
   const not = (): Node => {
@@ -177,6 +198,12 @@ const evaluate = (node: Node, lookup: Lookup): boolean => {
       return evaluate(node.left, lookup) && evaluate(node.right, lookup);
     case "not":
       return !evaluate(node.operand, lookup);
+    case "order": {
+      const { value } = lookup(node.name);
+      const order = typeof value === "string" ? compareReleases(value, node.value) : undefined;
+      if (order === undefined) return false;
+      return { "<": order < 0, "<=": order <= 0, ">": order > 0, ">=": order >= 0 }[node.op];
+    }
     case "compare":
     case "in": {
       const { value } = lookup(node.name);

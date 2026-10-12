@@ -434,14 +434,28 @@ test("patches apply only where they say: by model, by role", (t) => {
     "/etc/hotplug.d/iface/30-odhcpd-ra-fix",
   ]);
   t.deepEqual(files("home-ap-1", "zyxel,nwa50ax-pro"), ["/etc/hotplug.d/net/20-aql"]);
+  t.deepEqual(
+    files("home-router", "friendlyarm,nanopi-r6s", (i) => (i.internet.ipv6 = false)).filter(
+      (p: string) => !p.includes("avahi")
+    ),
+    ["/usr/libexec/platform/packet-steering.sh"],
+    "the odhcpd fix only where the internet's IPv6 is on"
+  );
+});
 
-  const aql = (airtime: string) => {
+test("airtime: each band's queue limits, on the access points", (t) => {
+  const aql = (radios: object) => {
     const intent = sample();
-    intent.radios = { ...(intent.radios ?? {}), airtime };
+    intent.radios = { ...(intent.radios ?? {}), ...radios };
     return (compile(intent).files ?? []).find((f: any) => f.path.endsWith("20-aql"))!.content;
   };
-  t.regex(aql("latency"), /echo "\$ac 2000 4000"/);
-  t.regex(aql("balanced"), /echo "\$ac 5000 12000"/);
+  t.regex(aql({}), /in "2G 5000 12000" "5G 5000 12000"; do/, "balanced on each band by default");
+  t.regex(
+    aql({ "2g": { airtime: "throughput" }, "5g": { airtime: "latency" } }),
+    /limits="2000 4000"\n  for entry in "5G 2000 4000" "2G 8000 20000"; do/,
+    "per band, tightest first and as the fallback"
+  );
+  t.regex(aql({ "2g": { enabled: false } }), /in "5G 5000 12000"; do/, "only bands that are on");
 });
 
 test("on the access point: bridged, a DHCP client, Wi-Fi on both bands", (t) => {

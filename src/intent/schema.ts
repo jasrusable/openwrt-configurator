@@ -119,6 +119,12 @@ const radio = (defaults: { enabled: boolean }) =>
       power: z.enum(["auto", "low", "medium", "high"]).default("auto"),
       /** Fewer, faster clients near each access point; less range. */
       cell_density: z.enum(["off", "normal", "high", "very_high"]).default("normal"),
+      /**
+       * What the radio's queues favour: little queued for snappy calls and
+       * games (latency), the kernel's own (balanced), or more queued to fill
+       * the air (throughput). Per radio: every SSID on it shares its queues.
+       */
+      airtime: z.enum(["balanced", "latency", "throughput"]).default("balanced"),
     })
     .strict()
     .default({});
@@ -329,12 +335,6 @@ export const intentSchema = z
         "5g": radio({ enabled: true }),
         // Off by default: few access points have it, and it needs WPA3.
         "6g": radio({ enabled: false }),
-        /**
-         * What the access points' Wi-Fi queues favour: little queued for
-         * snappy calls and games (latency), the kernel's own (balanced), or
-         * more queued to fill the air (throughput).
-         */
-        airtime: z.enum(["balanced", "latency", "throughput"]).default("balanced"),
       })
       .strict()
       .default({}),

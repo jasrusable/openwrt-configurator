@@ -1,6 +1,7 @@
 // Intent -> the low-level config the engine provisions. Pure: no device facts
 // and no I/O, so the same intent always compiles to the same config, and
 // everything device-specific is resolved later, against the live device.
+import { airtime } from "./features/airtime";
 import { devices } from "./features/devices";
 import { discovery } from "./features/discovery";
 import { dns } from "./features/dns";
@@ -23,6 +24,7 @@ const features: Feature[] = [
   firewall,
   dns,
   wifi,
+  airtime,
   discovery,
   roles,
   // Last: fixes layered over everything else (src/intent/patches).

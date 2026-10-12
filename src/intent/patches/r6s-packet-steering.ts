@@ -1,4 +1,3 @@
-import { onModel } from "../fragment";
 import { Patch } from "./patch";
 
 export const r6sPacketSteering: Patch = {
@@ -7,7 +6,7 @@ export const r6sPacketSteering: Patch = {
     "OpenWrt's generic packet steering put WAN receive work on a little A55 core, " +
     "which hit ~100% softirq at ~600 Mbit/s; this board script spreads it over big cores " +
     "(43% on the busiest at the same load).",
-  when: onModel("friendlyarm,nanopi-r6s"),
+  target: { models: ["friendlyarm,nanopi-r6s"] },
   apply: () => ({
     files: [
       {

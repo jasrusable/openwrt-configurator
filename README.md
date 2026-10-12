@@ -215,6 +215,7 @@ The config file is JSON, and may carry `//` and `/* */` comments and trailing co
    |---|---|
    | `device.tag.role == 'ap'`, `!=` | equals / differs (a list-valued tag *contains* the value) |
    | `device.tag.role in ['ap', 'switch']` | equals any of |
+   | `device.version < '25.12.6'`, `<=`, `>`, `>=` | release order: numerically, an `-rc` before its release, a snapshot after its line; anything not a release matches nothing |
    | `AND` / `&&`, `OR` / `\|\|`, `NOT` / `!`, `( … )` | combine; `AND` binds tighter than `OR`; keywords in any case |
    | `'my house'`, `"jason's ap"`, `'it\'s'` | strings keep spaces; `\` escapes a quote |
    | `*` | always |

@@ -50,9 +50,10 @@ export const loadOncConfig = async ({
   );
   // An intent file compiles to the same low-level config a hand-written one
   // is, so every command takes either.
-  const lowLevel = isIntent(value)
-    ? compileIntent(parseSchema(intentSchema, migrateIntent(value)))
-    : value;
+  const intent = isIntent(value)
+    ? parseSchema(intentSchema, migrateIntent(value))
+    : undefined;
+  const lowLevel = intent ? compileIntent(intent) : value;
   const oncConfig: ONCConfig = parseSchema(oncConfigSchema, lowLevel);
-  return { oncConfig, secrets };
+  return { oncConfig, secrets, intent };
 };

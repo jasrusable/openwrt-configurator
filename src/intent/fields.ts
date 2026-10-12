@@ -167,11 +167,6 @@ export const fields: FieldInfo[] = [
     description: "Whether devices on it, on the same access point and band, are kept from reaching each other.",
   },
   { path: "radios", label: "Radios" },
-  {
-    path: "radios.airtime",
-    label: "Airtime",
-    description: "What the access points' Wi-Fi queues favour: latency, balance or throughput.",
-  },
   { path: "radios.2g", label: "2.4 GHz" },
   { path: "radios.5g", label: "5 GHz" },
   { path: "radios.6g", label: "6 GHz" },
@@ -179,6 +174,11 @@ export const fields: FieldInfo[] = [
   { path: "radios.*.width", label: "Channel width" },
   { path: "radios.*.power", label: "Transmit power" },
   { path: "radios.*.cell_density", label: "Cell density" },
+  {
+    path: "radios.*.airtime",
+    label: "Airtime",
+    description: "What the band's Wi-Fi queues favour: latency, balance or throughput.",
+  },
   {
     path: "wifi.*.network",
     label: "Network",

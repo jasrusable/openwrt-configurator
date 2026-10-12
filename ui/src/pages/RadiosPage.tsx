@@ -1,7 +1,7 @@
 // Wi-Fi › Radios: each band, on every access point. A read-only table, and
-// a page per band (/radios/5g) with its settings explained.
+// a page per band (/wifi/radios/5g) with its settings explained.
 import { Badge, Button, Text } from "@mantine/core";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate } from "react-router";
 import { channelWidths, widthAllowed } from "../../../src/intent/choices";
 import { Band } from "../../../src/intent/schema";
 import { useIssues } from "../form/draft";
@@ -56,6 +56,12 @@ const densities = [
   { value: "very_high", label: "Very high" },
 ];
 
+const airtimes = [
+  { value: "latency", label: "Low latency" },
+  { value: "balanced", label: "Balanced" },
+  { value: "throughput", label: "Throughput" },
+];
+
 const labelOf =
   (options: { value: string; label: string }[]) => (value?: string) =>
     options.find((o) => o.value === value)?.label ?? value;
@@ -77,22 +83,10 @@ const RadiosTable = () => {
       title="Radios"
       description="Each band's radios, on every access point. Channels are picked automatically; to pin one, open the access point under Hardware."
     >
-      <Section>
-        <SegmentedField
-          name={"radios.airtime" as never}
-          label="Airtime"
-          description="What every access point's Wi-Fi favours. Low latency keeps calls and games snappy while something downloads; throughput moves the most data. Balanced is OpenWrt's own."
-          options={[
-            { value: "latency", label: "Low latency" },
-            { value: "balanced", label: "Balanced" },
-            { value: "throughput", label: "Throughput" },
-          ]}
-        />
-      </Section>
       <DataTable
         rowCount={bands.length}
         rowKey={(i) => bands[i].band}
-        onRowClick={(i) => navigate(`/radios/${bands[i].band}`)}
+        onRowClick={(i) => navigate(`/wifi/radios/${bands[i].band}`)}
         rowMarker={(i) =>
           issues.some((issue) =>
             issue.path.startsWith(`radios.${bands[i].band}.`),
@@ -139,6 +133,10 @@ const RadiosTable = () => {
             cell: (i) =>
               cell(bands[i].band, "cell_density", labelOf(densities)),
           },
+          {
+            header: "Airtime",
+            cell: (i) => cell(bands[i].band, "airtime", labelOf(airtimes)),
+          },
         ]}
       />
     </SettingsPage>
@@ -151,7 +149,7 @@ const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
   return (
     <SettingsPage
       title={[
-        { label: "Radios", onClick: () => navigate("/radios") },
+        { label: "Radios", onClick: () => navigate("/wifi/radios") },
         { label },
       ]}
     >
@@ -185,6 +183,12 @@ const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
           description="Higher keeps slow, far-away devices from holding the air: faster for everyone, a little less range. Off lets very old devices connect."
           options={densities}
         />
+        <SegmentedField
+          name={at("airtime")}
+          label="Airtime"
+          description="What this band's Wi-Fi favours, for every SSID on it. Low latency keeps calls and games snappy while something downloads; throughput moves the most data. Balanced is OpenWrt's own."
+          options={airtimes}
+        />
       </Section>
       <Section title="Channel">
         <SettingRow
@@ -204,8 +208,7 @@ const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
   );
 };
 
-export const RadiosPage = () => {
-  const sub = useParams()["*"] ?? "";
+export const RadiosPage = ({ sub }: { sub: string }) => {
   const radio = bands.find((b) => b.band === sub);
   return radio ? <RadioPage {...radio} /> : <RadiosTable />;
 };

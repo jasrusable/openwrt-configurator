@@ -16,6 +16,7 @@ import {
   RouterProvider,
   useLocation,
   useNavigate,
+  useParams,
   useRouteError,
 } from "react-router";
 import { useIntent } from "./data/intent";
@@ -62,23 +63,17 @@ const Shell = () => {
         </Group>
       </AppShell.Header>
       <AppShell.Navbar p="sm">
-        {pages.map((page) => {
-          const { id, label, icon: Icon } = page;
-          const indent = "indent" in page && page.indent;
-          // A heading is never the current page: it leads to its first one.
-          const to = "header" in page ? page.to : id;
-          return (
-            <NavLink
-              key={id}
-              label={label}
-              leftSection={<Icon size={indent ? 16 : 18} stroke={1.6} />}
-              rightSection={<ProblemCount count={problems(id)} />}
-              active={!("header" in page) && isActive(id)}
-              onClick={() => navigate(`/${to}`)}
-              style={{ borderRadius: 8, ...(indent ? { paddingLeft: 32 } : {}) }}
-            />
-          );
-        })}
+        {pages.map(({ id, label, icon: Icon }) => (
+          <NavLink
+            key={id}
+            label={label}
+            leftSection={<Icon size={18} stroke={1.6} />}
+            rightSection={<ProblemCount count={problems(id)} />}
+            active={isActive(id)}
+            onClick={() => navigate(`/${id}`)}
+            style={{ borderRadius: 8 }}
+          />
+        ))}
       </AppShell.Navbar>
       <AppShell.Main bg="var(--mantine-color-gray-0)">
         <Outlet />
@@ -107,6 +102,12 @@ const PageError = () => {
   );
 };
 
+/** An old address: the same page under its new one. */
+const MovedTo = ({ base }: { base: string }) => {
+  const rest = useParams()["*"];
+  return <Navigate to={rest ? `${base}/${rest}` : base} replace />;
+};
+
 const router = createHashRouter([
   {
     path: "/",
@@ -114,9 +115,10 @@ const router = createHashRouter([
     errorElement: <PageError />,
     children: [
       { index: true, element: <Navigate to="general" replace /> },
-      ...pages.flatMap((page) =>
-        "Page" in page ? [{ path: `${page.id}/*`, element: <page.Page /> }] : []
-      ),
+      ...pages.map((page) => ({ path: `${page.id}/*`, element: <page.Page /> })),
+      // Where SSIDs and Radios were before they were Wi-Fi's tabs.
+      { path: "ssids/*", element: <MovedTo base="/wifi" /> },
+      { path: "radios/*", element: <MovedTo base="/wifi/radios" /> },
       { path: "*", element: <Navigate to="general" replace /> },
     ],
   },

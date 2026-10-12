@@ -90,6 +90,7 @@ test("settings a file leaves out are served as their defaults", async (t) => {
       width: "auto",
       power: "auto",
       cell_density: "normal",
+      airtime: "balanced",
     });
   });
 });

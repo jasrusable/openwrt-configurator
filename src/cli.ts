@@ -20,6 +20,7 @@ import { confirmTiming } from "./confirm";
 import { getDeviceSchema } from "./getDeviceSchema";
 import { loadOncConfig } from "./loadConfig";
 import { cgiResponse, uiHandler } from "./server/handlers";
+import { describePatches } from "./intent/patches";
 import {
   redactSecretFields,
   redactValue,
@@ -131,10 +132,12 @@ export const main = async ({
       },
     ],
     action: async ([configPath], options) => {
-      const { oncConfig, secrets } = await loadOncConfig({
+      const { oncConfig, secrets, intent } = await loadOncConfig({
         path: configPath,
         platform,
       });
+      // On stderr, so stdout stays the config.
+      if (intent) console.warn(describePatches(intent));
       const hideSecrets = (value: unknown): unknown =>
         typeof value === "string"
           ? redactValue(value, secrets)

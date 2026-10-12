@@ -187,7 +187,7 @@ const NetworkName = ({ index }: { index: number }) => {
   return <>{networks.find((n) => n.id === id)?.name ?? "—"}</>;
 };
 
-export const WifiPage = () => <ListPage list={wifiNetworks} />;
+export const WifiPage = ({ sub }: { sub: string }) => <ListPage list={wifiNetworks} sub={sub} />;
 
 /** Only bands whose radios are on (Wi-Fi › Radios) can be picked. */
 const BandsField = ({ index }: { index: number }) => {

@@ -1,4 +1,3 @@
-import { onRouter } from "../fragment";
 import { Patch } from "./patch";
 
 export const odhcpdRaRestart: Patch = {
@@ -8,7 +7,9 @@ export const odhcpdRaRestart: Patch = {
     "never recovers, so every client is left link-local only; restarting it once the " +
     "route exists fixes it (seen on 25.12.5, odhcpd 2026.06.29).",
   upstream: "https://github.com/openwrt/odhcpd/issues/388",
-  when: onRouter,
+  target: { roles: ["router"] },
+  // Only the internet's IPv6 brings up wan6 and router advertisements.
+  applies: (intent) => intent.internet.ipv6,
   apply: () => ({
     files: [
       {

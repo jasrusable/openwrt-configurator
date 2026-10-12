@@ -1,5 +1,5 @@
 import test from "ava";
-import { assertSupportedRelease, supportedRelease } from "../../release";
+import { assertSupportedRelease, compareReleases, supportedRelease } from "../../release";
 
 test("25.12 and later are provisioned; older releases are refused up front", (t) => {
   for (const ok of ["25.12.0", "25.12.5", "25.12.0-rc1", "26.03.1", "SNAPSHOT"]) {
@@ -11,4 +11,11 @@ test("25.12 and later are provisioned; older releases are refused up front", (t)
   t.throws(() => assertSupportedRelease("jaculu-ap-1", "24.10.2"), {
     message: /jaculu-ap-1 runs OpenWrt 24\.10\.2; this tool needs 25\.12 or later/,
   });
+});
+
+test("releases order by number, rc before release, snapshot after its line", (t) => {
+  const ordered = ["24.10.2", "25.12.0-rc1", "25.12.0-rc2", "25.12.0", "25.12.5", "25.12.10", "25.12-SNAPSHOT", "26.03.0", "SNAPSHOT"];
+  ordered.slice(1).forEach((newer, i) => t.is(compareReleases(ordered[i], newer), -1, `${ordered[i]} < ${newer}`));
+  t.is(compareReleases("25.12", "25.12.0"), 0);
+  t.is(compareReleases("garbage", "25.12.0"), undefined);
 });

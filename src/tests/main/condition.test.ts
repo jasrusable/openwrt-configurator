@@ -80,3 +80,21 @@ test("mistakes are reported with the condition and a position", (t) => {
     message: /expected "\)" at the end/,
   });
 });
+
+test("releases compare as releases", (t) => {
+  const on = (version: string, condition: string) =>
+    evaluateCondition(condition, (name) => ({ value: name === "device.version" ? version : undefined }));
+  t.true(on("25.12.5", "device.version < '25.12.6'"));
+  t.false(on("25.12.6", "device.version < '25.12.6'"));
+  t.true(on("25.12.10", "device.version > '25.12.9'"), "numerically, not as text");
+  t.true(on("25.12.0-rc1", "device.version < '25.12.0'"), "an rc before its release");
+  t.true(on("25.12-SNAPSHOT", "device.version > '25.12.9'"), "a branch snapshot after its releases");
+  t.true(on("SNAPSHOT", "device.version >= '26.03'"), "main's snapshot after everything");
+  t.true(on("25.12.0", "device.version <= 25.12"), "25.12 is 25.12.0");
+  t.true(on("25.10.1", "device.version >= 25.10"), "a number literal kept as written: 25.10, not 25.1");
+  t.false(on("garbage", "device.version < '25.12.6'"), "not a release: matches nothing");
+  t.false(on("garbage", "device.version >= '25.12.6'"));
+  t.false(check("device.tag.missing < '1'"), "absent: matches nothing");
+  t.true(on("25.12.5", "device.version >= '25.12' AND device.version < '25.12.6'"));
+  t.throws(() => check("device.version < true"), { message: /expected a release/ });
+});
