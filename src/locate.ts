@@ -144,7 +144,10 @@ export const knownKey = (platform: Platform, file: string, host: string): HostKe
 };
 
 /** An IPv4 or IPv6 address, not a name a DHCP client could claim. */
-export const isAddress = (host: string) => /^\d+\.\d+\.\d+\.\d+$/.test(host) || host.includes(":");
+export const isAddress = (host: string) =>
+  (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) && host.split(".").every((part) => Number(part) <= 255)) ||
+  // IPv6: hex and colons only, at least two (nothing an ssh argument could start with).
+  (/^[0-9a-f:]+$/i.test(host) && (host.match(/:/g) ?? []).length >= 2);
 
 /**
  * Connect to `deviceConfig` at `address` only if it is that device: the
@@ -178,8 +181,10 @@ const tryAddress = async (
     return {
       hostname: deviceConfig.hostname,
       session,
-      // An address, never a name, once it has answered: held to its key all the same.
-      address: read.answeredOn ?? address,
+      // Reached by name and its key on record: the address it answered on, so
+      // the apply does not depend on the name; never what a device says of an
+      // address we gave, nor without a key to hold the next connection to.
+      address: !isAddress(address) && key && read.answeredOn ? read.answeredOn : address,
       schema,
       macs: read.macs,
       ...(key ? { hostKey: { type: key.type, key: key.key } } : {}),

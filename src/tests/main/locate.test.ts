@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "f
 import { tmpdir } from "os";
 import { join } from "path";
 import { DeviceFacts } from "../../deviceFacts";
-import { candidatesFor, Located, locateEach, NotLocated, parseNeighbours } from "../../locate";
+import { candidatesFor, isAddress, Located, locateEach, NotLocated, parseNeighbours } from "../../locate";
 import { checkHostKey, formatKnownHost, parseKnownHosts } from "../../knownHosts";
 import { Platform, Session, SshTarget } from "../../platform";
 import { nodePlatform } from "../../platforms/node";
@@ -160,4 +160,19 @@ test("found by name, used by the address it answered on: a name can go when the 
   writeFileSync(net.knownHosts, formatKnownHost({ host: "home-ap-1.lan", type: "ssh-ed25519", key: "AP-KEY" }));
   const [, a] = await settle(locateEach({ devices: [router, ap], facts: {}, platform: net.platform }));
   t.like(a, { address: "10.0.0.50", hostKey: { type: "ssh-ed25519", key: "AP-KEY" } });
+});
+
+test("only a real address counts as one: nothing an ssh argument could be", (t) => {
+  t.true(isAddress("10.0.0.50"));
+  t.true(isAddress("fe80::1"));
+  t.false(isAddress("999.1.1.1"));
+  t.false(isAddress("-oProxyCommand=touch:x"));
+  t.false(isAddress("home-ap-1.lan"));
+  t.false(isAddress("a:b"), "one colon is no IPv6 address");
+});
+
+test("a device's word for its address is not taken for an address we gave it", async (t) => {
+  const net = network({ "10.0.0.1": { ...routerMachine(""), ip: "10.0.0.99" } });
+  const [r] = await settle(locateEach({ devices: [router], facts: {}, platform: net.platform }));
+  t.like(r, { address: "10.0.0.1" });
 });

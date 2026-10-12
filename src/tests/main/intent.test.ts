@@ -762,7 +762,11 @@ test("two internet connections: a line on a LAN port, mwan3 over both, queueing 
     deviceSchema: deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", "friendlyarm,nanopi-r6s.json"), "utf8"))),
   });
   t.like(oneLine.services!.find((s) => s.name === "mwan3"), { enabled: false }, "...and off: stopped and disabled");
-  t.is(onDevice("home-router", "friendlyarm,nanopi-r6s").mwan3, undefined);
+  t.deepEqual(
+    onDevice("home-router", "friendlyarm,nanopi-r6s").mwan3,
+    { globals: [{ ".name": "globals", mmx_mask: "0x3F00" }], interface: [], member: [], policy: [], rule: [] },
+    "one line: declared all the same, so the package's first start reads nothing to track"
+  );
 });
 
 test("connections: one per port, the WAN port once, ids of their own", (t) => {

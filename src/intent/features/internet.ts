@@ -247,7 +247,17 @@ export const internet: Feature = (intent) => {
           },
         ]),
       }
-    : undefined;
+    : {
+        // One line: mwan3 is installed but off. Declared all the same, so
+        // the package's first start (on install, before the config is
+        // staged) reads this, not its stock example of four lines and
+        // load-balancing rules: nothing to track, nothing to mark.
+        globals: routerOnly([{ ".name": "globals", mmx_mask: "0x3F00" }]),
+        interface: [],
+        member: [],
+        policy: [],
+        rule: [],
+      };
 
   return {
     package_profiles: [
@@ -324,7 +334,7 @@ export const internet: Feature = (intent) => {
         ddns: routerOnly([{ ".name": "global", upd_privateip: false }]),
         service: routerOnly(intent.internet.ddns ? [ddnsService(intent.internet.ddns, primaryConnection(intent).id)] : []),
       },
-      ...(mwan3 ? { mwan3 } : {}),
+      mwan3,
     },
   };
 };
