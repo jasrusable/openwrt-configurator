@@ -27,6 +27,18 @@ export const system: Feature = (intent) => {
   const main = mainNetwork(intent).id;
   return {
     package_profiles: [{ ".if": everyDevice, packages: ["luci-ssl"] }],
+    // Who may log in as root. Listed keys replace the device's file; none
+    // leaves a hand-installed one alone. dropbear reads it at each login.
+    files: intent.admin.authorized_keys.length
+      ? [
+          {
+            ".if": everyDevice,
+            path: "/etc/dropbear/authorized_keys",
+            mode: "0600",
+            content: intent.admin.authorized_keys.join("\n") + "\n",
+          },
+        ]
+      : [],
     configs_to_not_reset: [
       {
         ".if": everyDevice,
@@ -69,8 +81,11 @@ export const system: Feature = (intent) => {
         dropbear: [
           {
             ".name": "main",
-            PasswordAuth: "on",
-            RootPasswordAuth: "on",
+            // Off: only the authorized keys (below) let root in. A stock
+            // device has no root password and accepts any, so this is what
+            // closes it.
+            PasswordAuth: intent.admin.password_login ? "on" : "off",
+            RootPasswordAuth: intent.admin.password_login ? "on" : "off",
             Port: 22,
             // Only on the main network: guests and IoT get no SSH. Bound to
             // its device, not an address, so an address from DHCP (as access

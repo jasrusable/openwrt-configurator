@@ -139,6 +139,15 @@ const reservation = z
   })
   .strict();
 
+/** One SSH public key line: "ssh-ed25519 AAAA… comment". */
+export const sshPublicKey = z
+  .string()
+  .trim()
+  .regex(
+    /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com) [A-Za-z0-9+/]+={0,3}( [^\n]*)?$/,
+    "an SSH public key, like ssh-ed25519 AAAA… you@computer"
+  );
+
 const network = z
   .object({
     /**
@@ -198,10 +207,20 @@ export const intentSchema = z
       .strict(),
 
     /** How the tool logs in to every device, as root. */
+    /**
+     * How this app logs in to the devices (ssh_key_path, password), and who
+     * may log in as root at all: the compiler installs authorized_keys and
+     * can turn password login off, so a device fresh from stock (which lets
+     * root in with any password) is closed by its first apply.
+     */
     admin: z
       .object({
         ssh_key_path: z.string().optional(),
         password: z.string().optional(),
+        /** Public keys allowed to log in as root, as `ssh-keygen` writes them. */
+        authorized_keys: z.array(sshPublicKey).default([]),
+        /** Whether root may log in with a password; off needs an authorized key. */
+        password_login: z.boolean().default(true),
       })
       .strict()
       .default({}),

@@ -1,0 +1,254 @@
+// Adding hardware, guided: what is on the network but not in Hardware yet,
+// a read of the one the user picks, and taking it on. Nothing is scanned:
+// candidates come from the router's DHCP leases and neighbour table, and
+// devices seen before (whose facts are kept). Only the device the user picks
+// is logged in to, read-only, and never with the admin password: anything on
+// the network could be pretending to be an OpenWrt device. It is tried with
+// this app's key, then with OpenWrt's default (no root password, which a
+// stock device's dropbear accepts with any password). Picking it is the
+// trust-on-first-use moment: its host key is recorded then, and taking it on
+// keeps its address, MACs and key as facts, so it is found by identity after.
+import { DeviceFacts, listSeen, readFacts, writeFacts } from "./deviceFacts";
+import { Probe, runProbes } from "./deviceProbes";
+import { DeviceSchema } from "./deviceSchema";
+import { getDeviceSchema } from "./getDeviceSchema";
+import type { Intent } from "./intent/schema";
+import { parseKnownHosts } from "./knownHosts";
+import { loadOncConfig } from "./loadConfig";
+import { Located, locateEach, Neighbour, parseNeighbours } from "./locate";
+import { ONCDeviceConfig } from "./oncConfigSchema";
+import { Platform } from "./platform";
+import { provisionableDevices, sshConnectOptions } from "./provisionConfig";
+import { shellQuote } from "./shell";
+import { Lease, parseLeases } from "./status/device";
+
+export type Candidate = {
+  address: string;
+  mac?: string;
+  /** The name it gave the router's DHCP. */
+  name?: string;
+  /** Seen before under this name: its facts are still kept. */
+  seen?: { hostname: string; model: string; readAt: number };
+  /** Named OpenWrt in DHCP, or answering SSH with dropbear: worth a look. */
+  likelyOpenWrt: boolean;
+};
+
+/**
+ * What is on the network and not in Hardware, best first: seen before, then
+ * likely OpenWrt, then the rest. Pure.
+ */
+export const discoverCandidates = ({
+  leases,
+  neighbours,
+  banners = {},
+  known,
+  seen,
+}: {
+  leases: Lease[];
+  neighbours: Neighbour[];
+  /** SSH banners by address, where one was read. */
+  banners?: Record<string, string>;
+  /** Devices already in Hardware: their names, addresses and MACs. */
+  known: { names: string[]; addresses: string[]; macs: string[] };
+  /** Facts of devices seen before that are not in Hardware. */
+  seen: DeviceFacts[];
+}): Candidate[] => {
+  const byAddress = new Map<string, Candidate>();
+  const add = (address: string, mac?: string, name?: string) => {
+    if (known.addresses.includes(address) || (mac && known.macs.includes(mac)) || (name && known.names.includes(name))) return;
+    const before = byAddress.get(address);
+    byAddress.set(address, { address, likelyOpenWrt: false, ...before, ...(mac ? { mac } : {}), ...(name ? { name } : {}) });
+  };
+  leases.forEach((l) => add(l.address, l.mac, l.name));
+  neighbours.forEach((n) => add(n.address, n.mac));
+  const candidates = [...byAddress.values()].map((c) => {
+    const was = seen.find((f) => (c.mac && f.macs?.includes(c.mac)) || f.address === c.address);
+    return {
+      ...c,
+      ...(was ? { seen: { hostname: was.hostname, model: was.schema.model ?? was.schema.name, readAt: was.readAt } } : {}),
+      likelyOpenWrt: !!was || /^openwrt$/i.test(c.name ?? "") || /dropbear/i.test(banners[c.address] ?? ""),
+    };
+  });
+  const rank = (c: Candidate) => (c.seen ? 0 : c.likelyOpenWrt ? 1 : 2);
+  return candidates.sort((a, b) => rank(a) - rank(b) || a.address.localeCompare(b.address, undefined, { numeric: true }));
+};
+
+/**
+ * Every SSH banner among `addresses`, read from the router: all at once
+ * (busybox nc, given a second), so a long list costs one second, not one
+ * each. Addresses come from other devices' DHCP, so each is quoted.
+ */
+const banners = (addresses: string[]): Probe<Record<string, string>> => {
+  const list = addresses.map(shellQuote).join(" ");
+  return {
+    command: [
+      "d=$(mktemp -d)",
+      `for a in ${list}; do nc "$a" 22 </dev/null > "$d/$a" 2>/dev/null & echo $! >> "$d/pids"; done`,
+      'sleep 1; kill $(cat "$d/pids") 2>/dev/null',
+      `for a in ${list}; do printf '%s ' "$a"; head -c 64 "$d/$a" 2>/dev/null | tr -d '\\r\\n'; echo; done`,
+      'rm -rf "$d"',
+    ].join("\n"),
+    parse: ({ stdout }) =>
+      Object.fromEntries(
+        stdout.split("\n").flatMap((line) => {
+          const [address, ...banner] = line.trim().split(" ");
+          return address ? [[address, banner.join(" ")]] : [];
+        })
+      ),
+  };
+};
+
+/** What to show while the network is looked at: the candidates, or why there are none. */
+export const discover = async ({ intentPath, platform }: { intentPath: string; platform: Platform }) => {
+  const { oncConfig, intent } = await loadOncConfig({ path: intentPath, platform });
+  const { ready } = provisionableDevices(oncConfig);
+  const names = (intent?.hardware ?? []).map((d) => d.name);
+  const facts = readFacts(platform, intentPath, names);
+  const seen = Object.values(readFacts(platform, intentPath, listSeen(platform, intentPath).filter((h) => !names.includes(h)))).flatMap(
+    (f) => (f ? [f] : [])
+  );
+  const router = ready.find((d) => d.tags?.role === "router");
+  if (!router) return { candidates: [], error: "There is no router in Hardware to ask." };
+  const [found] = locateEach({ devices: [router], facts, platform });
+  const r = await found;
+  if (!("session" in r)) return { candidates: [], error: `The router could not be reached: ${r.error}` };
+  try {
+    const tables = await runProbes(r.session, {
+      leases: { command: "cat /tmp/dhcp.leases 2>/dev/null || true", parse: ({ stdout }) => parseLeases(stdout) } as Probe<Lease[]>,
+      neighbours: { command: "ip -4 neigh show 2>/dev/null || true", parse: ({ stdout }) => parseNeighbours(stdout) } as Probe<Neighbour[]>,
+    });
+    const known = {
+      names,
+      addresses: [...ready.map((d) => d.ipaddr), ...Object.values(facts).flatMap((f) => (f?.address ? [f.address] : []))],
+      macs: Object.values(facts).flatMap((f) => f?.macs ?? []),
+    };
+    const first = discoverCandidates({ ...tables, known, seen });
+    // Who answers SSH like OpenWrt: asked of the router, for these addresses only.
+    const asked = first.slice(0, 32).map((c) => c.address).filter((a) => /^[\d.]+$/.test(a));
+    const heard = asked.length ? (await runProbes(r.session, { heard: banners(asked) })).heard : {};
+    return { candidates: discoverCandidates({ ...tables, banners: heard, known, seen }) };
+  } finally {
+    r.session.dispose();
+  }
+};
+
+export type Inspected = {
+  address: string;
+  schema: DeviceSchema;
+  macs: string[];
+  /** Its hostname now: "OpenWrt" on a stock device. */
+  hostname: string;
+  hostKey?: { type: string; key: string };
+  /** It let root in without this app's key: OpenWrt's default, open to anyone on the network. */
+  openLogin: boolean;
+  suggested: { name: string; role: "router" | "access-point" };
+};
+
+/** What role a device suits: Wi-Fi makes an access point; a WAN port and no Wi-Fi, a router. */
+export const suggestRole = (schema: DeviceSchema): "router" | "access-point" =>
+  (schema.radios ?? []).length === 0 && (schema.ports ?? []).some((p) => p.default_role === "wan") ? "router" : "access-point";
+
+/** Its current hostname, unless a stock one; else one from its role, numbered past those taken. */
+export const suggestName = (hostname: string, role: "router" | "access-point", taken: string[]) => {
+  const clean = hostname.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/^-+|-+$/g, "");
+  if (clean && clean !== "openwrt" && !taken.includes(clean)) return clean;
+  const base = role === "router" ? "router" : "ap";
+  for (let n = 1; ; n++) if (!taken.includes(`${base}-${n}`)) return `${base}-${n}`;
+};
+
+/**
+ * OpenWrt's default login: root with no password, which its dropbear accepts
+ * with any password. Sent only when this app's key is refused; not a secret.
+ */
+const stockPassword = "openwrt";
+
+const hostnameProbe: Probe<string> = {
+  command: "cat /proc/sys/kernel/hostname",
+  parse: ({ stdout }) => stdout.trim(),
+};
+const macsProbe: Probe<string[]> = {
+  command: "cat /sys/class/net/*/address 2>/dev/null || true",
+  parse: ({ stdout }) => [
+    ...new Set(
+      stdout
+        .split("\n")
+        .map((m) => m.trim().toLowerCase())
+        .filter((m) => /^[0-9a-f:]{17}$/.test(m) && m !== "00:00:00:00:00:00")
+    ),
+  ],
+};
+
+/**
+ * Read the device at `address`, read-only: with this app's key, else with
+ * OpenWrt's default. Never the admin password.
+ */
+export const inspect = async ({
+  address,
+  intent,
+  platform,
+}: {
+  address: string;
+  intent: Intent;
+  platform: Platform;
+}): Promise<Inspected> => {
+  const tries: ONCDeviceConfig["provisioning_config"][] = [
+    ...(intent.admin.ssh_key_path
+      ? [{ ssh_auth: { username: "root", private_key_path: intent.admin.ssh_key_path } }]
+      : []),
+    { ssh_auth: { username: "root", password: stockPassword } },
+  ];
+  const failures: string[] = [];
+  for (const [i, provisioning_config] of tries.entries()) {
+    const at = { hostname: address, ipaddr: address, provisioning_config } as ONCDeviceConfig;
+    const options = sshConnectOptions({ deviceConfig: at, platform });
+    try {
+      const session = await platform.connect({ ...options, readyTimeout: 5000 });
+      try {
+        const schema = await getDeviceSchema({ deviceConfig: at, ssh: session });
+        const read = await runProbes(session, { hostname: hostnameProbe, macs: macsProbe });
+        const key = parseKnownHosts(
+          (() => {
+            try {
+              return platform.readTextFile(options.knownHostsFile!);
+            } catch {
+              return "";
+            }
+          })()
+        ).find((k) => k.host === address);
+        const role = suggestRole(schema);
+        return {
+          address,
+          schema,
+          macs: read.macs,
+          hostname: read.hostname,
+          ...(key ? { hostKey: { type: key.type, key: key.key } } : {}),
+          openLogin: !!tries[i]?.ssh_auth?.password,
+          suggested: { role, name: suggestName(read.hostname, role, intent.hardware.map((d) => d.name)) },
+        };
+      } finally {
+        session.dispose();
+      }
+    } catch (e) {
+      failures.push((e as Error).message);
+    }
+  }
+  throw new Error(`Could not log in to ${address}: ${failures.join("; ")}`);
+};
+
+/** Take on an inspected device under `name`: its facts kept, so it is found by identity from now on. */
+export const adopt = (
+  files: Pick<Platform, "mkdirp" | "writeTextFile" | "readTextFile">,
+  intentPath: string,
+  name: string,
+  inspected: Inspected,
+  now: number
+) => {
+  const located: Omit<Located, "session"> = {
+    hostname: name,
+    address: inspected.address,
+    schema: inspected.schema,
+    macs: inspected.macs,
+    ...(inspected.hostKey ? { hostKey: inspected.hostKey } : {}),
+  };
+  writeFacts(files, intentPath, { ...located, readAt: now });
+};

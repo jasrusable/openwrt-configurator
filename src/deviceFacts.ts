@@ -30,13 +30,29 @@ const dir = (intentPath: string) => `${intentPath}.state/devices`;
 const file = (intentPath: string, hostname: string) =>
   `${dir(intentPath)}/${hostname.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "_")}.json`;
 
+/** Every device whose facts were ever kept: Add hardware offers those no longer in Hardware. */
+const seenFile = (intentPath: string) => `${dir(intentPath)}/seen.json`;
+
+export const listSeen = (files: Pick<Platform, "readTextFile">, intentPath: string): string[] => {
+  try {
+    const list = parseJson(files.readTextFile(seenFile(intentPath)), seenFile(intentPath));
+    return Array.isArray(list) ? list.filter((h): h is string => typeof h === "string") : [];
+  } catch {
+    return [];
+  }
+};
+
 export const writeFacts = (
-  files: Pick<Platform, "mkdirp" | "writeTextFile">,
+  files: Pick<Platform, "mkdirp" | "writeTextFile" | "readTextFile">,
   intentPath: string,
   facts: DeviceFacts
 ) => {
   files.mkdirp(dir(intentPath));
   files.writeTextFile(file(intentPath, facts.hostname), JSON.stringify(facts, null, 2) + "\n");
+  const seen = listSeen(files, intentPath);
+  if (!seen.includes(facts.hostname)) {
+    files.writeTextFile(seenFile(intentPath), JSON.stringify([...seen, facts.hostname]));
+  }
 };
 
 /** The facts last read for each of `hostnames`; a device never read has none. */
@@ -121,7 +137,7 @@ export const staleDevices = ({
 
 /** Keep what was learnt while locating a device: where it is, its MACs and host key, its schema. */
 export const rememberLocated = (
-  files: Pick<Platform, "mkdirp" | "writeTextFile">,
+  files: Pick<Platform, "mkdirp" | "writeTextFile" | "readTextFile">,
   intentPath: string,
   located: Located,
   now: number

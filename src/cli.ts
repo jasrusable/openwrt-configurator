@@ -18,6 +18,7 @@ import {
 } from "./provisionConfig";
 import { confirmTiming } from "./confirm";
 import { withLocatedAddresses, writeFacts } from "./deviceFacts";
+import { lockoutReason } from "./loginAccess";
 import { DeviceSchema } from "./deviceSchema";
 import { getDeviceSchema } from "./getDeviceSchema";
 import { loadOncConfig } from "./loadConfig";
@@ -114,6 +115,9 @@ export const main = async ({
     ],
     action: async ([configPath], options) => {
       const loaded = await loadOncConfig({ path: configPath, platform });
+      // Refused before any device is touched: it would lock this app out.
+      const lockout = loaded.intent && (await lockoutReason(loaded.intent, platform));
+      if (lockout) throw new Error(lockout);
       // From the UI: each device is found where it is (src/locate.ts), its
       // identity checked, before anything is applied to it.
       const oncConfig = options.factsFor

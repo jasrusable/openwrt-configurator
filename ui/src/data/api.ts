@@ -1,6 +1,7 @@
 // The only part of the UI that talks to the backend. URLs are relative, so
 // the same build works at / (the Mac server) and /cgi-bin/onc/ (a router).
 import type { DeviceDiff } from "../../../src/applyDiff";
+import type { Candidate, Inspected } from "../../../src/discover";
 import type { DeviceFacts, ReadAttempt } from "../../../src/deviceFacts";
 import type { Change } from "../../../src/intent/diff";
 import type { NetworkStatus } from "../../../src/status/network";
@@ -97,3 +98,37 @@ export const loadNetworkStatus = async (): Promise<NetworkStatus> => {
   if (!response.ok) throw new Error(body.error ?? "Could not read the network's status.");
   return body;
 };
+
+/** This app's own public key, from beside its saved SSH key; null when there is none. */
+export const loadOwnKey = async (): Promise<string | null> => {
+  const response = await fetch("api/admin/key");
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error ?? "Could not read this app's key.");
+  return body.publicKey;
+};
+
+export const loadCandidates = async (): Promise<{ candidates: Candidate[]; error?: string }> => {
+  const response = await fetch("api/discover");
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error ?? "Could not look at the network.");
+  return body;
+};
+
+const post = async <T>(path: string, input: unknown, failure: string): Promise<T> => {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...writeHeaders },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error ?? failure);
+  return body;
+};
+
+/** Reads the device at `address` (read-only); the server keeps the read for adopting. */
+export const inspectDevice = (address: string) =>
+  post<Inspected>("api/discover/inspect", { address }, "Could not read the device.");
+
+/** Keeps the read device's facts under `name`, so it is found by identity from now on. */
+export const adoptDevice = (address: string, name: string) =>
+  post<{ ok: true }>("api/discover/adopt", { address, name }, "Could not take on the device.");

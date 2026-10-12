@@ -3,8 +3,10 @@
 // (`cgi`) answer every request with the same code. The UI uses relative URLs,
 // so it works wherever it is mounted: / on a Mac, /cgi-bin/onc/ on a router.
 import { applyDiff } from "../applyDiff";
+import { adopt, discover, Inspected, inspect } from "../discover";
 import { readFacts, readFailures, refreshStale, staleDevices } from "../deviceFacts";
 import { compileIntent } from "../intent/compile";
+import { lockoutReason, ownPublicKey } from "../loginAccess";
 import { readNetworkStatus } from "../status/read";
 import { diffIntent } from "../intent/diff";
 import { migrateIntent } from "../intent/migrations";
@@ -111,7 +113,7 @@ export const staticFiles =
     }
   };
 
-type JobPlatform = Files & Pick<Platform, "run" | "selfCommand">;
+type JobPlatform = Files & Pick<Platform, "run" | "selfCommand" | "homedir">;
 
 /**
  * An intent file, in the current format and with defaults filled in when it
@@ -163,6 +165,9 @@ export const provisionApi =
           error: "The saved settings are not valid: fix them, save, then apply.",
         });
       }
+      // Said now, not minutes later in the log (the run refuses it too).
+      const lockout = await lockoutReason(draft.data, platform);
+      if (lockout) return json(409, { error: lockout });
       const result = await startProvision({
         intentPath,
         files: platform,
@@ -206,6 +211,66 @@ export const devicesApi =
     return json(405, { error: "GET or POST" });
   };
 
+const addressPattern = /^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$/;
+const inspectedFile = (intentPath: string, address: string) => `${intentPath}.state/devices/inspected-${address.replace(/[^A-Za-z0-9.-]/g, "_")}.json`;
+
+/**
+ * Add hardware, guided (src/discover.ts). GET /api/discover: what is on the
+ * network and not in Hardware. POST /api/discover/inspect {address}: read
+ * that device (read-only), kept here so adopting uses this read and nothing
+ * the browser sends. POST /api/discover/adopt {address, name}: keep its
+ * facts under that name.
+ */
+export const discoverApi =
+  ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
+  async ({ method, path, body }) => {
+    if (method === "GET" && path === "/api/discover") return json(200, await discover({ intentPath, platform }));
+    if (method !== "POST") return json(405, { error: "GET or POST" });
+    let input: { address?: unknown; name?: unknown };
+    try {
+      input = JSON.parse(body || "{}");
+    } catch {
+      return json(400, { error: "The body is not JSON." });
+    }
+    const address = typeof input.address === "string" ? input.address.trim() : "";
+    if (!addressPattern.test(address)) return json(400, { error: "Give an address, like 10.0.0.143 or ap.lan." });
+    if (path === "/api/discover/inspect") {
+      const intent = intentSchema.safeParse(readIntent(platform, intentPath));
+      if (!intent.success) return json(409, { error: "The saved settings are not valid." });
+      try {
+        const inspected = await inspect({ address, intent: intent.data, platform });
+        platform.mkdirp(`${intentPath}.state/devices`);
+        platform.writeTextFile(inspectedFile(intentPath, address), JSON.stringify(inspected));
+        return json(200, inspected);
+      } catch (e) {
+        return json(502, { error: (e as Error).message });
+      }
+    }
+    if (path === "/api/discover/adopt") {
+      const name = typeof input.name === "string" ? input.name.trim() : "";
+      if (!/^[a-z0-9][a-z0-9-]{0,30}$/.test(name)) return json(400, { error: "A name like ap-2." });
+      let inspected: Inspected;
+      try {
+        inspected = JSON.parse(platform.readTextFile(inspectedFile(intentPath, address)));
+      } catch {
+        return json(409, { error: "Read the device first." });
+      }
+      adopt(platform, intentPath, name, inspected, Date.now());
+      return json(200, { ok: true });
+    }
+    return json(404, { error: "Not found." });
+  };
+
+/** GET: this app's own public key (beside its saved SSH key), so the UI can offer to authorize it. */
+export const ownKeyApi =
+  ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
+  async ({ method }) => {
+    if (method !== "GET") return json(405, { error: "GET" });
+    const keyPath = readIntent(platform, intentPath)?.admin?.ssh_key_path as string | undefined;
+    const publicKey = keyPath ? await ownPublicKey(platform, keyPath) : undefined;
+    return json(200, { publicKey: publicKey ?? null });
+  };
+
 /** GET: what the network is doing now, read from the devices (src/status/). Polled only while a page shows it. */
 export const statusApi =
   ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
@@ -242,6 +307,10 @@ export const uiHandler = ({
     "/api/devices": devicesApi({ intentPath, platform }),
     "/api/apply/diff": applyDiffApi({ intentPath, files: platform }),
     "/api/status": statusApi({ intentPath, platform }),
+    "/api/admin/key": ownKeyApi({ intentPath, platform }),
+    "/api/discover": discoverApi({ intentPath, platform }),
+    "/api/discover/inspect": discoverApi({ intentPath, platform }),
+    "/api/discover/adopt": discoverApi({ intentPath, platform }),
   };
   const ui = staticFiles({ root: uiRoot, files: platform });
   return (request) =>

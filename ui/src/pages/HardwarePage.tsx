@@ -10,6 +10,7 @@ import { defineList, ListPage } from "../form/ListPage";
 import { IconAccessPoint, IconRouter } from "@tabler/icons-react";
 import { useDraftValue } from "../form/draft";
 import { useFreshDevices } from "../data/devices";
+import { AddHardwarePage } from "./AddHardwarePage";
 import { useNetworkStatus } from "../data/status";
 import { ago, bandsOf, duration, modelOf, portsOf } from "../facts";
 import { ItemIcon, ItemName, Section, SettingRow, StatusDot } from "../kit/layout";
@@ -148,7 +149,8 @@ const hardware = defineList({
   title: "Hardware",
   description:
     "Your router and access points.",
-  addLabel: "Add access point",
+  addLabel: "Add hardware",
+  newPage: <AddHardwarePage />,
   newItem: () => ({ name: "", role: "access-point" as const }),
   itemTitle: (i) => <Value name={`hardware.${i}.name`} fallback="New access point" />,
   empty: "No hardware yet.",

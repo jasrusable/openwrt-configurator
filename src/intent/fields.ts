@@ -60,6 +60,22 @@ export const fields: FieldInfo[] = [
     explain:
       "The devices' root password, used to log in over SSH when there is no key. The app only logs in with it; it never changes the password on the devices.",
   },
+  {
+    path: "admin.authorized_keys",
+    label: "Authorized keys",
+    description: "Public keys that may log in to the devices as root.",
+    openwrt: "/etc/dropbear/authorized_keys",
+    explain:
+      "Installed on every device by each apply, replacing what was there. Empty leaves each device's own file alone. This app's key belongs here, so it can still log in once password login is off.",
+  },
+  {
+    path: "admin.password_login",
+    label: "Password login",
+    description: "Whether root may log in with a password.",
+    openwrt: "dropbear PasswordAuth, RootPasswordAuth",
+    explain:
+      "A device fresh from OpenWrt has no root password and lets root in with any password, so anyone on your network could log in. Off, only the authorized keys can, which closes that on the first apply.",
+  },
 
   { path: "hardware", label: "Hardware" },
   { path: "hardware.*", label: (d) => `“${d?.name || "unnamed"}”` },

@@ -12,7 +12,7 @@ import { ConfirmTiming, confirmTiming } from "./confirm";
 
 const connectTimeoutMs = 15000;
 
-const expandHome = (path: string, home: string) =>
+export const expandHome = (path: string, home: string) =>
   path === "~"
     ? home
     : path.startsWith("~/")

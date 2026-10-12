@@ -189,6 +189,13 @@ export const choices: Choice[] = [
     refuses: false,
   },
   {
+    path: "admin.password_login",
+    values: [false],
+    unavailable: (intent) =>
+      !intent.admin?.authorized_keys?.length &&
+      "Add an authorized key first: with neither a password nor a key, nobody could log in.",
+  },
+  {
     // usteer moves devices between access points and between bands on one.
     path: "roaming.steering",
     values: ["nudge", "push"],

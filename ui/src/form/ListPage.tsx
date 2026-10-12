@@ -32,6 +32,8 @@ export type ListSpec<N extends ListName> = {
   title: string;
   description?: ReactNode;
   addLabel: string;
+  /** Add's page, when the generic one will not do (Hardware's is guided). */
+  newPage?: ReactNode;
   /** What Add creates, given the items already there and the whole draft. */
   newItem: (items: Item<N>[], intent: Intent) => Item<N>;
   /** Whether an item may be removed (the main network may not). */
@@ -262,7 +264,7 @@ export const ListPage = <N extends ListName>({
       "",
     );
   const props = { list, base };
-  if (sub === "new") return <NewItemPage {...props} />;
+  if (sub === "new") return list.newPage ? <>{list.newPage}</> : <NewItemPage {...props} />;
   const index = /^\d+$/.test(sub) ? Number(sub) : undefined;
   return index !== undefined && index < items.length ? (
     <ListItemPage {...props} index={index} />
