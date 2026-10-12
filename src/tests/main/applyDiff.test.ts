@@ -112,3 +112,21 @@ test("packages and files: missing, unwanted, changed and no longer managed", (t)
     { path: file.path, change: "changed" },
   ].sort((a, b) => a.path.localeCompare(b.path)));
 });
+
+test("secrets under any package's option names stay hidden", (t) => {
+  const state = stateFor(sample(), "home-ap-1");
+  const now = appliedWith(state);
+  const d = diff(state, {
+    ...now,
+    config: {
+      ...now.config,
+      acme: [{ type: "cert", name: "c", options: { credentials: ["CF_Token=tok-123"] } }],
+      wireless: [
+        ...now.config.wireless,
+        { type: "wifi-iface", name: "x", options: { r0kh: ["ff:ff:ff:ff:ff:ff,*,r0-secret"], key1: "wep-secret" } },
+      ],
+    },
+  });
+  t.true(d.config.some((c) => c.key === "wireless.x.r0kh" && c.before === "(hidden)"));
+  t.false(/tok-123|r0-secret|wep-secret/.test(JSON.stringify(d)));
+});

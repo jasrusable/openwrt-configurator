@@ -36,9 +36,13 @@ export type DeviceDiff =
   /** Not reached: what it holds now is not known, so neither is the change. */
   | { hostname: string; error: string };
 
-/** Options whose values are never shown: keys and passwords. */
-const isSecret = (option: string) =>
-  /^(key|password|sae_password|auth_secret|acct_secret|private_key|preshared_key)$/.test(option);
+/**
+ * Options whose values are never shown. Matched broadly, since the device's
+ * config holds packages' options this app does not know (802.11r's r0kh/r1kh
+ * carry keys, WEP has key1-4, acme keeps API tokens in credentials): hiding
+ * a harmless one only costs showing "(hidden)".
+ */
+export const isSecret = (option: string) => /key|secret|pass|psk|token|credential|r[01]kh|priv|auth/i.test(option);
 
 /** What the device holds after the apply: kept sections as they are, declared ones merged in or added. */
 export const configsAfter = ({

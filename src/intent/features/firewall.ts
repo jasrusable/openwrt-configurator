@@ -116,8 +116,11 @@ export const firewall: Feature = (intent) => {
         ]),
         zone: routerOnly([
           // Each network its own zone, named by its id. Between networks only
-          // what forwardings allow; to the router as its access says.
+          // what forwardings allow; to the router as its access says. Section
+          // names are the zone's, so adding or reordering networks never
+          // renames another zone (the apply diff would show it all changing).
           ...networks.map((network) => ({
+            ".name": network.id,
             name: network.id,
             input: network.access.router === "full" ? "ACCEPT" : "REJECT",
             output: "ACCEPT",
@@ -125,6 +128,7 @@ export const firewall: Feature = (intent) => {
             network: [network.id],
           })),
           {
+            ".name": wan,
             name: wan,
             input: "REJECT",
             output: "ACCEPT",
@@ -136,8 +140,8 @@ export const firewall: Feature = (intent) => {
         ]),
         forwarding: routerOnly(
           networks.flatMap((network) => [
-            ...(network.access.internet ? [{ src: network.id, dest: wan }] : []),
-            ...network.access.networks.map((to) => ({ src: network.id, dest: to })),
+            ...(network.access.internet ? [{ ".name": `${network.id}_${wan}`, src: network.id, dest: wan }] : []),
+            ...network.access.networks.map((to) => ({ ".name": `${network.id}_${to}`, src: network.id, dest: to })),
           ])
         ),
         rule: routerOnly([

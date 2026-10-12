@@ -646,3 +646,15 @@ test("the ULA prefix is stable and well-formed", (t) => {
   t.not(ulaPrefix("Home"), ulaPrefix("Cabin"));
   t.regex(ulaPrefix("Home"), /^fd[0-9a-f]{2}:[0-9a-f]{4}:[0-9a-f]{4}::\/48$/);
 });
+
+test("zones and forwardings are named for what they are, so another network never renames them", (t) => {
+  const names = (intent: any) => {
+    const { firewall } = onDevice("home-router", "friendlyarm,nanopi-r6s", intent);
+    return [...firewall.zone, ...firewall.forwarding].map((s: any) => s[".name"]);
+  };
+  const before = names(sample());
+  t.deepEqual(before, ["lan", "guest", "wan", "lan_wan", "lan_guest", "guest_wan"]);
+  const reordered = sample();
+  reordered.networks.reverse();
+  t.deepEqual([...names(reordered)].sort(), [...before].sort());
+});
