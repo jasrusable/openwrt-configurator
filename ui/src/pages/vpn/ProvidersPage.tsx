@@ -23,7 +23,7 @@ const fromFile = (kind: Tunnel["type"], id: string, name: string, text: string, 
     if (!/^\s*remote\s/m.test(text)) throw new Error("No remote in it: is it an .ovpn?");
     const unsafe = ovpnUnsafe(text);
     if (unsafe.length) {
-      throw new Error(`It would run or write things on the router (${unsafe.join(", ")}): remove those lines and paste it again.`);
+      throw new Error(`It sets options a provider's file may not, as they could run or write things on the router: ${unsafe.join(", ")}. Remove those lines and paste it again.`);
     }
     return {
       id,

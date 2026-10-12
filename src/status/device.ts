@@ -145,7 +145,14 @@ export const parseWifi = (list: unknown): WifiInterface[] =>
       };
     });
 
-/** dnsmasq's /tmp/dhcp.leases: "expires mac address name clientid" per line; "*" is no name. */
+/**
+ * dnsmasq's leases, wherever its config keeps them (stock /tmp/dhcp.leases;
+ * the compiler's own choice may differ), not a fixed path.
+ */
+export const leasesCommand =
+  'cat "$(uci -q get dhcp.@dnsmasq[0].leasefile || echo /tmp/dhcp.leases)" 2>/dev/null || true';
+
+/** dnsmasq's lease file: "expires mac address name clientid" per line; "*" is no name. */
 export const parseLeases = (text: string): Lease[] =>
   text
     .split("\n")
@@ -256,7 +263,7 @@ export const parseHandshakes = (text: string): WireguardPeer[] => {
 };
 
 const leases: Probe<string> = {
-  command: "cat /tmp/dhcp.leases 2>/dev/null || true",
+  command: leasesCommand,
   parse: ({ stdout }) => stdout,
 };
 

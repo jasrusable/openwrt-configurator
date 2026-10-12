@@ -15,6 +15,7 @@
 // other machine there is refused before credentials are sent, and a client
 // that cannot check a given key (dbclient) refuses to try. Once in, the
 // board must be the one recorded.
+import { leasesCommand } from "./status/device";
 import type { DeviceFacts } from "./deviceFacts";
 import { Probe, runProbes } from "./deviceProbes";
 import { DeviceSchema } from "./deviceSchema";
@@ -88,7 +89,7 @@ const macs: Probe<string[]> = {
 };
 
 const routerTables = {
-  leases: { command: "cat /tmp/dhcp.leases 2>/dev/null || true", parse: ({ stdout }) => parseLeases(stdout) } as Probe<Lease[]>,
+  leases: { command: leasesCommand, parse: ({ stdout }) => parseLeases(stdout) } as Probe<Lease[]>,
   neighbours: { command: "ip -4 neigh show 2>/dev/null || true", parse: ({ stdout }) => parseNeighbours(stdout) } as Probe<Neighbour[]>,
 };
 

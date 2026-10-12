@@ -8,6 +8,7 @@
 // stock device's dropbear accepts with any password). Picking it is the
 // trust-on-first-use moment: its host key is recorded then, and taking it on
 // keeps its address, MACs and key as facts, so it is found by identity after.
+import { leasesCommand } from "./status/device";
 import { DeviceFacts, listSeen, readFacts, writeFacts } from "./deviceFacts";
 import { Probe, runProbes } from "./deviceProbes";
 import { DeviceSchema } from "./deviceSchema";
@@ -114,7 +115,7 @@ export const discover = async ({ intentPath, platform }: { intentPath: string; p
   if (!("session" in r)) return { candidates: [], error: `The router could not be reached: ${r.error}` };
   try {
     const tables = await runProbes(r.session, {
-      leases: { command: "cat /tmp/dhcp.leases 2>/dev/null || true", parse: ({ stdout }) => parseLeases(stdout) } as Probe<Lease[]>,
+      leases: { command: leasesCommand, parse: ({ stdout }) => parseLeases(stdout) } as Probe<Lease[]>,
       neighbours: { command: "ip -4 neigh show 2>/dev/null || true", parse: ({ stdout }) => parseNeighbours(stdout) } as Probe<Neighbour[]>,
     });
     const known = {

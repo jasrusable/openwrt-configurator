@@ -562,7 +562,7 @@ export const intentSchema = z
                   if (unsafe.length) {
                     ctx.addIssue({
                       code: "custom",
-                      message: `it would run or write things on the router (${unsafe.join(", ")}): remove those lines`,
+                      message: `options a provider's file may not set here, as they could run or write things on the router: ${unsafe.join(", ")}`,
                     });
                   }
                 }),

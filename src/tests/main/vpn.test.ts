@@ -8,6 +8,7 @@ import { templateOf, withTemplate } from "../../intent/networkTemplates";
 import { compileIntent } from "../../intent/compile";
 import { ddnsService } from "../../intent/features/internet";
 import { ovpnFile } from "../../intent/features/vpn";
+import { ovpnUnsafe } from "../../intent/ovpn";
 import { intentSchema } from "../../intent/schema";
 import { clientAddresses, clientConf, decodeInvite, encodeInvite, inviteOf, nextClientHost, withPort } from "../../intent/vpn";
 import { newPrivateKey, publicKeyOf } from "../../wireguard";
@@ -75,7 +76,7 @@ test("an .ovpn that would run or write things on the router is refused, and neve
   const config = "client\nremote vpn.example.com 1194\nscript-security 2\nup /bin/evil.sh\n  plugin /x.so\nlog /etc/shadow\n";
   const parsed = intentSchema.safeParse({ ...intent, tunnels: [{ id: "tun1", name: "Bad", type: "openvpn", config }] });
   t.false(parsed.success);
-  t.regex(JSON.stringify(parsed.error?.issues), /script-security, up, plugin, log/);
+  t.regex(JSON.stringify(parsed.error?.issues), /may not set here.*script-security, up, plugin, log/);
   const file = ovpnFile({ id: "tun1", config });
   t.notRegex(file, /evil|\.so|shadow|script-security 2/);
   t.regex(file, /script-security 1\n/);
@@ -136,4 +137,17 @@ test("a network's template leaves its access to remote access and sites alone", 
   const home = withTemplate(intent, 1, "home");
   t.deepEqual(home.networks[1].access.networks, ["lan", "vpn"]);
   t.is(templateOf(home.networks, 1), "home");
+});
+
+test("an .ovpn is read as OpenVPN reads it: quoted, --prefixed and setenv opt spellings are caught, a typical file passes", (t) => {
+  t.deepEqual(ovpnUnsafe('client\nremote a.example.com 1194\n"plugin" /x.so\n--up /bin/sh\nsetenv opt up /bin/sh\nsetenv opt block-outside-dns\n'), ["plugin", "up"]);
+  t.deepEqual(ovpnUnsafe("client\nremote a 1\n'replay-persist' /etc/x\nifconfig-pool-persist /etc/y\n"), ["replay-persist", "ifconfig-pool-persist"]);
+  const typical = [
+    "client", "dev tun", "proto udp", "remote nl1.example.com 1194", "resolv-retry infinite", "nobind",
+    "persist-key", "persist-tun", "remote-cert-tls server", "cipher AES-256-GCM", "auth SHA512", "verb 3",
+    "# a comment", "; another", "auth-user-pass", "<ca>", "-----BEGIN CERTIFICATE-----", "up and away", "-----END CERTIFICATE-----", "</ca>",
+    "key-direction 1", "<tls-auth>", "abc", "</tls-auth>",
+  ].join("\n");
+  t.deepEqual(ovpnUnsafe(typical), [], "certificate content is data, not options");
+  t.deepEqual(ovpnUnsafe("client\nremote a 1\n<script>\nx\n</script>\n"), ["script"], "an unknown block is refused");
 });
