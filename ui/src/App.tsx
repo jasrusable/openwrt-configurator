@@ -30,6 +30,7 @@ import { IntentForm, useDraftChanged, useSaveActions } from "./form/IntentForm";
 import { ProblemCount, ProblemsButton, usePageProblems } from "./form/Problems";
 import { AppIcon } from "./kit/layout";
 import { pages } from "./pages";
+import { ApplyPage } from "./provision/ApplyPage";
 import { ProvisionButton } from "./provision/ProvisionButton";
 
 /** Unsaved edits: Revert and Save, Save the one primary action meanwhile. */
@@ -157,6 +158,7 @@ const router = createHashRouter([
     children: [
       { index: true, element: <Navigate to="system" replace /> },
       ...pages.map((page) => ({ path: `${page.id}/*`, element: <page.Page /> })),
+      { path: "apply", element: <ApplyPage /> },
       { path: "general/*", element: <MovedTo base="/system" /> },
       // Old addresses: General is System, SSIDs and Radios are Wi-Fi's tabs.
       { path: "ssids/*", element: <MovedTo base="/wifi" /> },
