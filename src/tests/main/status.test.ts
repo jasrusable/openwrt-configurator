@@ -6,6 +6,7 @@ import {
   DeviceStatus,
   parseInterfaces,
   parseLeases,
+  parseLines,
   parseSystemInfo,
   parseWifi,
 } from "../../status/device";
@@ -77,6 +78,7 @@ const device = (hostname: string, parts: Partial<DeviceStatus>): DeviceStatus =>
   interfaces: [],
   wifi: [],
   leases: [],
+  lines: [],
   ...parts,
 });
 
@@ -116,4 +118,42 @@ test("a device not reached is said so; nothing is made up for it", (t) => {
   t.is(status.internet, undefined);
   t.like(status.devices[0], { name: "home-router", error: "connect ECONNREFUSED" });
   t.is(status.networks[0].up, undefined);
+});
+
+test("several lines: mwan3's view of each, and which carry traffic", (t) => {
+  // Recorded from mwan3 2.12 on 25.12.5, both lines failing to reach the internet.
+  t.deepEqual(parseLines(recorded("mwan3-status.json")), [
+    { id: "wan", state: "offline", since: 1 },
+    { id: "wanb", state: "offline", since: 1 },
+  ]);
+  t.deepEqual(parseLines({}), [], "no mwan3: no lines");
+
+  const intent = sample();
+  intent.internet.connections.push({
+    id: "wanb",
+    name: "LTE",
+    port: "eth2",
+    connection: { type: "dhcp" },
+    ipv6: false,
+    ipv6_prefix: "auto",
+    weight: 1,
+    metered: true,
+    down_when_slow: false,
+  });
+  const router = (wan: string, wanb: string) =>
+    device("home-router", {
+      lines: [
+        { id: "wan", state: wan, since: 600 },
+        { id: "wanb", state: wanb, since: 30 },
+      ],
+    });
+  const using = (status: ReturnType<typeof networkStatus>) => status.connections.filter((c) => c.inUse).map((c) => c.id);
+  t.deepEqual(using(networkStatus(intent, [router("online", "online")])), ["wan"], "failover: the first that works");
+  const onBackup = networkStatus(intent, [router("offline", "online")]);
+  t.deepEqual(using(onBackup), ["wanb"]);
+  t.like(onBackup.connections[0], { line: { state: "offline", since: 600 }, inUse: false });
+  t.true(onBackup.internet!.up);
+  intent.internet.mode = "balance";
+  t.deepEqual(using(networkStatus(intent, [router("online", "online")])), ["wan"], "sharing: a metered line held back");
+  t.deepEqual(using(networkStatus(intent, [router("disconnecting", "online")])), ["wan"], "failing is still working");
 });

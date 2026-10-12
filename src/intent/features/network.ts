@@ -12,6 +12,7 @@ import {
   onRouter,
 } from "../fragment";
 import { networkIpv6Applies } from "../choices";
+import { internetIpv6, ipv6Interface, primaryConnection } from "../connections";
 import { named } from "../names";
 
 /** FNV-1a, 32-bit, as 8 hex digits: a stable value derived from a name. */
@@ -42,12 +43,12 @@ const isMain = (network: Network) => network.vlan === undefined;
 /** One per network, so each gets its own /64 of the delegated prefix. */
 const ip6hint = (network: Network) => vlanOf(network).toString(16);
 
-const routerInterface = (network: Network, ipv6: boolean) => ({
+const routerInterface = (network: Network, ipv6: boolean, ipv6Upstream: string) => ({
   proto: "static",
   ipaddr: gatewayOf(network),
   netmask: "255.255.255.0",
   ...(ipv6
-    ? { ip6assign: "64", ip6hint: ip6hint(network), ip6class: ["wan6", "local"] }
+    ? { ip6assign: "64", ip6hint: ip6hint(network), ip6class: [ipv6Upstream, "local"] }
     : {}),
 });
 
@@ -84,7 +85,9 @@ export const network: Feature = (intent) => {
   const main = networks.find(isMain)!;
   // A network's IPv6 needs the internet's: without it there is only a
   // local range, which would be announced as if it went somewhere.
-  const ipv6 = (n: Network) => networkIpv6Applies(intent.internet.ipv6) && n.ipv6;
+  const ipv6 = (n: Network) => networkIpv6Applies(internetIpv6(intent)) && n.ipv6;
+  // Prefixes from the main connection's IPv6 interface (wan6 for wan).
+  const ipv6Upstream = ipv6Interface(primaryConnection(intent));
   return {
     services: [
       { ".if": everyDevice, name: "network", running: true },
@@ -139,7 +142,7 @@ export const network: Feature = (intent) => {
             device: deviceOf(n),
             delegate: false,
             ".overrides": [
-              { ".if": onRouter, override: routerInterface(n, ipv6(n)) },
+              { ".if": onRouter, override: routerInterface(n, ipv6(n), ipv6Upstream) },
               {
                 // Access points: a client of the main network; the others
                 // only carried, for their Wi-Fi to join.

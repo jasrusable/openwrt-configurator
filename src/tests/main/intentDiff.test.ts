@@ -4,9 +4,9 @@ import { diffIntent } from "../../intent/diff";
 const base = {
   site: { name: "Home", timezone: "Europe/Zurich", country: "CH" },
   internet: {
-    connection: { type: "dhcp" },
-    ipv6: true,
-    speed: { down_mbps: 950, up_mbps: 950 },
+    connections: [
+      { id: "wan", name: "Fibre", connection: { type: "dhcp" }, ipv6: true, speed: { down_mbps: 950, up_mbps: 950 } },
+    ],
   },
   wifi: [{ ssid: "Home", password: "hunter2-hunter2" }],
   dns: { upstream: { type: "encrypted", provider: "cloudflare" } },
@@ -22,8 +22,8 @@ test("no changes, no diff", (t) => {
 });
 
 test("a setting changes from one value to another, labelled for people", (t) => {
-  const [change] = diffIntent(base, edit((i) => (i.internet.speed.down_mbps = 900)));
-  t.deepEqual(change.label, ["Internet", "Smart queueing", "Download"]);
+  const [change] = diffIntent(base, edit((i) => (i.internet.connections[0].speed.down_mbps = 900)));
+  t.deepEqual(change.label, ["Internet", "Connections", "“Fibre”", "Smart queueing", "Download"]);
   t.is(change.kind, "changed");
   t.is(change.before, "950 Mbit/s");
   t.is(change.after, "900 Mbit/s");
@@ -49,20 +49,20 @@ test("whole items and optional groups are added and removed as one change", (t) 
     [["Wi-Fi › “Guest”", "added"]]
   );
   t.false(JSON.stringify(added).includes("guest-pass-1"));
-  const removed = diffIntent(base, edit((i) => delete i.internet.speed));
+  const removed = diffIntent(base, edit((i) => delete i.internet.connections[0].speed));
   t.deepEqual(
     removed.map((c) => [c.label.join(" › "), c.kind]),
-    [["Internet › Smart queueing", "removed"]]
+    [["Internet › Connections › “Fibre” › Smart queueing", "removed"]]
   );
 });
 
 test("switching the kind of connection is one change", (t) => {
   const changes = diffIntent(
     base,
-    edit((i) => (i.internet.connection = { type: "pppoe", username: "u", password: "p" }))
+    edit((i) => (i.internet.connections[0].connection = { type: "pppoe", username: "u", password: "p" }))
   );
   t.deepEqual(
     changes.map((c) => [c.label.join(" › "), c.before, c.after]),
-    [["Internet › Connection", "dhcp", "pppoe"]]
+    [["Internet › Connections › “Fibre” › Connection", "dhcp", "pppoe"]]
   );
 });

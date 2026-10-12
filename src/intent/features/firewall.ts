@@ -5,6 +5,7 @@
 // port forwards (DNAT) into the zone of their target's network.
 import { portsApply } from "../choices";
 import { anywhere, internet, isIpv6, router, Rule } from "../firewall";
+import { ipv6Interface } from "../connections";
 import { Feature, onRouter } from "../fragment";
 import { named } from "../names";
 
@@ -96,7 +97,9 @@ export const firewall: Feature = (intent) => {
     sections.map((section) => ({ ".if": onRouter, ...section }));
   const main = networks.find((n) => n.vlan === undefined) ?? networks[0];
   // The interfaces the internet connection makes (features/internet.ts).
-  const wanInterfaces = intent.internet.ipv6 ? ["wan", "wan6"] : ["wan"];
+  const wanInterfaces = intent.internet.connections.flatMap((c, i) =>
+    i === 0 && c.ipv6 ? [c.id, ipv6Interface(c)] : [c.id]
+  );
   // The network an address is on: where a port forward lands.
   const networkOf = (address: string) => {
     const prefix = address.split(".").slice(0, 3).join(".");

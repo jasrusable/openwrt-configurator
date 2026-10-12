@@ -283,3 +283,16 @@ test('only one device per box may use "*" ports', (t) => {
     )
   );
 });
+
+test('a VLAN on a port (a tagged internet line) keeps the port out of a "*" bridge', (t) => {
+  const config = build(
+    {
+      network: {
+        device: [{ name: "br-lan", type: "bridge", ports: "*" }],
+        interface: [{ ".name": "wan", device: "@wan_port.10", proto: "dhcp" }],
+      },
+    },
+    dsa
+  );
+  t.deepEqual(config.network.device[0].ports, ["eth1", "eth2"]);
+});

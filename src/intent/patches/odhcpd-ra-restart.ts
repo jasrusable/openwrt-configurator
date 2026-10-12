@@ -1,3 +1,4 @@
+import { internetIpv6, ipv6Interface, primaryConnection } from "../connections";
 import { Patch } from "./patch";
 
 export const odhcpdRaRestart: Patch = {
@@ -9,8 +10,9 @@ export const odhcpdRaRestart: Patch = {
   upstream: "https://github.com/openwrt/odhcpd/issues/388",
   target: { roles: ["router"] },
   // Only the internet's IPv6 brings up wan6 and router advertisements.
-  applies: (intent) => intent.internet.ipv6,
-  apply: () => ({
+  applies: (intent) => internetIpv6(intent),
+  // The main connection's IPv6 interface: wan6, or wanb6 when that line is the main one.
+  apply: (intent) => ({
     files: [
       {
         path: "/etc/hotplug.d/iface/30-odhcpd-ra-fix",
@@ -26,7 +28,7 @@ export const odhcpdRaRestart: Patch = {
 # that must restart odhcpd \u2014 a cooldown that ignores it leaves every client
 # link-local only. Concurrent overlapping runs are serialised with mkdir.
 [ "$ACTION" = "ifup" ] || exit 0
-[ "$INTERFACE" = "wan6" ] || exit 0
+[ "$INTERFACE" = "${ipv6Interface(primaryConnection(intent))}" ] || exit 0
 
 (
 	LOCK=/tmp/onc-ipv6-ra.lock

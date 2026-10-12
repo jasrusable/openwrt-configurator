@@ -6,6 +6,7 @@
 // exactly one router), choosing the value instead swaps: it also changes
 // what else it must, so the settings never pass through a broken state.
 // Free-text values (an address, a name) are checked by the schema alone.
+import { internetIpv6, multiWan, primaryConnection } from "./connections";
 import { internet } from "./firewall";
 import { where } from "./places";
 import { steeringLabels } from "./roaming";
@@ -145,7 +146,9 @@ export const choices: Choice[] = [
   },
   {
     path: "networks.*.ipv6",
-    unavailable: (intent) => !networkIpv6Applies(intent.internet.ipv6) && `Turn on IPv6 under ${where("internet")} first.`,
+    unavailable: (intent) =>
+      !networkIpv6Applies(internetIpv6(intent)) &&
+      `Turn on IPv6 for ${primaryConnection(intent).name || "the main connection"} under ${where("internet")} first.`,
     // Ignored without the internet's IPv6, and kept for when it is back.
     refuses: false,
   },
@@ -153,8 +156,8 @@ export const choices: Choice[] = [
     path: "networks.*.ipv6",
     values: [true],
     unavailable: (intent, [i]) => {
-      const prefix = intent.internet.ipv6_prefix;
-      if (!intent.internet.ipv6 || prefix === "auto") return undefined;
+      const prefix = primaryConnection(intent).ipv6_prefix;
+      if (!internetIpv6(intent) || prefix === "auto") return undefined;
       const others = intent.networks.filter((n, j) => n.ipv6 && j !== Number(i)).length;
       const room = roomIn(prefix);
       return (
@@ -166,13 +169,14 @@ export const choices: Choice[] = [
     refuses: false,
   },
   {
-    path: "internet.ipv6_prefix",
+    path: "internet.connections.*.ipv6_prefix",
     values: ["48", "56", "60", "64"],
-    unavailable: (intent, _, prefix) => {
+    unavailable: (intent, [c], prefix) => {
       const want = intent.networks.filter((n) => n.ipv6).length;
       const room = roomIn(prefix as string);
       return (
-        intent.internet.ipv6 &&
+        c === "0" &&
+        internetIpv6(intent) &&
         want > room &&
         `${want} networks have IPv6, and a /${prefix} has room for ${room}.`
       );
@@ -181,11 +185,80 @@ export const choices: Choice[] = [
   {
     path: "dns.upstream.type",
     values: ["provider"],
-    unavailable: (intent) =>
-      intent.internet.connection.type === "static" &&
-      !intent.internet.connection.dns?.length &&
-      `Your internet connection is set by hand, without DNS servers: add them under ${where("internet")} first.`,
+    unavailable: (intent) => {
+      const bare = intent.internet.connections.find((c) => c.connection.type === "static" && !c.connection.dns?.length);
+      return (
+        bare &&
+        `${bare.name || "An internet connection"} is set by hand, without DNS servers: add them under ${where("internet")} first.`
+      );
+    },
     // Reported at the connection's DNS servers, where they are missing.
+    refuses: false,
+  },
+  {
+    // The networks' IPv6 comes from the main connection alone: two
+    // providers' prefixes at once leave clients on a dead one when a line fails.
+    path: "internet.connections.*.ipv6",
+    unavailable: (intent, [c]) =>
+      c !== "0" && `Your networks get IPv6 from the first connection, ${primaryConnection(intent).name || "the main one"}.`,
+    refuses: false,
+  },
+  {
+    path: "internet.connections.*.ipv6_prefix",
+    unavailable: (intent, [c]) => c !== "0" && "Only the first connection's prefix is used.",
+    refuses: false,
+  },
+  {
+    // A port carries one line: reported at the later of two (the UI greys
+    // a port any other connection uses, with portTakenBy). Unset (the
+    // router's WAN port) is checked by the schema.
+    path: "internet.connections.*.port",
+    unavailable: (intent, [c], port) => {
+      const other = intent.internet.connections.slice(0, Number(c)).find((o) => o.port === port);
+      return port !== undefined && other && `${other.name || "Another connection"} uses it.`;
+    },
+  },
+  {
+    // Unset is the router's WAN port, which one connection can have: the
+    // earliest that has it keeps it.
+    path: "internet.connections.*.port",
+    values: [undefined],
+    unavailable: (intent, [c]) => {
+      const other = intent.internet.connections.slice(0, Number(c)).find((o) => o.port === undefined);
+      return other && `${other.name || "Another connection"} uses the WAN port.`;
+    },
+  },
+  {
+    // Ignored with one line; kept for when there are several again.
+    path: "networks.*.line",
+    unavailable: (intent) => !multiWan(intent) && "With one internet connection, every network uses it.",
+    refuses: false,
+  },
+  {
+    path: "internet.connections.*.metered",
+    unavailable: (intent) => !multiWan(intent) && "With one connection it is used for everything anyway.",
+    refuses: false,
+  },
+  {
+    path: "internet.connections.*.down_when_slow",
+    unavailable: (intent) => !multiWan(intent) && "With one connection there is nothing to switch to.",
+    refuses: false,
+  },
+  {
+    path: "internet.share_per_device",
+    unavailable: (intent) =>
+      (!multiWan(intent) || intent.internet.mode !== "balance") && "Only used when connections share traffic.",
+    refuses: false,
+  },
+  {
+    path: "internet.mode",
+    unavailable: (intent) => !multiWan(intent) && "With one connection there is nothing to share or fail over to.",
+    refuses: false,
+  },
+  {
+    path: "internet.connections.*.weight",
+    unavailable: (intent) =>
+      (!multiWan(intent) || intent.internet.mode !== "balance") && "Only used when connections share traffic.",
     refuses: false,
   },
   {
@@ -269,10 +342,10 @@ const expand = (intent: unknown, pattern: string) =>
     (places, part) =>
       places.flatMap(({ path, at, value }) => {
         if (value === null || typeof value !== "object") return [];
+        // A named key that is missing still has a place, holding undefined:
+        // a rule about the unset value (the WAN port) applies there too.
         const keys = part === "*" ? Object.keys(value) : [part];
-        return keys
-          .filter((key) => key in value)
-          .map((key) => ({
+        return keys.map((key) => ({
             path: [...path, key],
             at: part === "*" ? [...at, key] : at,
             value: (value as Record<string, unknown>)[key],

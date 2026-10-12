@@ -45,6 +45,17 @@ export type DeviceStatus = {
   interfaces: InterfaceStatus[];
   wifi: WifiInterface[];
   leases: Lease[];
+  /** mwan3's view of each line, where it runs (a router with several connections). */
+  lines: LineStatus[];
+};
+
+export type LineStatus = {
+  /** The connection's interface: wan, wanb. */
+  id: string;
+  /** online, offline, connecting (coming back), disconnecting (failing), or mwan3's other words. */
+  state: string;
+  /** Seconds in that state: online for, or offline for. */
+  since: number;
 };
 
 const obj = (value: unknown): Record<string, unknown> =>
@@ -149,6 +160,22 @@ const wifi: Probe<unknown> = {
   parse: ({ stdout }) => json(stdout, "hostapd"),
 };
 
+/** mwan3's lines, without what it pings (no need, and kept short). Nothing where mwan3 is not running. */
+const mwan3: Probe<unknown> = {
+  command: "ubus call mwan3 status 2>/dev/null || echo '{}'",
+  parse: ({ stdout }) => json(stdout || "{}", "mwan3 status"),
+};
+
+/** `ubus call mwan3 status`, as each line's state and for how long. */
+export const parseLines = (status: unknown): LineStatus[] =>
+  Object.entries(obj(obj(status).interfaces)).map(([id, value]) => {
+    const line = obj(value);
+    const state = typeof line.status === "string" ? line.status : "unknown";
+    const online = state === "online" || state === "disconnecting";
+    const since = Number(online ? line.online : line.offline);
+    return { id, state, since: Number.isFinite(since) ? since : 0 };
+  });
+
 const leases: Probe<string> = {
   command: "cat /tmp/dhcp.leases 2>/dev/null || true",
   parse: ({ stdout }) => stdout,
@@ -160,7 +187,7 @@ export const readDeviceStatus = async (
   session: Session,
   now: () => number
 ): Promise<DeviceStatus> => {
-  const read = await runProbes(session, { systemInfo, interfaces, wifi, leases });
+  const read = await runProbes(session, { systemInfo, interfaces, wifi, leases, mwan3 });
   return {
     hostname,
     readAt: now(),
@@ -168,5 +195,6 @@ export const readDeviceStatus = async (
     interfaces: parseInterfaces(read.interfaces),
     wifi: parseWifi(read.wifi),
     leases: parseLeases(read.leases),
+    lines: parseLines(read.mwan3),
   };
 };

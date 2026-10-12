@@ -41,7 +41,7 @@ type RowProps = {
 };
 
 /** A setting's row, with its ⓘ: what it does and what OpenWrt calls it (src/intent/fields.ts). */
-const FieldRow = ({
+export const FieldRow = ({
   name,
   unavailable,
   children,
@@ -82,7 +82,7 @@ export const Because = ({ reason, children }: { reason?: string; children: React
 const ruled = <T,>(options: Option<T>[], option: Availability["option"]) =>
   options.map((o) => {
     const { unavailable, swap } = option(o.value);
-    return { ...o, disabled: o.disabled || !!unavailable, reason: unavailable ?? swap?.note };
+    return { ...o, disabled: o.disabled || !!unavailable, reason: unavailable ?? swap?.note ?? o.reason };
   });
 
 /** A segmented control's options, each with its reason in a tooltip. */
@@ -280,7 +280,8 @@ export const SwitchField = ({
   );
 };
 
-export type Option<T> = { value: T; label: string; disabled?: boolean };
+/** A choice; one the page itself greys out (a port another connection uses) says why in `reason`. */
+export type Option<T> = { value: T; label: string; disabled?: boolean; reason?: string };
 
 /**
  * A choice from a list. Values may be strings or numbers; with `emptyLabel`
@@ -299,8 +300,10 @@ export const SelectField = <T extends string | number>({
   const field = useField(row.name);
   const empty = "\u0000";
   const choices = ruled(options, field.option);
+  // The unset choice is ruled like any other (the WAN port another connection has).
+  const unset = field.option(undefined).unavailable;
   const data = [
-    ...(emptyLabel ? [{ value: empty, label: emptyLabel }] : []),
+    ...(emptyLabel ? [{ value: empty, label: emptyLabel, disabled: !!unset }] : []),
     ...choices.map((option) => ({
       value: String(option.value),
       label: option.label,
@@ -312,9 +315,10 @@ export const SelectField = <T extends string | number>({
       <Select
         data={data}
         disabled={!!field.unavailable}
-        renderOption={optionWithReason(
-          Object.fromEntries(choices.map((o) => [String(o.value), o.reason]))
-        )}
+        renderOption={optionWithReason({
+          ...Object.fromEntries(choices.map((o) => [String(o.value), o.reason])),
+          [empty]: unset,
+        })}
         value={field.value === undefined ? (emptyLabel ? empty : null) : String(field.value)}
         onChange={(value) =>
           field.onChange(

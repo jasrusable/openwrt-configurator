@@ -335,7 +335,9 @@ export const seedCommands = ({
     const path = shellQuote(`/etc/config/${configKey}`);
     const text = uciFileText(sections, redact);
     const delimiter = heredocDelimiter(text);
-    return [`if [ ! -e ${path} ]; then`, `cat > ${path} <<'${delimiter}'`, `${text}${delimiter}`, "fi"].join("\n");
+    // Owner-only, like the provision script: a config can hold secrets, and
+    // a new file would otherwise take the shell's umask.
+    return [`if [ ! -e ${path} ]; then`, `(umask 077; cat > ${path}) <<'${delimiter}'`, `${text}${delimiter}`, "fi"].join("\n");
   });
 
 /** The stock configs apk set aside for an owned config: never used. */

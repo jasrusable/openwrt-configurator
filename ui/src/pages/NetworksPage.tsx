@@ -4,6 +4,7 @@ import {
   Group,
   NumberInput,
   SegmentedControl,
+  Select,
   Text,
   TextInput,
 } from "@mantine/core";
@@ -28,11 +29,13 @@ import {
   templateSettings,
   withTemplate,
 } from "../../../src/intent/networkTemplates";
+import { internetIpv6 } from "../../../src/intent/connections";
 import { deviceOf } from "../../../src/intent/features/network";
 import { where } from "../../../src/intent/places";
 import { Intent, parseSubnet } from "../../../src/intent/schema";
 import {
   DurationField,
+  FieldRow,
   MultiSelectField,
   NumberField,
   OptionalField,
@@ -99,7 +102,7 @@ const newNetwork = (
     subnet,
     dhcp: { size: 100, lease: "12h" },
     // As the internet side has it.
-    ipv6: intent.internet.ipv6,
+    ipv6: internetIpv6(intent),
     reservations: [],
     ...templateSettings("guest", []),
   };
@@ -160,6 +163,7 @@ const networks = defineList({
         <TypeField index={i} />
       </Section>
       <AccessSection index={i} />
+      <LineSection index={i} />
       <ReservationsSection index={i} />
       <Section title="Addressing">
         <When name={`networks.${i}.vlan`} is={undefined}>
@@ -480,6 +484,48 @@ const ReservationRow = ({
         <IconX size={16} />
       </ActionIcon>
     </Group>
+  );
+};
+
+/**
+ * Which internet connection its devices use, once there are several:
+ * Automatic (as the internet's mode says), or one, with the others or not
+ * when it is down.
+ */
+const LineSection = ({ index }: { index: number }) => {
+  const draft = useDraft();
+  const intent: Intent = useDraftValue();
+  const path = `networks.${index}.line` as const;
+  const line = intent.networks[index]?.line;
+  const error = useFieldError(`${path}.connection`);
+  const { connections } = intent.internet;
+  if (connections.length < 2) return null;
+  const automatic = "\u0000";
+  return (
+    <Section title="Internet">
+      <FieldRow name={path} label="Internet line" description="Which connection its devices use." error={error}>
+        <Select
+          data={[
+            { value: automatic, label: "Automatic" },
+            ...connections.map((c) => ({ value: c.id, label: c.name || "Unnamed" })),
+          ]}
+          value={line?.connection ?? automatic}
+          onChange={(value) =>
+            draft.set(
+              path,
+              value === null || value === automatic
+                ? undefined
+                : { connection: value, fallback: line?.fallback ?? true }
+            )
+          }
+          allowDeselect={false}
+          error={!!error}
+          aria-label="Internet line"
+          w={220}
+        />
+      </FieldRow>
+      {line && <SwitchField name={`${path}.fallback`} label="Use the others when it is down" />}
+    </Section>
   );
 };
 

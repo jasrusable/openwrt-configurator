@@ -84,11 +84,12 @@ export const getOpenWrtConfig = ({
       return [...new Set([...acc, ...devices])];
     }, []);
 
+  // A VLAN on a port (eth1.10, a tagged internet line) uses the port itself:
+  // left in a "*" bridge, the LAN would be bridged onto that line.
   const interfacedDevices = (resolvedOncConfig.network?.interface || [])
-    .map((interface_) => {
-      return interface_.device;
-    })
-    .filter((device) => !!device);
+    .map((interface_) => interface_.device)
+    .filter((device): device is string => typeof device === "string" && !!device)
+    .flatMap((device) => [device, device.replace(/\.\d+$/, "")]);
 
   const usedDeviceNames = [...bridgedDevices, ...interfacedDevices];
 

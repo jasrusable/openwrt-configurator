@@ -7,6 +7,7 @@ import { IconChevronRight } from "@tabler/icons-react";
 import { ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { Intent } from "../../../src/intent/schema";
+import { internetIpv6 } from "../../../src/intent/connections";
 import { templateOf } from "../../../src/intent/networkTemplates";
 import { useFreshDevices } from "../data/devices";
 import { useProvision } from "../data/provision";
@@ -52,6 +53,14 @@ export const OverviewPage = () => {
   const router = routerFacts(intent, facts);
   const wan = router && portsOf(router.schema).wan[0];
   const dns = intent.dns.upstream;
+  const several = intent.internet.connections.length > 1;
+  // On a backup: the main line is down and another carries the traffic.
+  const main = live?.connections[0];
+  const carrying = live?.connections.find((c) => c.inUse);
+  const onBackup =
+    several && main && !main.inUse && carrying
+      ? `On ${carrying.name}${main.line ? ` · ${main.name} down ${duration(main.line.since)}` : ""}`
+      : undefined;
   const unexpected = live && [...live.unexpected.interfaces, ...live.unexpected.ssids];
   return (
     <SettingsPage
@@ -72,25 +81,43 @@ export const OverviewPage = () => {
         </Section>
       )}
 
-      <Section title="Internet">
-        <SettingRow
-          label="Connection"
-          description={
-            [
-              live?.internet?.ipv4[0],
-              wan && router ? `on ${wan} of ${router.name}` : undefined,
-              live?.internet?.up && live.internet.uptime !== undefined ? `up ${duration(live.internet.uptime)}` : undefined,
-            ]
-              .filter(Boolean)
-              .join(" · ") || undefined
-          }
-        >
-          <State up={live?.internet?.up}>
-            {live?.internet ? (live.internet.up ? "Connected" : "Down") : connections[intent.internet.connection.type]}
-          </State>
-        </SettingRow>
+      <Section title="Internet" description={onBackup}>
+        {intent.internet.connections.map((c) => {
+          const now = live?.connections.find((x) => x.id === c.id);
+          const port = c.port ?? wan;
+          // With several, mwan3 says whether the line works; else its interface.
+          const works = now?.line ? ["online", "disconnecting"].includes(now.line.state) : now?.up;
+          const since = now?.line?.since ?? (now?.up ? now.uptime : undefined);
+          return (
+            <SettingRow
+              key={c.id}
+              label={c.name || "Unnamed"}
+              description={
+                [
+                  now?.ipv4[0],
+                  port && router ? `on ${port} of ${router.name}` : undefined,
+                  now && since !== undefined ? `${works ? "up" : "down"} ${duration(since)}` : undefined,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || undefined
+              }
+            >
+              <State up={now ? (now.inUse ? true : works ? undefined : false) : undefined}>
+                {!now
+                  ? connections[c.connection.type]
+                  : now.inUse
+                    ? several ? "In use" : "Connected"
+                    : works
+                      ? "Standby"
+                      : now.line?.state === "connecting"
+                        ? "Coming back"
+                        : "Down"}
+              </State>
+            </SettingRow>
+          );
+        })}
         <SettingRow label="IPv6" description={live?.internet?.ipv6[0]}>
-          <State>{intent.internet.ipv6 ? "On" : "Off"}</State>
+          <State>{internetIpv6(intent) ? "On" : "Off"}</State>
         </SettingRow>
         <SettingRow label="DNS">
           <State>

@@ -7,6 +7,7 @@
 export const settingPages: { path: string; page: string; item?: (index: string) => string }[] = [
   { path: "site", page: "system" },
   { path: "admin", page: "system" },
+  { path: "internet.connections", page: "internet", item: (i) => `/internet/${i}` },
   { path: "internet", page: "internet" },
   { path: "firewall.rules", page: "firewall", item: (i) => `/firewall/rules/${i}` },
   { path: "firewall.port_forwards", page: "firewall", item: (i) => `/firewall/${i}` },

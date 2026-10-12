@@ -36,8 +36,10 @@ export type ListSpec<N extends ListName> = {
   newPage?: ReactNode;
   /** What Add creates, given the items already there and the whole draft. */
   newItem: (items: Item<N>[], intent: Intent) => Item<N>;
-  /** Whether an item may be removed (the main network may not). */
-  canRemove?: (item: Item<N>) => boolean;
+  /** Or, when it needs what only a hook can read (the router's ports), a hook giving it. */
+  useNewItem?: () => (items: Item<N>[], intent: Intent) => Item<N>;
+  /** Whether an item may be removed (the main network may not; the only connection may not). */
+  canRemove?: (item: Item<N>, items: Item<N>[]) => boolean;
   /**
    * When adding item `index` changes other settings too (a network's zone):
    * the whole intent after the add. The item is already in the list.
@@ -65,6 +67,8 @@ export type HostPage = {
   title: ReactNode;
   description?: ReactNode;
   before?: ReactNode;
+  /** Settings below the table (the internet's, under its connections). */
+  after?: ReactNode;
 };
 
 const ListTable = <N extends ListName>({
@@ -122,6 +126,7 @@ const ListTable = <N extends ListName>({
         </Group>
         {table}
       </Stack>
+      {page.after}
     </SettingsPage>
   ) : (
     <SettingsPage
@@ -145,7 +150,8 @@ const ListItemPage = <N extends ListName>({
 }) => {
   const navigate = useNavigate();
   const item = useDraftValue(`${list.name}.${index}` as never) as Item<N>;
-  const removable = !list.canRemove || list.canRemove(item);
+  const items = (useDraftValue(list.name as never) ?? []) as Item<N>[];
+  const removable = !list.canRemove || list.canRemove(item, items);
   const back = () => navigate(base);
   // Same width and header position as the list: only the title grows a
   // step, "Networks / Home", whose first part leads back.
@@ -190,11 +196,13 @@ const NewItemPage = <N extends ListName>({
 }) => {
   const navigate = useNavigate();
   const main = useDraft();
+  // A list's spec never changes, so this hook is called on every render or on none.
+  const newItem = list.useNewItem ? list.useNewItem() : list.newItem;
   // Its own draft, over a copy with the item appended. Problems show only
   // once a field is edited, or Add is pressed: not on a blank form.
   const [{ copy, index }] = useState(() => {
     const items: Item<N>[] = main.get(list.name) ?? [];
-    const value = setIn(main.value, list.name, [...items, list.newItem(items, main.value)]);
+    const value = setIn(main.value, list.name, [...items, newItem(items, main.value)]);
     return { copy: new Draft(main.value, value, false), index: items.length };
   });
   const back = () => navigate(base);

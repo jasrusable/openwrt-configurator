@@ -3,14 +3,30 @@
 // never assumes it does: what lines up is matched (interface lan is network
 // lan, an SSID with your SSID's name is that SSID), and what does not is
 // listed as unexpected, never hidden. Pure: tested against recorded output.
+import { ipv6Interface } from "../intent/connections";
 import type { Intent } from "../intent/schema";
 import { DeviceStatus } from "./device";
 
 export type Reachability = DeviceStatus | { hostname: string; error: string };
 
 export type NetworkStatus = {
-  /** From the router's wan and wan6; absent when the router was not reached. */
+  /** Up when any connection is; its addresses the first working one's. Absent when the router was not reached. */
   internet?: { up: boolean; ipv4: string[]; ipv6: string[]; uptime?: number };
+  /**
+   * Each connection, from its interfaces on the router (wan, and wan6 for
+   * the main one), and with several, mwan3's view: whether the line works
+   * (`line`), for how long, and whether it carries traffic now (`inUse`).
+   */
+  connections: {
+    id: string;
+    name: string;
+    up?: boolean;
+    ipv4: string[];
+    ipv6: string[];
+    uptime?: number;
+    line?: { state: string; since: number };
+    inUse?: boolean;
+  }[];
   devices: {
     name: string;
     role: string;
@@ -36,27 +52,61 @@ export const networkStatus = (intent: Intent, devices: Reachability[]): NetworkS
   const router = routerName ? byName.get(routerName) : undefined;
   const routerUp = reached(router) ? router : undefined;
   const iface = (id: string) => routerUp?.interfaces.find((i) => i.id === id);
-  const wan = iface("wan");
-  const wan6 = iface("wan6");
+  const lineOf = (id: string) => routerUp?.lines.find((l) => l.id === id);
+  // A line works when mwan3 says so (still, while it is only failing); with
+  // one connection and no mwan3, when its interface is up.
+  const works = (c: Intent["internet"]["connections"][number]) => {
+    const line = lineOf(c.id);
+    return line ? line.state === "online" || line.state === "disconnecting" : !!iface(c.id)?.up;
+  };
+  const all = intent.internet.connections;
+  const working = all.filter(works);
+  // Which carry traffic now: the first working one in failover; sharing,
+  // every working one, a metered line only when nothing else works.
+  const carrying =
+    intent.internet.mode === "balance" && all.length > 1
+      ? working.some((c) => !c.metered)
+        ? working.filter((c) => !c.metered)
+        : working
+      : working.slice(0, 1);
+  const connections = all.map((c) => {
+    const v4 = iface(c.id);
+    const v6 = iface(ipv6Interface(c));
+    const line = lineOf(c.id);
+    return {
+      id: c.id,
+      name: c.name,
+      ...(routerUp ? { up: !!v4?.up, inUse: carrying.includes(c) } : {}),
+      ipv4: v4?.ipv4 ?? [],
+      ipv6: [...(v4?.ipv6 ?? []), ...(v6?.ipv6 ?? [])],
+      ...(v4?.uptime !== undefined ? { uptime: v4.uptime } : {}),
+      ...(line ? { line: { state: line.state, since: line.since } } : {}),
+    };
+  });
+  const inUse = connections.find((c) => c.inUse);
   const leases = routerUp?.leases ?? [];
   const accessPoints = intent.hardware.filter((d) => d.role === "access-point");
   const radios = accessPoints.flatMap((ap) => {
     const status = byName.get(ap.name);
     return reached(status) ? status.wifi.map((w) => ({ ap: ap.name, ...w })) : [];
   });
-  const known = new Set(["wan", "wan6", ...intent.networks.map((n) => n.id)]);
+  const known = new Set([
+    ...intent.internet.connections.flatMap((c) => [c.id, ipv6Interface(c)]),
+    ...intent.networks.map((n) => n.id),
+  ]);
   const ssids = new Set(intent.wifi.map((w) => w.ssid));
   return {
     ...(routerUp
       ? {
           internet: {
-            up: !!wan?.up,
-            ipv4: wan?.ipv4 ?? [],
-            ipv6: [...(wan?.ipv6 ?? []), ...(wan6?.ipv6 ?? [])],
-            ...(wan?.uptime !== undefined ? { uptime: wan.uptime } : {}),
+            up: !!inUse,
+            ipv4: inUse?.ipv4 ?? [],
+            ipv6: connections[0]?.ipv6 ?? [],
+            ...(inUse?.uptime !== undefined ? { uptime: inUse.uptime } : {}),
           },
         }
       : {}),
+    connections,
     devices: intent.hardware.map((d) => {
       const status = byName.get(d.name);
       return {

@@ -25,14 +25,20 @@
     }
   ],
   "internet": {
-    "connection": {
-      "type": "dhcp"
-    },
-    "ipv6": true,
-    "speed": {
-      "down_mbps": 950,
-      "up_mbps": 950
-    }
+    "connections": [
+      {
+        "id": "wan",
+        "name": "Fibre",
+        "connection": {
+          "type": "dhcp"
+        },
+        "ipv6": true,
+        "speed": {
+          "down_mbps": 950,
+          "up_mbps": 950
+        }
+      }
+    ]
   },
   "dns": {
     "upstream": {

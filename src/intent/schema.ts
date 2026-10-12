@@ -124,6 +124,62 @@ const radio = (defaults: { enabled: boolean }) =>
     .strict()
     .default({});
 
+export const internetModes = ["failover", "balance"] as const;
+
+/** One way to the internet: a line on a port of the router. */
+const internetConnection = z
+  .object({
+    /** Hidden and stable: it names the connection's interfaces (wan and wan6; wanb and wanb6). */
+    id: z.string().regex(/^wan[b-z]?$/, "an id like wan or wanb"),
+    name: z.string().min(1, "required").max(32, "at most 32 characters"),
+    /** The router port it plugs into; unset, the one the router's maker marked WAN. */
+    port: z
+      .string()
+      .regex(/^[A-Za-z0-9._-]+$/, "a port name, like eth2")
+      .optional(),
+    connection: z.discriminatedUnion("type", [
+      z.object({ type: z.literal("dhcp") }).strict(),
+      z
+        .object({
+          type: z.literal("pppoe"),
+          username: z.string().min(1, "required"),
+          password: z.string().min(1, "required"),
+        })
+        .strict(),
+      z
+        .object({
+          type: z.literal("static"),
+          address: ipv4,
+          prefix_length: z.number().int().min(8).max(30),
+          gateway: ipv4,
+          /** Needed unless encrypted DNS is on. */
+          dns: z.array(dnsServer).optional(),
+        })
+        .strict(),
+    ]),
+    /** The provider's VLAN, for a line that must be tagged. */
+    vlan: z.number().int().min(1, "1 to 4094").max(4094, "1 to 4094").optional(),
+    /** The first connection's: the networks' IPv6 comes from it. */
+    ipv6: z.boolean().default(true),
+    ipv6_prefix: z.enum(ipv6Prefixes).default("auto"),
+    /** The line's speed. Set, it turns on smart queueing on this line (less lag under load). */
+    speed: z
+      .object({
+        down_mbps: z.number().positive(),
+        up_mbps: z.number().positive(),
+        line: z.enum(lineTypes).default("fibre"),
+      })
+      .strict()
+      .optional(),
+    /** Sharing traffic: its share of new connections, against the others'. */
+    weight: z.number().int().min(1, "1 to 100").max(100, "1 to 100").default(1),
+    /** Paid by the amount (LTE): checked sparingly, and only a backup, never shared. */
+    metered: z.boolean().default(false),
+    /** A line that is up but too slow to use counts as down. */
+    down_when_slow: z.boolean().default(false),
+  })
+  .strict();
+
 /** A MAC address, as aa:bb:cc:dd:ee:ff. */
 export const macAddress = z
   .string()
@@ -157,7 +213,8 @@ const network = z
     id: z
       .string()
       .regex(/^[a-z][a-z0-9]{0,9}$/, "a short id")
-      .refine((id) => !reservedIds.includes(id), "reserved"),
+      // Not "wan…": the internet connections' interfaces are named so.
+      .refine((id) => !reservedIds.includes(id) && !id.startsWith("wan"), "reserved"),
     name: z.string().min(1, "required").max(32),
 
     /** Absent for the main network, which is untagged on every port. */
@@ -185,6 +242,18 @@ const network = z
      * networks that share theirs, and theirs here: mDNS, reflected.
      */
     share_devices: z.boolean().default(false),
+    /**
+     * With several internet connections: its devices go out this one
+     * (`connection`, by id), or the others too when it is down (`fallback`).
+     * Unset, they go as the internet's mode says.
+     */
+    line: z
+      .object({
+        connection: z.string().min(1, "pick a connection"),
+        fallback: z.boolean().default(true),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -258,41 +327,17 @@ export const intentSchema = z
 
     internet: z
       .object({
-        connection: z.discriminatedUnion("type", [
-          z.object({ type: z.literal("dhcp") }).strict(),
-          z
-            .object({
-              type: z.literal("pppoe"),
-              username: z.string().min(1, "required"),
-              password: z.string().min(1, "required"),
-            })
-            .strict(),
-          z
-            .object({
-              type: z.literal("static"),
-              address: ipv4,
-              prefix_length: z.number().int().min(8).max(30),
-              gateway: ipv4,
-              /** Needed unless encrypted DNS is on. */
-              dns: z.array(dnsServer).optional(),
-            })
-            .strict(),
-        ]),
-        /** The provider's VLAN, for a line that must be tagged. */
-        vlan: z.number().int().min(1, "1 to 4094").max(4094, "1 to 4094").optional(),
-        ipv6: z.boolean().default(true),
-        ipv6_prefix: z.enum(ipv6Prefixes).default("auto"),
+        /**
+         * The ways out, in order: the first is the main one, and gives the
+         * networks their IPv6; with more, `mode` says how they are used.
+         */
+        connections: z.array(internetConnection).min(1, "at least one connection"),
+        /** With two or more: the next takes over when one fails, or they share traffic by weight. */
+        mode: z.enum(internetModes).default("failover"),
         /** Devices on the main network may open ports for themselves (UPnP, NAT-PMP). */
         upnp: z.boolean().default(false),
-        /** The line's speed. Set, it turns on smart queueing (less lag under load). */
-        speed: z
-          .object({
-            down_mbps: z.number().positive(),
-            up_mbps: z.number().positive(),
-            line: z.enum(lineTypes).default("fibre"),
-          })
-          .strict()
-          .optional(),
+        /** Sharing traffic: each device keeps to one line (not only for secure websites). */
+        share_per_device: z.boolean().default(false),
       })
       .strict(),
 
@@ -405,9 +450,18 @@ export const intentSchema = z
     // there. The server applies the same ones: nothing invalid is saved.
     const issue = (path: (string | number)[], message: string) =>
       ctx.addIssue({ code: z.ZodIssueCode.custom, path, message });
-    const { connection } = intent.internet;
-    if (connection.type === "static") {
-      const at = (key: string) => ["internet", "connection", key];
+    intent.networks.forEach((network, i) => {
+      const line = network.line?.connection;
+      if (line && !intent.internet.connections.some((c) => c.id === line)) {
+        issue(["networks", i, "line", "connection"], "pick a connection");
+      }
+    });
+    intent.internet.connections.forEach(({ connection, id }, c) => {
+      if (intent.internet.connections.slice(0, c).some((other) => other.id === id)) {
+        issue(["internet", "connections", c, "id"], "already used by another connection");
+      }
+      if (connection.type !== "static") return;
+      const at = (key: string) => ["internet", "connections", c, "connection", key];
       const address = parseIpv4(connection.address);
       const gateway = parseIpv4(connection.gateway);
       if (address !== undefined) {
@@ -425,7 +479,7 @@ export const intentSchema = z
       if (!connection.dns?.length && intent.dns.upstream.type === "provider") {
         issue(at("dns"), `add a DNS server, or choose other DNS servers under ${where("dns")}`);
       }
-    }
+    });
     // What one setting may be given the rest: the rules the UI greys out by.
     choiceIssues(intent).forEach(({ path, message }) => issue(path, message));
 

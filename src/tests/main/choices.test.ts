@@ -96,9 +96,9 @@ test("why a value is not available, in words the UI and the schema share", (t) =
   t.regex(availability(intent, "radios.5g.enabled").option(false).unavailable!, /only on 5 GHz: give it another band first/);
   t.is(availability(intent, "radios.2g.enabled").option(false).unavailable, undefined);
 
-  intent.internet.ipv6 = false;
+  intent.internet.connections[0].ipv6 = false;
   t.deepEqual(availability(intent, "networks.0.ipv6").unavailable, {
-    reason: "Turn on IPv6 under Internet first.",
+    reason: "Turn on IPv6 for Fibre under Internet first.",
     refuses: false,
   });
 

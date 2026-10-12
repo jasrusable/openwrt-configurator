@@ -1,0 +1,103 @@
+{
+	"interfaces": {
+		"wan": {
+			"age": 1,
+			"online": 0,
+			"offline": 1,
+			"uptime": 37,
+			"score": 0,
+			"lost": 9,
+			"turn": 3,
+			"status": "offline",
+			"enabled": true,
+			"running": true,
+			"tracking": "active",
+			"up": true,
+			"track_ip": [
+				{
+					"ip": "1.1.1.1",
+					"status": "down",
+					"latency": 0,
+					"packetloss": 0
+				},
+				{
+					"ip": "9.9.9.9",
+					"status": "down",
+					"latency": 0,
+					"packetloss": 0
+				},
+				{
+					"ip": "8.8.8.8",
+					"status": "down",
+					"latency": 0,
+					"packetloss": 0
+				}
+			]
+		},
+		"wanb": {
+			"age": 1,
+			"online": 0,
+			"offline": 1,
+			"uptime": 37,
+			"score": 0,
+			"lost": 9,
+			"turn": 3,
+			"status": "offline",
+			"enabled": true,
+			"running": true,
+			"tracking": "active",
+			"up": true,
+			"track_ip": [
+				{
+					"ip": "1.1.1.1",
+					"status": "down",
+					"latency": 0,
+					"packetloss": 0
+				},
+				{
+					"ip": "9.9.9.9",
+					"status": "down",
+					"latency": 0,
+					"packetloss": 0
+				},
+				{
+					"ip": "8.8.8.8",
+					"status": "down",
+					"latency": 0,
+					"packetloss": 0
+				}
+			]
+		}
+	},
+	"connected": {
+		"ipv4": [
+			"192.168.255.255",
+			"198.51.100.0/24",
+			"127.0.0.1",
+			"224.0.0.0/3",
+			"127.0.0.0/8",
+			"192.0.2.0/24",
+			"192.168.0.0/16",
+			"192.168.215.4",
+			"192.0.2.255",
+			"192.0.2.2",
+			"127.255.255.255",
+			"198.51.100.2",
+			"198.51.100.255"
+		],
+		"ipv6": [
+			"fd2a:f458:b922::/64",
+			"fe80::/64"
+		]
+	},
+	"policies": {
+		"ipv4": {
+			"internet": [
+				
+			]
+		},
+		"ipv6": {
+			
+		}
+	}
+}

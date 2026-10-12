@@ -163,7 +163,7 @@ const iface = (config: any, name: string) =>
   config.network.interface.find((i: any) => i[".name"] === name);
 
 test("internet: a tagged line, its queueing counting the tag", (t) => {
-  const config = router((i) => (i.internet.vlan = 10));
+  const config = router((i) => (i.internet.connections[0].vlan = 10));
   t.is(iface(config, "wan").device, "eth1.10", "@wan_port.10 is the WAN port's VLAN 10");
   t.is(config.sqm.queue[0].interface, "eth1", "shaped on the port, under the tag");
   t.like(config.sqm.queue[0], { linklayer: "ethernet", overhead: "42" });
@@ -172,7 +172,7 @@ test("internet: a tagged line, its queueing counting the tag", (t) => {
 
 test("internet: the line type sets queueing's overhead", (t) => {
   const line = (type: string) =>
-    router((i) => (i.internet.speed.line = type)).sqm.queue[0];
+    router((i) => (i.internet.connections[0].speed.line = type)).sqm.queue[0];
   t.like(line("cable"), { linklayer: "ethernet", overhead: "18", tcMPU: 64 });
   t.like(line("vdsl"), { linklayer: "ethernet", overhead: "34" });
   t.like(line("adsl"), { linklayer: "atm", overhead: "44" });
@@ -188,7 +188,7 @@ test("internet: the line type sets queueing's overhead", (t) => {
 
 test("internet: a static address", (t) => {
   const config = router((i) => {
-    i.internet.connection = {
+    i.internet.connections[0].connection = {
       type: "static",
       address: "203.0.113.10",
       prefix_length: 29,
@@ -208,41 +208,41 @@ test("internet: a static address", (t) => {
 
   const issues = (connection: any, dohOn = true) => {
     const intent = sample();
-    intent.internet.connection = { type: "static", prefix_length: 29, ...connection };
+    intent.internet.connections[0].connection = { type: "static", prefix_length: 29, ...connection };
     if (!dohOn) intent.dns.upstream = { type: "provider" };
     return intentSchema.safeParse(intent).error?.issues.map(
       (i) => `${i.path.join(".")}: ${i.message}`
     );
   };
   t.deepEqual(issues({ address: "203.0.113.8", gateway: "203.0.113.9" }), [
-    "internet.connection.address: the subnet's own or broadcast address, not a host's",
+    "internet.connections.0.connection.address: the subnet's own or broadcast address, not a host's",
   ]);
   t.deepEqual(issues({ address: "203.0.113.10", gateway: "203.0.113.20" }), [
-    "internet.connection.gateway: not in the address's subnet",
+    "internet.connections.0.connection.gateway: not in the address's subnet",
   ]);
   t.deepEqual(issues({ address: "203.0.113.10", gateway: "203.0.113.9" }, false), [
-    "internet.connection.dns: add a DNS server, or choose other DNS servers under DNS & DHCP",
+    "internet.connections.0.connection.dns: add a DNS server, or choose other DNS servers under DNS & DHCP",
   ]);
   t.deepEqual(issues({ address: "203.0.113.300", gateway: "203.0.113.9" }), [
-    "internet.connection.address: an IPv4 address, like 203.0.113.10",
+    "internet.connections.0.connection.address: an IPv4 address, like 203.0.113.10",
   ]);
 });
 
 test("internet: IPv6 asks for the prefix size; PPPoE gets an explicit wan6", (t) => {
   const config = router((i) => {
-    i.internet.connection = { type: "pppoe", username: "u", password: "p" };
-    i.internet.ipv6_prefix = "56";
+    i.internet.connections[0].connection = { type: "pppoe", username: "u", password: "p" };
+    i.internet.connections[0].ipv6_prefix = "56";
   });
   t.like(iface(config, "wan"), { proto: "pppoe", ipv6: "1" });
   t.like(iface(config, "wan6"), { device: "@wan", proto: "dhcpv6", reqprefix: "56" });
   t.false("reqprefix" in iface(router(() => {}), "wan6"), "automatic asks for nothing");
 
   const intent = sample();
-  intent.internet.ipv6_prefix = "64";
+  intent.internet.connections[0].ipv6_prefix = "64";
   intent.networks[1].ipv6 = true;
   t.deepEqual(
     intentSchema.safeParse(intent).error?.issues.map((i) => `${i.path.join(".")}: ${i.message}`),
-    ["internet.ipv6_prefix: 2 networks have IPv6, and a /64 has room for 1."]
+    ["internet.connections.0.ipv6_prefix: 2 networks have IPv6, and a /64 has room for 1."]
   );
 });
 
@@ -250,7 +250,7 @@ test("packages are fixed per role; a setting off is config, not a removal", (t) 
   const packages = (intent: any) =>
     (compile(intent).package_profiles ?? []).flatMap((p: any) => p.packages);
   const off = sample();
-  delete off.internet.speed;
+  delete off.internet.connections[0].speed;
   off.dns.upstream = { type: "provider" };
   t.deepEqual(packages(off), packages(sample()));
 
@@ -285,14 +285,14 @@ test("IPv6: per network, announced only with a public prefix, and only with the 
   t.regex(on.network.globals[0].ula_prefix, /^fd/);
 
   // No IPv6 on the internet side: no network gets any, not even local-only.
-  const off = router((i) => (i.internet.ipv6 = false));
+  const off = router((i) => (i.internet.connections[0].ipv6 = false));
   t.false("ip6assign" in off.network.interface.find((i: any) => i[".name"] === "lan"));
   t.like(off.dhcp.dhcp.find((d: any) => d.interface === "lan"), { ra: "disabled", dhcpv6: "disabled" });
   t.is(off.network.globals[0].ula_prefix, "");
   t.false(off.network.interface.some((i: any) => i[".name"] === "wan6"));
 
   const intent = sample();
-  intent.internet.ipv6 = false;
+  intent.internet.connections[0].ipv6 = false;
   const ap = onDevice("home-ap-1", "zyxel,nwa50ax-pro", intent);
   t.false(ap.network.interface.some((i: any) => i[".name"] === "lan6"), "the AP takes no IPv6 address either");
 });
@@ -482,7 +482,7 @@ test("patches apply only where they say: by model, by role", (t) => {
     "/usr/libexec/onc/ubihealthd-config",
   ]);
   t.deepEqual(
-    files("home-router", "friendlyarm,nanopi-r6s", (i) => (i.internet.ipv6 = false)).filter(
+    files("home-router", "friendlyarm,nanopi-r6s", (i) => (i.internet.connections[0].ipv6 = false)).filter(
       (p: string) => !p.includes("avahi")
     ),
     ["/usr/libexec/platform/packet-steering.sh", "/usr/libexec/onc/ubihealthd-config"],
@@ -686,5 +686,107 @@ test("services: each role's kept enabled and started; those that must run are ch
   t.false(
     running(services("home-router", "friendlyarm,nanopi-r6s", (i) => (i.internet.upnp = false))).includes("miniupnpd"),
     "UPnP off: enabled, but nothing should run"
+  );
+});
+
+test("two internet connections: a line on a LAN port, mwan3 over both, queueing on each", (t) => {
+  const twoLines = (mode: "failover" | "balance") => {
+    const intent = sample();
+    intent.internet.mode = mode;
+    intent.internet.connections.push({
+      id: "wanb",
+      name: "LTE",
+      port: "eth2",
+      connection: { type: "dhcp" },
+      ipv6: true,
+      speed: { down_mbps: 50, up_mbps: 10 },
+      weight: 3,
+    });
+    return intent;
+  };
+  const config = onDevice("home-router", "friendlyarm,nanopi-r6s", twoLines("failover"));
+  const iface = (name: string) => config.network.interface.find((i: any) => i[".name"] === name);
+  t.like(iface("wan"), { device: "eth1", metric: 10 });
+  t.like(iface("wanb"), { device: "eth2", metric: 20 });
+  t.is(iface("wanb6"), undefined, "IPv6 from the first connection only");
+  t.false(config.network.device[0].ports.includes("eth2"), "its port leaves the LAN bridge");
+  t.deepEqual(
+    config.sqm.queue.map((q: any) => [q[".name"], q.interface, q.download]),
+    [
+      ["wan", "eth1", "950000"],
+      ["wanb", "eth2", "50000"],
+    ]
+  );
+  t.deepEqual(config.firewall.zone.find((z: any) => z.name === "wan").network, ["wan", "wan6", "wanb"]);
+  t.deepEqual(config.mwan3.member.map((m: any) => [m.interface, m.metric]), [["wan", 1], ["wanb", 2]]);
+  t.deepEqual(config.mwan3.policy[0].use_member, ["wan_m1", "wanb_m2"]);
+  t.deepEqual(config.mwan3.rule.map((r: any) => r[".name"]), ["default"]);
+
+  const shared = onDevice("home-router", "friendlyarm,nanopi-r6s", twoLines("balance"));
+  t.deepEqual(shared.mwan3.member.map((m: any) => [m.metric, m.weight]), [[1, 1], [1, 3]]);
+  t.deepEqual(shared.mwan3.rule.map((r: any) => r[".name"]), ["https", "default"], "secure sites keep to one line");
+
+  const packages = compile(twoLines("failover")).package_profiles!.flatMap((p: any) => p.packages);
+  t.true(packages.includes("mwan3"));
+  t.false(compile().package_profiles!.flatMap((p: any) => p.packages).includes("mwan3"), "one line: no mwan3");
+  t.is(onDevice("home-router", "friendlyarm,nanopi-r6s").mwan3, undefined);
+});
+
+test("connections: one per port, the WAN port once, ids of their own", (t) => {
+  const issues = (change: (i: any) => void) => {
+    const intent = sample();
+    change(intent);
+    const result = intentSchema.safeParse(intent);
+    return result.success ? [] : result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
+  };
+  const second = { id: "wanb", name: "LTE", connection: { type: "dhcp" } };
+  t.deepEqual(issues((i) => i.internet.connections.push(second)), [
+    "internet.connections.1.port: Fibre uses the WAN port.",
+  ]);
+  t.deepEqual(
+    issues((i) => {
+      i.internet.connections[0].port = "eth2";
+      i.internet.connections.push({ ...second, port: "eth2" });
+    }),
+    ["internet.connections.1.port: Fibre uses it."]
+  );
+  t.true(issues((i) => (i.networks[1].id = "wanx")).some((m) => m.endsWith("reserved")));
+});
+
+test("several lines: a network keeps to one, a metered line is a last resort, a slow line counts as down, devices keep to a line", (t) => {
+  const intent = sample();
+  intent.internet.mode = "balance";
+  intent.internet.share_per_device = true;
+  intent.internet.connections.push({
+    id: "wanb",
+    name: "LTE",
+    port: "eth2",
+    connection: { type: "dhcp" },
+    ipv6: false,
+    ipv6_prefix: "auto",
+    weight: 1,
+    metered: true,
+    down_when_slow: true,
+  });
+  intent.networks[1].line = { connection: "wanb", fallback: false };
+  const { mwan3 } = onDevice("home-router", "friendlyarm,nanopi-r6s", intent);
+  const policy = (name: string) => mwan3.policy.find((p: any) => p[".name"] === name).use_member;
+  const memberOf = (name: string) => mwan3.member.find((m: any) => m[".name"] === name);
+  t.deepEqual(policy("internet").map((m: string) => memberOf(m).metric), [1, 2], "the metered line only when the other is down");
+  t.deepEqual(policy("via_guest"), ["wanb_m1"], "guests: only the LTE");
+  t.like(mwan3.rule[0], { ".name": "net_guest", src_ip: intent.networks[1].subnet, use_policy: "via_guest" });
+  t.like(mwan3.rule.at(-1), { ".name": "default", sticky: true, timeout: 600 });
+  t.false(mwan3.rule.some((r: any) => r[".name"] === "https"), "per device covers secure sites too");
+  const lte = mwan3.interface.find((i: any) => i[".name"] === "wanb");
+  t.like(lte, { interval: 30, track_ip: ["1.1.1.1"], check_quality: true, failure_latency: 500, count: 5 });
+  t.is(mwan3.interface.find((i: any) => i[".name"] === "wan").check_quality, undefined);
+
+  intent.networks[1].line = { connection: "wanb", fallback: true };
+  const fallback = onDevice("home-router", "friendlyarm,nanopi-r6s", intent).mwan3;
+  t.deepEqual(fallback.policy.find((p: any) => p[".name"] === "via_guest").use_member, ["wanb_m1", "wan_m2"]);
+
+  intent.networks[1].line = { connection: "wanz", fallback: true };
+  t.true(
+    (intentSchema.safeParse(intent) as any).error.issues.some((i: any) => i.path.join(".") === "networks.1.line.connection")
   );
 });
