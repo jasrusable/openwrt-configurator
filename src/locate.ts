@@ -95,10 +95,16 @@ const macs: Probe<string[]> = {
  * lease file), so what follows (the apply, its last reconnect) uses this.
  */
 const answeredOn: Probe<string | undefined> = {
-  command: 'echo "$SSH_CONNECTION"',
+  // Over IPv4, that address. Over IPv6 (the Mac resolved the name to its
+  // global address), the device's own IPv4 instead: an IPv6 address from
+  // DHCPv6 or SLAAC goes when an apply rebuilds the device's network, and
+  // with it the apply's last reconnect (seen on a real access point).
+  command:
+    'set -- $SSH_CONNECTION; case "$3" in *:*) ip -4 -o addr show 2>/dev/null | awk \'$2 != "lo" {split($4, a, "/"); print a[1]; exit}\' ;; *) echo "$3" ;; esac',
   parse: ({ stdout }) => {
-    const server = stdout.trim().split(/\s+/)[2];
-    return server && isAddress(server) ? server : undefined;
+    const address = stdout.trim();
+    // IPv4 only: never an address that could go mid-apply.
+    return /^\d{1,3}(\.\d{1,3}){3}$/.test(address) && isAddress(address) ? address : undefined;
   },
 };
 

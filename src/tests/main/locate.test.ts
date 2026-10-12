@@ -33,7 +33,7 @@ const session = (m: Machine): Session => ({
         : part.includes("neigh")
         ? m.neighbours ?? ""
         : part.includes("SSH_CONNECTION")
-        ? (m.ip ? `10.0.0.200 51515 ${m.ip} 22` : "")
+        ? m.ip ?? ""
         : "";
     return { stdout: parts.map((p) => `${answer(p)}\n__ONC_PROBE__0\n`).join(""), stderr: "", code: 0 };
   },
