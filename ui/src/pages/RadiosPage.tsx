@@ -3,6 +3,7 @@
 import { Badge, Button, Text } from "@mantine/core";
 import { useNavigate } from "react-router";
 import { channelWidths } from "../../../src/intent/choices";
+import { placeName, where } from "../../../src/intent/places";
 import { Band } from "../../../src/intent/schema";
 import { useIssues } from "../form/draft";
 import {
@@ -31,7 +32,7 @@ const bands: { band: Band; label: string; description: string }[] = [
     band: "6g",
     label: "6 GHz",
     description:
-      "Fastest, shortest range (Wi-Fi 6E and 7). Only on access points that have it, and always WPA3.",
+      "Fastest, shortest range. Wi-Fi 6E and 7, WPA3 only.",
   },
 ];
 
@@ -80,7 +81,7 @@ const RadiosTable = () => {
   return (
     <SettingsPage
       title="Radios"
-      description="Each band's radios, on every access point. Channels are picked automatically; to pin one, open the access point under Hardware."
+      description={`Each band, on every access point.`}
     >
       <DataTable
         rowCount={bands.length}
@@ -165,7 +166,7 @@ const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
           label="Channel width"
           description={
             band === "2g"
-              ? "Wider is faster but crowds neighbours; 2.4 GHz is at most 40 MHz, and 20 MHz is best where there are many networks."
+              ? "20 MHz is best where there are many networks."
               : "Wider is faster but has fewer clear channels. Auto picks the band's usual width."
           }
           options={widths}
@@ -173,33 +174,33 @@ const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
         <SegmentedField
           name={at("power")}
           label="Transmit power"
-          description="Lower power keeps devices on the nearest access point, which helps with several of them. Auto is the most your country allows."
+          description="Lower helps devices pick the nearest access point."
           options={powers}
         />
         <SegmentedField
           name={at("cell_density")}
           label="Cell density"
-          description="Higher keeps slow, far-away devices from holding the air: faster for everyone, a little less range. Off lets very old devices connect."
+          description="Higher keeps slow, distant devices off the air."
           options={densities}
         />
         <SegmentedField
           name={at("airtime")}
           label="Airtime"
-          description="What this band's Wi-Fi favours, for every SSID on it. Low latency keeps calls and games snappy while something downloads; throughput moves the most data. Balanced is OpenWrt's own."
+          description="Snappy calls and games, or the most data."
           options={airtimes}
         />
       </Section>
       <Section title="Channel">
         <SettingRow
           label="Channel"
-          description="Each access point picks the clearest channel when it starts. To pin one, open the access point under Hardware."
+          description={`Picked automatically; pin one under ${where("hardware")}.`}
         >
           <Button
             variant="subtle"
             size="compact-sm"
             onClick={() => navigate("/hardware")}
           >
-            Auto · Hardware
+            Auto · {placeName("hardware")}
           </Button>
         </SettingRow>
       </Section>

@@ -20,7 +20,7 @@ import {
 import { ReactNode, useMemo, useRef } from "react";
 import { SettingRow } from "../kit/layout";
 import { availability, Availability, inUse } from "../../../src/intent/choices";
-import { fieldInfo } from "../../../src/intent/fields";
+import { explainFor, fieldInfo } from "../../../src/intent/fields";
 import { parseSubnet } from "../../../src/intent/schema";
 import { IntentField, useDraft, useDraftValue, useFieldError } from "./draft";
 
@@ -47,9 +47,14 @@ const FieldRow = ({
   children,
   ...props
 }: Parameters<typeof SettingRow>[0] & { name: IntentField; unavailable?: string }) => {
-  const info = fieldInfo(name.split("."));
+  const path = name.split(".");
+  const intent = useDraftValue();
   return (
-    <SettingRow {...props} openwrt={props.openwrt ?? info?.openwrt} explain={info?.explain}>
+    <SettingRow
+      {...props}
+      openwrt={props.openwrt ?? fieldInfo(path)?.openwrt}
+      explain={explainFor(path, intent)}
+    >
       <Because reason={unavailable}>{children}</Because>
     </SettingRow>
   );

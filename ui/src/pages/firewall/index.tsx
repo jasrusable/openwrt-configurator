@@ -1,14 +1,15 @@
 // The firewall's own settings, as tabs above each page's title: port
 // forwards and rules. Who may reach what is each network's access.
 import { useParams } from "react-router";
+import { placeName } from "../../../../src/intent/places";
 import { SectionNav } from "../../kit/layout";
 import { SectionTabs } from "../../kit/SectionTabs";
 import { PortForwardsPage } from "./PortForwardsPage";
 import { RulesPage } from "./RulesPage";
 
 const tabs = [
-  { value: "port-forwards", label: "Port forwards", path: "/firewall" },
-  { value: "rules", label: "Rules", path: "/firewall/rules" },
+  { value: "port-forwards", label: placeName("portForwards"), path: "/firewall" },
+  { value: "rules", label: placeName("rules"), path: "/firewall/rules" },
 ];
 
 export const FirewallPage = () => {

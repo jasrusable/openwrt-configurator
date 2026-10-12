@@ -1,8 +1,8 @@
 // Page structure, in the style of macOS System Settings: a page is a title
 // and grouped sections; a section is a card of rows; a row is a label (and
 // an explanation) on the left, its control on the right.
-import { Anchor, Box, Group, Paper, Stack, Text, ThemeIcon, Title, Tooltip } from "@mantine/core";
-import { IconInfoCircle } from "@tabler/icons-react";
+import { Anchor, Box, Group, Stack, Text, ThemeIcon, Title, Tooltip } from "@mantine/core";
+import { IconInbox, IconInfoCircle } from "@tabler/icons-react";
 import { createContext, ReactNode, useContext } from "react";
 import "./kit.css";
 
@@ -13,6 +13,18 @@ export type Crumb = { label: ReactNode; onClick?: () => void };
  * tabs, so a section's pages, and the items nested in them, share them.
  */
 export const SectionNav = createContext<ReactNode>(null);
+
+/** A page's icon on its colour, as macOS Settings draws them: the sidebar, and beside a page's title. */
+export type PageMark = { icon: typeof IconInbox; color: string };
+
+export const AppIcon = ({ icon: Icon, color, size = 22 }: PageMark & { size?: number }) => (
+  <ThemeIcon size={size} radius={Math.round(size * 0.27)} color={color} variant="filled" aria-hidden>
+    <Icon size={Math.round(size * 0.66)} stroke={1.9} />
+  </ThemeIcon>
+);
+
+/** The current page's mark, set by the app shell from the route. */
+export const CurrentPageMark = createContext<PageMark | undefined>(undefined);
 
 export const SettingsPage = ({
   title,
@@ -30,13 +42,14 @@ export const SettingsPage = ({
   actions?: ReactNode;
   children: ReactNode;
 }) => (
-  // One width for every page, tables or not, so nothing shifts between them.
-  <Stack gap="xl" maw={1040} mx="auto" py="lg" px="md">
+  // One width for every page, tables or not, so nothing shifts between them;
+  // narrow enough that a label and its control read as one row.
+  <Stack gap="xl" maw={760} mx="auto" py="lg" px="md">
     <Box>
       <SectionNavSlot />
       <Group justify="space-between" wrap="nowrap" gap="md">
         <Title order={2}>
-          {Array.isArray(title) ? <Crumbs crumbs={title} /> : title}
+          {Array.isArray(title) ? <Crumbs crumbs={title} /> : <Titled>{title}</Titled>}
         </Title>
         {actions && (
           <Group gap="xs" wrap="nowrap">
@@ -53,6 +66,19 @@ export const SettingsPage = ({
     {children}
   </Stack>
 );
+
+/** A page's own title with its mark; an item's page ("Networks / Home") has none. */
+const Titled = ({ children }: { children: ReactNode }) => {
+  const mark = useContext(CurrentPageMark);
+  return mark ? (
+    <Group gap={12} wrap="nowrap" component="span">
+      <AppIcon {...mark} size={30} />
+      <span>{children}</span>
+    </Group>
+  ) : (
+    <>{children}</>
+  );
+};
 
 const SectionNavSlot = () => {
   const nav = useContext(SectionNav);
@@ -101,20 +127,18 @@ export const Section = ({
   children: ReactNode;
 }) => {
   return (
-    <Stack gap={6}>
+    <Stack gap={8}>
       {(title || actions) && (
-        <Group justify="space-between" px={4}>
+        <Group justify="space-between" px={4} mih={22}>
           {title && (
-            <Text fw={600} size="sm">
+            <Text fw={600} size="sm" className="onc-section-title">
               {title}
             </Text>
           )}
           {actions}
         </Group>
       )}
-      <Paper withBorder radius="lg" className="onc-rows">
-        {children}
-      </Paper>
+      <div className="onc-card onc-rows">{children}</div>
       {description && (
         <Text size="xs" c="dimmed" px={4}>
           {description}
@@ -141,7 +165,7 @@ export const SettingRow = ({
   explain?: string;
   children?: ReactNode;
 }) => (
-  <Group justify="space-between" wrap="nowrap" gap="md" px="md" py="sm" mih={52}>
+  <Group justify="space-between" gap="md" px="md" py={10} mih={52} className="onc-row">
     <Box style={{ flex: 1, minWidth: 0 }}>
       <Group gap={4} wrap="nowrap">
         <Text size="sm">{label}</Text>
@@ -186,6 +210,16 @@ export const SettingRow = ({
         </Text>
       )}
     </Box>
-    <Box style={{ flexShrink: 0, maxWidth: "60%" }}>{children}</Box>
+    {children && <Box className="onc-row-control">{children}</Box>}
   </Group>
+);
+
+/** Nothing here yet: a quiet icon and a line, inside a card or a table. */
+export const EmptyState = ({ icon: Icon = IconInbox, children }: { icon?: typeof IconInbox; children: ReactNode }) => (
+  <Stack align="center" gap={6} py="xl" px="md">
+    <Icon size={28} stroke={1.4} color="var(--onc-label-2)" />
+    <Text size="sm" c="dimmed" ta="center">
+      {children}
+    </Text>
+  </Stack>
 );

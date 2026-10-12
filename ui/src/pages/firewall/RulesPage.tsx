@@ -34,7 +34,7 @@ const rules = defineList({
   name: "firewall.rules",
   title: "Rules",
   description:
-    "Exceptions to what each network may reach (Networks › Access), applied in order.",
+    `Exceptions to each network's access, in order.`,
   addLabel: "Add rule",
   newItem: (_, intent) => ({
     name: "",

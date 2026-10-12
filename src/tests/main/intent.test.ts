@@ -359,6 +359,14 @@ test("SSIDs: security mode, hidden, off, and fast roaming", (t) => {
   t.true(slow.bss_transition, "802.11v stays on");
   t.false("ft_over_ds" in iface(() => {}), "OpenWrt's default: over the air");
   t.like(iface((w) => (w.roaming_assistance = false)), { ieee80211k: false, bss_transition: false });
+  // Steering Off turns neighbour lists off on every SSID, whatever each says.
+  const offEverywhere = sample();
+  offEverywhere.roaming = { steering: "off", prefer_5g: false };
+  t.true(
+    onDevice("home-ap-1", "zyxel,nwa50ax-pro", offEverywhere).wireless["wifi-iface"].every(
+      (w: any) => w.ieee80211k === false && w.bss_transition === false
+    )
+  );
 
   // usteer: passive, and only for SSIDs that give neighbour reports.
   const usteer = (change: (intent: any) => void) => {
@@ -370,6 +378,41 @@ test("SSIDs: security mode, hidden, off, and fast roaming", (t) => {
   t.deepEqual(usteer(() => {}).ssid_list, ["Home", "Home Guests"]);
   t.deepEqual(usteer((i) => (i.wifi[1].roaming_assistance = false)).ssid_list, ["Home"]);
   t.deepEqual(usteer((i) => (i.wifi[0].enabled = false)).ssid_list, ["Home Guests"]);
+  // An empty ssid_list would mean every SSID: with none taking part, usteer stops.
+  t.like(
+    usteer((i) => i.wifi.forEach((w: any) => (w.roaming_assistance = false))),
+    { enabled: false }
+  );
+
+  // Wi-Fi › Roaming: off stops usteer and neighbour lists; advise moves
+  // nothing; nudge asks; push asks, then disconnects. aggressiveness is
+  // always set: its default (3) would kick.
+  const roaming = (steering: string, prefer_5g = false) =>
+    usteer((i) => (i.roaming = { steering, prefer_5g }));
+  t.like(roaming("off"), { enabled: false });
+  t.like(roaming("advise"), {
+    enabled: true,
+    aggressiveness: "1",
+    roam_scan_snr: "0",
+    roam_trigger_snr: "0",
+    min_snr: "0",
+    band_steering_interval: "0",
+  });
+  t.like(roaming("nudge"), {
+    aggressiveness: "1",
+    roam_scan_snr: "-70",
+    roam_trigger_snr: "-75",
+    roam_kick_delay: "10000",
+    min_snr: "0",
+  });
+  t.like(roaming("push"), { aggressiveness: "3", roam_trigger_snr: "-75", min_snr: "-82" });
+  t.like(roaming("advise", true), {
+    aggressiveness: "1",
+    roam_trigger_snr: "0",
+    roam_kick_delay: "10000",
+    band_steering_interval: "30000",
+    band_steering_min_snr: "-60",
+  });
 
   const intent = sample();
   intent.wifi[0].security = "wpa3";

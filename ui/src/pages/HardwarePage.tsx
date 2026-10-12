@@ -30,7 +30,7 @@ const hardware = defineList({
   name: "hardware",
   title: "Hardware",
   description:
-    "Your router and access points. Each is set up entirely from these settings; what it is (model, ports, radios) is read from it when settings are applied.",
+    "Your router and access points.",
   addLabel: "Add access point",
   newItem: () => ({ name: "", role: "access-point" as const }),
   itemTitle: (i) => <Value name={`hardware.${i}.name`} fallback="New access point" />,
@@ -86,7 +86,7 @@ const hardware = defineList({
         <SegmentedField
           name={`hardware.${i}.role`}
           label="Role"
-          description="The router connects to the internet and runs the networks; access points broadcast Wi-Fi."
+          description="The router runs the networks; access points broadcast Wi-Fi."
           options={roles}
         />
         <TextField
@@ -99,7 +99,7 @@ const hardware = defineList({
       <When name={`hardware.${i}.role`} is="access-point">
         <Section
           title="Wi-Fi"
-          description="Pin a channel only to avoid a crowded one; automatic picks for you."
+          description="Pin one only to avoid a crowded channel."
         >
           <SelectField
             name={`hardware.${i}.wifi.channel.2g`}

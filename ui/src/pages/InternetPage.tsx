@@ -98,19 +98,19 @@ export const InternetPage = () => (
         <SelectField
           name="internet.ipv6_prefix"
           label="Prefix size"
-          description="How much address space to ask your provider for. Each network with IPv6 needs a /64."
+          description="Each network with IPv6 needs a /64."
           options={[...prefixes]}
         />
       </When>
     </Section>
-    <Section description="Only devices on the main network, only for themselves, and only ports above 1024. Guest and other networks cannot use it.">
+    <Section description="Main network only; devices open ports for themselves.">
       <SwitchField
         name="internet.upnp"
         label="UPnP and NAT-PMP"
-        description="Lets games and apps open the ports they need, without port forwards."
+        description="Lets games and apps open the ports they need."
       />
     </Section>
-    <Section description="Shapes traffic to your line's speed, so calls and games stay smooth while something downloads. Set it a little below what your line really gives.">
+    <Section description="Keeps calls smooth under load. Set just below your line's speed.">
       <OptionalField
         name="internet.speed"
         label="Smart queueing"
@@ -121,7 +121,7 @@ export const InternetPage = () => (
         <SelectField
           name="internet.speed.line"
           label="Line type"
-          description="What the line adds to every packet, so queueing counts it."
+          description="Sets the per-packet overhead."
           options={[...lines]}
         />
       </OptionalField>

@@ -13,6 +13,7 @@ export const settingPages: { path: string; page: string; item?: (index: string) 
   { path: "networks", page: "networks", item: (i) => `/networks/${i}` },
   { path: "wifi", page: "wifi", item: (i) => `/wifi/${i}` },
   { path: "radios", page: "wifi", item: (band) => `/wifi/radios/${band}` },
+  { path: "roaming", page: "wifi", item: () => "/wifi/roaming" },
   { path: "dns", page: "dns" },
   { path: "hardware", page: "hardware", item: (i) => `/hardware/${i}` },
 ];

@@ -17,28 +17,28 @@ const countryOptions = countries
 export const SystemPage = () => (
   <SettingsPage
     title="System"
-    description="Your network as a whole: its name, time and how devices are administered."
+    description="Name, time and administration."
   >
     <Section>
       <TextField name="site.name" label="Name" />
       <SelectField
         name="site.country"
         label="Country"
-        description="Sets which Wi-Fi channels and power levels are allowed; access points announce it to clients (802.11d)."
+        description="Sets the Wi-Fi channels and power allowed."
         options={countryOptions}
         searchable
       />
       <SelectField
         name="site.timezone"
         label="Time zone"
-        description="Access points also broadcast it, so clients can set their clocks (802.11v)."
+        description="Wi-Fi devices can set their clocks from it."
         options={timezoneOptions}
         searchable
       />
     </Section>
     <Section
       title="Administration"
-      description="How this app signs in to your devices to configure them."
+      description="How this app signs in to your devices."
     >
       <TextField
         name="admin.ssh_key_path"

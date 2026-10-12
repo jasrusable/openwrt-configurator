@@ -1,6 +1,18 @@
 // What each intent setting is called and what it does, for people: the
 // provision page explains a change with it. Patterns use * for a list index;
-// a pattern for a list item names the item from its value.
+// a pattern for a list item names the item from its value. Where a setting's
+// effect depends on others (roaming assistance on Steering), its explainer
+// is a function of the intent, and its numbers come from where the compiler
+// takes them (roaming.ts), so the text says what the devices will do.
+import { where } from "./places";
+import {
+  describePrefer5g,
+  describeSteering,
+  describeSteeringLevels,
+  steeringLabels,
+} from "./roaming";
+import type { Intent } from "./schema";
+
 export type FieldInfo = {
   path: string;
   label: string | ((item: any) => string);
@@ -10,8 +22,12 @@ export type FieldInfo = {
   unit?: string;
   /** What OpenWrt calls it, for people who know LuCI: the foot of the setting's ⓘ tooltip. */
   openwrt?: string;
-  /** What it does on the devices, in more depth than its description: the body of the tooltip. */
-  explain?: string;
+  /**
+   * What it does on the devices, in more depth than its description: the
+   * body of the tooltip. A function when it depends on other settings; `at`
+   * holds what each * in the path matched.
+   */
+  explain?: string | ((intent: Intent, at: string[]) => string);
 };
 
 export const fields: FieldInfo[] = [
@@ -272,9 +288,15 @@ export const fields: FieldInfo[] = [
     path: "wifi.*.roaming_assistance",
     label: "Roaming assistance",
     description: "Access points tell devices about their neighbours (802.11k/v).",
-    openwrt: "802.11k/v · usteer",
-    explain:
-      "Access points tell devices about their neighbours (802.11k) and suggest a better one as the signal fades (802.11v), shared between access points by usteer. usteer only advises: it never kicks a device off.",
+    openwrt: "802.11k/v · usteer ssid_list",
+    explain: (intent, [i]) => {
+      const level = intent.roaming?.steering ?? "advise";
+      const base =
+        "Access points tell devices about their neighbours (802.11k) and can suggest a better one (802.11v), with usteer sharing what each access point sees.";
+      return level !== "off" && intent.wifi?.[Number(i)]?.roaming_assistance === false
+        ? `${base} Off for this SSID: no neighbour lists, and steering (${where("roaming")}) leaves its devices alone.`
+        : `${base} Steering is ${steeringLabels[level]} (${where("roaming")}): ${describeSteering(level)}`;
+    },
   },
   {
     path: "wifi.*.fast_roaming",
@@ -294,7 +316,22 @@ export const fields: FieldInfo[] = [
       "Devices on this SSID cannot reach each other directly on the same access point and band, only the internet and what the network's access allows. Good for guests.",
   },
   { path: "radios", label: "Radios" },
-  { path: "radios.2g", label: "2.4 GHz" },
+  { path: "roaming", label: "Roaming" },
+  {
+    path: "roaming.steering",
+    label: "Steering",
+    description: "How firmly access points move devices to a better access point or band.",
+    openwrt: "usteer roam_trigger_snr, aggressiveness, min_snr",
+    explain: describeSteeringLevels,
+  },
+  {
+    path: "roaming.prefer_5g",
+    label: "Prefer 5 GHz",
+    description: "Moves dual-band devices with a strong signal off 2.4 GHz.",
+    openwrt: "usteer band steering",
+    explain: (intent) => describePrefer5g(intent.roaming?.steering ?? "advise"),
+  },
+
   { path: "radios.5g", label: "5 GHz" },
   { path: "radios.6g", label: "6 GHz" },
   { path: "radios.*.enabled", label: "Enabled" },
@@ -430,3 +467,11 @@ const matches = (pattern: string, path: string[]) => {
 
 export const fieldInfo = (path: string[]) =>
   fields.find((field) => matches(field.path, path));
+
+/** A setting's explainer, given the rest of the intent. */
+export const explainFor = (path: string[], intent: Intent) => {
+  const info = fieldInfo(path);
+  if (typeof info?.explain !== "function") return info?.explain;
+  const at = info.path.split(".").flatMap((part, i) => (part === "*" ? [path[i]] : []));
+  return info.explain(intent, at);
+};

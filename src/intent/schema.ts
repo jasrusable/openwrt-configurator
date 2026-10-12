@@ -5,6 +5,8 @@
 import { z } from "zod";
 import { choiceIssues } from "./choices";
 import { countries } from "./countries";
+import { where } from "./places";
+import { steeringLevels } from "./roaming";
 import {
   accessSchema,
   anywhere,
@@ -332,6 +334,22 @@ export const intentSchema = z
       .strict()
       .default({}),
 
+    /**
+     * How the access points move devices to a better access point or band
+     * (usteer), on the SSIDs with roaming assistance. Off gives no neighbour
+     * lists at all; advise only gives them; nudge asks a fading device to
+     * move; push also disconnects one that will not, or that stays too weak.
+     * The values per level are in roaming.ts.
+     */
+    roaming: z
+      .object({
+        steering: z.enum(steeringLevels).default("advise"),
+        /** Ask dual-band devices with a strong signal to leave 2.4 GHz. */
+        prefer_5g: z.boolean().default(false),
+      })
+      .strict()
+      .default({}),
+
     dns: z
       .object({
         /**
@@ -394,7 +412,7 @@ export const intentSchema = z
         }
       }
       if (!connection.dns?.length && intent.dns.upstream.type === "provider") {
-        issue(at("dns"), "add a DNS server, or choose other DNS servers under DNS & DHCP");
+        issue(at("dns"), `add a DNS server, or choose other DNS servers under ${where("dns")}`);
       }
     }
     // What one setting may be given the rest: the rules the UI greys out by.
@@ -419,7 +437,7 @@ export const intentSchema = z
     intent.wifi.forEach((wifi, i) => {
       // The UI cannot get here (choices.ts); a hand-edited file can.
       if (wifi.bands && !wifi.bands.some((band) => intent.radios[band].enabled)) {
-        issue(["wifi", i, "bands"], "none of its bands is on (Wi-Fi › Radios)");
+        issue(["wifi", i, "bands"], `none of its bands is on (${where("radios")})`);
       }
     });
     const ids = intent.networks.map((n) => n.id);

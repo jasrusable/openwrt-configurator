@@ -1,14 +1,19 @@
 import {
   Alert,
   AppShell,
+  Burger,
   Button,
   Center,
   Group,
-  Loader,
   NavLink,
+  Skeleton,
+  Stack,
   Text,
-  Title,
+  ThemeIcon,
 } from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
+import { IconTopologyStar3 } from "@tabler/icons-react";
+import { useEffect } from "react";
 import {
   createHashRouter,
   Navigate,
@@ -20,63 +25,102 @@ import {
   useRouteError,
 } from "react-router";
 import { useIntent } from "./data/intent";
-import { IntentForm, useSaveActions } from "./form/IntentForm";
+import { useDraftValue } from "./form/draft";
+import { IntentForm, useDraftChanged, useSaveActions } from "./form/IntentForm";
 import { ProblemCount, ProblemsButton, usePageProblems } from "./form/Problems";
+import { AppIcon, CurrentPageMark } from "./kit/layout";
 import { pages } from "./pages";
 import { ProvisionButton } from "./provision/ProvisionButton";
 
+/** Unsaved edits: Revert and Save, Save the one primary action meanwhile. */
 const SaveBar = () => {
   const { save, revert, dirty, valid, saving } = useSaveActions();
   return (
-    <Group gap="xs">
+    <Group gap="xs" wrap="nowrap">
       <ProblemsButton />
-      {dirty && valid && (
-        <Text size="sm" c="dimmed">
-          Unsaved changes
-        </Text>
+      {dirty && (
+        <>
+          {valid && (
+            <Text size="sm" c="dimmed" visibleFrom="sm">
+              Unsaved changes
+            </Text>
+          )}
+          <Button variant="subtle" color="gray" onClick={revert} disabled={saving}>
+            Revert
+          </Button>
+          <Button onClick={save} disabled={!valid} loading={saving}>
+            Save
+          </Button>
+        </>
       )}
-      <Button variant="default" onClick={revert} disabled={!dirty || saving}>
-        Revert
-      </Button>
-      <Button onClick={save} disabled={!dirty || !valid} loading={saving}>
-        Save
-      </Button>
     </Group>
   );
 };
+
+/** The app's mark: a network of linked nodes, in the system blue. */
+const Mark = () => (
+  <ThemeIcon size={28} radius={8} variant="filled" aria-hidden>
+    <IconTopologyStar3 size={18} stroke={1.8} />
+  </ThemeIcon>
+);
 
 const Shell = () => {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const problems = usePageProblems();
-  const isActive = (id: string) =>
-    pathname === `/${id}` || pathname.startsWith(`/${id}/`);
+  const [navOpen, nav] = useDisclosure(false);
+  const site: string = useDraftValue("site.name") || "Network";
+  const dirty = useDraftChanged();
+  useEffect(() => {
+    document.title = site;
+  }, [site]);
+  const isActive = (id: string) => pathname === `/${id}` || pathname.startsWith(`/${id}/`);
+  const current = pages.find((page) => isActive(page.id));
   return (
-    <AppShell header={{ height: 60 }} navbar={{ width: 240, breakpoint: "sm" }} padding="md">
-      <AppShell.Header px="md">
-        <Group h="100%" justify="space-between">
-          <Title order={4}>Network</Title>
-          <Group gap="sm">
+    <AppShell
+      header={{ height: 56 }}
+      navbar={{ width: 232, breakpoint: "sm", collapsed: { mobile: !navOpen } }}
+      padding="md"
+    >
+      <AppShell.Header px="md" className="onc-chrome">
+        <Group h="100%" justify="space-between" wrap="nowrap">
+          <Group gap={10} wrap="nowrap" style={{ minWidth: 0 }}>
+            <Burger opened={navOpen} onClick={nav.toggle} hiddenFrom="sm" size="sm" aria-label="Menu" />
+            <Mark />
+            <Text fw={600} size="md" truncate>
+              {site}
+            </Text>
+          </Group>
+          <Group gap="xs" wrap="nowrap">
             <SaveBar />
-            <ProvisionButton />
+            {/* While there are edits, Save leads; Apply waits for them. */}
+            <ProvisionButton quiet={dirty} />
           </Group>
         </Group>
       </AppShell.Header>
-      <AppShell.Navbar p="sm">
-        {pages.map(({ id, label, icon: Icon }) => (
+      <AppShell.Navbar p="sm" className="onc-chrome">
+        {pages.map(({ id, label, icon, color }) => (
           <NavLink
             key={id}
             label={label}
-            leftSection={<Icon size={18} stroke={1.6} />}
+            leftSection={<AppIcon icon={icon} color={color} />}
             rightSection={<ProblemCount count={problems(id)} />}
             active={isActive(id)}
-            onClick={() => navigate(`/${id}`)}
+            // A soft fill, as macOS selects among coloured icons.
+            className="onc-nav"
+            onClick={() => {
+              navigate(`/${id}`);
+              nav.close();
+            }}
             style={{ borderRadius: 8 }}
+            mb={2}
           />
         ))}
       </AppShell.Navbar>
-      <AppShell.Main bg="var(--mantine-color-gray-0)">
-        <Outlet />
+      <AppShell.Main>
+        <CurrentPageMark.Provider value={current && { icon: current.icon, color: current.color }}>
+          <Outlet />
+        </CurrentPageMark.Provider>
       </AppShell.Main>
     </AppShell>
   );
@@ -125,15 +169,35 @@ const router = createHashRouter([
   },
 ]);
 
+/** While the file loads: the shape of the app, not a spinner. */
+const Loading = () => (
+  <AppShell header={{ height: 56 }} navbar={{ width: 232, breakpoint: "sm" }} padding="md">
+    <AppShell.Header px="md" className="onc-chrome">
+      <Group h="100%" gap={10}>
+        <Skeleton h={28} w={28} radius={8} />
+        <Skeleton h={14} w={120} />
+      </Group>
+    </AppShell.Header>
+    <AppShell.Navbar p="sm" className="onc-chrome">
+      <Stack gap={14} p={8}>
+        {Array.from({ length: 7 }, (_, i) => (
+          <Skeleton key={i} h={14} w={`${60 + ((i * 17) % 30)}%`} />
+        ))}
+      </Stack>
+    </AppShell.Navbar>
+    <AppShell.Main>
+      <Stack gap="xl" maw={760} mx="auto" py="lg" px="md">
+        <Skeleton h={26} w={180} />
+        <Skeleton h={160} radius={12} />
+        <Skeleton h={110} radius={12} />
+      </Stack>
+    </AppShell.Main>
+  </AppShell>
+);
+
 export const App = () => {
   const intent = useIntent();
-  if (intent.isPending) {
-    return (
-      <Center h="100vh">
-        <Loader />
-      </Center>
-    );
-  }
+  if (intent.isPending) return <Loading />;
   if (intent.isError) {
     return (
       <Center h="100vh">

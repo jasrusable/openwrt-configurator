@@ -7,6 +7,8 @@
 // what else it must, so the settings never pass through a broken state.
 // Free-text values (an address, a name) are checked by the schema alone.
 import { internet } from "./firewall";
+import { where } from "./places";
+import { steeringLabels } from "./roaming";
 import type { Band, Intent } from "./schema";
 
 type Networks = Pick<Intent["networks"][number], "id" | "vlan">[];
@@ -105,7 +107,7 @@ export const choices: Choice[] = [
       );
       return (
         stranded &&
-        `“${stranded.ssid || "Unnamed"}” is only on ${bandLabels[band as Band]}: give it another band first (Wi-Fi › SSIDs).`
+        `“${stranded.ssid || "Unnamed"}” is only on ${bandLabels[band as Band]}: give it another band first (${where("ssids")}).`
       );
     },
     refuses: false,
@@ -115,7 +117,7 @@ export const choices: Choice[] = [
     values: ["2g", "5g", "6g"],
     unavailable: (intent, _, band) =>
       !intent.radios[band as Band]?.enabled &&
-      `${bandLabels[band as Band]} radios are off (Wi-Fi › Radios).`,
+      `${bandLabels[band as Band]} radios are off (${where("radios")}).`,
     // The schema reports an SSID none of whose bands is on.
     refuses: false,
   },
@@ -143,7 +145,7 @@ export const choices: Choice[] = [
   },
   {
     path: "networks.*.ipv6",
-    unavailable: (intent) => !networkIpv6Applies(intent.internet.ipv6) && "Turn on IPv6 under Internet first.",
+    unavailable: (intent) => !networkIpv6Applies(intent.internet.ipv6) && `Turn on IPv6 under ${where("internet")} first.`,
     // Ignored without the internet's IPv6, and kept for when it is back.
     refuses: false,
   },
@@ -157,7 +159,7 @@ export const choices: Choice[] = [
       const room = roomIn(prefix);
       return (
         others + 1 > room &&
-        `The internet's /${prefix} prefix has room for ${room} network${room === 1 ? "" : "s"} with IPv6: ask for a larger one (Internet › IPv6 prefix).`
+        `The internet's /${prefix} prefix has room for ${room} network${room === 1 ? "" : "s"} with IPv6: ask for a larger one (${where("internet", "IPv6 prefix size")}).`
       );
     },
     // The prefix's own rule reports it.
@@ -182,8 +184,44 @@ export const choices: Choice[] = [
     unavailable: (intent) =>
       intent.internet.connection.type === "static" &&
       !intent.internet.connection.dns?.length &&
-      "Your internet connection is set by hand, without DNS servers: add them under Internet first.",
+      `Your internet connection is set by hand, without DNS servers: add them under ${where("internet")} first.`,
     // Reported at the connection's DNS servers, where they are missing.
+    refuses: false,
+  },
+  {
+    // usteer moves devices between access points and between bands on one.
+    path: "roaming.steering",
+    values: ["nudge", "push"],
+    unavailable: (intent) =>
+      intent.hardware.filter((d) => d.role === "access-point").length <= 1 &&
+      (["2g", "5g", "6g"] as Band[]).filter((b) => intent.radios[b]?.enabled).length <= 1 &&
+      "One access point with one band on: there is nowhere to steer a device to.",
+    // Harmless: with nowhere to go, nothing is steered.
+    refuses: false,
+  },
+  {
+    // Off stops usteer and turns neighbour lists off on every SSID.
+    path: "wifi.*.roaming_assistance",
+    unavailable: (intent) =>
+      intent.roaming?.steering === "off" &&
+      `Steering is ${steeringLabels.off} (${where("roaming")}): no SSID gives neighbour lists.`,
+    // Ignored meanwhile, and kept for when steering is back on.
+    refuses: false,
+  },
+  {
+    path: "roaming.prefer_5g",
+    values: [true],
+    unavailable: (intent) =>
+      intent.roaming?.steering === "off" &&
+      `Steering is ${steeringLabels.off}: usteer, which moves devices between bands, is stopped.`,
+    refuses: false,
+  },
+  {
+    path: "roaming.prefer_5g",
+    values: [true],
+    unavailable: (intent) =>
+      !(intent.radios["2g"]?.enabled && (intent.radios["5g"]?.enabled || intent.radios["6g"]?.enabled)) &&
+      `Needs 2.4 GHz and a faster band on (${where("radios")}).`,
     refuses: false,
   },
   {

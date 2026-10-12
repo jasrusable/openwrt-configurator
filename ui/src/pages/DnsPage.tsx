@@ -1,7 +1,7 @@
 // DNS & DHCP: how names are looked up, for the whole network; and an
 // overview of each network's DHCP, which is edited on the network itself.
 import { ActionIcon, Button, Group, Text, TextInput } from "@mantine/core";
-import { IconPlus, IconX } from "@tabler/icons-react";
+import { IconPlus, IconWorldWww, IconX } from "@tabler/icons-react";
 import { useNavigate } from "react-router";
 import { Intent } from "../../../src/intent/schema";
 import { useDraft, useDraftValue, useFieldError } from "../form/draft";
@@ -14,7 +14,7 @@ import {
   When,
 } from "../form/fields";
 import { DataTable } from "../kit/DataTable";
-import { Section, SettingsPage } from "../kit/layout";
+import { EmptyState, Section, SettingsPage } from "../kit/layout";
 
 type DnsRecord = { name: string; address: string };
 
@@ -26,7 +26,7 @@ const LocalNames = () => {
   return (
     <Section
       title="Local names"
-      description={`Names for things that are not one device with a reserved address (those are named under Networks): name.${domain} answers with the address.`}
+      description={`Names that answer on every network, like printer.${domain}.`}
       actions={
         <Button
           variant="subtle"
@@ -39,9 +39,7 @@ const LocalNames = () => {
       }
     >
       {records.length === 0 ? (
-        <Text size="sm" c="dimmed" ta="center" py="md">
-          No local names.
-        </Text>
+        <EmptyState icon={IconWorldWww}>No local names.</EmptyState>
       ) : (
         records.map((record, i) => (
           <RecordRow
@@ -129,7 +127,7 @@ const DhcpOverview = () => {
   return (
     <Section
       title="DHCP"
-      description="Addresses each network hands out. Open a network to change its range, lease time or reserved addresses."
+      description="Each network's addresses. Open one to change it."
     >
       <DataTable
         rowCount={networks.length}
@@ -186,7 +184,7 @@ const DhcpOverview = () => {
 export const DnsPage = () => (
   <SettingsPage
     title="DNS & DHCP"
-    description="How names are looked up, and how devices get their addresses."
+    description="Name lookups, and addresses for devices."
   >
     <Section
       title="DNS servers"
@@ -217,7 +215,7 @@ export const DnsPage = () => (
         <SelectField
           name="dns.upstream.provider"
           label="Provider"
-          description="Lookups are encrypted, so your internet provider cannot see or change them."
+          description="Your provider cannot see or change lookups."
           options={[
             { value: "cloudflare", label: "Cloudflare" },
             { value: "google", label: "Google" },
@@ -243,7 +241,7 @@ export const DnsPage = () => (
       <SwitchField
         name="dns.rebind_protection"
         label="Rebind protection"
-        description="Answers from the internet may not point at your own addresses, so a web page cannot reach devices inside. Some services (a few streaming and smart-home apps) need it off."
+        description="Stops web pages from reaching devices at home."
       />
     </Section>
     <LocalNames />

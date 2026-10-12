@@ -3,7 +3,16 @@
 // Radios are matched to bands on the device, so a band an access point lacks
 // (6 GHz on most) is skipped there; the intent only pins channels per device.
 import { Feature, mainNetwork, onAccessPoints, onDevice } from "../fragment";
-import { Band } from "../schema";
+import { Band, Intent } from "../schema";
+import {
+  bandSteering,
+  betterBy,
+  floorForMs,
+  moveWithinMs,
+  steeredSsids,
+  steeringValues,
+  takesPart,
+} from "../roaming";
 import { timezones } from "../timezones";
 
 const radios: { band: Band; name: string; width: string }[] = [
@@ -18,6 +27,30 @@ const cellDensity = { off: 0, normal: 1, high: 2, very_high: 3 } as const;
 
 /** OpenWrt's encryption, by security mode; PMF follows (optional in mixed, required in WPA3). */
 const encryption = { wpa2: "psk2+ccmp", "wpa2-wpa3": "sae-mixed", wpa3: "sae" } as const;
+
+/**
+ * usteer's steering, from Wi-Fi › Roaming, with the values in roaming.ts
+ * (which the explainers quote). Nothing moves a device until its signal
+ * drops below roam_scan_snr; aggressiveness is always set, since its default
+ * (3: disconnect after the request) would also apply to band moves.
+ * roam_kick_delay is also how long a move request stays open, so it must not
+ * be 0 while steering.
+ */
+const steering = ({ steering, prefer_5g }: Intent["roaming"]) => {
+  const level = steeringValues[steering];
+  const moves = steering === "nudge" || steering === "push";
+  return {
+    aggressiveness: String(level.aggressiveness),
+    signal_diff_threshold: String(betterBy),
+    roam_scan_snr: String(level.scanBelow),
+    roam_trigger_snr: String(level.moveBelow),
+    roam_kick_delay: moves || prefer_5g ? String(moveWithinMs) : "0",
+    min_snr: String(level.floor),
+    ...(level.floor ? { min_snr_kick_delay: String(floorForMs) } : {}),
+    band_steering_interval: prefer_5g ? String(bandSteering.forMs) : "0",
+    ...(prefer_5g ? { band_steering_min_snr: String(bandSteering.strongerThan) } : {}),
+  };
+};
 
 export const wifi: Feature = (intent) => {
   const posixTimezone = timezones[intent.site.timezone];
@@ -78,8 +111,8 @@ export const wifi: Feature = (intent) => {
             // key-holder for WPA3), the same on every access point; FT over
             // the air.
             ieee80211r: ssid.fast_roaming,
-            ieee80211k: ssid.roaming_assistance,
-            bss_transition: ssid.roaming_assistance,
+            ieee80211k: takesPart(intent, ssid),
+            bss_transition: takesPart(intent, ssid),
             time_advertisement: 2,
             time_zone: posixTimezone,
             max_inactivity: 3600,
@@ -104,10 +137,13 @@ export const wifi: Feature = (intent) => {
         usteer: [
           ap({
             ".name": "usteer",
-            // Passive: access points share what they see over the main
-            // network, so each can give clients a list of its neighbours
-            // (802.11k reports, via hostapd). Every way of pushing a client
-            // somewhere is off: no refusing, kicking, nudging or band moves.
+            // Stopped when roaming is Off or no SSID takes part: an empty
+            // ssid_list would mean every SSID, not none.
+            enabled: steeredSsids(intent).length > 0,
+            // Access points share what they see over the main network, so
+            // each can give clients a list of its neighbours (802.11k reports,
+            // via hostapd). Steering (Wi-Fi › Roaming) adds moving them; never
+            // refusing a connection, load balancing or probe games.
             network: mainNetwork(intent).id,
             syslog: "1",
             debug_level: "1",
@@ -115,19 +151,12 @@ export const wifi: Feature = (intent) => {
             probe_steering: "0",
             load_balancing_threshold: "0",
             band_steering_threshold: "0",
-            signal_diff_threshold: "8",
-            roam_scan_snr: "0",
-            roam_trigger_snr: "0",
-            roam_kick_delay: "0",
+            ...steering(intent.roaming),
             load_kick_enabled: "0",
-            min_snr: "0",
             min_connect_snr: "0",
             initial_connect_delay: "0",
-            band_steering_interval: "0",
             // Only the SSIDs that give clients neighbour reports.
-            ssid_list: intent.wifi
-              .filter((ssid) => ssid.enabled && ssid.roaming_assistance)
-              .map((ssid) => ssid.ssid),
+            ssid_list: steeredSsids(intent).map((ssid) => ssid.ssid),
           }),
         ],
       },

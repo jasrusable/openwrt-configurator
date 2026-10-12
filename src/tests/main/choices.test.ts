@@ -102,6 +102,13 @@ test("why a value is not available, in words the UI and the schema share", (t) =
     refuses: false,
   });
 
+  // Steering moves devices between bands too, so one access point is enough while two bands are on.
+  t.is(availability(intent, "roaming.steering").option("push").unavailable, undefined);
+  const lone = sample();
+  lone.radios["2g"].enabled = false;
+  t.regex(availability(lone, "roaming.steering").option("nudge").unavailable!, /nowhere to steer/);
+  t.regex(availability(lone, "roaming.prefer_5g").option(true).unavailable!, /Needs 2.4 GHz/);
+
   // The schema reports a refused value with the rule's words; an ignored one not at all.
   intent.radios["2g"].width = "80";
   intent.networks[0].ipv6 = true;

@@ -1,5 +1,5 @@
 import { Alert, Badge, Group, Loader, Stack, Text } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
+import { notify } from "../kit/notify";
 import type { ProvisionInfo } from "../data/api";
 import { useProvision, useStartProvision } from "../data/provision";
 import { useDraftChanged } from "../form/IntentForm";
@@ -115,7 +115,7 @@ export const ProvisionPanel = () => {
           onConfirm={() =>
             start.mutate(undefined, {
               onError: (e) =>
-                notifications.show({ message: (e as Error).message, color: "red" }),
+                notify.error((e as Error).message),
             })
           }
         >

@@ -1,4 +1,4 @@
-import { Badge, createTheme } from "@mantine/core";
+import { Badge, createTheme, CSSVariablesResolver } from "@mantine/core";
 
 // Close to Apple's system look: the system font, soft corners, iOS blue.
 export const theme = createTheme({
@@ -29,5 +29,23 @@ export const theme = createTheme({
   components: {
     // Sentence case, as Apple's UI writes labels, not Mantine's capitals.
     Badge: Badge.extend({ styles: { root: { textTransform: "none" } } }),
+  },
+});
+
+/**
+ * Mantine derives its "light" tints (light buttons, badges) from the
+ * palette, and in dark mode they come out near black; these are Apple's
+ * dark-mode fills instead.
+ */
+export const cssVariables: CSSVariablesResolver = () => ({
+  variables: {},
+  light: {},
+  dark: {
+    "--mantine-color-blue-light": "rgba(10, 132, 255, 0.2)",
+    "--mantine-color-blue-light-hover": "rgba(10, 132, 255, 0.28)",
+    "--mantine-color-blue-light-color": "#4da3ff",
+    "--mantine-color-gray-light": "rgba(235, 235, 245, 0.12)",
+    "--mantine-color-gray-light-hover": "rgba(235, 235, 245, 0.18)",
+    "--mantine-color-gray-light-color": "#d1d1d6",
   },
 });

@@ -7,7 +7,7 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { IconPlus, IconX } from "@tabler/icons-react";
+import { IconAddressBook, IconPlus, IconX } from "@tabler/icons-react";
 import { useDraft, useDraftValue, useFieldError } from "../form/draft";
 import { withNetworkAdded, withoutNetwork } from "../../../src/intent/edits";
 import {
@@ -16,6 +16,7 @@ import {
 } from "../../../src/intent/choices";
 import { accessForPurpose } from "../../../src/intent/firewall";
 import { deviceOf } from "../../../src/intent/features/network";
+import { where } from "../../../src/intent/places";
 import { Intent, parseSubnet, Purpose } from "../../../src/intent/schema";
 import {
   DurationField,
@@ -32,7 +33,7 @@ import {
   When,
 } from "../form/fields";
 import { defineList, ListPage } from "../form/ListPage";
-import { Section, SettingRow } from "../kit/layout";
+import { EmptyState, Section, SettingRow } from "../kit/layout";
 
 const purposes: { value: Purpose; label: string; color: string }[] = [
   { value: "home", label: "Home", color: "blue" },
@@ -78,7 +79,7 @@ const networks = defineList({
   name: "networks",
   title: "Networks",
   description:
-    "Each network is a VLAN on every port and access point, with its own access to the internet, the router and the others.",
+    "Each network is a VLAN with its own access.",
   addLabel: "Add network",
   newItem: newNetwork,
   canRemove: (network) => network?.vlan !== undefined,
@@ -148,7 +149,7 @@ const networks = defineList({
         <When name={`networks.${i}.vlan`} is={undefined}>
           <SettingRow
             label="VLAN"
-            description="The main network is untagged on every port; devices are managed over it."
+            description="Untagged on every port; devices are managed over it."
           >
             <Text size="sm" c="dimmed">
               Main (untagged)
@@ -170,7 +171,7 @@ const networks = defineList({
         <OptionalField
           name={`networks.${i}.dhcp.dns_servers`}
           label="Hand out other DNS servers"
-          description="Devices ask these instead of the router, e.g. a Pi-hole. They then skip encrypted DNS and local names."
+          description="Instead of the router, e.g. a Pi-hole."
           initial={[]}
         >
           <TagsField
@@ -220,7 +221,7 @@ const PurposeField = ({ index }: { index: number }) => {
     <PresetField
       name={`networks.${index}.purpose`}
       label="Purpose"
-      description="Sets its access below: home reaches everything, guests and IoT only the internet."
+      description="Presets its access: home reaches all, guests the internet."
       options={purposes}
       fills={`networks.${index}.access`}
       presets={{
@@ -238,7 +239,7 @@ const AccessSection = ({ index }: { index: number }) => {
   return (
     <Section
       title="Access"
-      description="Replies always get back, so a network that may not reach this one can still answer it. Exceptions: Firewall › Rules."
+      description={`Replies always get back. Exceptions: ${where("rules")}.`}
     >
       <SwitchField
         name={`networks.${index}.access.internet`}
@@ -250,8 +251,8 @@ const AccessSection = ({ index }: { index: number }) => {
         description={
           networks[index]?.share_devices &&
           !networks.some((n, i) => i !== index && n.share_devices)
-            ? "Nothing to share with yet: turn it on for another network too."
-            : "AirPlay, printers and Chromecasts are seen on the other networks that share theirs. Using one still needs Can reach."
+            ? "Turn it on for another network too."
+            : "AirPlay, printers and Chromecasts, seen across networks."
         }
       />
       <MultiSelectField
@@ -264,7 +265,7 @@ const AccessSection = ({ index }: { index: number }) => {
       <SegmentedField
         name={`networks.${index}.access.router`}
         label="Router access"
-        description="Network services: addresses, DNS and time only. Full: also the router's admin pages and SSH."
+        description="Services: addresses, DNS and time. Full: also admin and SSH."
         options={[
           { value: "services", label: "Network services" },
           { value: "full", label: "Full" },
@@ -299,7 +300,7 @@ const ReservationsSection = ({ index }: { index: number }) => {
   return (
     <Section
       title="Reserved addresses"
-      description={`These devices always get the same address, and a name: name.${domain}. Rules and port forwards that point at a device need one.`}
+      description={`The same address every time, and a name: name.${domain}.`}
       actions={
         <Button
           variant="subtle"
@@ -321,9 +322,7 @@ const ReservationsSection = ({ index }: { index: number }) => {
       }
     >
       {reservations.length === 0 ? (
-        <Text size="sm" c="dimmed" ta="center" py="md">
-          No reserved addresses.
-        </Text>
+        <EmptyState icon={IconAddressBook}>No reserved addresses.</EmptyState>
       ) : (
         <>
           <Group gap="xs" px="md" pt="sm" wrap="nowrap">

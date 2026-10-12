@@ -1,9 +1,109 @@
+/* Design tokens: Apple's grouped settings, in light and dark. Everything
+   that paints a surface, a line or secondary text uses these, never a fixed
+   Mantine grey, so both schemes hold together. */
+:root,
+:root[data-mantine-color-scheme="light"] {
+  --onc-page: #f5f5f7;
+  --onc-card: #ffffff;
+  --onc-chrome: rgba(251, 251, 253, 0.8);
+  --onc-separator: rgba(60, 60, 67, 0.13);
+  --onc-label-2: #6e6e73;
+  --onc-hover: rgba(0, 0, 0, 0.035);
+  --onc-selected: rgba(0, 0, 0, 0.075);
+  --onc-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+:root[data-mantine-color-scheme="dark"] {
+  --onc-page: #1c1c1e;
+  --onc-card: #2c2c2e;
+  --onc-chrome: rgba(36, 36, 38, 0.8);
+  --onc-separator: rgba(235, 235, 245, 0.1);
+  --onc-label-2: #98989d;
+  --onc-hover: rgba(255, 255, 255, 0.05);
+  --onc-selected: rgba(255, 255, 255, 0.1);
+  --onc-shadow: none;
+}
+
+body {
+  background: var(--onc-page);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* A card of rows, and a table, alike. */
+.onc-card {
+  background: var(--onc-card);
+  border: 1px solid var(--onc-separator);
+  border-radius: 12px;
+  box-shadow: var(--onc-shadow);
+  overflow: hidden;
+}
+
 /* A divider between the rows a section actually renders, however they are
    nested in fragments or hidden by conditions. */
 .onc-rows > * + * {
-  border-top: 1px solid var(--mantine-color-default-border);
+  border-top: 1px solid var(--onc-separator);
 }
 
-.onc-problem:hover {
-  background: var(--mantine-color-gray-0);
+.onc-section-title {
+  color: var(--onc-label-2);
+}
+
+.onc-problem:hover,
+.onc-card tbody tr:hover {
+  background: var(--onc-hover);
+}
+
+.onc-card th {
+  border-bottom: 1px solid var(--onc-separator) !important;
+}
+
+.onc-card td {
+  border-top: 1px solid var(--onc-separator) !important;
+}
+
+/* The selected sidebar item: a soft fill, the text as is (Mantine's
+   NavLink takes its active colours from these variables). */
+.onc-nav {
+  --nl-bg: var(--onc-selected);
+  --nl-color: var(--mantine-color-text);
+  --nl-hover: var(--onc-hover);
+}
+
+.onc-nav[data-active] {
+  font-weight: 500;
+}
+
+/* The header and sidebar: translucent over the page, as macOS draws them. */
+.onc-chrome {
+  background: var(--onc-chrome);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-color: var(--onc-separator) !important;
+}
+
+/* A row: label left, control right. On a phone the label keeps over half
+   the width, so a switch stays beside it and only a wide control (a field,
+   a segmented choice) goes beneath. */
+.onc-row {
+  flex-wrap: nowrap;
+}
+
+.onc-row-control {
+  flex-shrink: 0;
+  max-width: 60%;
+}
+
+@media (max-width: 36em) {
+  .onc-row {
+    flex-wrap: wrap;
+  }
+
+  /* !important: the label box sets min-width: 0 inline, to truncate. */
+  .onc-row > :first-child {
+    min-width: 55% !important;
+  }
+
+  .onc-row-control {
+    max-width: 100%;
+  }
 }

@@ -1,4 +1,12 @@
 import { Badge, Group, Text } from "@mantine/core";
+import { ReactNode } from "react";
+import { placeName, where } from "../../../src/intent/places";
+import {
+  SteeringLevel,
+  steeringLabels,
+  steeringSummary,
+  takesPart,
+} from "../../../src/intent/roaming";
 import { Band, Intent } from "../../../src/intent/schema";
 import { useDraftValue } from "../form/draft";
 import {
@@ -30,7 +38,7 @@ const wifiNetworks = defineList({
   name: "wifi",
   title: "SSIDs",
   description:
-    "Each SSID is broadcast by every access point, on its bands, with seamless roaming between them.",
+    "Broadcast by every access point.",
   addLabel: "Add network",
   // Joins the main network unless told otherwise.
   newItem: (_, intent) => ({
@@ -133,7 +141,7 @@ const wifiNetworks = defineList({
         <SegmentedField
           name={`wifi.${i}.security`}
           label="Mode"
-          description="WPA3 is stronger. WPA2/WPA3 lets older devices join too. 6 GHz is always WPA3."
+          description="WPA2/WPA3 lets older devices join too."
           options={[
             { value: "wpa2", label: "WPA2" },
             { value: "wpa2-wpa3", label: "WPA2/WPA3" },
@@ -148,29 +156,21 @@ const wifiNetworks = defineList({
         <SwitchField
           name={`wifi.${i}.hidden`}
           label="Hidden"
-          description="Its name is not announced: devices must be told it. It does not make the network more secure."
+          description="Not announced; devices must be told the name."
         />
         <SwitchField
           name={`wifi.${i}.isolate_clients`}
           label="Isolate clients"
-          description="Devices on it, on the same access point and band, cannot reach each other."
+          description="Its devices cannot reach each other."
         />
       </Section>
-      <Section
-        title="Roaming"
-        description="With more than one access point. They share what they see, but never push a device anywhere: each device decides when to move."
-      >
-        <SwitchField
-          name={`wifi.${i}.roaming_assistance`}
-          label="Roaming assistance"
-          description="Access points tell devices which neighbours are near (802.11k/v), so devices find a better one sooner."
-        />
+      <RoamingSection index={i}>
         <SwitchField
           name={`wifi.${i}.fast_roaming`}
           label="Fast roaming"
-          description="Devices move between access points without a pause (802.11r). Turn off if an older device keeps dropping."
+          description="Seamless handover between access points."
         />
-      </Section>
+      </RoamingSection>
     </>
   ),
 });
@@ -185,12 +185,38 @@ const NetworkName = ({ index }: { index: number }) => {
 
 export const WifiPage = ({ sub }: { sub: string }) => <ListPage list={wifiNetworks} sub={sub} />;
 
+/**
+ * Roaming on this SSID, saying what Steering (Wi-Fi › Roaming) does to it
+ * now, from the same words the Roaming tab and the compiler use.
+ */
+const RoamingSection = ({ index, children }: { index: number; children: ReactNode }) => {
+  const level: SteeringLevel = useDraftValue("roaming.steering") ?? "advise";
+  const intent: Intent = useDraftValue();
+  const ssid: Intent["wifi"][number] | undefined = useDraftValue(`wifi.${index}`);
+  const assisted = level === "off" || (!!ssid && takesPart(intent, ssid));
+  return (
+    <Section
+      title={placeName("roaming")}
+      description={`Steering is ${steeringLabels[level]} (${where("roaming")}): ${
+        assisted ? steeringSummary[level] : "this SSID's devices are left alone"
+      }.`}
+    >
+      <SwitchField
+        name={`wifi.${index}.roaming_assistance`}
+        label="Roaming assistance"
+        description="Neighbour lists help devices find a better access point."
+      />
+      {children}
+    </Section>
+  );
+};
+
 /** Bands whose radios are off are greyed out, with why (choices.ts). */
 const BandsField = ({ index }: { index: number }) => (
   <MultiSelectField
     name={`wifi.${index}.bands`}
     label="Bands"
-    description="Empty: every band that is on. A band that is off can be turned on under Wi-Fi › Radios."
+    description={`Empty: every band that is on.`}
     options={(Object.entries(bandLabels) as [Band, string][]).map(([value, label]) => ({
       value,
       label,

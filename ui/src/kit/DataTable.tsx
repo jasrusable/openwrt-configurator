@@ -1,8 +1,9 @@
 // A list of things as a table: a row per item that opens it when clicked, and
 // a friendly empty state. Its title and Add live in the page's header.
-import { Group, Paper, Table, Text } from "@mantine/core";
+import { Group, Table, Text } from "@mantine/core";
 import { IconChevronRight } from "@tabler/icons-react";
 import { ReactNode } from "react";
+import { EmptyState } from "./layout";
 
 export type Column = {
   header: string;
@@ -29,14 +30,13 @@ export const DataTable = ({
   rowMarker?: (index: number) => ReactNode;
   empty: ReactNode;
 }) => (
-  <div>
-    <Paper withBorder radius="lg" style={{ overflow: "hidden" }}>
-      {rowCount === 0 ? (
-        <Text c="dimmed" size="sm" ta="center" py="xl">
-          {empty}
-        </Text>
-      ) : (
-        <Table highlightOnHover verticalSpacing="sm" horizontalSpacing="md">
+  <div className="onc-card">
+    {rowCount === 0 ? (
+      <EmptyState>{empty}</EmptyState>
+    ) : (
+      // Scrolls sideways on a phone rather than squeezing its columns.
+      <Table.ScrollContainer minWidth={520} type="native">
+        <Table verticalSpacing="sm" horizontalSpacing="md" withRowBorders={false}>
           <Table.Thead>
             <Table.Tr>
               {columns.map((column) => (
@@ -54,19 +54,16 @@ export const DataTable = ({
               <Table.Tr
                 key={rowKey(index)}
                 onClick={() => onRowClick(index)}
-                style={{ cursor: "pointer" }}
+                // Openable from the keyboard too.
+                tabIndex={0}
+                onKeyDown={(e) => e.key === "Enter" && onRowClick(index)}
+                style={{ cursor: "pointer", transition: "background 120ms" }}
               >
                 {columns.map((column, c) => (
                   <Table.Td
                     key={column.header}
-                    onClick={
-                      column.interactive
-                        ? (e) => e.stopPropagation()
-                        : undefined
-                    }
-                    style={
-                      column.interactive ? { cursor: "default" } : undefined
-                    }
+                    onClick={column.interactive ? (e) => e.stopPropagation() : undefined}
+                    style={column.interactive ? { cursor: "default" } : undefined}
                   >
                     <Group gap={8} wrap="nowrap">
                       {c === 0 && rowMarker?.(index)}
@@ -75,16 +72,13 @@ export const DataTable = ({
                   </Table.Td>
                 ))}
                 <Table.Td>
-                  <IconChevronRight
-                    size={16}
-                    color="var(--mantine-color-dimmed)"
-                  />
+                  <IconChevronRight size={16} color="var(--onc-label-2)" />
                 </Table.Td>
               </Table.Tr>
             ))}
           </Table.Tbody>
         </Table>
-      )}
-    </Paper>
+      </Table.ScrollContainer>
+    )}
   </div>
 );

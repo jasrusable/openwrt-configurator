@@ -18,7 +18,7 @@ const protocolOptions = [
 const forwards = defineList({
   name: "firewall.port_forwards",
   title: "Port forwarding",
-  description: "Let traffic from the internet reach a device inside (DNAT).",
+  description: "Let the internet reach a device at home.",
   addLabel: "Add port forward",
   newItem: () => ({
     name: "",
