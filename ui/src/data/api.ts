@@ -11,6 +11,8 @@ import type { ProvisionStatus } from "../../../src/server/provisionJob";
 export type Issue = { path: string; message: string };
 
 /** Every write carries it: the server refuses writes without (CSRF). */
+// On every request, reads too: a cross-site page cannot send it without a
+// CORS preflight, so it cannot make this app log in to the devices.
 const writeHeaders = { "x-onc": "1" };
 
 export class SaveError extends Error {
@@ -20,7 +22,7 @@ export class SaveError extends Error {
 }
 
 export const loadIntent = async (): Promise<Intent> => {
-  const response = await fetch("api/intent");
+  const response = await fetch("api/intent", { headers: writeHeaders });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not load the configuration.");
   return body;
@@ -47,7 +49,7 @@ export type ProvisionInfo = ProvisionStatus & {
 };
 
 export const loadProvision = async (): Promise<ProvisionInfo> => {
-  const response = await fetch("api/provision");
+  const response = await fetch("api/provision", { headers: writeHeaders });
   if (!response.ok) throw new Error("Could not load the apply status.");
   return response.json();
 };
@@ -71,7 +73,7 @@ export type Devices = {
 };
 
 export const loadDevices = async (): Promise<Devices> => {
-  const response = await fetch("api/devices");
+  const response = await fetch("api/devices", { headers: writeHeaders });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not load what the devices are.");
   return body;
@@ -86,14 +88,14 @@ export const refreshDevices = async (): Promise<Devices> => {
 };
 
 export const loadApplyDiff = async (): Promise<DeviceDiff[]> => {
-  const response = await fetch("api/apply/diff");
+  const response = await fetch("api/apply/diff", { headers: writeHeaders });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not work out the changes.");
   return body.devices;
 };
 
 export const loadNetworkStatus = async (): Promise<NetworkStatus> => {
-  const response = await fetch("api/status");
+  const response = await fetch("api/status", { headers: writeHeaders });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not read the network's status.");
   return body;
@@ -101,14 +103,14 @@ export const loadNetworkStatus = async (): Promise<NetworkStatus> => {
 
 /** This app's own public key, from beside its saved SSH key; null when there is none. */
 export const loadOwnKey = async (): Promise<string | null> => {
-  const response = await fetch("api/admin/key");
+  const response = await fetch("api/admin/key", { headers: writeHeaders });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not read this app's key.");
   return body.publicKey;
 };
 
 export const loadCandidates = async (): Promise<{ candidates: Candidate[]; error?: string }> => {
-  const response = await fetch("api/discover");
+  const response = await fetch("api/discover", { headers: writeHeaders });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not look at the network.");
   return body;

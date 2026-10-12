@@ -2,6 +2,7 @@
 // is (facts), and what the network is doing now (status, read from the
 // devices every 30 seconds while this page is open), interpreted against the
 // settings: what does not match them is shown, never hidden.
+import { weakMeshLinkMbps } from "../../../src/status/network";
 import { Anchor, Button, Group, Text } from "@mantine/core";
 import { IconChevronRight } from "@tabler/icons-react";
 import { ReactNode } from "react";
@@ -42,11 +43,11 @@ const State = ({ up, children }: { up?: boolean; children: ReactNode }) => (
 );
 
 /** A mesh link, its quality, and its measured speed on request (sends test traffic for a few seconds). */
-const LinkSpeed = ({ from, to, quality }: { from: string; to: string; quality: number }) => {
+const LinkSpeed = ({ from, to, throughput }: { from: string; to: string; throughput: number }) => {
   const measure = useMeasureLink();
   return (
     <Text component="span" size="xs" c="dimmed">
-      {to} {Math.round(quality * 100)}% ·{" "}
+      {to} · ~{Math.round(throughput)} Mbit/s ·{" "}
       {measure.data ? (
         `${Math.round(measure.data.mbps)} Mbit/s`
       ) : measure.isError ? (
@@ -181,7 +182,7 @@ export const OverviewPage = () => {
             .filter((d) => d.uplink === "mesh" || live.mesh!.some((m) => m.name === d.name && m.links.length))
             .map((d) => {
               const links = live.mesh!.find((m) => m.name === d.name)?.links ?? [];
-              const best = Math.max(0, ...links.map((l) => l.quality));
+              const best = Math.max(0, ...links.map((l) => l.throughput));
               return (
                 <SettingRow
                   key={d.name}
@@ -190,7 +191,7 @@ export const OverviewPage = () => {
                     links.length ? (
                       <Group gap={10} component="span">
                         {links.map((l) => (
-                          <LinkSpeed key={l.to} from={d.name} to={l.to} quality={l.quality} />
+                          <LinkSpeed key={l.to} from={d.name} to={l.to} throughput={l.throughput} />
                         ))}
                       </Group>
                     ) : d.uplink === "mesh" ? (
@@ -199,7 +200,7 @@ export const OverviewPage = () => {
                   }
                 >
                   <State up={links.length ? best >= 0.4 : false}>
-                    {links.length ? (best >= 0.4 ? "Linked" : "Weak link") : "No link"}
+                    {links.length ? (best >= weakMeshLinkMbps ? "Linked" : "Weak link") : "No link"}
                   </State>
                 </SettingRow>
               );

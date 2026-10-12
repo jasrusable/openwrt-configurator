@@ -5,7 +5,7 @@
 import { Button, Group, Text } from "@mantine/core";
 import { IconWorld } from "@tabler/icons-react";
 import { useLocation, useNavigate } from "react-router";
-import { portTakenBy } from "../../../src/intent/connections";
+import { portTakenBy, withMain, withoutConnection } from "../../../src/intent/connections";
 import { Intent, netmask } from "../../../src/intent/schema";
 import { useDevices } from "../data/devices";
 import { modelOf, portsOf, routerFacts } from "../facts";
@@ -71,6 +71,8 @@ const useRole = (index: number) => {
   const { connections, mode } = intent.internet;
   if (connections.length < 2) return "Main";
   if (mode === "balance") return `Share ${connections[index]?.weight ?? 1}`;
+  // Failover tries a metered line after all the others.
+  if (connections[index]?.metered) return "Last resort";
   return index === 0 ? "Main" : connections.length > 2 ? `Backup ${index}` : "Backup";
 };
 
@@ -135,8 +137,10 @@ const PortField = ({ index }: { index: number }) => {
  * nothing but Wi-Fi it does not have.
  */
 const lastLanPort = (lan: string[], intent: Intent, index: number) => {
+  // The WAN port joins the home network when no other connection is on it.
+  const wanFree = !intent.internet.connections.some((c, i) => i !== index && c.port === undefined);
   const free = lan.filter((p) => !portTakenBy(intent, index, p));
-  return free.length === 1 ? free[0] : undefined;
+  return free.length === 1 && !wanFree ? free[0] : undefined;
 };
 
 /** The main connection, or a backup that can become it (failover tries them in this order). */
@@ -150,8 +154,7 @@ const PriorityRow = ({ index }: { index: number }) => {
   const { connections } = intent.internet;
   if (connections.length < 2) return null;
   const makeMain = () => {
-    const moved = [connections[index], ...connections.filter((_, i) => i !== index)];
-    draft.replace({ ...intent, internet: { ...intent.internet, connections: moved } });
+    draft.replace({ ...intent, internet: { ...intent.internet, connections: withMain(connections, index) } });
     navigate("/internet/0");
   };
   return index === 0 ? (
@@ -204,7 +207,7 @@ const connections = defineList({
     const gone = intent.internet.connections[index];
     return {
       ...intent,
-      internet: { ...intent.internet, connections: intent.internet.connections.filter((_, i) => i !== index) },
+      internet: { ...intent.internet, connections: withoutConnection(intent.internet.connections, index) },
       networks: intent.networks.map(({ line, ...network }) =>
         line?.connection === gone?.id ? network : { ...network, ...(line ? { line } : {}) }
       ),
@@ -368,6 +371,9 @@ const Together = () => {
           />
           <TextField name="internet.ddns.hostname" label="Name" placeholder="myhome.duckdns.org" />
           <PasswordField name="internet.ddns.token" label="API token" />
+          <When name="internet.ddns.provider" is="cloudflare">
+            <TextField name="internet.ddns.zone" label="Zone" placeholder="example.com" />
+          </When>
         </OptionalField>
       </Section>
       <Section description="Main network only; devices open ports for themselves.">

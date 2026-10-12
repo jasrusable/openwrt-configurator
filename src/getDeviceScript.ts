@@ -88,8 +88,7 @@ export const getFinaliseCommands = ({
     }),
     "commit"
   ),
-  "reload_config",
-  ...protocolRefreshCommands(state),
+  ["reload_config", ...protocolRefreshCommands(state)].join("; "),
 ];
 
 /**
@@ -99,18 +98,25 @@ export const getFinaliseCommands = ({
  * down until a reboot (verified on 25.12.5). So when a declared interface's
  * protocol is one netifd does not know, it is restarted, once, here: inside
  * the confirm window, so a restart that cut the device off is rolled back.
+ * It shares reload_config's line: a reload that drops the link kills the
+ * script at its next marker, which would skip a command of its own. netifd's
+ * built-ins (none, static) are never in the list, and dhcp and dhcpv6 ship
+ * on every image, so only the others are checked: listing none restarted the
+ * network on every apply to any device with a VLAN network.
  */
+const builtinProtocols = ["none", "static", "dhcp", "dhcpv6"];
+
 export const protocolRefreshCommands = (state: OpenWrtState) => {
   const protos = [
     ...new Set(
       (state.config.network?.interface ?? []).flatMap((i: { proto?: unknown }) =>
-        typeof i.proto === "string" ? [i.proto] : []
+        typeof i.proto === "string" && !builtinProtocols.includes(i.proto) ? [i.proto] : []
       )
     ),
   ];
   return protos.length
     ? [
-        `for p in ${protos.map(shellQuote).join(" ")}; do ubus call network get_proto_handlers | grep -q "\\"$p\\":" || { /etc/init.d/network restart; break; }; done`,
+        `for p in ${protos.map(shellQuote).join(" ")}; do ubus call network get_proto_handlers | grep -q "\\"$p\\":" || { /etc/init.d/network restart >/dev/null 2>&1; break; }; done`,
       ]
     : [];
 };
@@ -130,12 +136,8 @@ export const protocolRefreshCommands = (state: OpenWrtState) => {
  * networking, while the tool still reported success. Running them once the
  * device has been reconnected to makes that impossible.
  */
-export const getPostReloadCommands = (state: OpenWrtState) => [
-  ...servicesCommands(state),
-  ...(state.files || []).flatMap((file) =>
-    file.run_after_reload ? [file.run_after_reload] : []
-  ),
-];
+export const getPostReloadCommands = (state: OpenWrtState) =>
+  (state.files || []).flatMap((file) => (file.run_after_reload ? [file.run_after_reload] : []));
 
 /**
  * Every declared service enabled at boot and started. A package enables its
@@ -146,7 +148,9 @@ export const getPostReloadCommands = (state: OpenWrtState) => [
  * process: sqm and the firewall have none, and starting them again would
  * re-apply them for nothing. An init script the device lacks (ubihealthd
  * without UBI flash) is skipped. A failure is reported, not fatal: the
- * config is already live, and the check after says what is not running.
+ * check after says what is not running. Run over the first reconnect,
+ * before the confirming one (confirmDevice): a stopped firewall's new rules
+ * take effect only as it starts, so a lockout there must still roll back.
  */
 export const servicesCommands = (state: OpenWrtState) => {
   const names = (state.services || []).map((s) => shellQuote(s.name));
@@ -199,18 +203,30 @@ export const heredocDelimiter = (content: string, base = "ONC_EOF") => {
   return delimiter;
 };
 
-const writeFileCommand = (path: string, content: string, mode?: string) => {
-  // Write via a quoted heredoc: `cat` is always present (unlike the `base64`
-  // applet, which is missing on stripped/small-flash busybox builds), and a
-  // quoted delimiter keeps content literal so `$vars` in scripts aren't
-  // expanded at write time.
+/**
+ * Write a file, and run `runAfter` only when its content changed.
+ *
+ * Via a quoted heredoc: `cat` is always present (unlike the `base64` applet,
+ * which is missing on stripped/small-flash busybox builds), and a quoted
+ * delimiter keeps content literal so `$vars` in scripts aren't expanded at
+ * write time. Into a new file beside it first, under umask 077, so a file
+ * holding secrets is never readable by others, not even until its chmod;
+ * then moved over the old one only if it differs (busybox `cmp`, verified on
+ * 25.12.5), so a hook that restarts a service (OpenVPN's) runs when there is
+ * something new, not on every apply. With no mode, 0644, as before.
+ */
+const writeFileCommand = (path: string, content: string, mode?: string, runAfter?: string) => {
   const delimiter = heredocDelimiter(content);
   const body = content.endsWith("\n") ? content : `${content}\n`;
+  const [file, next] = [shellQuote(path), shellQuote(`${path}.onc-new`)];
   return [
     `mkdir -p ${shellQuote(dirname(path))}`,
-    `cat > ${shellQuote(path)} <<'${delimiter}'`,
+    `(umask 077; cat > ${next}) <<'${delimiter}'`,
     `${body}${delimiter}`,
-    ...(mode ? [`chmod ${shellQuote(mode)} ${shellQuote(path)}`] : []),
+    `chmod ${shellQuote(mode ?? "0644")} ${next}`,
+    `if cmp -s ${next} ${file}; then rm -f ${next}; chmod ${shellQuote(mode ?? "0644")} ${file}; else mv -f ${next} ${file}${
+      runAfter ? `; ${runAfter}` : ""
+    }; fi`,
   ].join("\n");
 };
 
@@ -404,13 +420,19 @@ export const getStageCommands = ({
   const fileCommands =
     files.length > 0 || staleFiles.length > 0
       ? [
-          ...staleFiles.map((path) => `rm -f ${shellQuote(path)}`),
-          ...files.flatMap((file) => [
-            writeFileCommand(file.path, hide(file.content), file.mode),
-            // Optional command run immediately after the file is written (e.g.
-            // trigger a freshly-written hotplug script so it applies now).
-            ...(file.run_after ? [hide(file.run_after)] : []),
+          // A service whose init script goes is stopped first: removing the
+          // file leaves procd running it until a reboot.
+          ...staleFiles.flatMap((path) => [
+            ...(/^\/etc\/init\.d\/[^/]+$/.test(path)
+              ? [`if [ -x ${shellQuote(path)} ]; then ${shellQuote(path)} stop; ${shellQuote(path)} disable; fi >/dev/null 2>&1 || true`]
+              : []),
+            `rm -f ${shellQuote(path)}`,
           ]),
+          // Each with its optional command, run right after the file is
+          // written when it changed (e.g. trigger a new hotplug script now).
+          ...files.map((file) =>
+            writeFileCommand(file.path, hide(file.content), file.mode, file.run_after && hide(file.run_after))
+          ),
           writeFileCommand(
             managedFilesManifest,
             files.map((file) => file.path).join("\n")
@@ -448,8 +470,8 @@ export const getDeviceScript = ({
   ...getStageCommands({ state, current, managedFiles, redact }),
   ...getFinaliseCommands({ state, current }),
   // Printed so a dry run shows the whole sequence, but `provision` runs these
-  // over a reconnected session. See `getPostReloadCommands`.
-  ...getPostReloadCommands(state).map((command) =>
+  // over a reconnected session. See `servicesCommands`, `getPostReloadCommands`.
+  ...[...servicesCommands(state), ...getPostReloadCommands(state)].map((command) =>
     redact ? redact(command) : command
   ),
 ];

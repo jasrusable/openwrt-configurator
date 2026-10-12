@@ -60,20 +60,24 @@ export const sshConnectOptions = ({
 export const connectToDevice = ({
   deviceConfig,
   identityPath,
+  hostKey,
   platform,
 }: {
   deviceConfig: ONCDeviceConfig;
   identityPath?: string;
+  /** Held to this key by the SSH client itself (an address found by src/locate.ts). */
+  hostKey?: { type: string; key: string };
   platform: Platform;
 }) =>
-  platform.connect(
-    sshConnectOptions({
+  platform.connect({
+    ...sshConnectOptions({
       deviceConfig,
       identityPath,
       agentSocket: platform.env("SSH_AUTH_SOCK"),
       platform,
-    })
-  );
+    }),
+    ...(hostKey ? { hostKey } : {}),
+  });
 
 export type ProvisionableDevice = ONCDeviceConfig & {
   ipaddr: string;
@@ -156,8 +160,11 @@ export const provisionConfig = async ({
   platform,
   timing,
   onDeviceSchema,
+  hostKeys = {},
 }: {
   oncConfig: ONCConfig;
+  /** Per hostname: the key its address was found by, which every connection to it must show. */
+  hostKeys?: Record<string, { type: string; key: string }>;
   /** Told each device's schema as it is read: an apply keeps the device facts fresh. */
   onDeviceSchema?: (hostname: string, schema: DeviceSchema) => void;
   confirm?: boolean;
@@ -168,7 +175,7 @@ export const provisionConfig = async ({
   timing?: ConfirmTiming;
 }) => {
   const connect = (deviceConfig: ONCDeviceConfig) =>
-    connectToDevice({ deviceConfig, identityPath, platform });
+    connectToDevice({ deviceConfig, identityPath, hostKey: hostKeys[deviceConfig.hostname], platform });
 
   const { ready: deviceConfigs, skipped } = provisionableDevices(oncConfig);
   reportSkipped(skipped);

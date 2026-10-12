@@ -5,6 +5,7 @@ import { Alert, Button, SegmentedControl, Text, Textarea, TextInput } from "@man
 import { IconShieldLock } from "@tabler/icons-react";
 import { useState } from "react";
 import { useNavigate } from "react-router";
+import { ovpnUnsafe } from "../../../../src/intent/ovpn";
 import { where } from "../../../../src/intent/places";
 import { Intent } from "../../../../src/intent/schema";
 import { parseWgConf } from "../../../../src/wireguardConf";
@@ -20,6 +21,10 @@ type Tunnel = Intent["tunnels"][number];
 const fromFile = (kind: Tunnel["type"], id: string, name: string, text: string, login: { username: string; password: string }): Tunnel => {
   if (kind === "openvpn") {
     if (!/^\s*remote\s/m.test(text)) throw new Error("No remote in it: is it an .ovpn?");
+    const unsafe = ovpnUnsafe(text);
+    if (unsafe.length) {
+      throw new Error(`It would run or write things on the router (${unsafe.join(", ")}): remove those lines and paste it again.`);
+    }
     return {
       id,
       name,

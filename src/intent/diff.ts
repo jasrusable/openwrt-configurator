@@ -49,16 +49,40 @@ const labelFor = (path: string[], before: unknown, after: unknown) => {
   return label;
 };
 
+/** What a list item is, to pair it across two lists: its id, else its name. */
+const keyOf = (item: unknown) => {
+  if (!isObject(item)) return undefined;
+  const key = item.id ?? item.name ?? item.ssid;
+  return typeof key === "string" && key ? key : undefined;
+};
+
 export const diffIntent = (before: unknown, after: unknown): Change[] => {
   const changes: Change[] = [];
-  const walk = (b: unknown, a: unknown, path: string[]) => {
+  // `path` is where it is after, `from` where it was before: a list item
+  // keeps its identity when items before it come or go.
+  const walk = (b: unknown, a: unknown, path: string[], from: string[]) => {
     if (equal(b, a)) return;
     const info = fieldInfo(path);
-    // Lists of things (Wi-Fi networks, devices) compare item by item.
+    // Lists of things (Wi-Fi networks, devices) compare item by item, each
+    // paired with itself by its id or name, else by its place.
     if (Array.isArray(b) && Array.isArray(a) && fieldInfo([...path, "*"])) {
-      for (let i = 0; i < Math.max(a.length, b.length); i++) {
-        walk(b[i], a[i], [...path, String(i)]);
-      }
+      // First by identity; then what is left by place (a renamed item).
+      const pairOf = new Map<number, number>();
+      a.forEach((item, i) => {
+        const key = keyOf(item);
+        const j = key === undefined ? -1 : b.findIndex((o, k) => ![...pairOf.values()].includes(k) && keyOf(o) === key);
+        if (j >= 0) pairOf.set(i, j);
+      });
+      a.forEach((_, i) => {
+        if (!pairOf.has(i) && i < b.length && ![...pairOf.values()].includes(i)) pairOf.set(i, i);
+      });
+      a.forEach((item, i) => {
+        const j = pairOf.get(i);
+        walk(j === undefined ? undefined : b[j], item, [...path, String(i)], [...from, String(j ?? i)]);
+      });
+      b.forEach((item, j) => {
+        if (![...pairOf.values()].includes(j)) walk(item, undefined, [...path, String(j)], [...from, String(j)]);
+      });
       return;
     }
     // A secret object changes as a whole; anything else, field by field.
@@ -66,25 +90,26 @@ export const diffIntent = (before: unknown, after: unknown): Change[] => {
       const keys = [...new Set([...Object.keys(b), ...Object.keys(a)])];
       // A variant switch (DHCP to PPPoE) is one change, not three.
       if (b.type !== undefined && b.type !== a.type) {
-        changes.push(change(b, a, path));
+        changes.push(change(b, a, path, from));
         return;
       }
-      keys.forEach((key) => walk(b[key], a[key], [...path, key]));
+      keys.forEach((key) => walk(b[key], a[key], [...path, key], [...from, key]));
       return;
     }
-    changes.push(change(b, a, path));
+    changes.push(change(b, a, path, from));
   };
-  const change = (b: unknown, a: unknown, path: string[]): Change => {
+  const change = (b: unknown, a: unknown, path: string[], from: string[]): Change => {
     const info = fieldInfo(path);
     return {
-      path: path.join("."),
-      label: labelFor(path, before, after),
+      path: (a === undefined ? from : path).join("."),
+      // Named as it is now, or as it was when it is gone.
+      label: a === undefined ? labelFor(from, before, before) : labelFor(path, after, after),
       kind: b === undefined ? "added" : a === undefined ? "removed" : "changed",
       before: display(b, path),
       after: display(a, path),
       description: info?.description,
     };
   };
-  walk(before, after, []);
+  walk(before, after, [], []);
   return changes;
 };

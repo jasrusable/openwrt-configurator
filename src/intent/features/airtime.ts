@@ -46,7 +46,9 @@ for dir in /sys/kernel/debug/ieee80211/phy*; do
   for ac in 0 1 2 3; do echo "$ac $limits" > "$dir/aql_txq_limit"; done
 done
 `,
-        run_after_reload: "ACTION=add INTERFACE=phy1-ap0 sh /etc/hotplug.d/net/20-aql",
+        // Now, when the file changed: it sets every phy whenever it runs, and
+        // an interface made later runs it itself (hotplug), so not every apply.
+        run_after: "ACTION=add INTERFACE=phy1-ap0 sh /etc/hotplug.d/net/20-aql",
       },
     ],
   };

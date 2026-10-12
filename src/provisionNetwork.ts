@@ -22,8 +22,7 @@ import {
   rollBackNow,
   runPostReloadHooks,
   checkServices,
-  waitForRecovery,
-} from "./devicePhases";
+  waitForRecovery, AppliedWithProblems } from "./devicePhases";
 import { Session } from "./platform";
 
 /** Services that should be running and are not: said plainly, not fatal. */
@@ -225,7 +224,11 @@ export const provisionNetwork = async ({
       session.dispose();
     }
   }
-  if (hookFailures.length > 0) throw new Error(hookFailures.join("\n"));
+  if (hookFailures.length > 0) {
+    throw new AppliedWithProblems(
+      `Applied to every device, but a step after it failed:\n${hookFailures.join("\n")}`
+    );
+  }
   console.log(
     `Provisioning completed: ${confirmed.length} device(s) confirmed.`
   );

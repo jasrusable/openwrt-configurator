@@ -27,6 +27,14 @@ export const conditionMatches = ({
         (deviceSchema.radios ?? []).some((r) => r.band === band),
       ])
     ),
+    // And one there that can mesh (802.11s; unknown counts as yes, as facts
+    // read before it was asked do not say).
+    ...Object.fromEntries(
+      ["2g", "5g", "6g"].map((band) => [
+        `device.mesh_${band}`,
+        (deviceSchema.radios ?? []).some((r) => r.band === band && r.mesh !== false),
+      ])
+    ),
   };
   return evaluateCondition(condition, (name) => {
     if (name.startsWith("device.tag.")) {

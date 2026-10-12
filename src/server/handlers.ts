@@ -261,6 +261,15 @@ export const discoverApi =
       } catch {
         return json(409, { error: "Read the device first." });
       }
+      // Nor the same box twice, under another name: its key or a MAC already belongs to one.
+      const known = readFacts(platform, intentPath, saved.data.hardware.map((d) => d.name));
+      const same = Object.values(known).find(
+        (f) =>
+          f &&
+          ((inspected.hostKey && f.hostKey?.key === inspected.hostKey.key) ||
+            (f.macs ?? []).some((mac) => inspected.macs.includes(mac)))
+      );
+      if (same) return json(409, { error: `This is ${same.hostname}, already in Hardware.` });
       adopt(platform, intentPath, name, inspected, Date.now());
       return json(200, { ok: true });
     }
@@ -292,6 +301,10 @@ export const applyDiffApi =
   async ({ method }) => {
     if (method !== "GET") return json(405, { error: "GET" });
     if (!compiled(platform, intentPath)) return json(409, { error: "The saved settings are not valid." });
+    // Not while an apply runs: it would log in to devices mid-change.
+    if ((await provisionStatus({ intentPath, files: platform })).state === "running") {
+      return json(409, { error: "Settings are being applied." });
+    }
     return json(200, { devices: await readApplyDiff({ intentPath, platform }) });
   };
 
@@ -336,9 +349,11 @@ export const uiHandler = ({
   };
   const ui = staticFiles({ root: uiRoot, files: platform });
   return (request) =>
-    // Writes must carry a header a cross-site page cannot send without a
-    // CORS preflight, which is never granted: no CSRF on any transport.
-    request.method !== "GET" && request.headers["x-onc"] !== "1"
+    // Every API request must carry a header a cross-site page cannot send
+    // without a CORS preflight, which is never granted: no CSRF on any
+    // transport, and no reads either (a GET of /api/status logs in to the
+    // devices, which an <img> on any page could otherwise make it do).
+    request.path.startsWith("/api/") && request.headers["x-onc"] !== "1"
       ? Promise.resolve(json(403, { error: "Missing the X-ONC header." }))
       : (routes[request.path] ?? ui)(request);
 };

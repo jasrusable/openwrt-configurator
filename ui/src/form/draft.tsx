@@ -152,6 +152,20 @@ export class Draft {
     this.emit();
   };
 
+  /**
+   * `sent` was saved as `stored`. Edits made while it was on its way are
+   * kept: the draft becomes the stored file only if it is still what was sent.
+   */
+  savedAs = (sent: Intent, stored: Intent) => {
+    this.saved = stored;
+    if (this.value === sent) {
+      this.value = stored;
+      this.touched.clear();
+    }
+    this.serverIssues = [];
+    this.emit();
+  };
+
   reveal = () => {
     this.revealAll = true;
     this.emit();

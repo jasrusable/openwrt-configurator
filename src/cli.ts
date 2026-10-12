@@ -1,3 +1,4 @@
+import { AppliedWithProblems, appliedWithProblemsExit } from "./devicePhases";
 import { assertSupportedRelease } from "./release";
 import { DeviceBuildPlan } from "./getBuildPlan";
 import { getDeviceScript, managedFilesManifest } from "./getDeviceScript";
@@ -120,11 +121,12 @@ export const main = async ({
       if (lockout) throw new Error(lockout);
       // From the UI: each device is found where it is (src/locate.ts), its
       // identity checked, before anything is applied to it.
-      const oncConfig = options.factsFor
+      const { oncConfig, hostKeys } = options.factsFor
         ? await withLocatedAddresses(loaded.oncConfig, options.factsFor, platform)
-        : loaded.oncConfig;
+        : { oncConfig: loaded.oncConfig, hostKeys: {} };
       await provisionConfig({
         oncConfig,
+        hostKeys,
         ...(options.factsFor
           ? {
               onDeviceSchema: (hostname: string, schema: DeviceSchema) =>
@@ -758,5 +760,5 @@ export const run = ({
       // Without this a failure surfaces as an unhandled rejection and a stack
       // trace rather than a readable message.
       console.error(`\nError: ${(e as Error)?.message ?? e}`);
-      platform.exit(1);
+      platform.exit(e instanceof AppliedWithProblems ? appliedWithProblemsExit : 1);
     });

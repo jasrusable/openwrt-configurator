@@ -46,4 +46,10 @@ test("an apply that would lock this app out is refused, and says why", async (t)
   t.is(await lockoutReason(intent({ ssh_key_path: keyPath, password_login: false, authorized_keys: [key.replace("you@mac", "a different comment")] }), nodePlatform), undefined, "the comment does not matter");
   t.regex((await lockoutReason(intent({ ssh_key_path: keyPath, password_login: false, authorized_keys: [other] }), nodePlatform))!, /not among the authorized keys/);
   t.regex((await lockoutReason(intent({ password_login: false, authorized_keys: [other] }), nodePlatform))!, /no SSH key/);
+  t.regex(
+    (await lockoutReason(intent({ ssh_key_path: keyPath, authorized_keys: [other] }), nodePlatform))!,
+    /no password to log in with, and this app's key is not among/,
+    "password login on is no way in without a password to send"
+  );
+  t.is(await lockoutReason(intent({ password: "pw", authorized_keys: [other] }), nodePlatform), undefined);
 });

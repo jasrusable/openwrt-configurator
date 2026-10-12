@@ -36,6 +36,7 @@ import {
   getFinaliseCommands,
   getPackagesToRemove,
   getPostReloadCommands,
+  servicesCommands,
   getPrepareCommands,
   getStageCommands,
   managedFilesManifest,
@@ -82,6 +83,8 @@ export type DeviceRun = DeviceRunOptions & {
   /** Set by configureDevice: they depend on the config it read. */
   finaliseCommands?: string[];
   postReloadCommands: string[];
+  /** Every declared service enabled and started: over the first reconnect, before confirming. */
+  servicesCommands: string[];
   /** Services that must have a running process once the run is done. */
   servicesToCheck: string[];
   /** Package or file changes, which only the watchdog can undo. */
@@ -97,6 +100,14 @@ export class ProvisionFailure extends Error {
     super(message);
   }
 }
+
+/**
+ * Every device confirmed and kept its change, but a step after it (a hook)
+ * failed: the run is applied, not rolled back, and exits with its own code
+ * so the UI does not say otherwise.
+ */
+export class AppliedWithProblems extends Error {}
+export const appliedWithProblemsExit = 3;
 
 // --- plan --------------------------------------------------------------------
 
@@ -166,6 +177,7 @@ export const planDevice = async (
     removalCascade,
     prepareCommands: getPrepareCommands({ state, installedPackages }),
     postReloadCommands,
+    servicesCommands: servicesCommands(state),
     servicesToCheck: (state.services || []).filter((s) => s.running).map((s) => s.name),
     // `uci revert` undoes staged UCI changes and nothing else. Package
     // removals and written files are already on disk, and only the watchdog
@@ -513,6 +525,17 @@ export const confirmDevice = async (run: DeviceRun): Promise<Session> => {
   try {
     return await reconnectSettled({
       connect,
+      // Started before the settle and the confirming reconnect: what they
+      // change (a stopped firewall's rules) is then inside the rollback.
+      beforeSettle: async (session) => {
+        if (run.servicesCommands.length === 0) return;
+        // A failure here is not the verdict: the confirming reconnect is.
+        const started = await execScript({ ssh: session, commands: run.servicesCommands }).catch((e: Error) => ({
+          ok: false,
+          stderr: e.message,
+        }));
+        if (!started.ok) console.warn(`${hostname}: starting its services: ${started.stderr.trim()}`);
+      },
       confirmWith: reachableSession({ connect, host: ipAddress }),
       // Leave a margin so the last attempt still lands before the watchdog fires.
       deadline: (run.deadline ?? run.now()) - reconnectIntervalMs * 2,

@@ -27,19 +27,26 @@ export const ownPublicKey = async (
   }
 };
 
-/** Why applying `intent` would lock this app out, if it would. */
+/**
+ * Why applying `intent` would lock this app out, if it would: after it, the
+ * app must still get in, by password (login on, and a password to send) or
+ * by its key (authorized, when the list is the intent's; with none listed
+ * the device's own file is left, and with it whatever got the app in).
+ */
 export const lockoutReason = async (
   intent: Intent,
   platform: Pick<Platform, "readTextFile" | "run" | "homedir">
 ): Promise<string | undefined> => {
-  if (intent.admin.password_login) return undefined;
-  const keyPath = intent.admin.ssh_key_path;
+  const { password_login, password, ssh_key_path: keyPath, authorized_keys: keys } = intent.admin;
+  if (password_login && password) return undefined;
+  const off = password_login ? "This app has no password to log in with" : "Password login would be off";
   if (!keyPath) {
-    return `Password login would be off, but this app has no SSH key to log in with (${where("system", "Administration", "SSH key")}).`;
+    return `${off}, and no SSH key to log in with either (${where("system", "Administration", "SSH key")}).`;
   }
+  if (password_login && keys.length === 0) return undefined;
   const own = await ownPublicKey(platform, keyPath);
-  if (!own) return `Password login would be off, but this app's public key could not be read (${keyPath}.pub).`;
-  return intent.admin.authorized_keys.some((k) => keyIdentity(k) === keyIdentity(own))
+  if (!own) return `${off}, and this app's public key could not be read (${keyPath}.pub).`;
+  return keys.some((k) => keyIdentity(k) === keyIdentity(own))
     ? undefined
-    : `Password login would be off, and this app's key is not among the authorized keys: applying would lock it out. Add it under ${where("system", "Authorized keys")}.`;
+    : `${off}, and this app's key is not among the authorized keys: applying would lock it out. Add it under ${where("system", "Authorized keys")}.`;
 };

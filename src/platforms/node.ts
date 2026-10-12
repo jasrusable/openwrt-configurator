@@ -22,6 +22,7 @@ import {
   formatKnownHost,
   hostKeyAlgorithms,
   hostKeyChangedMessage,
+  pinnedKeyChangedMessage,
   keyTypeOfBlob,
   parseKnownHosts,
 } from "../knownHosts";
@@ -245,7 +246,11 @@ export const nodePlatform: Platform = {
       });
     } catch (e) {
       throw changed
-        ? new Error(hostKeyChangedMessage(target.host!, target.knownHostsFile!))
+        ? new Error(
+            target.hostKey
+              ? pinnedKeyChangedMessage(target.host!)
+              : hostKeyChangedMessage(target.host!, target.knownHostsFile!)
+          )
         : e;
     }
     // Once a command is in flight node-ssh drops its own 'error' listener, so an

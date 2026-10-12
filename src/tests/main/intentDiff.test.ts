@@ -66,3 +66,11 @@ test("switching the kind of connection is one change", (t) => {
     [["Internet › Connections › “Fibre” › Connection", "dhcp", "pppoe"]]
   );
 });
+
+test("a list item removed from the middle is one removal, not every later item changed; a rename stays a rename", (t) => {
+  const ssid = (name: string) => ({ ssid: name, password: "x" });
+  const removed = diffIntent({ wifi: [ssid("Home"), ssid("Guests"), ssid("IoT")] }, { wifi: [ssid("Guests"), ssid("IoT")] });
+  t.deepEqual(removed.map((c) => [c.kind, c.path]), [["removed", "wifi.0"]]);
+  const renamed = diffIntent({ wifi: [ssid("Home"), ssid("IoT")] }, { wifi: [ssid("House"), ssid("IoT")] });
+  t.deepEqual(renamed.map((c) => [c.kind, c.path, c.before, c.after]), [["changed", "wifi.0.ssid", "Home", "House"]]);
+});

@@ -70,6 +70,15 @@ test.serial("a staged config that does not verify is never committed", async (t)
   t.is(device.committed().system[0].options.hostname, "OpenWrt");
 });
 
+test.serial("services start before the settle and the confirming reconnect: inside the rollback", async (t) => {
+  const device = fakeDevice({ hostname: "ap", services: [{ name: "firewall", running: false }] });
+  await run([device]);
+  const events = device.events.filter((e) => e !== "revert");
+  t.true(events.indexOf("services") > events.indexOf("commit"));
+  t.true(events.indexOf("services") < events.indexOf("settle"));
+  t.true(events.indexOf("settle") < events.indexOf("disarm"));
+});
+
 test.serial("every device is armed before any is changed, and disarmed only once all confirm", async (t) => {
   const log: string[] = [];
   const devices = ["a", "b", "c"].map((hostname) =>

@@ -1,7 +1,7 @@
 import test from "ava";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { availability, choiceIssues, choices } from "../../intent/choices";
+import { availability, choiceIssues, choices, meshChannels } from "../../intent/choices";
 import { fieldInfo } from "../../intent/fields";
 import { Intent, intentSchema } from "../../intent/schema";
 
@@ -113,4 +113,18 @@ test("why a value is not available, in words the UI and the schema share", (t) =
   intent.radios["2g"].width = "80";
   intent.networks[0].ipv6 = true;
   t.deepEqual(choiceIssues(intent), [{ path: ["radios", "2g", "width"], message: "2.4 GHz is at most 40 MHz wide." }]);
+});
+
+test("mesh dead ends: 6 GHz moves the channel, turning the mesh off or making a repeater the router leaves no problem", (t) => {
+  const intent = structuredClone(sample());
+  intent.mesh = { ...intent.mesh, enabled: true, key: "mesh-key-123456", band: "5g", channel: 36 };
+  intent.radios["6g"].enabled = true;
+  const six = availability(intent, "mesh.band").option("6g").swap!.apply(intent);
+  t.is(six.mesh.channel, meshChannels["6g"][0]);
+  const ap = intent.hardware.findIndex((d) => d.role === "access-point");
+  intent.hardware[ap].uplink = "mesh";
+  t.deepEqual(issues({ ...intent, mesh: { ...intent.mesh, enabled: false } }), []);
+  const swapped = availability(intent, `hardware.${ap}.role`).option("router").swap!.apply(intent);
+  t.is(swapped.hardware[ap].uplink, "cable");
+  t.deepEqual(issues(swapped), []);
 });

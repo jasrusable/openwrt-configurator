@@ -123,8 +123,11 @@ export const fakeDevice = ({
   },
   afterStage,
   afterPackages,
+  services,
 }: {
   hostname: string;
+  /** Services the config declares (started over the first reconnect). */
+  services?: { name: string; running: boolean }[];
   ipAddress?: string;
   failOn?: "configure" | "commit";
   /** The committed config cuts SSH off until the device rolls back. */
@@ -178,6 +181,7 @@ export const fakeDevice = ({
         },
         state: {
           config: { system: { system: [{ ".name": "s", hostname }] } } as any,
+          ...(services ? { services } : {}),
         },
         rollbackMode: "reload-then-reboot",
         recoverSeconds: 30,

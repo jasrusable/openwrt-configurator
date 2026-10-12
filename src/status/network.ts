@@ -3,10 +3,13 @@
 // never assumes it does: what lines up is matched (interface lan is network
 // lan, an SSID with your SSID's name is that SSID), and what does not is
 // listed as unexpected, never hidden. Pure: tested against recorded output.
-import { ipv6Interface } from "../intent/connections";
+import { failoverOrder, ipv6Interface } from "../intent/connections";
 import type { Intent } from "../intent/schema";
 import { DeviceStatus } from "./device";
 
+
+/** A mesh link slower than this (BATMAN_V's estimate) shows as weak: below it, a cable or a nearer node would help. */
+export const weakMeshLinkMbps = 20;
 export type Reachability = DeviceStatus | { hostname: string; error: string };
 
 export type NetworkStatus = {
@@ -41,7 +44,7 @@ export type NetworkStatus = {
    * With the mesh on: each device reached, and the nodes it links to
    * directly (by name where its MAC is known from facts) with the quality.
    */
-  mesh?: { name: string; links: { to: string; quality: number }[] }[];
+  mesh?: { name: string; links: { to: string; throughput: number }[] }[];
   /**
    * Remote access's clients and the linked sites, by their keys: how long
    * since each last made a handshake (a few minutes is connected); and each
@@ -88,7 +91,7 @@ export const networkStatus = (
       ? working.some((c) => !c.metered)
         ? working.filter((c) => !c.metered)
         : working
-      : working.slice(0, 1);
+      : failoverOrder(working).slice(0, 1);
   const connections = all.map((c) => {
     const v4 = iface(c.id);
     const v6 = iface(ipv6Interface(c));
@@ -110,9 +113,15 @@ export const networkStatus = (
     const status = byName.get(ap.name);
     return reached(status) ? status.wifi.map((w) => ({ ap: ap.name, ...w })) : [];
   });
+  // Every interface the compiler writes on the router: its lines, networks,
+  // VPN (features/vpn.ts) and mesh (features/mesh.ts).
   const known = new Set([
     ...intent.internet.connections.flatMap((c) => [c.id, ipv6Interface(c)]),
     ...intent.networks.map((n) => n.id),
+    ...(intent.vpn?.enabled ? ["vpn"] : []),
+    ...(intent.sites?.peers.length ? ["sites"] : []),
+    ...(intent.tunnels ?? []).map((t) => t.id),
+    ...(intent.mesh?.enabled ? ["bat0", "batmesh", "batwired"] : []),
   ]);
   const ssids = new Set(intent.wifi.map((w) => w.ssid));
   return {
@@ -153,7 +162,9 @@ export const networkStatus = (
             if (!reached(status)) return [];
             const nameOf = (mac: string) =>
               Object.entries(macs).find(([, list]) => list?.includes(mac))?.[0] ?? mac;
-            return [{ name: d.name, links: status.mesh.map((n) => ({ to: nameOf(n.mac), quality: n.quality })) }];
+            // Direct: the next hop is the node itself, by any of its MACs.
+            const direct = status.mesh.filter((n) => n.originator === n.mac || nameOf(n.originator) === nameOf(n.mac));
+            return [{ name: d.name, links: direct.map((n) => ({ to: nameOf(n.mac), throughput: n.throughput })) }];
           }),
         }
       : {}),

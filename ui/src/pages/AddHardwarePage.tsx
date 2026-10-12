@@ -214,10 +214,17 @@ export const AddHardwarePage = () => {
       title={[{ label: "Hardware", onClick: () => navigate("/hardware") }, { label: "Add" }]}
       description="A router or access point on your network. Pick it, and it is read to see what it is; nothing on it changes until you apply."
       actions={
-        device && (
+        device ? (
           <Button onClick={add} loading={adopt.isPending} disabled={!choice.name}>
             Add
           </Button>
+        ) : (
+          // The router's lists again (a device just plugged in): still no scan.
+          !read.isPending && (
+            <Button variant="default" onClick={() => candidates.refetch()} loading={candidates.isFetching}>
+              Look again
+            </Button>
+          )
         )
       }
     >

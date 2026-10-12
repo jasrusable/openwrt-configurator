@@ -4,7 +4,8 @@
 // effect depends on others (roaming assistance on Steering), its explainer
 // is a function of the intent, and its numbers come from where the compiler
 // takes them (roaming.ts), so the text says what the devices will do.
-import { lineCheck, meteredCheck, monthlyMegabytes, slowLine, stickySeconds } from "./connections";
+import { tunnelDefaultDns } from "./vpn";
+import { lineCheck, meteredCheck, monthlyMegabytes, secondsToDown, slowLine, stickySeconds } from "./connections";
 import { meshHopPenalty, meshMtu } from "./features/mesh";
 import { meshWiredVlan } from "./choices";
 import { where } from "./places";
@@ -198,7 +199,7 @@ export const fields: FieldInfo[] = [
     description: "Paid by the amount, like mobile data: a backup only, checked sparingly.",
     openwrt: "mwan3 interface interval, track_ip",
     explain: () =>
-      `Checks this line with ${meteredCheck.ips.length} address every ${meteredCheck.intervalS} seconds instead of ${lineCheck.ips.length} every ${lineCheck.intervalS}: about ${monthlyMegabytes(meteredCheck)} MB a month of checks rather than ${monthlyMegabytes(lineCheck)} MB, so noticing it fail takes about ${meteredCheck.intervalS * meteredCheck.missesDown} seconds. When connections share traffic, it is never shared: it only carries traffic when the others are down.`,
+      `Checks this line with ${meteredCheck.ips.length} address every ${meteredCheck.intervalS} seconds instead of ${lineCheck.ips.length} every ${lineCheck.intervalS}: about ${monthlyMegabytes(meteredCheck)} MB a month of checks rather than ${monthlyMegabytes(lineCheck)} MB, so noticing it fail takes about ${secondsToDown(meteredCheck)} seconds (with "down when slow", each check sends ${slowLine.count} pings, so ${slowLine.count} times the data). It only carries traffic when the others are down: after every other line in failover, never shared when sharing.`,
   },
   {
     path: "internet.connections.*.down_when_slow",
@@ -222,7 +223,7 @@ export const fields: FieldInfo[] = [
     description: "How the connections work together.",
     openwrt: "mwan3",
     explain: (intent) =>
-      `Failover: everything goes out the first connection that works, in the order listed, and moves to the next within about ${lineCheck.intervalS * lineCheck.missesDown} seconds of a line failing (mwan3 pings ${lineCheck.ips.slice(0, -1).join(", ")} and ${lineCheck.ips[lineCheck.ips.length - 1]} every ${lineCheck.intervalS} seconds out of each line; ${lineCheck.missesDown} misses in a row mark it down). Share: new connections are spread over the working lines by their share, and secure websites keep to one line per device. Either way IPv6 uses the first connection.` +
+      `Failover: everything goes out the first connection that works, in the order listed, and moves to the next within about ${secondsToDown(lineCheck)} seconds of a line failing (mwan3 pings ${lineCheck.ips.slice(0, -1).join(", ")} and ${lineCheck.ips[lineCheck.ips.length - 1]} out of each line, waiting up to ${lineCheck.timeoutS} seconds for each, then ${lineCheck.intervalS} seconds before the next round; ${lineCheck.missesDown} failed rounds in a row mark it down). A metered line comes after all the others. Share: new connections are spread over the working lines by their share, and secure websites keep to one line per device. Either way IPv6 uses the first connection.` +
       (intent.internet.connections.length < 2 ? " Add a second connection to use it." : ""),
   },
   {
@@ -236,6 +237,12 @@ export const fields: FieldInfo[] = [
   { path: "internet.ddns.provider", label: "Provider" },
   { path: "internet.ddns.hostname", label: "Name" },
   { path: "internet.ddns.token", label: "API token", secret: true },
+  {
+    path: "internet.ddns.zone",
+    label: "Zone",
+    description: "Unset: the name's last two parts.",
+    explain: "The Cloudflare zone the name is in: for vpn.home.example.co.uk, example.co.uk. Unset, the last two parts of the name (example.com), which is right unless the domain ends in two parts of its own.",
+  },
   {
     path: "internet.upnp",
     label: "UPnP and NAT-PMP",
@@ -360,7 +367,7 @@ export const fields: FieldInfo[] = [
     label: "DNS servers",
     description: "The provider's: networks out through it are given them.",
     explain:
-      "Devices on a network that goes out through this tunnel are handed these DNS servers, so their lookups go through the tunnel too instead of out the plain internet.",
+      `Devices on a network that goes out through this tunnel are handed these DNS servers, so their lookups go through the tunnel too instead of out the plain internet. None given: ${tunnelDefaultDns.join(" and ")}, also through the tunnel.`,
   },
   { path: "tunnels.*.peer", label: "Server" },
   { path: "tunnels.*.peer.public_key", label: "Server key" },
@@ -430,7 +437,7 @@ export const fields: FieldInfo[] = [
     description: "Which internet connection or VPN provider its devices use.",
     openwrt: "mwan3 policy and rule",
     explain:
-      "Unset, its devices go out as the internet's setting says (failover or sharing). Set, they go out the connection or VPN provider chosen, and either use the others when it is down or have no internet until it is back (a VPN's kill switch). The router itself, and other networks, are not affected. A connection: IPv4 only, IPv6 always uses the first one. A VPN provider: the network has no IPv6, which would go around the tunnel, and is given the provider's DNS servers.",
+      "Unset, its devices go out as the internet's setting says (failover or sharing). Set, they go out the connection or VPN provider chosen. A connection: when it is down they use the others, or have no internet until it is back; IPv4 only, IPv6 always uses the first one. A VPN provider: when it is down they have no internet (a kill switch), the network has no IPv6, which would go around the tunnel, and its DNS goes through the tunnel too. The router itself, and other networks, are not affected.",
   },
   { path: "networks.*.line.connection", label: "Line" },
   { path: "networks.*.line.fallback", label: "Use the others when it is down" },

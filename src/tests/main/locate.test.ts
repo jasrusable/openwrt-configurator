@@ -134,43 +134,21 @@ test("a different board where the device used to be is refused", async (t) => {
 });
 
 test("first contact: trusted at its configured address, and its key remembered", async (t) => {
+  const routerOnly = network({ "10.0.0.1": routerMachine("") });
+  const [r] = await settle(locateEach({ devices: [router], facts: {}, platform: routerOnly.platform }));
+  t.like(r, { address: "10.0.0.1", hostKey: { type: "ssh-ed25519", key: "ROUTER-KEY" } });
+});
+
+test("a name in the settings is what DHCP says: never trusted on first use", async (t) => {
+  const net = network({ "10.0.0.1": routerMachine(""), "home-ap-1.lan": { ...apMachine, key: "IMPOSTOR-KEY" } });
+  const [, a] = await settle(locateEach({ devices: [router, ap], facts: {}, platform: net.platform }));
+  t.regex((a as NotLocated).error, /home-ap-1\.lan \(where your settings put it\): not tried, no host key on record.*Hardware › Add/);
+  t.false(net.tried.includes("home-ap-1.lan"));
+});
+
+test("a name SSH already trusts is held to that key", async (t) => {
   const net = network({ "10.0.0.1": routerMachine(""), "home-ap-1.lan": apMachine });
+  writeFileSync(net.knownHosts, formatKnownHost({ host: "home-ap-1.lan", type: "ssh-ed25519", key: "AP-KEY" }));
   const [, a] = await settle(locateEach({ devices: [router, ap], facts: {}, platform: net.platform }));
   t.like(a, { address: "home-ap-1.lan", hostKey: { type: "ssh-ed25519", key: "AP-KEY" } });
-});
-
-test("fail closed: an address the app found is never tried without a host key to pin it to", async (t) => {
-  // An impostor claims the access point's name in DHCP; the real one is not yet known by key.
-  const net = network({
-    "10.0.0.1": routerMachine("1 ff:ff:ff:00:00:00 10.0.0.66 home-ap-1 *\n1 aa:bb:cc:00:00:01 10.0.0.77 * *"),
-    "10.0.0.66": { board: board("zyxel,nwa50ax-pro"), macs: ["ff:ff:ff:00:00:00"], key: "IMPOSTOR-KEY" },
-  });
-  const { hostKey: _none, ...withoutKey } = apFacts;
-  for (const facts of [{}, { "home-ap-1": withoutKey }]) {
-    net.tried.length = 0;
-    const [, a] = await settle(locateEach({ devices: [router, ap], facts, platform: net.platform }));
-    t.false("session" in a);
-    t.false(net.tried.includes("10.0.0.66"), "no credentials sent to a name anyone can claim");
-    t.false(net.tried.includes("10.0.0.77") || net.tried.includes("10.0.0.50"));
-    t.regex((a as NotLocated).error, /not tried, no host key on record/);
-  }
-});
-
-test("a known device is held to its key by the SSH client, and the shared known_hosts is never touched", async (t) => {
-  const net = network({ "10.0.0.1": routerMachine(""), "10.0.0.50": apMachine });
-  const unreadable = join(mkdtempSync(join(tmpdir(), "onc-locate-")), "known_hosts");
-  mkdirSync(unreadable); // reading it would fail: a pinned attempt must not need it
-  const pins: unknown[] = [];
-  const platform = {
-    ...net.platform,
-    env: (name: string) => (name === "ONC_KNOWN_HOSTS" ? unreadable : undefined),
-    connect: (target: SshTarget) => {
-      pins.push(target.hostKey);
-      return net.platform.connect(target);
-    },
-  };
-  const [a] = await settle(locateEach({ devices: [ap], facts: { "home-ap-1": apFacts }, platform }));
-  t.like(a, { address: "10.0.0.50", hostKey: apFacts.hostKey });
-  t.deepEqual(pins, [apFacts.hostKey]);
-  t.true(statSync(unreadable).isDirectory(), "left as it was");
 });

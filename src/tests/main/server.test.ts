@@ -2,6 +2,7 @@ import test from "ava";
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { writeFacts } from "../../deviceFacts";
 import { nodePlatform } from "../../platforms/node";
 import { uiHandler } from "../../server/handlers";
 
@@ -20,21 +21,23 @@ const withServer = async (
   }
 };
 
-const request = (method: string, path: string, body = "", headers = {}) => ({
+const request = (method: string, path: string, body = "", headers: Record<string, string> = { "x-onc": "1" }) => ({
   method,
   path,
   body,
   headers,
 });
 
-test("a write without the X-ONC header is refused (CSRF)", async (t) => {
+test("an API request without the X-ONC header is refused (CSRF), reads too", async (t) => {
   await withServer(async (handle, intentPath) => {
     const before = readFileSync(intentPath, "utf8");
     const intent = JSON.parse(before);
-    const put = await handle(request("PUT", "/api/intent", JSON.stringify(intent)));
+    const put = await handle(request("PUT", "/api/intent", JSON.stringify(intent), {}));
     t.is(put.status, 403);
-    const post = await handle(request("POST", "/api/provision"));
+    const post = await handle(request("POST", "/api/provision", "", {}));
     t.is(post.status, 403);
+    // A GET that would log in to the devices, as an <img> on any page could ask.
+    t.is((await handle(request("GET", "/api/status", "", {}))).status, 403);
     t.is(readFileSync(intentPath, "utf8"), before);
   });
 });
@@ -103,5 +106,21 @@ test("adopting under a name already in Hardware is refused: it would re-pin that
     );
     t.is(post.status, 409);
     t.regex(JSON.parse(post.body).error, /already in Hardware/);
+  });
+});
+
+test("adopting a box already in Hardware under another name is refused: its key is on record", async (t) => {
+  await withServer(async (handle, intentPath) => {
+    const existing = JSON.parse(readFileSync(intentPath, "utf8")).hardware[1].name;
+    const schema = { name: "zyxel,nwa50ax-pro", version: "25.12.5", ports: [{ name: "lan1", default_role: "lan" as const }] };
+    const hostKey = { type: "ssh-ed25519", key: "SAME-KEY" };
+    writeFacts(nodePlatform, intentPath, { hostname: existing, readAt: 1, schema, hostKey, macs: ["aa:bb:cc:00:00:01"] });
+    writeFileSync(
+      `${intentPath}.state/devices/inspected-10.0.0.66.json`,
+      JSON.stringify({ address: "10.0.0.66", schema, macs: [], hostname: "OpenWrt", hostKey, openLogin: false, suggested: { name: "ap-2", role: "access-point" } })
+    );
+    const post = await handle(request("POST", "/api/discover/adopt", JSON.stringify({ address: "10.0.0.66", name: "ap-9" })));
+    t.is(post.status, 409);
+    t.regex(JSON.parse(post.body).error, new RegExp(`This is ${existing}`));
   });
 });

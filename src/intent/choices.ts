@@ -97,9 +97,14 @@ export const choices: Choice[] = [
         note: `${intent.hardware[current].name || "The current router"} becomes an access point.`,
         apply: (next) => ({
           ...next,
-          hardware: next.hardware.map((d, j) =>
-            j === Number(i) ? { ...d, role: "router" } : j === current ? { ...d, role: "access-point" } : d
-          ),
+          hardware: next.hardware.map((d, j) => {
+            // The router is cabled: a mesh uplink it had as an access point goes.
+            return j === Number(i)
+              ? { ...d, role: "router", uplink: "cable" }
+              : j === current
+                ? { ...d, role: "access-point" }
+                : d;
+          }),
         }),
       };
     },
@@ -266,10 +271,21 @@ export const choices: Choice[] = [
   {
     // Ignored with one line; kept for when there are several again.
     path: "networks.*.line",
-    unavailable: (intent) =>
-      !multiWan(intent) &&
-      !intent.tunnels?.length &&
-      `With one internet connection and no VPN provider (${where("vpnProviders")}), every network uses it.`,
+    unavailable: (intent, [i]) =>
+      (intent.networks[Number(i)]?.access?.internet === false && "This network has no internet access.") ||
+      (!multiWan(intent) &&
+        !intent.tunnels?.length &&
+        `With one internet connection and no VPN provider (${where("vpnProviders")}), every network uses it.`),
+    refuses: false,
+  },
+  {
+    // A provider's tunnel never falls back (features/vpn.ts): the kill switch, always.
+    path: "networks.*.line.fallback",
+    values: [true],
+    unavailable: (intent, [i]) => {
+      const tunnel = intent.tunnels?.find((t) => t.id === intent.networks[Number(i)]?.line?.connection);
+      return tunnel && `Never through a VPN provider: the plain line would leak what ${tunnel.name} hides.`;
+    },
     refuses: false,
   },
   {
@@ -277,8 +293,13 @@ export const choices: Choice[] = [
     path: "networks.*.ipv6",
     values: [true],
     unavailable: (intent, [i]) => {
-      const tunnel = intent.tunnels?.find((t) => t.id === intent.networks[Number(i)]?.line?.connection);
-      return tunnel && `It goes out through ${tunnel.name}: IPv6 would go around the tunnel.`;
+      const line = intent.networks[Number(i)]?.line?.connection;
+      const tunnel = intent.tunnels?.find((t) => t.id === line);
+      const connection = intent.internet.connections.find((c, j) => j > 0 && c.id === line);
+      return (
+        (tunnel && `It goes out through ${tunnel.name}: IPv6 would go around the tunnel.`) ||
+        (connection && `It keeps to ${connection.name || "a backup line"}: IPv6 only goes out the main connection.`)
+      );
     },
     refuses: false,
   },
@@ -349,7 +370,7 @@ export const choices: Choice[] = [
   },
   {
     path: "mesh.band",
-    values: ["2g", "5g"],
+    values: [...meshBands],
     unavailable: (intent, _, band) =>
       intent.mesh.enabled && !intent.radios[band as Band]?.enabled && `The ${bandLabels[band as Band]} radios are off.`,
     // Each band has its own channels: the channel moves with it.
@@ -384,9 +405,14 @@ export const choices: Choice[] = [
     path: "hardware.*.uplink",
     values: ["mesh"],
     unavailable: (intent, [i]) =>
-      intent.hardware[Number(i)]?.role === "router"
-        ? "The router is where the network starts: it is cabled."
-        : !intent.mesh.enabled && `Turn on the mesh first (${where("mesh")}).`,
+      intent.hardware[Number(i)]?.role === "router" && "The router is where the network starts: it is cabled.",
+  },
+  {
+    // Kept for when the mesh is back; until then every device is cabled (features/devices.ts).
+    path: "hardware.*.uplink",
+    values: ["mesh"],
+    unavailable: (intent) => !intent.mesh.enabled && `Turn on the mesh first (${where("mesh")}).`,
+    refuses: false,
   },
   // Every mesh node is on the mesh's channel: one access point elsewhere would drop out of it.
   ...(["2g", "5g"] as const).map(

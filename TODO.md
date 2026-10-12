@@ -98,7 +98,9 @@ and the React UI in `ui/`.
       a router that has radios (today only access points broadcast)?
 - [ ] Snapshot tests per feature × OpenWrt version; the rig on more than
       one version.
-- [ ] `@wan_port` on swconfig devices (the WAN is a switch VLAN there).
+- [ ] Run a line on a swconfig router on real hardware (compiled to OpenWrt's own layout, VLAN 2 with the CPU tagged; checked only against the Archer C50's schema).
+- [ ] On a router (CGI, dbclient), pinned host keys cannot be checked: dbclient refuses them, so access points (found by name) are refused there. Pin with OpenSSH on the router, or ship a small checker, before `cgi` is used.
+- [ ] CLI `provision` (no `--facts-for`) still trusts an access point's `name.lan` on first use through the shared known_hosts; only the UI's apply holds it to a pin.
 - [ ] **Authentication before `cgi` is exposed anywhere.** The API reads and
       writes Wi-Fi passwords, and has no login: on a router anyone on the
       LAN could use it. Likely reuse rpcd's login session (`ubus call
@@ -111,4 +113,7 @@ and the React UI in `ui/`.
 - Mesh over cables (`mesh.wired`) on swconfig nodes: there the VLAN is only carried, not used.
 - Tri-band access points with two 5 GHz radios: the mesh uses the first; a dedicated second 5 GHz radio needs each radio's channels in the facts.
 - A QEMU OpenWrt VM with `kmod-mac80211-hwsim` for an end-to-end mesh test in CI.
+- Wired batman (`br-lan.4000`) runs at MTU 1500, so batman fragments there; 1532 needs every switch port to take it.
+- Mesh packages (`kmod-batman-adv`, `batctl-default`, full wpad) on every access point whether the mesh is on or not: tight on 8 MB flash (Archer C50).
+- A mesh neighbour's name comes from facts' MACs: until they are re-read (a day), a new neighbour shows as a MAC and its speed test is refused.
 

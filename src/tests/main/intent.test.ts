@@ -1,14 +1,18 @@
 import test from "ava";
-import { readFileSync } from "fs";
+import { spawnSync } from "child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import { deviceSchemaSchema } from "../../deviceSchema";
 import { getOpenWrtConfig } from "../../getOpenWrtConfig";
 import { getOpenWrtState } from "../../getOpenWrtState";
 import { availability } from "../../intent/choices";
+import { withMain, withoutConnection } from "../../intent/connections";
 import { compileIntent } from "../../intent/compile";
+import { rescueAfterMinutes } from "../../intent/features/mesh";
 import { ulaPrefix } from "../../intent/features/network";
 import { migrateIntent } from "../../intent/migrations";
-import { intentSchema } from "../../intent/schema";
+import { Intent, intentSchema } from "../../intent/schema";
 import { oncConfigSchema } from "../../oncConfigSchema";
 
 const root = join(__dirname, "../../..");
@@ -91,12 +95,12 @@ test("on the router: each network routed, served and firewalled by purpose", (t)
   t.deepEqual(
     config.firewall.rule.filter((r: any) => r.src === "guest").map((r: any) => r.name),
     [
+      "Guests may print",
       "Allow-guest-DHCP",
       "Allow-guest-DHCPv6",
       "Allow-guest-DNS",
       "Allow-guest-NTP",
       "Allow-guest-ICMPv6",
-      "Guests may print",
     ]
   );
   t.like(
@@ -120,7 +124,7 @@ test("on the router: each network routed, served and firewalled by purpose", (t)
   });
 });
 
-test("the firewall derives from each network's access; own rules come last", (t) => {
+test("the firewall derives from each network's access; own rules come first", (t) => {
   const intent = sample();
   intent.networks[1].access = { internet: false, networks: ["lan"], router: "full" };
   intent.firewall.rules.push(
@@ -141,8 +145,8 @@ test("the firewall derives from each network's access; own rules come last", (t)
     network: ["wan", "wan6"],
   });
   const names = fw.rule.map((r: any) => r.name);
-  t.is(names[0], "Allow-DHCP-Renew", "stock rules first");
-  t.deepEqual(names.slice(-3), ["Guests may print", "No IoT out", "Scanners"], "own rules last, in order");
+  t.deepEqual(names.slice(0, 3), ["Guests may print", "No IoT out", "Scanners"], "own rules first, in order: fw4 stops at the first match");
+  t.is(names[3], "Allow-DHCP-Renew", "then the stock rules");
   t.like(fw.rule.find((r: any) => r.name === "No IoT out"), { src: "guest", dest: "wan", proto: ["all"], target: "REJECT" });
   t.like(fw.rule.find((r: any) => r.name === "Scanners"), {
     src: "wan",
@@ -445,7 +449,11 @@ test("DNS: where names are looked up, rebind protection, own names, DHCP's DNS",
   const named = dns((i) => (i.dns.records = [{ name: "printer", address: "10.0.0.30" }])).config;
   t.like(named.dhcp.domain[0], { name: "printer", ip: "10.0.0.30" });
 
-  const piHole = dns((i) => (i.networks[1].dhcp.dns_servers = ["10.0.0.53"])).config;
+  // A Pi-hole on the home network: guests must be able to reach it.
+  const piHole = dns((i) => {
+    i.networks[1].dhcp.dns_servers = ["10.0.0.53"];
+    i.networks[1].access.networks = ["lan"];
+  }).config;
   t.deepEqual(piHole.dhcp.dhcp.find((d: any) => d.interface === "guest").dhcp_option, ["42,10.0.20.1", "6,10.0.0.53"]);
 
   const issues = (change: (intent: any) => void) => {
@@ -723,6 +731,19 @@ test("two internet connections: a line on a LAN port, mwan3 over both, queueing 
   t.deepEqual(config.mwan3.policy[0].use_member, ["wan_m1", "wanb_m2"]);
   t.deepEqual(config.mwan3.rule.map((r: any) => r[".name"]), ["default"]);
 
+  // A network kept to the backup line has no IPv6, which only the main line carries.
+  const pinned = twoLines("failover");
+  pinned.networks[0].line = { connection: "wanb", fallback: true };
+  const pinnedConfig = onDevice("home-router", "friendlyarm,nanopi-r6s", pinned);
+  t.is(pinnedConfig.network.interface.find((i: any) => i[".name"] === "lan").ip6assign, undefined);
+  t.truthy(availability(pinned, "networks.0.ipv6").option(true).unavailable);
+
+  // A metered line, even listed first, is failover's last resort.
+  const meteredFirst = twoLines("failover");
+  meteredFirst.internet.connections[0].metered = true;
+  const last = onDevice("home-router", "friendlyarm,nanopi-r6s", meteredFirst);
+  t.deepEqual(last.mwan3.policy[0].use_member, ["wan_m2", "wanb_m1"]);
+
   const shared = onDevice("home-router", "friendlyarm,nanopi-r6s", twoLines("balance"));
   t.deepEqual(shared.mwan3.member.map((m: any) => [m.metric, m.weight]), [[1, 1], [1, 3]]);
   t.deepEqual(shared.mwan3.rule.map((r: any) => r[".name"]), ["https", "default"], "secure sites keep to one line");
@@ -934,7 +955,14 @@ test("remote access, sites and a provider's tunnel: WireGuard on the router, zon
   t.like(r.network.wireguard_tun1[0], { endpoint_host: "203.0.113.5", route_allowed_ips: true });
   t.deepEqual(
     r.network.rule.map((x: any) => [x[".name"], x.lookup ?? x.action]),
-    [["local_first", "main"], ["via_guest", 101], ["only_guest", "unreachable"]]
+    [
+      ["local_lan", "main"],
+      ["local_guest", "main"],
+      ["local_vpn", "main"],
+      ["local_s1_0", "main"],
+      ["via_guest", 101],
+      ["only_guest", "unreachable"],
+    ]
   );
   const zone = (name: string) => r.firewall.zone.find((z: any) => z.name === name);
   t.like(zone("vpn"), { input: "ACCEPT", network: ["vpn"] });
@@ -944,9 +972,128 @@ test("remote access, sites and a provider's tunnel: WireGuard on the router, zon
   t.truthy(r.firewall.rule.find((x: any) => x.name === "Allow-WireGuard" && x.dest_port === "51820"));
   const guestDhcp = r.dhcp.dhcp.find((d: any) => d[".name"] === "guest");
   t.true(guestDhcp.dhcp_option.includes("6,10.64.0.1"), "the provider's DNS, through the tunnel");
+  t.is(r.network.rule.find((x: any) => x[".name"] === "local_lan").dest, "10.0.0.0/24", "local ranges by name, not suppress_prefixlength");
   t.is(iface("guest").ip6assign, undefined, "no IPv6 around the tunnel");
 
   intent.sites.peers[0].subnets = ["10.0.0.0/16"];
   const clash = intentSchema.safeParse(intent);
   t.true(!clash.success && clash.error.issues.some((i) => i.message.includes("overlaps")));
+
+  // Without internet access, the tunnel is no way out either.
+  intent.sites.peers[0].subnets = ["192.168.50.0/24"];
+  // Never a fallback to the plain line; with no DNS from the provider, public ones through the tunnel.
+  t.truthy(availability(intent, "networks.1.line.fallback").option(true).unavailable);
+  delete intent.tunnels[0].dns;
+  const noDns = onDevice("home-router", "friendlyarm,nanopi-r6s", intent);
+  t.true(noDns.dhcp.dhcp.find((d: any) => d[".name"] === "guest").dhcp_option.includes("6,9.9.9.9,1.1.1.1"));
+  intent.networks[1].access.internet = false;
+  const off = onDevice("home-router", "friendlyarm,nanopi-r6s", intent);
+  t.falsy(off.firewall.forwarding.find((f: any) => f.src === "guest" && f.dest === "tun1"));
+  t.deepEqual(off.network.rule ?? [], []);
+  t.truthy(availability(intent, "networks.1.line").unavailable);
+});
+
+test("mesh rescue watcher: on once after the quiet, off once when the mesh is back, gone when its network is", (t) => {
+  const intent = sample();
+  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false };
+  intent.hardware[1].uplink = "mesh";
+  const state = getOpenWrtState({
+    oncConfig: compile(intent),
+    deviceConfig: compile(intent).devices.find((d) => d.hostname === "home-ap-1")!,
+    deviceSchema: deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", "zyxel,nwa50ax-pro.json"), "utf8"))),
+  });
+  const script = state.files!.find((f) => f.path === "/usr/libexec/onc/mesh-rescue")!.content;
+  const quiet = rescueAfterMinutes * 2;
+  // Each pass (one sleep): quiet, then the mesh back, then the network gone.
+  const dir = mkdtempSync(join(tmpdir(), "onc-rescue-"));
+  const stub = (name: string, body: string) => writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  stub("sleep", `n=$(cat ${dir}/n 2>/dev/null || echo 0); echo $((n + 1)) > ${dir}/n; [ $n -lt ${quiet + 6} ]`);
+  stub("batctl", `[ $(cat ${dir}/n) -gt ${quiet + 2} ] && echo node`);
+  stub("uci", `case "$*" in *"show wireless"*) [ $(cat ${dir}/n) -le ${quiet + 4} ] && echo "wireless.rescue_radio0.ifname='rescue0'" ;; *"get wireless.rescue_radio0.device"*) echo radio0 ;; *) echo "uci $*" >> ${dir}/log ;; esac`);
+  stub("wifi", `echo "wifi $*" >> ${dir}/log`);
+  stub("logger", "true");
+  const run = spawnSync("sh", ["-c", script], { env: { PATH: `${dir}:/usr/bin:/bin` }, encoding: "utf8" });
+  t.is(run.status, 0, run.stderr);
+  t.deepEqual(readFileSync(join(dir, "log"), "utf8").trim().split("\n"), [
+    "uci set wireless.rescue_radio0.disabled=0",
+    "uci set wireless.radio0.disabled=0",
+    "wifi up",
+    "uci -q revert wireless.rescue_radio0",
+    "uci -q revert wireless.radio0",
+    "wifi up",
+  ]);
+  t.is(readFileSync(join(dir, "n"), "utf8").trim(), String(quiet + 5), "it left once its network was gone");
+});
+
+test("an internet line on a swconfig router: a switch VLAN of its own, out of the networks'", (t) => {
+  const vlans = (intent: Intent) => {
+    const r = onDevice("home-router", "tplink,archer-c50-v4", intent);
+    return {
+      switch: r.network.switch_vlan.map((v: any) => `${v.vlan}: ${v.ports}`),
+      wan: r.network.interface.find((i: any) => i[".name"] === "wan").device,
+    };
+  };
+  const intent = sample();
+  // The WAN port: OpenWrt's own layout (VLAN 2, the CPU tagged).
+  t.deepEqual(vlans(intent), { switch: ["1: 6t 1 2 3 4", "20: 6t 1t 2t 3t 4t", "2: 6t 0"], wan: "eth0.2" });
+  intent.internet.connections[0].port = "eth2";
+  t.deepEqual(vlans(intent), { switch: ["1: 6t 0 1 3 4", "20: 6t 0t 1t 3t 4t", "2: 6t 2"], wan: "eth0.2" });
+  delete intent.internet.connections[0].port;
+  intent.internet.connections[0].vlan = 7;
+  t.deepEqual(vlans(intent), { switch: ["1: 6t 1 2 3 4", "20: 6t 1t 2t 3t 4t", "7: 6t 0t"], wan: "eth0.7" });
+  intent.internet.connections[0].vlan = 20;
+  t.throws(() => vlans(intent), { message: /VLAN 20 is both a network's and the line's/ });
+});
+
+test("the main connection's IPv6 moves with the role: promoting a backup or removing the main keeps it", (t) => {
+  const main = { ...sample().internet.connections[0], ipv6: true, ipv6_prefix: "56" as const };
+  const backup = { ...main, id: "wanb", name: "LTE", ipv6: false, ipv6_prefix: "auto" as const };
+  t.like(withMain([main, backup], 1)[0], { id: "wanb", ipv6: true, ipv6_prefix: "56" });
+  t.deepEqual(withoutConnection([main, backup], 0).map((c) => [c.id, c.ipv6]), [["wanb", true]]);
+  t.deepEqual(withoutConnection([main, backup], 1).map((c) => c.id), ["wan"]);
+});
+
+test("a radio that cannot mesh (facts say so) makes its device no mesh node", (t) => {
+  const intent = sample();
+  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false };
+  const oncConfig = compile(intent);
+  const schema = deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", "zyxel,nwa50ax-pro.json"), "utf8")));
+  const on = (deviceSchema: typeof schema) =>
+    getOpenWrtConfig({ oncConfig, deviceConfig: oncConfig.devices.find((d) => d.hostname === "home-ap-1")!, deviceSchema }) as any;
+  const mesh = (config: any) => config.wireless["wifi-iface"].some((w: any) => w.mode === "mesh");
+  t.true(mesh(on(schema)), "unknown: a node");
+  t.false(mesh(on({ ...schema, radios: schema.radios!.map((r) => (r.band === "5g" ? { ...r, mesh: false } : r)) })));
+});
+
+test("two connections on one port (the WAN port unset and by name) are refused where the port is known", (t) => {
+  const intent = sample();
+  intent.internet.connections.push({ ...intent.internet.connections[0], id: "wanb", name: "Second", port: "eth1" });
+  t.throws(() => onDevice("home-router", "friendlyarm,nanopi-r6s", intent), { message: /wan and wanb are both on port eth1/ });
+});
+
+test("port forwards: a range overlapping another's port is a clash; IPv6 sources are refused", (t) => {
+  const intent = sample();
+  const forward = (external_port: string, extra = {}) => ({
+    name: `F ${external_port}`,
+    enabled: true,
+    protocol: "tcp" as const,
+    external_port,
+    internal_address: "10.0.0.20",
+    reflection: true,
+    ...extra,
+  });
+  const issues = (port_forwards: unknown[]) =>
+    (intentSchema.safeParse({ ...intent, firewall: { ...intent.firewall, port_forwards } }).error?.issues ?? []).map((i) => i.message);
+  t.true(issues([forward("8000-8100"), forward("8080")]).includes("already forwarded"));
+  t.deepEqual(issues([forward("8000-8100"), forward("8101")]), []);
+  t.true(issues([forward("443", { source_addresses: ["2001:db8::1"] })]).some((m) => m.includes("IPv4 addresses only")));
+});
+
+test("a DNS server on a network this one cannot reach is refused", (t) => {
+  const intent = sample();
+  intent.networks[1].dhcp.dns_servers = ["10.0.0.53"];
+  const r = intentSchema.safeParse(intent);
+  t.true(!r.success && r.error.issues.some((i) => i.path.join(".") === "networks.1.dhcp.dns_servers.0"));
+  intent.networks[1].access.networks = ["lan"];
+  t.true(intentSchema.safeParse(intent).success);
 });

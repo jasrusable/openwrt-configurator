@@ -158,7 +158,7 @@ const wifiNetworks = defineList({
         <SwitchField
           name={`wifi.${i}.isolate_clients`}
           label="Isolate clients"
-          description="Its devices cannot reach each other."
+          description="Its devices cannot reach each other on the same access point."
         />
       </Section>
       <RoamingSection index={i}>

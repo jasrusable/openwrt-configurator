@@ -56,6 +56,7 @@ export const applyStatus = (info: ProvisionInfo): ApplyStatus => {
 export const lastRun = (state: ProvisionInfo["state"]) =>
   ({
     succeeded: { title: "Last run succeeded", color: "green" },
-    failed: { title: "Last run failed: every device rolled back", color: "red" },
+    failed: { title: "Last run failed: your devices kept their settings", color: "red" },
+    "applied-with-problems": { title: "Last run applied, but a step after it failed", color: "orange" },
     interrupted: { title: "Last run was interrupted", color: "red" },
   } as Partial<Record<ProvisionInfo["state"], { title: string; color: string }>>)[state];

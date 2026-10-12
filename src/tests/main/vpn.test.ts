@@ -1,9 +1,15 @@
 import test from "ava";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { protocolRefreshCommands } from "../../getDeviceScript";
+import { OpenWrtState } from "../../openWrtConfigSchema";
 import { availability } from "../../intent/choices";
+import { templateOf, withTemplate } from "../../intent/networkTemplates";
+import { compileIntent } from "../../intent/compile";
+import { ddnsService } from "../../intent/features/internet";
+import { ovpnFile } from "../../intent/features/vpn";
 import { intentSchema } from "../../intent/schema";
-import { clientAddresses, clientConf, decodeInvite, encodeInvite, inviteOf, nextClientHost } from "../../intent/vpn";
+import { clientAddresses, clientConf, decodeInvite, encodeInvite, inviteOf, nextClientHost, withPort } from "../../intent/vpn";
 import { newPrivateKey, publicKeyOf } from "../../wireguard";
 import { parseWgConf } from "../../wireguardConf";
 
@@ -53,4 +59,81 @@ test("a site's invitation carries what the other needs, and reads back the same"
   t.is(invite.endpoint, "home.duckdns.org:51821");
   t.deepEqual(decodeInvite(encodeInvite(invite)), invite);
   t.throws(() => decodeInvite("hello"), { message: /onc-site:/ });
+});
+
+test("netifd is restarted only for a protocol it may not know, on reload_config's own line", (t) => {
+  const state = (protos: string[]) =>
+    ({ config: { network: { interface: protos.map((proto) => ({ proto })) } } }) as unknown as OpenWrtState;
+  t.deepEqual(protocolRefreshCommands(state(["none", "static", "dhcp", "dhcpv6"])), []);
+  const [line] = protocolRefreshCommands(state(["static", "wireguard", "none"]));
+  t.regex(line, /for p in 'wireguard'; do/);
+  t.notRegex(line, /'none'/);
+});
+
+test("an .ovpn that would run or write things on the router is refused, and never written", (t) => {
+  const intent = sample();
+  const config = "client\nremote vpn.example.com 1194\nscript-security 2\nup /bin/evil.sh\n  plugin /x.so\nlog /etc/shadow\n";
+  const parsed = intentSchema.safeParse({ ...intent, tunnels: [{ id: "tun1", name: "Bad", type: "openvpn", config }] });
+  t.false(parsed.success);
+  t.regex(JSON.stringify(parsed.error?.issues), /script-security, up, plugin, log/);
+  const file = ovpnFile({ id: "tun1", config });
+  t.notRegex(file, /evil|\.so|shadow|script-security 2/);
+  t.regex(file, /script-security 1\n/);
+});
+
+test("a site may claim only private ranges, none overlapping another site's or this one's", (t) => {
+  const intent = sample();
+  const key = publicKeyOf(newPrivateKey());
+  const peer = (id: string, subnets: string[]) => ({ id, name: id, public_key: key, subnets });
+  const issues = (peers: unknown[]) =>
+    JSON.stringify(intentSchema.safeParse({ ...intent, sites: { private_key: newPrivateKey(), peers } }).error?.issues ?? []);
+  t.regex(issues([peer("s1", ["8.8.0.0/16"])]), /8\.8\.0\.0\/16 is not a private range/);
+  t.regex(issues([peer("s1", ["10.9.0.0/16"]), peer("s2", ["10.9.1.0/24"])]), /10\.9\.1\.0\/24 overlaps s1's/);
+  t.regex(issues([peer("s1", ["10.9.0.0/16"]), peer("s1", ["10.8.0.0/16"])]), /another has the id s1/);
+  t.is(issues([peer("s1", ["10.9.0.0/16"]), peer("s2", ["100.64.1.0/24"])]), "[]");
+});
+
+test("a provider's DNS servers are IPv4: DHCP's option 6 takes nothing else, and dnsmasq would not start", (t) => {
+  const tunnel = { id: "tun1", name: "P", type: "openvpn", config: "remote vpn.example.com 1194\n", dns: ["2001:db8::1"] };
+  const r = intentSchema.safeParse({ ...sample(), tunnels: [tunnel] });
+  t.true(!r.success && r.error.issues.some((i) => i.path.join(".") === "tunnels.0.dns.0"));
+});
+
+test("turning remote access off keeps networks' access to it, valid and not compiled", (t) => {
+  const intent = sample();
+  intent.networks[0].access.networks.push("vpn");
+  intent.vpn.enabled = false;
+  t.true(intentSchema.safeParse(intent).success);
+  const config = compileIntent(intent);
+  const forwardings = JSON.stringify(config.config.firewall?.forwarding ?? []);
+  t.notRegex(forwardings, /"dest":"vpn"/);
+});
+
+test("dynamic DNS: Cloudflare's record@zone for deeper names, the main connection's interface", (t) => {
+  const service = (hostname: string, zone?: string) =>
+    ddnsService({ provider: "cloudflare", hostname, token: "t", ...(zone ? { zone } : {}) }, "wanb");
+  t.is(service("vpn.home.example.com").domain, "vpn.home@example.com");
+  t.is(service("example.com").domain, "@example.com");
+  t.is(service("home.example.co.uk", "example.co.uk").domain, "home@example.co.uk");
+  t.is(service("home.example.com").interface, "wanb");
+});
+
+test("remote access's address: a name or an address without a port; IPv6 bracketed in what clients get", (t) => {
+  const intent = sample();
+  const ok = (endpoint: string) => intentSchema.safeParse({ ...intent, vpn: { ...intent.vpn, endpoint } }).success;
+  t.true(ok("home.example.com"));
+  t.true(ok("203.0.113.7"));
+  t.true(ok("2001:db8::7"));
+  t.false(ok("home.example.com:51820"));
+  t.is(withPort("2001:db8::7", 51820), "[2001:db8::7]:51820");
+  t.is(withPort("home.example.com", 51820), "home.example.com:51820");
+});
+
+test("a network's template leaves its access to remote access and sites alone", (t) => {
+  const intent = sample();
+  intent.networks[1].access.networks.push("vpn");
+  t.is(templateOf(intent.networks, 1), "guest");
+  const home = withTemplate(intent, 1, "home");
+  t.deepEqual(home.networks[1].access.networks, ["lan", "vpn"]);
+  t.is(templateOf(home.networks, 1), "home");
 });

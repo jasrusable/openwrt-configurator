@@ -1,8 +1,8 @@
 import * as std from "std";
-import { hostKeyChangedMessage } from "../../knownHosts";
+import { hostKeyAlgorithms, hostKeyChangedMessage, pinnedKeyChangedMessage } from "../../knownHosts";
 import { dirname } from "../../paths";
 import { ExecResult, Session, SshTarget } from "../../platform";
-import { mkdirp } from "./files";
+import { mkdirp, removeFile } from "./files";
 import { environment, spawn, spawnSync, tmpPath, which } from "./process";
 
 // --- SSH ---------------------------------------------------------------
@@ -36,6 +36,8 @@ type Transport = {
     command: string,
     options?: { stdin?: string; timeoutMs?: number }
   ) => Promise<ExecResult>;
+  /** What the session leaves behind (a pinned key's file), removed when it is closed. */
+  cleanup?: () => void;
 };
 
 const transport = (
@@ -48,10 +50,10 @@ const transport = (
     ),
 });
 
-const sessionOver = ({ exec }: Transport, local = false): Session => ({
+const sessionOver = ({ exec, cleanup }: Transport, local = false): Session => ({
   execCommand: (command, options) => exec(command, { stdin: options?.stdin }),
-  // Every command is its own client process, so there is nothing to close.
-  dispose: () => {},
+  // Every command is its own client process: only files of its own to remove.
+  dispose: () => cleanup?.(),
   local,
 });
 
@@ -97,6 +99,7 @@ const pinnedKnownHosts = (host: string, key: { type: string; key: string }) => {
 
 const openSsh = (target: SshTarget, host: string): Transport => {
   const seconds = (ms: number) => String(Math.max(1, Math.round(ms / 1000)));
+  const pinned = target.hostKey && pinnedKnownHosts(host, target.hostKey);
   const options = [
     "-T",
     // A pinned key: exactly it, from a file of its own, never recorded.
@@ -107,9 +110,10 @@ const openSsh = (target: SshTarget, host: string): Transport => {
           "-o",
           "StrictHostKeyChecking=yes",
           "-o",
-          `UserKnownHostsFile=${pinnedKnownHosts(host, target.hostKey)}`,
+          `UserKnownHostsFile=${pinned}`,
           "-o",
-          `HostKeyAlgorithms=${target.hostKey.type}`,
+          // An RSA key is checked with SHA-2 signatures, as ssh2 does, not ssh-rsa's SHA-1 alone.
+          `HostKeyAlgorithms=${hostKeyAlgorithms(target.hostKey.type).join(",")}`,
         ]
       : target.knownHostsFile
       ? [
@@ -157,7 +161,20 @@ const openSsh = (target: SshTarget, host: string): Transport => {
         }
       : {}),
   });
-  return transport((command) => ["ssh", ...options, host, command], env);
+  return {
+    ...transport((command) => ["ssh", ...options, host, command], env),
+    ...(pinned
+      ? {
+          cleanup: () => {
+            try {
+              removeFile(pinned);
+            } catch {
+              // Already gone.
+            }
+          },
+        }
+      : {}),
+  };
 };
 
 const dropbear = (target: SshTarget, host: string): Transport => {
@@ -204,6 +221,10 @@ export const connect = async (target: SshTarget): Promise<Session> => {
   if (probe.code !== 0) {
     const detail = probe.stderr.trim() || "no response";
     // OpenSSH and dbclient each announce a changed key in their own words.
+    if (target.hostKey && /HOST IDENTIFICATION HAS CHANGED|Host key verification failed/i.test(detail)) {
+      client.cleanup?.();
+      throw new Error(pinnedKeyChangedMessage(host));
+    }
     if (/HOST IDENTIFICATION HAS CHANGED|Host key mismatch/i.test(detail)) {
       throw new Error(
         hostKeyChangedMessage(
@@ -218,6 +239,7 @@ export const connect = async (target: SshTarget): Promise<Session> => {
       target.password && /Remote closed the connection/.test(detail)
         ? " (dropbear closes the connection after repeated bad passwords)"
         : "";
+    client.cleanup?.();
     throw new Error(`SSH to ${host} failed: ${detail}${hint}`);
   }
   return sessionOver(client);

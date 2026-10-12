@@ -7,7 +7,9 @@
 //
 // The app logs in as root, so a wrong guess must never reach another box,
 // nor be handed a password. Only the address the settings give may be
-// trusted on first use (as before). Any address the app found itself is
+// trusted on first use, and only when it is an address: a name (an access
+// point's name.lan) is what DHCP says, and anyone can claim a name there. Any
+// name, and any address the app found itself, is
 // tried only for a device whose host key is on record, and the connection
 // is held to that key by the SSH client itself (SshTarget.hostKey): any
 // other machine there is refused before credentials are sent, and a client
@@ -17,6 +19,7 @@ import type { DeviceFacts } from "./deviceFacts";
 import { Probe, runProbes } from "./deviceProbes";
 import { DeviceSchema } from "./deviceSchema";
 import { getDeviceSchema } from "./getDeviceSchema";
+import { where } from "./intent/places";
 import { parseKnownHosts } from "./knownHosts";
 import { ONCDeviceConfig } from "./oncConfigSchema";
 import { Platform, Session } from "./platform";
@@ -106,6 +109,21 @@ const readKnownHosts = (platform: Platform, file: string) => {
   return platform.readTextFile(file);
 };
 
+type HostKey = { type: string; key: string };
+
+/** The key the shared known_hosts holds for `host`, if any. */
+const knownKey = (platform: Platform, file: string, host: string): HostKey | undefined => {
+  try {
+    const found = parseKnownHosts(readKnownHosts(platform, file)).find((k) => k.host === host);
+    return found && { type: found.type, key: found.key };
+  } catch {
+    return undefined;
+  }
+};
+
+/** An IPv4 or IPv6 address, not a name a DHCP client could claim. */
+export const isAddress = (host: string) => /^\d+\.\d+\.\d+\.\d+$/.test(host) || host.includes(":");
+
 /**
  * Connect to `deviceConfig` at `address` only if it is that device: the
  * address pinned to its known host key first, its board checked once in.
@@ -114,6 +132,7 @@ const tryAddress = async (
   deviceConfig: ProvisionableDevice,
   address: string,
   facts: DeviceFacts | undefined,
+  pin: HostKey | undefined,
   platform: Platform
 ): Promise<Located> => {
   const at = { ...deviceConfig, ipaddr: address } as ONCDeviceConfig;
@@ -124,7 +143,7 @@ const tryAddress = async (
   const session = await platform.connect({
     ...sshConnectOptions({ deviceConfig: at, agentSocket: platform.env("SSH_AUTH_SOCK"), platform }),
     readyTimeout: attemptTimeoutMs,
-    ...(facts?.hostKey ? { hostKey: facts.hostKey } : {}),
+    ...(pin ? { hostKey: pin } : {}),
   });
   try {
     const schema = await getDeviceSchema({ deviceConfig: at, ssh: session });
@@ -133,15 +152,7 @@ const tryAddress = async (
     }
     const read = await runProbes(session, { macs });
     // Its key: the pinned one, or the one just trusted on first use.
-    const key =
-      facts?.hostKey ??
-      (() => {
-        try {
-          return parseKnownHosts(readKnownHosts(platform, file)).find((k) => k.host === address);
-        } catch {
-          return undefined;
-        }
-      })();
+    const key = pin ?? knownKey(platform, file, address);
     return {
       hostname: deviceConfig.hostname,
       session,
@@ -168,12 +179,21 @@ const locate = async (
     // Fail closed: an address the app found (a lease, a MAC, the last one)
     // could be anyone's. It is tried only pinned to the device's recorded
     // host key, which both SSH clients check before any credential is sent.
-    if (!configured && !facts?.hostKey) {
-      failures.push(`${address} (${why}): not tried, no host key on record to check it against`);
+    // A name in the settings is the router's DNS answering from DHCP: held
+    // to the key on record, else to the one SSH already trusts for the name.
+    const pin =
+      facts?.hostKey ??
+      (configured && !isAddress(address)
+        ? knownKey(platform, sshConnectOptions({ deviceConfig: deviceConfig as ONCDeviceConfig, platform }).knownHostsFile!, address)
+        : undefined);
+    if (!pin && !(configured && isAddress(address))) {
+      failures.push(
+        `${address} (${why}): not tried, no host key on record to check it against${configured ? `: add it in ${where("hardware", "Add")}` : ""}`
+      );
       continue;
     }
     try {
-      return await tryAddress(deviceConfig, address, facts, platform);
+      return await tryAddress(deviceConfig, address, facts, pin, platform);
     } catch (e) {
       failures.push(`${address} (${why}): ${(e as Error).message}`);
     }

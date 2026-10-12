@@ -13,14 +13,27 @@ export const meterMs = 5000;
 
 /** batctl's "Throughput: 5.67 MB/s (47.52 Mbps)", in Mbit/s; undefined when it did not say. */
 export const parseThroughput = (text: string) => {
-  const m = /Throughput:.*\(([\d.]+)\s*([KMG])bps\)/i.exec(text);
+  // batctl scales the unit to the value: bps, Kbps, Mbps or Gbps.
+  const m = /Throughput:.*\(([\d.]+)\s*([KMG]?)bps\)/i.exec(text);
   if (!m) return undefined;
-  return Number(m[1]) * ({ K: 0.001, M: 1, G: 1000 } as const)[m[2].toUpperCase() as "K" | "M" | "G"];
+  const scale = ({ "": 0.000001, K: 0.001, M: 1, G: 1000 } as const)[m[2].toUpperCase() as "" | "K" | "M" | "G"];
+  return Math.round(Number(m[1]) * scale * 1e6) / 1e6;
+};
+
+/**
+ * The node's batman address, which the meter is aimed at: its main
+ * interface's MAC, from batctl's header ("MainIF/MAC: mesh0/02:…"), which is
+ * not mesh0's when the mesh also runs over cables; else mesh0's.
+ */
+export const parseMeshAddress = (stdout: string) => {
+  const main = /MainIF\/MAC:\s*[^/\s]+\/([0-9a-f:]{17})/i.exec(stdout)?.[1];
+  const mesh0 = stdout.split("\n").map((l) => l.trim()).find((l) => /^[0-9a-f:]{17}$/i.test(l));
+  return (main ?? mesh0)?.toLowerCase();
 };
 
 const meshAddress: Probe<string | undefined> = {
-  command: "cat /sys/class/net/mesh0/address 2>/dev/null || true",
-  parse: ({ stdout }) => (/^[0-9a-f:]{17}$/i.test(stdout.trim()) ? stdout.trim().toLowerCase() : undefined),
+  command: "batctl meshif bat0 originators 2>/dev/null | head -n 1; cat /sys/class/net/mesh0/address 2>/dev/null || true",
+  parse: ({ stdout }) => parseMeshAddress(stdout),
 };
 
 const meter = (mac: string): Probe<string> => ({

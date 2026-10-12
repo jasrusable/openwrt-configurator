@@ -57,8 +57,8 @@ export const rescueAfterMinutes = 3;
 const rescueScript = "/usr/libexec/onc/mesh-rescue";
 const rescueService = "onc-mesh-rescue";
 
-/** A node: any device with a radio in the mesh's band. */
-export const meshNode = (intent: Pick<Intent, "mesh">) => `device.wifi_${intent.mesh.band} == true`;
+/** A node: any device with a radio in the mesh's band that can mesh (facts say which). */
+export const meshNode = (intent: Pick<Intent, "mesh">) => `device.mesh_${intent.mesh.band} == true`;
 
 export const mesh: Feature = (intent) => {
   const { enabled, band, channel, key } = intent.mesh;
@@ -84,30 +84,41 @@ export const mesh: Feature = (intent) => {
 # This access point's rescue Wi-Fi: up once it has heard no other mesh node
 # for ${rescueAfterMinutes} minutes, so it can still be reached without a cable; down again
 # when the mesh is back. A uci change never committed: a reboot or an apply
-# starts with it off. It stands aside while an apply runs (its watchdog).
+# starts with it off. It stands aside while an apply runs.
 command -v batctl >/dev/null || exit 0
-section=$(uci -q show wireless | grep "ifname='rescue0'$" | cut -d . -f 2 | head -n 1)
-[ -n "$section" ] || exit 0
+rescue() { uci -q show wireless | grep "ifname='rescue0'$" | cut -d . -f 2 | head -n 1; }
 applying() {
-	for p in /tmp/onc-watchdog-*.pid; do
-		[ -f "$p" ] && kill -0 "$(cat "$p")" 2>/dev/null && return 0
+	for p in /tmp/onc-watchdog-*.pid /tmp/.onc-provision-*.sh; do
+		[ -f "$p" ] || continue
+		case "$p" in *.pid) kill -0 "$(cat "$p")" 2>/dev/null && return 0 ;; *) return 0 ;; esac
 	done
 	return 1
 }
+# What this watcher turned on, not what uci says: a change it did not make
+# (an apply's, a commit) is never acted on, so it cannot restart Wi-Fi in a loop.
+on=0
 quiet=0
 while sleep 30; do
+	section=$(rescue)
+	# No longer a repeater (its rescue network is gone): nothing to watch.
+	[ -n "$section" ] || exit 0
 	applying && continue
 	if batctl meshif bat0 originators -H 2>/dev/null | grep -q .; then
 		quiet=0
-		if [ "$(uci -q get "wireless.$section.disabled")" = "0" ]; then
+		if [ "$on" = 1 ]; then
+			on=0
 			uci -q revert "wireless.$section"
+			uci -q revert "wireless.$radio"
 			logger -t onc-mesh "mesh back: rescue Wi-Fi off"
 			wifi up
 		fi
 	else
 		quiet=$((quiet + 1))
-		if [ "$quiet" -ge ${rescueAfterMinutes * 2} ] && [ "$(uci -q get "wireless.$section.disabled")" != "0" ]; then
-			uci set "wireless.$section.disabled=0"
+		if [ "$on" = 0 ] && [ "$quiet" -ge ${rescueAfterMinutes * 2} ]; then
+			# Its radio too: 2.4 GHz may be off for everything else.
+			radio=$(uci -q get "wireless.$section.device") || continue
+			uci set "wireless.$section.disabled=0" && uci set "wireless.$radio.disabled=0" || continue
+			on=1
 			logger -t onc-mesh "no mesh for ${rescueAfterMinutes} minutes: rescue Wi-Fi on"
 			wifi up
 		fi

@@ -45,6 +45,11 @@ export const keyTypeOfBlob = (blob: Uint8Array) => {
 export const hostKeyAlgorithms = (type: string) =>
   type === "ssh-rsa" ? ["rsa-sha2-512", "rsa-sha2-256", "ssh-rsa"] : [type];
 
+/** A key pinned in a device's facts (found by src/locate.ts) did not match. */
+export const pinnedKeyChangedMessage = (host: string) =>
+  `The SSH host key at ${host} is not the one on record for this device, so the connection was refused: ` +
+  `it may be another machine. If the device was reflashed, remove it from Hardware and add it again.`;
+
 export const hostKeyChangedMessage = (host: string, file: string) =>
   `The SSH host key for ${host} has changed, so the connection was refused: ` +
   `it may not be the device you think it is. If it was reflashed or its ` +

@@ -95,11 +95,14 @@ export const reachableSession =
 export const reconnectSettled = async ({
   connect,
   confirmWith,
+  beforeSettle,
   deadline,
   sleep,
   now = Date.now,
 }: {
   connect: () => Promise<Session>;
+  /** Run over the first session, before the services settle. */
+  beforeSettle?: (session: Session) => Promise<void>;
   /** How the final, confirming session is obtained (see reachableSession). */
   confirmWith: () => Promise<Session>;
   deadline: number;
@@ -110,6 +113,7 @@ export const reconnectSettled = async ({
   // Leave at least ten seconds of the window for the second reconnect.
   const budget = Math.min(20, (deadline - now()) / 1000 - 10);
   try {
+    await beforeSettle?.(first);
     if (budget >= 3) await runProbe(first, servicesSettled(budget));
   } finally {
     first.dispose();

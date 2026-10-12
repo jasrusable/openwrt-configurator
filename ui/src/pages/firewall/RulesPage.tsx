@@ -47,8 +47,11 @@ const rules = defineList({
   newItem: (_, intent) => ({
     name: "",
     enabled: true,
+    // From another network to the main one; with only the main one, from it to the router.
     from: intent.networks.find((n) => n.vlan !== undefined)?.id ?? intent.networks[0].id,
-    to: intent.networks.find((n) => n.vlan === undefined)?.id ?? "router",
+    to: intent.networks.some((n) => n.vlan !== undefined)
+      ? (intent.networks.find((n) => n.vlan === undefined)?.id ?? "router")
+      : "router",
     protocol: "tcp+udp" as const,
     action: "allow" as const,
   }),

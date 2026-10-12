@@ -2,7 +2,7 @@
 // queueing on each line whose speed is known, and with several lines mwan3
 // using them together. The firewall is its own feature (firewall.ts).
 import { Feature, mainNetwork, onRouter } from "../fragment";
-import { checkOf, Connection, ipv6Interface, multiWan, slowLine, stickySeconds } from "../connections";
+import { checkOf, Connection, failoverOrder, ipv6Interface, multiWan, primaryConnection, slowLine, stickySeconds } from "../connections";
 import { named } from "../names";
 import { fnv } from "./network";
 import { Intent, lineTypes, netmask } from "../schema";
@@ -40,7 +40,8 @@ const upnpUuid = (siteName: string) => {
 };
 
 /** A connection's line: its port (unset, the board's WAN port), tagged with its VLAN. */
-const portOf = (connection: Connection) => connection.port ?? "@wan_port";
+/** Placeholders the engine resolves: on swconfig, a switch VLAN of the line's own. */
+const portOf = (connection: Connection) => (connection.port ? `@port:${connection.port}` : "@wan_port");
 
 /** Each provider's ddns-scripts service name. */
 const ddnsServices = { cloudflare: "cloudflare.com-v4", duckdns: "duckdns.org", dynv6: "dynv6.com" } as const;
@@ -49,14 +50,13 @@ const ddnsServices = { cloudflare: "cloudflare.com-v4", duckdns: "duckdns.org", 
 const ddnsIpUrl = "https://api.ipify.org";
 
 /** The ddns-scripts service for a name that follows the internet address. */
-const ddnsService = (ddns: NonNullable<Intent["internet"]["ddns"]>) => {
-  const labels = ddns.hostname.split(".");
-  // Cloudflare's script takes "record@zone": home@example.com for home.example.com.
+export const ddnsService = (ddns: NonNullable<Intent["internet"]["ddns"]>, wan: string) => {
+  // Cloudflare's script takes "record@zone": vpn.home@example.com for
+  // vpn.home.example.com in example.com, @example.com for the zone itself.
+  const zone = ddns.zone ?? ddns.hostname.split(".").slice(-2).join(".");
   const domain =
     ddns.provider === "cloudflare"
-      ? labels.length > 2
-        ? `${labels[0]}@${labels.slice(1).join(".")}`
-        : `@${ddns.hostname}`
+      ? `${ddns.hostname === zone ? "" : ddns.hostname.slice(0, -(zone.length + 1))}@${zone}`
       : ddns.hostname;
   return {
     ".name": "main",
@@ -70,7 +70,8 @@ const ddnsService = (ddns: NonNullable<Intent["internet"]["ddns"]>) => {
     cacert: "/etc/ssl/certs",
     ip_source: "web",
     ip_url: ddnsIpUrl,
-    interface: "wan",
+    // The main connection's: ddns-scripts restarts with it.
+    interface: wan,
     use_ipv6: false,
     check_interval: 10,
     check_unit: "minutes",
@@ -171,8 +172,8 @@ export const internet: Feature = (intent) => {
     members.set(name, { ".name": name, interface: c.id, metric, weight });
     return name;
   };
-  const internetPolicy = connections.map((c, i) =>
-    mode === "failover" ? member(c, i + 1) : c.metered ? member(c, 2) : member(c, 1, c.weight)
+  const internetPolicy = connections.map((c) =>
+    mode === "failover" ? member(c, failoverOrder(connections).indexOf(c) + 1) : c.metered ? member(c, 2) : member(c, 1, c.weight)
   );
   const byNetwork = intent.networks.flatMap((n) => {
     const line = n.line && connections.find((c) => c.id === n.line!.connection);
@@ -202,7 +203,7 @@ export const internet: Feature = (intent) => {
               track_ip: [...check.ips],
               reliability: check.reliability,
               count: c.down_when_slow ? slowLine.count : 1,
-              timeout: 2,
+              timeout: check.timeoutS,
               interval: check.intervalS,
               down: check.missesDown,
               up: check.missesDown,
@@ -317,7 +318,7 @@ export const internet: Feature = (intent) => {
       // Declared on or off: no service is no updating.
       ddns: {
         ddns: routerOnly([{ ".name": "global", upd_privateip: false }]),
-        service: routerOnly(intent.internet.ddns ? [ddnsService(intent.internet.ddns)] : []),
+        service: routerOnly(intent.internet.ddns ? [ddnsService(intent.internet.ddns, primaryConnection(intent).id)] : []),
       },
       ...(mwan3 ? { mwan3 } : {}),
     },

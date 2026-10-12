@@ -29,7 +29,8 @@ export const useSaveActions = () => {
       return;
     }
     try {
-      draft.reset(await save.mutateAsync(draft.value));
+      const sent = draft.value;
+      draft.savedAs(sent, await save.mutateAsync(sent));
       notify.success("Saved.");
     } catch (e) {
       if (e instanceof SaveError) {

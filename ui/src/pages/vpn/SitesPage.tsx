@@ -5,6 +5,7 @@ import { Alert, Button, Code, CopyButton, Group, Text, Textarea, TextInput } fro
 import { IconBuildingCommunity } from "@tabler/icons-react";
 import { useState } from "react";
 import { useNavigate } from "react-router";
+import { where } from "../../../../src/intent/places";
 import { Intent } from "../../../../src/intent/schema";
 import { decodeInvite, encodeInvite, inviteOf, vpnEndpoint } from "../../../../src/intent/vpn";
 import { newPrivateKey } from "../../../../src/wireguard";
@@ -147,7 +148,7 @@ const ThisSite = () => {
         description={
           vpnEndpoint(intent)
             ? "Paste this into the other site's Sites page: then add its invitation here."
-            : "Set a name on the internet (Internet) first, or the other site must connect to you."
+            : `Set a name on the internet (${where("internet")}) first, or the other site must connect to you.`
         }
       >
         <SettingRow label="Invitation">

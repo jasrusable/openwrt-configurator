@@ -4,7 +4,7 @@
 // directly, so Save and Revert in the header cover them like any other.
 import { Button, Group, Stack, Text, ThemeIcon } from "@mantine/core";
 import { IconAlertCircle, IconPlus } from "@tabler/icons-react";
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Intent } from "../../../src/intent/schema";
 import { Column, DataTable } from "../kit/DataTable";
@@ -200,16 +200,38 @@ const NewItemPage = <N extends ListName>({
   const newItem = list.useNewItem ? list.useNewItem() : list.newItem;
   // Its own draft, over a copy with the item appended. Problems show only
   // once a field is edited, or Add is pressed: not on a blank form.
-  const [{ copy, index }] = useState(() => {
+  const [{ copy, index, openedOn }] = useState(() => {
     const items: Item<N>[] = main.get(list.name) ?? [];
     const value = setIn(main.value, list.name, [...items, newItem(items, main.value)]);
-    return { copy: new Draft(main.value, value, false), index: items.length };
+    return { copy: new Draft(main.value, value, false), index: items.length, openedOn: main.value };
+  });
+  // What only a hook knows (the router's ports) may arrive after the page
+  // opened: the new item is made again, until anything on it is edited.
+  const seeded = useRef(copy.value);
+  const remade = (() => {
+    const items: Item<N>[] = main.get(list.name) ?? [];
+    return newItem(items, main.value);
+  })();
+  useEffect(() => {
+    if (copy.value !== seeded.current) return;
+    const current = getIn(copy.value, `${list.name}.${index}`);
+    if (JSON.stringify(current) === JSON.stringify(remade)) return;
+    const next = setIn(copy.value, `${list.name}.${index}`, remade);
+    seeded.current = next;
+    copy.replace(next);
   });
   const back = () => navigate(base);
   const add = () => {
+    // The draft changed meanwhile (reverted, say): the new item onto it as it
+    // is now, rather than the copy taken when the page opened.
+    const items: Item<N>[] = main.get(list.name) ?? [];
+    const [source, at] =
+      main.value === openedOn
+        ? [copy.value, index]
+        : [setIn(main.value, list.name, [...items, getIn(copy.value, `${list.name}.${index}`)]), items.length];
     // What adding implies (home networks reach it) first, so the check sees it.
-    const next = list.onAdd ? list.onAdd(copy.value, index) : copy.value;
-    const path = `${list.name}.${index}`;
+    const next = list.onAdd ? list.onAdd(source, at) : source;
+    const path = `${list.name}.${at}`;
     const incomplete = issuesOf(next).some(
       (issue) => issue.path === path || issue.path.startsWith(`${path}.`)
     );

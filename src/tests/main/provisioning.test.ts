@@ -154,6 +154,13 @@ test("files dropped from the config are removed from the device", (t) => {
   t.false(commands.includes("rm -f '/etc/kept'"));
 });
 
+test("a service whose init script is dropped is stopped and disabled before the file goes", (t) => {
+  const commands = getDeviceScript({ state: { config: {} as any, files: [] }, managedFiles: ["/etc/init.d/watcher"] });
+  const stop = commands.findIndex((c) => c.includes("'/etc/init.d/watcher' stop; '/etc/init.d/watcher' disable"));
+  t.true(stop >= 0);
+  t.is(commands[stop + 1], "rm -f '/etc/init.d/watcher'");
+});
+
 // `reload_config` only fires config.change for configs already listed in
 // /var/run/config.md5, and installing a package does not refresh that list. So
 // a package installed by this run shipped /etc/config/<pkg>, we configured it,

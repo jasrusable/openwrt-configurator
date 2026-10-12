@@ -520,7 +520,7 @@ const LineSection = ({ index }: { index: number }) => {
               path,
               value === null || value === automatic
                 ? undefined
-                : { connection: value, fallback: line?.fallback ?? true }
+                : { connection: value, fallback: !intent.tunnels.some((t) => t.id === value) && (line?.fallback ?? true) }
             )
           }
           allowDeselect={false}
@@ -546,6 +546,8 @@ const VlanField = ({ index }: { index: number }) => (
           description="Any switch between your devices must carry it."
           min={2}
           max={4094}
+          integer
+          required
         />
       )
     }

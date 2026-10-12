@@ -31,6 +31,9 @@ export const templateSettings = (
 const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
 
 /** The template network `index` follows, or "custom". */
+/** Remote access and linked sites: reachable like networks, but no template's business. */
+const vpnZoneIds = ["vpn", "sites"];
+
 export const templateOf = (networks: Network[], index: number): NetworkTemplate | "custom" => {
   const network = networks[index];
   if (!network) return "custom";
@@ -41,7 +44,7 @@ export const templateOf = (networks: Network[], index: number): NetworkTemplate 
       return (
         network.access.internet === access.internet &&
         network.access.router === access.router &&
-        sameSet(network.access.networks, access.networks) &&
+        sameSet(network.access.networks.filter((id) => !vpnZoneIds.includes(id)), access.networks) &&
         (network.share_devices ?? false) === share_devices
       );
     }) ?? "custom"
@@ -53,8 +56,12 @@ export const withTemplate = (intent: Intent, index: number, template: NetworkTem
   const others = intent.networks.filter((_, i) => i !== index).map((n) => n.id);
   return {
     ...intent,
-    networks: intent.networks.map((network, i) =>
-      i === index ? { ...network, ...templateSettings(template, others) } : network
-    ),
+    networks: intent.networks.map((network, i) => {
+      if (i !== index) return network;
+      const settings = templateSettings(template, others);
+      // Access to remote access and sites is its own choice, kept.
+      const vpn = network.access.networks.filter((id) => vpnZoneIds.includes(id));
+      return { ...network, ...settings, access: { ...settings.access, networks: [...settings.access.networks, ...vpn] } };
+    }),
   };
 };

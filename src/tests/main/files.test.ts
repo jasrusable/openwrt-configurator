@@ -1,4 +1,8 @@
 import test from "ava";
+import { spawnSync } from "child_process";
+import { existsSync, mkdtempSync, readFileSync, statSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import {
   getDeviceScript,
   getFinaliseCommands,
@@ -37,16 +41,19 @@ test("getDeviceScript writes managed files + manifest before commit", async (t) 
   );
   t.truthy(writeCmd);
 
-  // run_after runs immediately after the file is written, before `uci commit`.
-  // (Use run_after_reload for anything that needs the config to be live.)
+  // run_after runs right after the file is written, before `uci commit`, and
+  // only when it changed. (Use run_after_reload for anything that needs the
+  // config to be live.)
   const writeCmdIdx = commands.indexOf(writeCmd!);
-  t.is(commands[writeCmdIdx + 1], runAfter);
-  t.true(writeCmdIdx + 1 < commitIdx);
-  // Quoted heredoc (no base64 — busybox often lacks it) keeps content literal.
-  t.true(writeCmd!.includes("cat > '/etc/hotplug.d/net/20-aql' <<'ONC_EOF'"));
+  t.true(writeCmd!.endsWith(`else mv -f '/etc/hotplug.d/net/20-aql.onc-new' '/etc/hotplug.d/net/20-aql'; ${runAfter}; fi`));
+  t.true(writeCmdIdx < commitIdx);
+  // Quoted heredoc (no base64 — busybox often lacks it) keeps content literal,
+  // written private (umask 077) beside the file, then moved over it if it differs.
+  t.true(writeCmd!.includes("(umask 077; cat > '/etc/hotplug.d/net/20-aql.onc-new') <<'ONC_EOF'"));
   t.true(writeCmd!.includes(content));
   t.true(writeCmd!.includes("mkdir -p '/etc/hotplug.d/net'"));
-  t.true(writeCmd!.includes("chmod '0755' '/etc/hotplug.d/net/20-aql'"));
+  t.true(writeCmd!.includes("chmod '0755' '/etc/hotplug.d/net/20-aql.onc-new'"));
+  t.true(writeCmd!.includes("if cmp -s '/etc/hotplug.d/net/20-aql.onc-new' '/etc/hotplug.d/net/20-aql'; then rm -f"));
 
   // A manifest of managed files is written so stale files can be pruned later.
   t.truthy(commands.find((c) => c.includes("'/etc/onc/managed_files'")));
@@ -76,7 +83,7 @@ test("run_after_reload runs after the config is live, run_after before", async (
   };
 
   const commands = await getDeviceScript({ state });
-  const early = commands.indexOf("EARLY");
+  const early = commands.findIndex((c) => c.endsWith("; EARLY; fi"));
   const late = commands.indexOf("LATE");
   const commitIdx = commands.findIndex((c) => c.includes("uci commit"));
   const reloadIdx = commands.lastIndexOf("reload_config");
@@ -131,4 +138,27 @@ test("a file with no run_after_reload adds nothing after the reload", async (t) 
 test("getDeviceScript emits no file commands when there are no files", async (t) => {
   const commands = await getDeviceScript({ state: { config: {} as any } });
   t.falsy(commands.find((c) => c.includes("/etc/onc/managed_files")));
+});
+
+test("a file is replaced, and its run_after run, only when its content changed", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "onc-write-"));
+  const path = join(dir, "x.conf");
+  const state = (content: string): OpenWrtState => ({
+    config: {} as any,
+    files: [{ path, content, mode: "0600", run_after: `echo restarted >> ${dir}/log` }],
+  });
+  const write = (content: string) => {
+    const command = getStageCommands({ state: state(content), current: {} }).find((c) => c.includes("x.conf.onc-new"))!;
+    const r = spawnSync("sh", ["-ec", command], { encoding: "utf8" });
+    t.is(r.status, 0, r.stderr);
+  };
+  const restarts = () => (existsSync(join(dir, "log")) ? readFileSync(join(dir, "log"), "utf8").trim().split("\n").length : 0);
+  write("a");
+  write("a");
+  t.is(restarts(), 1, "the same content: nothing restarted");
+  write("b");
+  t.is(restarts(), 2);
+  t.is(readFileSync(path, "utf8"), "b\n");
+  t.is(statSync(path).mode & 0o777, 0o600);
+  t.false(existsSync(`${path}.onc-new`));
 });

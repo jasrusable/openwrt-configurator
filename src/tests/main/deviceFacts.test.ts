@@ -67,6 +67,7 @@ test("a device that cannot be reached keeps its facts, says why, and rests befor
   let attempts = 0;
   const offline = {
     ...nodePlatform,
+    env: (name: string) => (name === "ONC_KNOWN_HOSTS" ? `${path}.known_hosts` : undefined),
     connect: async () => {
       attempts++;
       throw new Error("connect ECONNREFUSED");
@@ -74,14 +75,14 @@ test("a device that cannot be reached keeps its facts, says why, and rests befor
   };
   const now = factsMaxAgeMs + 5000;
   await refreshStale({ intentPath: path, platform: offline, now: () => now });
-  t.is(attempts, 2, "both devices were stale");
+  t.is(attempts, 1, "both were stale; the access point's name is not tried without its key");
   t.deepEqual(readFacts(nodePlatform, path, ["home-router"])["home-router"], old);
   t.deepEqual(readFailures(nodePlatform, path, ["home-ap-1"])["home-ap-1"], {
     at: now,
-    error: "home-ap-1.lan (where your settings put it): connect ECONNREFUSED",
+    error: "home-ap-1.lan (where your settings put it): not tried, no host key on record to check it against: add it in Hardware › Add",
   });
   await refreshStale({ intentPath: path, platform: offline, now: () => now + 1000 });
-  t.is(attempts, 2, "not tried again so soon");
+  t.is(attempts, 1, "not tried again so soon");
 });
 
 test("facts in an older format are read again, but keep where the device is and its key", (t) => {
@@ -96,4 +97,12 @@ test("facts in an older format are read again, but keep where the device is and 
     address: "10.0.0.9",
     hostKey: { type: "ssh-ed25519", key: "K" },
   });
+});
+
+test("an apply's write of the schema alone keeps the pinned key, MACs and address", (t) => {
+  const path = intentFile();
+  const pinned = { address: "10.0.0.9", macs: ["aa:bb:cc:dd:ee:ff"], hostKey: { type: "ssh-ed25519", key: "K" } };
+  writeFacts(nodePlatform, path, { hostname: "home-ap-1", readAt: 5, schema, ...pinned });
+  writeFacts(nodePlatform, path, { hostname: "home-ap-1", readAt: 6, schema });
+  t.like(readFacts(nodePlatform, path, ["home-ap-1"])["home-ap-1"], { readAt: 6, ...pinned });
 });

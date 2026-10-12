@@ -165,7 +165,8 @@ export const SettingRow = ({
               <Stack gap={6}>
                 {explain && <Text size="xs">{explain}</Text>}
                 {openwrt && (
-                  <Text size="xs" c="gray.4" ff="monospace">
+                  // The tooltip's own text colour, dimmed: it is dark on light in dark mode.
+                  <Text size="xs" ff="monospace" style={{ opacity: 0.7 }}>
                     OpenWrt: {openwrt}
                   </Text>
                 )}
@@ -180,7 +181,7 @@ export const SettingRow = ({
             <ThemeIcon
               variant="transparent"
               size={16}
-              c="gray.5"
+              c="var(--onc-label-2)"
               tabIndex={0}
               aria-label={[explain, openwrt && `OpenWrt: ${openwrt}`].filter(Boolean).join(" ")}
             >

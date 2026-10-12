@@ -44,7 +44,8 @@ export type DeviceDiff =
  * carry keys, WEP has key1-4, acme keeps API tokens in credentials): hiding
  * a harmless one only costs showing "(hidden)".
  */
-export const isSecret = (option: string) => /key|secret|pass|psk|token|credential|r[01]kh|priv|auth/i.test(option);
+export const isSecret = (option: string) =>
+  /key|secret|pass|psk|token|credential|r[01]kh|priv|auth(?!oritative)/i.test(option);
 
 /** What the device holds after the apply: kept sections as they are, declared ones merged in or added. */
 export const configsAfter = ({

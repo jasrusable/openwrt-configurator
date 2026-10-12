@@ -108,9 +108,10 @@ export const firewall: Feature = (intent) => {
     ...(intent.sites.peers.length ? [{ id: "sites", access: intent.sites.access }] : []),
   ];
   // Networks out through a provider's tunnel (their Internet line).
+  // Only a network with internet access: the tunnel is a way to the internet.
   const viaTunnel = networks.flatMap((n) => {
     const tunnel = intent.tunnels.find((t) => t.id === n.line?.connection);
-    return tunnel ? [{ network: n, tunnel }] : [];
+    return tunnel && n.access.internet ? [{ network: n, tunnel }] : [];
   });
   // The network an address is on: where a port forward lands.
   const networkOf = (address: string) => {
@@ -170,13 +171,19 @@ export const firewall: Feature = (intent) => {
         forwarding: routerOnly([
           ...areas.flatMap((area) => [
             ...(area.access.internet ? [{ ".name": `${area.id}_${wan}`, src: area.id, dest: wan }] : []),
-            ...area.access.networks.map((to) => ({ ".name": `${area.id}_${to}`, src: area.id, dest: to })),
+            // Access to remote access or sites while they are off is kept, not compiled.
+            ...area.access.networks
+              .filter((to) => areas.some((a) => a.id === to))
+              .map((to) => ({ ".name": `${area.id}_${to}`, src: area.id, dest: to })),
           ]),
           ...viaTunnel.map(({ network, tunnel }) => ({ ".name": `${network.id}_${tunnel.id}`, src: network.id, dest: tunnel.id })),
         ]),
         // Named by their names: order still matters to fw4, but inserting
-        // one renames no other.
+        // one renames no other. The user's own come first: fw4 stops at the
+        // first match, so after the stock allows a block of ping from the
+        // internet, or of a guest's DNS, would never be reached.
         rule: routerOnly(named("rule", [
+          ...rules.map(userRule),
           ...stockRules(main.id),
           ...areas.filter((a) => a.access.router === "services").flatMap((a) => serviceRules(a.id)),
           // WireGuard from the internet: remote access's clients, the sites.
@@ -196,7 +203,6 @@ export const firewall: Feature = (intent) => {
               dest_port: "5353",
               target: "ACCEPT",
             })),
-          ...rules.map(userRule),
         ], (r) => String(r.name))),
         redirect: routerOnly(
           named(

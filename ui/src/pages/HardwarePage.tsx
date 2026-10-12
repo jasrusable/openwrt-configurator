@@ -161,7 +161,7 @@ const UplinkSection = ({ index }: { index: number }) => {
     radios === undefined
       ? undefined
       : !radios.length
-        ? `It has no ${intent.mesh.band === "2g" ? "2.4" : "5"} GHz radio.`
+        ? `It has no ${{ "2g": "2.4", "5g": "5", "6g": "6" }[intent.mesh.band]} GHz radio.`
         : !radios.some((r) => r.mesh !== false)
           ? "Its radio cannot mesh."
           : undefined;

@@ -5,6 +5,7 @@
 import { z } from "zod";
 import { choiceIssues, meshBands, meshChannels, meshWiredVlan } from "./choices";
 import { countries } from "./countries";
+import { ovpnUnsafe } from "./ovpn";
 import { where } from "./places";
 import { steeringLevels } from "./roaming";
 import {
@@ -164,6 +165,21 @@ export const parseCidr = (cidr: string) => {
 export const overlaps = (a: string, b: string) => {
   const [x, y] = [parseCidr(a), parseCidr(b)];
   return !!x && !!y && x.start < y.start + y.size && y.start < x.start + x.size;
+};
+
+/** Private and shared (CGNAT) ranges: what another site may claim. */
+const privateRanges = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"];
+
+/** Whether `cidr` lies wholly in a private range, so routing it to a site can take no internet address. */
+export const isPrivateRange = (cidr: string) => {
+  const r = parseCidr(cidr);
+  return (
+    !!r &&
+    privateRanges.some((p) => {
+      const q = parseCidr(p)!;
+      return r.start >= q.start && r.start + r.size <= q.start + q.size;
+    })
+  );
 };
 
 export const vpnRoutes = ["home", "all"] as const;
@@ -394,8 +410,14 @@ export const intentSchema = z
             hostname: z.string().regex(/^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/, "like home.example.com"),
             /** The provider's API token. */
             token: z.string().min(1, "required"),
+            /** Cloudflare: the zone the name is in; unset, its last two labels (example.com). */
+            zone: z.string().regex(/^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/, "like example.com").optional(),
           })
           .strict()
+          .refine((d) => !d.zone || d.hostname === d.zone || d.hostname.endsWith(`.${d.zone}`), {
+            message: "the name must be in the zone",
+            path: ["zone"],
+          })
           .optional(),
       })
       .strict(),
@@ -477,7 +499,11 @@ export const intentSchema = z
         /** The clients' addresses. */
         subnet: ipv4Subnet.default("10.0.99.0/24"),
         /** Where clients connect to: a name or an address; unset, the dynamic DNS name. */
-        endpoint: z.string().regex(/^[A-Za-z0-9.:-]+$/, "a name or an address").optional(),
+        /** A name or an address, without a port (the port is its own setting). */
+        endpoint: z
+          .string()
+          .regex(/^([A-Za-z0-9.-]+|[0-9A-Fa-f]*:[0-9A-Fa-f:]*:[0-9A-Fa-f:]*)$/, "a name or an address, without a port")
+          .optional(),
         /** The router's; made when remote access is turned on. */
         private_key: wgKey.optional(),
         access: accessSchema.default({ internet: true, networks: [], router: "full" }),
@@ -514,8 +540,8 @@ export const intentSchema = z
               type: z.literal("wireguard").default("wireguard"),
               private_key: wgKey,
               address: ipv4WithPrefix,
-              /** The provider's DNS servers: the networks out through it use them. */
-              dns: z.array(dnsServer).optional(),
+              /** The provider's DNS servers: the networks out through it use them (DHCP's option 6: IPv4 only, as the tunnel is). */
+              dns: z.array(ipv4).optional(),
               peer: z
                 .object({ public_key: wgKey, preshared_key: wgKey.optional(), endpoint: hostPort })
                 .strict(),
@@ -527,11 +553,23 @@ export const intentSchema = z
               name: tunnelName,
               type: z.literal("openvpn"),
               /** The provider's .ovpn, as given (its keys inline). */
-              config: z.string().min(1, "paste the provider's .ovpn").refine((c) => /^\s*remote\s/m.test(c), "no remote in it"),
-              /** Where the provider asks for them. */
-              username: z.string().optional(),
-              password: z.string().optional(),
-              dns: z.array(dnsServer).optional(),
+              config: z
+                .string()
+                .min(1, "paste the provider's .ovpn")
+                .refine((c) => /^\s*remote\s/m.test(c), "no remote in it")
+                .superRefine((c, ctx) => {
+                  const unsafe = ovpnUnsafe(c);
+                  if (unsafe.length) {
+                    ctx.addIssue({
+                      code: "custom",
+                      message: `it would run or write things on the router (${unsafe.join(", ")}): remove those lines`,
+                    });
+                  }
+                }),
+              /** Where the provider asks for them: one line each in its login file. */
+              username: z.string().regex(/^[^\r\n]*$/, "one line").optional(),
+              password: z.string().regex(/^[^\r\n]*$/, "one line").optional(),
+              dns: z.array(ipv4).optional(),
             })
             .strict(),
         ])
@@ -696,7 +734,9 @@ export const intentSchema = z
     });
     const ids = intent.networks.map((n) => n.id);
     // The VPN's zones, as targets of an access: its clients, the linked sites.
-    const zones = [...(intent.vpn.enabled ? ["vpn"] : []), ...(intent.sites.peers.length ? ["sites"] : [])];
+    // Remote access and sites stay valid targets while off: access to them
+    // is kept for when they are back, and compiles to nothing meanwhile.
+    const zones = ["vpn", "sites"];
     if (intent.vpn.enabled && !intent.vpn.private_key) issue(["vpn", "private_key"], "required");
     if (intent.sites.peers.length && !intent.sites.private_key) issue(["sites", "private_key"], "required");
     intent.vpn.clients.forEach((client, i) => {
@@ -704,14 +744,28 @@ export const intentSchema = z
         issue(["vpn", "clients", i, "host"], "another client has this address");
       }
     });
-    if (intent.vpn.enabled && intent.networks.some((n) => n.subnet === intent.vpn.subnet)) {
-      issue(["vpn", "subnet"], "a network uses this range");
+    const unique = (list: { id: string }[], path: string[]) =>
+      list.forEach((item, i) => {
+        if (list.slice(0, i).some((o) => o.id === item.id)) issue([...path, i, "id"], `another has the id ${item.id}`);
+      });
+    unique(intent.tunnels, ["tunnels"]);
+    unique(intent.vpn.clients, ["vpn", "clients"]);
+    unique(intent.sites.peers, ["sites", "peers"]);
+    if (intent.vpn.enabled && intent.sites.peers.length && intent.vpn.port === intent.sites.port) {
+      issue(["sites", "port"], "remote access uses this port");
     }
+    const clash = intent.vpn.enabled && intent.networks.find((n) => overlaps(n.subnet, intent.vpn.subnet));
+    if (clash) issue(["vpn", "subnet"], `overlaps ${clash.name}'s ${clash.subnet}`);
     const local = [...intent.networks.map((n) => n.subnet), ...(intent.vpn.enabled ? [intent.vpn.subnet] : [])];
     intent.sites.peers.forEach((site, i) =>
       site.subnets.forEach((range) => {
+        const at = ["sites", "peers", i, "subnets"];
+        // Routed to the site: an internet range would send that traffic there.
+        if (!isPrivateRange(range)) return issue(at, `${range} is not a private range`);
         const mine = local.find((l) => overlaps(l, range));
-        if (mine) issue(["sites", "peers", i, "subnets"], `${range} overlaps this site's ${mine}`);
+        if (mine) return issue(at, `${range} overlaps this site's ${mine}`);
+        const other = intent.sites.peers.slice(0, i).find((p) => p.subnets.some((s) => overlaps(s, range)));
+        if (other) issue(at, `${range} overlaps ${other.name}'s`);
       })
     );
     const accessOf = (path: (string | number)[], access: { networks: string[] }, own: string) =>
@@ -784,15 +838,37 @@ export const intentSchema = z
       intent.networks.some(
         (n) => address.split(".").slice(0, 3).join(".") === n.subnet.split(".").slice(0, 3).join(".")
       );
+    // A DNS server it hands out on another network must be one it may reach.
+    intent.networks.forEach((network, i) =>
+      (network.dhcp.dns_servers ?? []).forEach((server, j) => {
+        const on = intent.networks.find((n) => n.id !== network.id && overlaps(n.subnet, `${server}/32`));
+        if (on && !network.access.networks.includes(on.id)) {
+          issue(["networks", i, "dhcp", "dns_servers", j], `on ${on.name}, which this network cannot reach: give it access, or pick another`);
+        }
+      })
+    );
     port_forwards.forEach((forward, i) => {
       if (!inANetwork(forward.internal_address)) {
         issue(["firewall", "port_forwards", i, "internal_address"], "not on any of your networks");
       }
+      // A port forward is IPv4's (fw4 redirect, NAT): an IPv6 source would never match.
+      if ((forward.source_addresses ?? []).some(isIpv6)) {
+        issue(["firewall", "port_forwards", i, "source_addresses"], "IPv4 addresses only: a port forward is IPv4's");
+      }
+      // "8000-8100" and "8080" are the same port twice.
+      const range = (ports: string) => {
+        const [from, to = from] = ports.split("-").map(Number);
+        return [from, to];
+      };
+      const overlap = (x: string, y: string) => {
+        const [[a1, a2], [b1, b2]] = [range(x), range(y)];
+        return a1 <= b2 && b1 <= a2;
+      };
       const clash = port_forwards
         .slice(0, i)
         .some(
           (other) =>
-            other.external_port === forward.external_port &&
+            overlap(other.external_port, forward.external_port) &&
             (other.protocol === forward.protocol ||
               other.protocol === "tcp+udp" ||
               forward.protocol === "tcp+udp")

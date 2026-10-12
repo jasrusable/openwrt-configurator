@@ -24,8 +24,11 @@ const prefixOf = (subnet: string) => subnet.split(".").slice(0, 3).join(".");
 /** The router's address among the clients: .1. */
 export const vpnRouterAddress = (intent: Pick<Intent, "vpn">) => `${prefixOf(intent.vpn.subnet)}.1`;
 
-/** Its IPv6, from the networks' ULA prefix: the /64 numbered ff, never a network's. */
-const vpnUla = (intent: Pick<Intent, "site">) => ulaPrefix(intent.site.name).replace("::/48", ":ff::");
+/**
+ * Its IPv6, from the networks' ULA prefix: the /64 numbered ffff. A network's
+ * is its VLAN in hex (features/network.ts), at most ffe (VLAN 4094), so never this.
+ */
+const vpnUla = (intent: Pick<Intent, "site">) => ulaPrefix(intent.site.name).replace("::/48", ":ffff::");
 
 export const vpnRouterAddresses = (intent: Pick<Intent, "vpn" | "site">) => [
   `${vpnRouterAddress(intent)}/24`,
@@ -47,6 +50,9 @@ export const nextClientHost = (clients: Pick<VpnClient, "host">[]) => {
 /** Where clients and sites connect to: the address set, else the dynamic DNS name. */
 export const vpnEndpoint = (intent: Pick<Intent, "vpn" | "internet">) => intent.vpn.endpoint ?? intent.internet.ddns?.hostname;
 
+/** host:port, an IPv6 address in brackets. */
+export const withPort = (host: string, port: number) => (host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`);
+
 /** What a client sends through the tunnel: everything, or only home's ranges. */
 const clientRoutes = (intent: Pick<Intent, "vpn" | "networks" | "site">, client: Pick<VpnClient, "route">) =>
   client.route === "all"
@@ -65,7 +71,7 @@ export const clientConf = (
     dns: [vpnRouterAddress(intent)],
     peer: {
       publicKey: intent.vpn.private_key ? publicKeyOf(intent.vpn.private_key) : "",
-      endpoint: `${vpnEndpoint(intent) ?? "your-address"}:${intent.vpn.port}`,
+      endpoint: withPort(vpnEndpoint(intent) ?? "your-address", intent.vpn.port),
       allowedIps: clientRoutes(intent, client),
     },
     // Keeps a phone's tunnel open through mobile carriers' NAT.
@@ -82,7 +88,7 @@ export const inviteOf = (intent: Pick<Intent, "site" | "sites" | "networks" | "v
     ? {
         name: intent.site.name,
         public_key: publicKeyOf(intent.sites.private_key),
-        ...(vpnEndpoint(intent) ? { endpoint: `${vpnEndpoint(intent)}:${intent.sites.port}` } : {}),
+        ...(vpnEndpoint(intent) ? { endpoint: withPort(vpnEndpoint(intent)!, intent.sites.port) } : {}),
         subnets: intent.networks.map((n) => n.subnet),
       }
     : undefined;
@@ -99,3 +105,13 @@ export const decodeInvite = (text: string): SiteInvite => {
   if (typeof invite?.public_key !== "string" || !Array.isArray(invite?.subnets)) throw new Error("A broken invitation.");
   return invite as SiteInvite;
 };
+
+/**
+ * A provider that gives no DNS servers: public ones, asked from the network
+ * like any other address, so through the tunnel, never the router's own
+ * upstream over the plain line.
+ */
+export const tunnelDefaultDns = ["9.9.9.9", "1.1.1.1"];
+
+/** What a network out through `tunnel` is told to use for DNS. */
+export const tunnelDns = (tunnel: { dns?: string[] }) => (tunnel.dns?.length ? tunnel.dns : tunnelDefaultDns);

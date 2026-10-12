@@ -110,6 +110,11 @@ test("interpreted against the settings: what matches, and what does not", (t) =>
   t.deepEqual(status.ssids[0], { ssid: "Home", accessPoints: ["home-ap-1"], clients: 2 });
   t.deepEqual(status.clients, { total: 3, wifi: 2 });
   t.deepEqual(status.unexpected, { interfaces: ["oldvpn"], ssids: ["Not Ours"] });
+  const withVpn = { ...intent, vpn: { ...intent.vpn, enabled: true }, mesh: { ...intent.mesh, enabled: true } };
+  const ours = device("home-router", {
+    interfaces: ["vpn", "bat0", "batmesh", "oldvpn"].map((id) => ({ id, up: true, ipv4: [], ipv6: [] })),
+  });
+  t.deepEqual(networkStatus(withVpn, [ours]).unexpected.interfaces, ["oldvpn"], "the VPN's and the mesh's are ours");
   t.like(status.devices[0], { name: "home-router", health: { uptime: 3600, load: 0.5, memoryUsed: 0.4 } });
 });
 
@@ -161,41 +166,51 @@ test("several lines: mwan3's view of each, and which carry traffic", (t) => {
   t.deepEqual(using(networkStatus(intent, [router("disconnecting", "online")])), ["wan"], "failing is still working");
 });
 
-test("the mesh: each node's direct neighbours and their link quality, named by their MACs", (t) => {
-  // batctl's documented "originators -H" layout (not recorded: no mesh hardware
-  // to read): the best route marked *, a neighbour being its own next hop.
+test("the mesh: each node's direct neighbours and their throughput, named by any of their MACs", (t) => {
+  // batctl's documented "originators -H" layout for BATMAN_V (not recorded: no
+  // mesh hardware to read): the best route marked *, throughput in Mbit/s.
   const table = [
-    " * 02:aa:00:00:00:02    0.420s   (230) 02:aa:00:00:00:02 [     mesh0]",
-    "   02:aa:00:00:00:02    0.900s   (120) 02:aa:00:00:00:03 [     mesh0]",
-    " * 02:aa:00:00:00:03    1.100s   (180) 02:aa:00:00:00:02 [     mesh0]",
+    " * 02:aa:00:00:00:02    0.420s   ( 86.0) 02:aa:00:00:00:02 [     mesh0]",
+    "   02:aa:00:00:00:02    0.900s   ( 12.0) 02:aa:00:00:00:03 [     mesh0]",
+    " * 02:aa:00:00:00:03    1.100s   ( 40.0) 02:aa:00:00:00:02 [     mesh0]",
+    // Over cables too: a node known by its cable's MAC, reached by its mesh0's.
+    " * 02:cc:00:00:00:04    0.300s   (300.0) 02:dd:00:00:00:04 [     mesh0]",
   ].join("\n");
-  t.deepEqual(parseOriginators(table), [{ mac: "02:aa:00:00:00:02", quality: 230 / 255, lastSeen: 0.42 }]);
+  t.like(parseOriginators(table)[0], { originator: "02:aa:00:00:00:02", mac: "02:aa:00:00:00:02", throughput: 86, lastSeen: 0.42 });
   t.deepEqual(parseOriginators(""), [], "no batman: no neighbours");
 
   const intent = sample();
   intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false };
-  const status = networkStatus(
-    intent,
-    [device("home-ap-1", { mesh: parseOriginators(table) })],
-    { "home-router": ["02:aa:00:00:00:02"] }
-  );
-  t.deepEqual(status.mesh, [{ name: "home-ap-1", links: [{ to: "home-router", quality: 230 / 255 }] }]);
+  const status = networkStatus(intent, [device("home-ap-1", { mesh: parseOriginators(table) })], {
+    "home-router": ["02:aa:00:00:00:02"],
+    "home-ap-2": ["02:cc:00:00:00:04", "02:dd:00:00:00:04"],
+  });
+  t.deepEqual(status.mesh, [
+    {
+      name: "home-ap-1",
+      links: [
+        { to: "home-router", throughput: 86 },
+        { to: "home-ap-2", throughput: 300 },
+      ],
+    },
+  ]);
   t.is(networkStatus(sample(), []).mesh, undefined, "mesh off: nothing about it");
 });
 
 test("mesh depth: from the cabled nodes' routes, a repeater through another is deeper", async (t) => {
   const { meshDepths, parseMeshView } = await import("../../meshOrder");
   // ap-1 cabled; ap-2 its neighbour; ap-3 reached through ap-2 (batctl's layout, not recorded).
+  // ap-2 is known to batman by its cable's MAC (cc), reached over its mesh0 (bb).
   const views = {
     "ap-1": parseMeshView(
       [
         "02:aa:00:00:00:01",
         "---",
-        " * 02:aa:00:00:00:02    0.400s   (240) 02:aa:00:00:00:02 [     mesh0]",
-        " * 02:aa:00:00:00:03    0.800s   (150) 02:aa:00:00:00:02 [     mesh0]",
+        " * 02:cc:00:00:00:02    0.400s   (240.0) 02:bb:00:00:00:02 [     mesh0]",
+        " * 02:aa:00:00:00:03    0.800s   (150.0) 02:bb:00:00:00:02 [     mesh0]",
       ].join("\n")
     ),
-    "ap-2": parseMeshView("02:aa:00:00:00:02\n---\n"),
+    "ap-2": parseMeshView("02:bb:00:00:00:02\n02:cc:00:00:00:02\n---\n"),
     "ap-3": parseMeshView("02:aa:00:00:00:03\n---\n"),
     "ap-4": parseMeshView("\n---\n"),
   };
@@ -207,7 +222,12 @@ test("a mesh link's measured speed, from batctl's throughput meter", async (t) =
   // batctl's documented output (not recorded: no mesh hardware to read).
   t.is(parseThroughput("Test duration 5030ms.\nSent 29880512 Bytes.\nThroughput: 5.67 MB/s (47.52 Mbps)\n"), 47.52);
   t.is(parseThroughput("Throughput: 120.1 MB/s (1.01 Gbps)"), 1010);
+  t.is(parseThroughput("Throughput: 61.2 KB/s (489.6 Kbps)"), 0.4896);
+  t.is(parseThroughput("Throughput: 100 B/s (800 bps)"), 0.0008);
   t.is(parseThroughput("Error - can't find bat0"), undefined);
+  const { parseMeshAddress } = await import("../../meshSpeed");
+  t.is(parseMeshAddress("[B.A.T.M.A.N. adv 2024.3, MainIF/MAC: br-lan.4000/02:CC:00:00:00:01 (bat0/02:ee:00:00:00:01 BATMAN_V)]\n02:bb:00:00:00:01\n"), "02:cc:00:00:00:01");
+  t.is(parseMeshAddress("02:bb:00:00:00:01\n"), "02:bb:00:00:00:01", "no header: mesh0's");
 });
 
 test("WireGuard peers: how long since each last made a handshake, from the device's own clock", async (t) => {

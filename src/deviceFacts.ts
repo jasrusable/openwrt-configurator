@@ -8,7 +8,7 @@ import { DeviceSchema, deviceSchemaSchema } from "./deviceSchema";
 import { loadOncConfig } from "./loadConfig";
 import { parseJson } from "./parseJson";
 import { Platform } from "./platform";
-import { Located, locateEach } from "./locate";
+import { isAddress, Located, locateEach } from "./locate";
 import { ONCConfig } from "./oncConfigSchema";
 import { provisionableDevices } from "./provisionConfig";
 
@@ -56,9 +56,14 @@ export const writeFacts = (
   facts: DeviceFacts
 ) => {
   files.mkdirp(dir(intentPath));
+  // Where it was found and what it is known by are kept unless this read
+  // learnt them again: a write of a schema alone (an apply's) must never
+  // drop the pinned host key, which is what keeps found addresses safe.
+  const before = readFacts(files, intentPath, [facts.hostname])[facts.hostname];
+  const { address, macs, hostKey } = before ?? {};
   files.writeTextFile(
     file(intentPath, facts.hostname),
-    JSON.stringify({ format: factsFormat, ...facts }, null, 2) + "\n"
+    JSON.stringify({ format: factsFormat, address, macs, hostKey, ...facts }, null, 2) + "\n"
   );
   const seen = listSeen(files, intentPath);
   if (!seen.includes(facts.hostname)) {
@@ -104,6 +109,8 @@ export const readFacts = (
 export const factsMaxAgeMs = 24 * 60 * 60 * 1000;
 /** After a failed read, a device is left alone this long. */
 export const retryAfterMs = 10 * 60 * 1000;
+/** How long one device's read may take before it counts as failed. */
+const refreshTimeoutMs = 30 * 1000;
 /** A read still marked running after this is taken to have died. */
 const lockTimeoutMs = 60 * 1000;
 
@@ -210,20 +217,32 @@ export const refreshStale = async ({
   try {
     const wanted = ready.filter((d) => stale.includes(d.hostname) || d.tags?.role === "router");
     await Promise.all(
-      locateEach({ devices: wanted, facts, platform }).map((found) =>
-        found.then((f) => {
-          if ("session" in f) {
-            try {
+      locateEach({ devices: wanted, facts, platform }).map((found, i) => {
+        const { hostname } = wanted[i];
+        const failed = (error: string) => {
+          if (stale.includes(hostname)) recordFailure(platform, intentPath, hostname, { at: now(), error });
+        };
+        // Within a time limit, as every read: one device that answers and
+        // then hangs must not hold the request (or a CGI process) open. A
+        // late answer is closed, not kept.
+        let done = false;
+        const attempt = found.then((f) => {
+          if (!("session" in f)) return done || failed(f.error);
+          try {
+            if (!done) {
               rememberLocated(platform, intentPath, f, now());
               clearFailure(platform, intentPath, f.hostname);
-            } finally {
-              f.session.dispose();
             }
-          } else if (stale.includes(f.hostname)) {
-            recordFailure(platform, intentPath, f.hostname, { at: now(), error: f.error });
+          } finally {
+            f.session.dispose();
           }
-        })
-      )
+        });
+        const late = platform.sleep(refreshTimeoutMs).then(() => {
+          done = true;
+          failed("did not answer in time");
+        });
+        return Promise.race([attempt, late]);
+      })
     );
   } finally {
     platform.removeFile(lockFile(intentPath));
@@ -241,19 +260,26 @@ export const withLocatedAddresses = async (oncConfig: ONCConfig, intentPath: str
   const facts = readFacts(platform, intentPath, ready.map((d) => d.hostname));
   const found = await Promise.all(locateEach({ devices: ready, facts, platform }));
   const addresses = new Map<string, string>();
+  const hostKeys: Record<string, { type: string; key: string }> = {};
   for (const f of found) {
     if (!("session" in f)) continue;
     f.session.dispose();
     rememberLocated(platform, intentPath, f, Date.now());
-    if (f.address !== ready.find((d) => d.hostname === f.hostname)?.ipaddr) {
-      console.log(`${f.hostname}: found at ${f.address}.`);
-    }
+    const configured = ready.find((d) => d.hostname === f.hostname)?.ipaddr;
+    if (f.address !== configured) console.log(`${f.hostname}: found at ${f.address}.`);
     addresses.set(f.hostname, f.address);
+    // Found by its key (anywhere but a configured address): the apply's own
+    // connections are held to it too, or a box that took the address since
+    // would be handed the login.
+    if (f.hostKey && !(f.address === configured && isAddress(f.address))) hostKeys[f.hostname] = f.hostKey;
   }
   return {
-    ...oncConfig,
-    devices: oncConfig.devices.map((d) =>
-      addresses.has(d.hostname) ? { ...d, ipaddr: addresses.get(d.hostname)! } : d
-    ),
+    oncConfig: {
+      ...oncConfig,
+      devices: oncConfig.devices.map((d) =>
+        addresses.has(d.hostname) ? { ...d, ipaddr: addresses.get(d.hostname)! } : d
+      ),
+    },
+    hostKeys,
   };
 };

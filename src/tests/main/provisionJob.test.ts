@@ -54,14 +54,33 @@ test.serial("a successful run makes the provisioned snapshot live", async (t) =>
   });
 });
 
+test.serial("a run applied everywhere whose later step failed is live, and says so", async (t) => {
+  await withJob("echo hook failed >&2; exit 3", async (intentPath, files) => {
+    await startProvision({ intentPath, files, now: () => 1 });
+    const status = await settle(intentPath, files);
+    t.is(status.state, "applied-with-problems", JSON.stringify(status));
+    t.is(status.live, "matches");
+  });
+});
+
 test.serial("a failed run leaves what was live", async (t) => {
-  await withJob("echo boom >&2; exit 3", async (intentPath, files) => {
+  await withJob("echo boom >&2; exit 4", async (intentPath, files) => {
     await startProvision({ intentPath, files, now: () => 1 });
     const status = await settle(intentPath, files);
     t.is(status.state, "failed", JSON.stringify(status));
-    t.is(status.exitCode, 3);
+    t.is(status.exitCode, 4);
     t.regex(status.log, /boom/);
     t.is(status.live, "none");
+  });
+});
+
+test.serial("two requests at the same moment start one run", async (t) => {
+  await withJob("sleep 0.5", async (intentPath, files) => {
+    const both = await Promise.all([1, 2, 3].map((n) => startProvision({ intentPath, files, now: () => n })));
+    t.is(both.filter((r) => r.started).length, 1);
+    t.is((await settle(intentPath, files)).state, "succeeded");
+    t.true((await startProvision({ intentPath, files, now: () => 4 })).started, "the lock is given back");
+    await settle(intentPath, files);
   });
 });
 

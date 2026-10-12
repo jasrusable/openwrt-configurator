@@ -25,33 +25,102 @@ export const getOpenWrtConfig = ({
   };
   const physicalPorts = ports.filter((port) => !port.sw_config_cpu_name);
 
-  // "@wan_port", as any whole value: the port board.json gives the WAN role,
-  // so a config can name it without knowing the model (eth1 on one, wan on
-  // another). "@wan_port.10" is that port's VLAN 10 (eth1.10).
-  const wanPort = () => {
+  // A line's port, as any whole value: "@wan_port" (the port board.json
+  // gives the WAN role, so a config can name it without knowing the model)
+  // or "@port:eth2" (a port by name), each optionally with a VLAN (".10").
+  // On DSA that is the port's own device (eth1, eth1.10). On swconfig the
+  // ports are a switch's, behind one CPU device: the line gets a switch VLAN
+  // of its own (its VLAN tagged, or a free one untagged) on the port and the
+  // CPU, its device is the CPU's for that VLAN (eth0.2), and the port leaves
+  // the networks' "*". A placeholder rather than a name, as a switch port's
+  // name can be the CPU device's (eth0 on eth0.2).
+  const linePattern = /^@(?:wan_port|port:([A-Za-z0-9_-]+))(?:\.(\d+))?$/;
+  const wanPortName = () => {
     const wan = physicalPorts.find((port) => port.default_role === "wan");
-    if (!wan || useSwConfig) {
-      throw new Error(
-        `${deviceConfig.hostname} has no WAN port for "@wan_port"` +
-          (useSwConfig ? " (not supported on swconfig devices yet)." : ".")
-      );
-    }
+    if (!wan) throw new Error(`${deviceConfig.hostname} has no WAN port for "@wan_port".`);
     return wan.name;
   };
-  const withWanPort = (value: unknown): unknown =>
-    typeof value === "string" && /^@wan_port(\.\d+)?$/.test(value)
-      ? wanPort() + value.slice("@wan_port".length)
+  const lineRefs: { port: string; vlan?: number }[] = [];
+  const collectLines = (value: unknown): void => {
+    const m = typeof value === "string" ? linePattern.exec(value) : null;
+    if (m) lineRefs.push({ port: m[1] ?? wanPortName(), ...(m[2] ? { vlan: Number(m[2]) } : {}) });
+    else if (Array.isArray(value)) value.forEach(collectLines);
+    else if (value && typeof value === "object") Object.values(value).forEach(collectLines);
+  };
+  const resolvedConditions = resolveOncConfig({ deviceConfig, deviceSchema, oncConfig });
+  collectLines(resolvedConditions);
+  lineRefs.forEach(({ port }) => {
+    if (!physicalPorts.some((p) => p.name === port)) {
+      throw new Error(`${deviceConfig.hostname} has no port ${port} (it has ${physicalPorts.map((p) => p.name).join(", ")}).`);
+    }
+  });
+  // Two lines on one port and VLAN (a connection on "@wan_port" and another
+  // naming that port) would be two interfaces on one device: refused here,
+  // where the WAN port is known.
+  (resolvedConditions.network?.interface || []).reduce<Record<string, string>>((seen, iface: any) => {
+    const m = typeof iface.device === "string" ? linePattern.exec(iface.device) : null;
+    if (!m) return seen;
+    const key = `${m[1] ?? wanPortName()}.${m[2] ?? ""}`;
+    if (seen[key]) {
+      throw new Error(`${deviceConfig.hostname}: ${seen[key]} and ${iface[".name"]} are both on port ${key.replace(/\.$/, "")}.`);
+    }
+    return { ...seen, [key]: iface[".name"] };
+  }, {});
+  // swconfig: each line port's VLANs: its tagged ones, else a free one untagged.
+  const networkSwitchVlans = resolvedConditions.network?.switch_vlan || [];
+  const networkVlans = networkSwitchVlans.map((v) => Number(v.vlan));
+  const switchLines = useSwConfig
+    ? [...new Set(lineRefs.map((r) => r.port))].reduce<{ port: string; vlan: number; tagged: boolean }[]>(
+        (acc, port) => {
+          const tagged = [...new Set(lineRefs.filter((r) => r.port === port && r.vlan).map((r) => r.vlan!))];
+          tagged.forEach((vlan) => {
+            if (networkVlans.includes(vlan)) {
+              throw new Error(`${deviceConfig.hostname}: VLAN ${vlan} is both a network's and the line's on ${port}.`);
+            }
+          });
+          if (tagged.length) return [...acc, ...tagged.map((vlan) => ({ port, vlan, tagged: true }))];
+          const taken = [...networkVlans, ...acc.map((l) => l.vlan)];
+          let vlan = 2;
+          while (taken.includes(vlan)) vlan++;
+          return [...acc, { port, vlan, tagged: false }];
+        },
+        []
+      )
+    : [];
+  const lineDevice = (port: string, vlan?: number) => {
+    if (!useSwConfig) return vlan ? `${port}.${vlan}` : port;
+    // A bare port is its line: the untagged one, or its first tagged.
+    const line = switchLines.find((l) => l.port === port && (vlan === undefined || l.vlan === vlan))!;
+    return `${expectCpuPort().sw_config_cpu_name}.${line.vlan}`;
+  };
+  const withLinePorts = (value: unknown): unknown => {
+    const m = typeof value === "string" ? linePattern.exec(value) : null;
+    return m
+      ? lineDevice(m[1] ?? wanPortName(), m[2] ? Number(m[2]) : undefined)
       : Array.isArray(value)
-      ? value.map(withWanPort)
+      ? value.map(withLinePorts)
       : value && typeof value === "object"
-      ? Object.fromEntries(
-          Object.entries(value).map(([key, v]) => [key, withWanPort(v)])
-        )
+      ? Object.fromEntries(Object.entries(value).map(([key, v]) => [key, withLinePorts(v)]))
       : value;
-
-  const resolvedOncConfig = withWanPort(
-    resolveOncConfig({ deviceConfig, deviceSchema, oncConfig })
-  ) as ReturnType<typeof resolveOncConfig>;
+  };
+  const withLines = withLinePorts(resolvedConditions) as ReturnType<typeof resolveOncConfig>;
+  const resolvedOncConfig = switchLines.length
+    ? {
+        ...withLines,
+        network: {
+          ...withLines.network,
+          switch_vlan: [
+            ...networkSwitchVlans,
+            ...switchLines.map((l) => ({
+              ".name": `line_${l.port}_${l.vlan}`,
+              device: networkSwitchVlans[0]?.device ?? "switch0",
+              vlan: l.vlan,
+              ports: [`${l.port}${l.tagged ? ":t" : ""}`],
+            })),
+          ],
+        },
+      }
+    : withLines;
 
   // "*" means every physical port nothing else uses, and only explicit port
   // lists count as uses — so two "*" devices would each claim every free port,
@@ -115,8 +184,9 @@ export const getOpenWrtConfig = ({
     ),
   ];
 
+  // A line's port is its own switch VLAN's, never the networks'.
   const swConfigPortsWhichCanBeUntagged = physicalPorts.filter(
-    (port) => !swConfigUntaggedPortNames.includes(port.name)
+    (port) => !swConfigUntaggedPortNames.includes(port.name) && !switchLines.some((l) => l.port === port.name)
   );
 
   const getDevicePorts = (deviceName: string) => {

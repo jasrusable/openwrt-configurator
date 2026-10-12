@@ -159,6 +159,9 @@ const useHaveBand = (label: string) => {
 
 const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
   const navigate = useNavigate();
+  const { mesh }: Intent = useDraftValue();
+  // The mesh's band is on its channel, on every node.
+  const meshChannel = mesh.enabled && mesh.band === band ? mesh.channel : undefined;
   const haveBand = useHaveBand(label);
   const at = (key: string) => `radios.${band}.${key}` as never;
   return (
@@ -206,18 +209,19 @@ const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
         />
       </Section>
       <Section title="Channel">
-        <SettingRow
-          label="Channel"
-          description={`Picked automatically; pin one under ${where("hardware")}.`}
-        >
-          <Button
-            variant="subtle"
-            size="compact-sm"
-            onClick={() => navigate("/hardware")}
-          >
-            Auto · {placeName("hardware")}
-          </Button>
-        </SettingRow>
+        {meshChannel !== undefined ? (
+          <SettingRow label="Channel" description={`Set by the mesh, on every access point (${where("mesh")}).`}>
+            <Button variant="subtle" size="compact-sm" onClick={() => navigate("/wifi/mesh")}>
+              {meshChannel} · {placeName("mesh")}
+            </Button>
+          </SettingRow>
+        ) : (
+          <SettingRow label="Channel" description={`Picked automatically; pin one under ${where("hardware")}.`}>
+            <Button variant="subtle" size="compact-sm" onClick={() => navigate("/hardware")}>
+              Auto · {placeName("hardware")}
+            </Button>
+          </SettingRow>
+        )}
       </Section>
     </SettingsPage>
   );

@@ -3,6 +3,7 @@
 // is a trunk and an access point plugged in anywhere gets every network.
 // The router routes and serves each network (addresses, IPv6, DHCP); every
 // other device is a client of the main network and only bridges the rest.
+import { tunnelDns } from "../vpn";
 import {
   everyDevice,
   Feature,
@@ -93,8 +94,10 @@ export const network: Feature = (intent) => {
   // local range, which would be announced as if it went somewhere.
   // A provider's tunnel a network goes out through (its Internet line).
   const tunnelOf = (n: Network) => intent.tunnels.find((t) => t.id === n.line?.connection);
-  // Not a network out through a provider's tunnel: its IPv6 would go around it.
-  const ipv6 = (n: Network) => networkIpv6Applies(internetIpv6(intent)) && n.ipv6 && !tunnelOf(n);
+  // Not a network out through a provider's tunnel, or kept to a line other
+  // than the main one: its IPv6 would go around it, as IPv6 only has the main's.
+  const offMainLine = (n: Network) => !!n.line && n.line.connection !== primaryConnection(intent).id;
+  const ipv6 = (n: Network) => networkIpv6Applies(internetIpv6(intent)) && n.ipv6 && !offMainLine(n);
   // Prefixes from the main connection's IPv6 interface (wan6 for wan).
   const ipv6Upstream = ipv6Interface(primaryConnection(intent));
   // What a section changes on a mesh node (features/mesh.ts), when the mesh is on.
@@ -206,7 +209,7 @@ export const network: Feature = (intent) => {
           ".name": n.id,
           interface: n.id,
           ".overrides": [
-            { ".if": onRouter, override: dhcpServer(n, ipv6(n), tunnelOf(n)?.dns ?? []) },
+            { ".if": onRouter, override: dhcpServer(n, ipv6(n), tunnelOf(n) ? tunnelDns(tunnelOf(n)!) : []) },
             {
               ".if": onAccessPoints,
               override: {

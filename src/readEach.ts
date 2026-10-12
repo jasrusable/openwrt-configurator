@@ -30,10 +30,13 @@ export const readEach = <T>({
       const { hostname } = devices[i];
       // Both settle to a result, never a rejection: the loser of the race
       // settles later with no one listening, which must not crash the server.
-      // The session is closed however late the device answers.
+      // The session is closed however late the device answers, and if it
+      // answers then hangs, when the time is up.
+      let session: Located["session"] | undefined;
       const attempt = found
         .then(async (f): Promise<T> => {
           if (!("session" in f)) return failed(hostname, f.error);
+          session = f.session;
           try {
             const known = facts[hostname];
             if (!known || known.address !== f.address || now() - known.readAt > factsMaxAgeMs) {
@@ -46,7 +49,14 @@ export const readEach = <T>({
           }
         })
         .catch((e) => failed(hostname, (e as Error).message));
-      const late = platform.sleep(timeoutMs).then(() => failed(hostname, "did not answer in time"));
+      const late = platform.sleep(timeoutMs).then(() => {
+        try {
+          session?.dispose();
+        } catch {
+          // Already closed.
+        }
+        return failed(hostname, "did not answer in time");
+      });
       return Promise.race([attempt, late]);
     })
   );

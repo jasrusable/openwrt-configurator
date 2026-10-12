@@ -17,7 +17,7 @@ import {
   TextInput,
   Tooltip,
 } from "@mantine/core";
-import { ReactNode, useMemo, useRef } from "react";
+import { ReactNode, useMemo, useRef, useState } from "react";
 import { SettingRow } from "../kit/layout";
 import { availability, Availability, inUse } from "../../../src/intent/choices";
 import { explainFor, fieldInfo } from "../../../src/intent/fields";
@@ -233,16 +233,31 @@ export const NumberField = ({
   min,
   max,
   integer,
+  required,
   ...row
-}: RowProps & { unit?: string; min?: number; max?: number; integer?: boolean }) => {
+}: RowProps & {
+  unit?: string;
+  min?: number;
+  max?: number;
+  integer?: boolean;
+  /** Emptied, it is empty only while typing: unset would mean something else (a VLAN-less network is the main one). */
+  required?: boolean;
+}) => {
   const field = useField(row.name);
+  const [typing, setTyping] = useState<string | number>();
   return (
     <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
       <NumberInput
         disabled={!!field.unavailable}
-        value={field.value ?? ""}
-        onChange={(value) => field.onChange(value === "" ? undefined : Number(value))}
-        onBlur={field.onBlur}
+        value={typing ?? field.value ?? ""}
+        onChange={(value) => {
+          setTyping(value);
+          if (value !== "" || !required) field.onChange(value === "" ? undefined : Number(value));
+        }}
+        onBlur={() => {
+          setTyping(undefined);
+          field.onBlur();
+        }}
         min={min}
         max={max}
         allowDecimal={!integer}

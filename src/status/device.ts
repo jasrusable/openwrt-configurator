@@ -62,10 +62,12 @@ export type WireguardPeer = {
 };
 
 export type MeshNeighbour = {
-  /** The neighbour's mesh address (its mesh interface's MAC). */
+  /** The node, by its batman address (its first interface's MAC). */
+  originator: string;
+  /** The next hop to it: the MAC of the neighbour's interface on the link. */
   mac: string;
-  /** batman's link quality, 0 to 1 (TQ / 255). */
-  quality: number;
+  /** BATMAN_V's estimate of the route's throughput, in Mbit/s. */
+  throughput: number;
   /** Seconds since it was last heard. */
   lastSeen: number;
 };
@@ -206,9 +208,8 @@ const originators: Probe<string> = {
 /**
  * The best route (marked *) to each originator in `batctl o -H`, through
  * which neighbour. A line reads
- * " * 02:aa:bb:cc:dd:01    0.420s   (255) 02:aa:bb:cc:dd:01 [     mesh0]";
- * BATMAN_V prints a throughput ("( 54.0)") where IV prints a quality: read
- * as a share of 255 either way, only for its order.
+ * " * 02:aa:bb:cc:dd:01    0.420s   ( 54.0) 02:aa:bb:cc:dd:01 [     mesh0]";
+ * the throughput in Mbit/s, as BATMAN_V (the compiler's) prints it.
  */
 export const parseRoutes = (text: string) =>
   text.split("\n").flatMap((line) => {
@@ -218,18 +219,20 @@ export const parseRoutes = (text: string) =>
           {
             originator: m[1].toLowerCase(),
             nexthop: m[4].toLowerCase(),
-            quality: Math.min(1, Number(m[3]) / 255),
+            throughput: Number(m[3]),
             lastSeen: Number(m[2]),
           },
         ]
       : [];
   });
 
-/** The direct neighbours: originators that are their own next hop. */
+/**
+ * Every node's best route. Which are direct neighbours is decided with the
+ * devices' MACs (networkStatus): a node with several interfaces (the mesh,
+ * a cable) is known by its first, while its next hop is the one on the link.
+ */
 export const parseOriginators = (text: string): MeshNeighbour[] =>
-  parseRoutes(text)
-    .filter((r) => r.originator === r.nexthop)
-    .map((r) => ({ mac: r.originator, quality: r.quality, lastSeen: r.lastSeen }));
+  parseRoutes(text).map((r) => ({ originator: r.originator, mac: r.nexthop, throughput: r.throughput, lastSeen: r.lastSeen }));
 
 /**
  * WireGuard's handshakes, after the device's clock: "<now>" then lines of
