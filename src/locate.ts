@@ -12,8 +12,8 @@
 // name, and any address the app found itself, is
 // tried only for a device whose host key is on record, and the connection
 // is held to that key by the SSH client itself (SshTarget.hostKey): any
-// other machine there is refused before credentials are sent, and a client
-// that cannot check a given key (dbclient) refuses to try. Once in, the
+// other machine there is refused before credentials are sent (dbclient,
+// on a router, from a home of its own holding only that key). Once in, the
 // board must be the one recorded.
 import { leasesCommand } from "./status/device";
 import type { DeviceFacts } from "./deviceFacts";
