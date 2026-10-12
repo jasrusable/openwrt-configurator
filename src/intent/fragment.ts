@@ -11,7 +11,7 @@ export type Fragment = {
   package_profiles?: { ".if": string; packages: string[] }[];
   configs_to_not_reset?: { ".if": string; configs: string[] }[];
   /** Services kept enabled and started; `running` ones must have a process. */
-  services?: { ".if": string; name: string; running?: boolean; enabled?: boolean }[];
+  services?: { ".if": string; name: string; running?: boolean; enabled?: boolean; restart_after_rollback?: boolean }[];
   /** config -> section type -> sections */
   config?: Record<string, Record<string, Section[]>>;
   /** Files a package reads that are not UCI, e.g. avahi's config. */

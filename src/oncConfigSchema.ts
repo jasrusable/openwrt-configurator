@@ -100,6 +100,8 @@ export const oncConfigSchema = z
             running: z.boolean().optional(),
             /** false: installed but off, stopped and disabled (a package fixed per role whose feature is not used). */
             enabled: z.boolean().optional(),
+            /** Restarted after a rollback restores the config: its reload keeps the devices it had (odhcpd). */
+            restart_after_rollback: z.boolean().optional(),
           })
           .strict()
       )

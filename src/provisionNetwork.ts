@@ -8,6 +8,7 @@
 //
 // Any failure in 3 or 4 rolls back every device already committed, now
 // rather than when its window runs out. A single device is just N = 1.
+import { Reporter, silent } from "./applyEvents";
 import {
   armRollback,
   commitDevice,
@@ -22,7 +23,10 @@ import {
   rollBackNow,
   runPostReloadHooks,
   checkServices,
-  waitForRecovery, AppliedWithProblems } from "./devicePhases";
+  waitForRecovery,
+  AppliedWithProblems,
+  RolledBack,
+} from "./devicePhases";
 import { Session } from "./platform";
 
 /** Services that should be running and are not: said plainly, not fatal. */
@@ -115,15 +119,40 @@ const abort = async ({
   return outcomes;
 };
 
-export const provisionNetwork = async ({
-  devices,
-  confirm,
-  confirmTimeoutSeconds,
-}: {
+/**
+ * The run, and how it ended as data (applyEvents.ts): applied, applied with a
+ * problem after, rolled back (something was committed, then undone), or failed
+ * (stopped before anything was committed).
+ */
+export const provisionNetwork = async (options: {
   /** In provisioning order (see provisioningOrder). */
   devices: DeviceRunOptions[];
   confirm: boolean;
   /** Per device; the run's window is this times the number of devices. */
+  confirmTimeoutSeconds: number;
+  report?: Reporter;
+}) => {
+  const report = options.report ?? silent;
+  const at = Date.now;
+  try {
+    await runNetwork(options);
+    report({ at: at(), outcome: "applied" });
+  } catch (e) {
+    report({
+      at: at(),
+      outcome: e instanceof AppliedWithProblems ? "applied-with-problems" : e instanceof RolledBack ? "rolled-back" : "failed",
+    });
+    throw e;
+  }
+};
+
+const runNetwork = async ({
+  devices,
+  confirm,
+  confirmTimeoutSeconds,
+}: {
+  devices: DeviceRunOptions[];
+  confirm: boolean;
   confirmTimeoutSeconds: number;
 }) => {
   // 1. Plan: verify every device and read its state. Nothing changes yet.
@@ -179,11 +208,10 @@ export const provisionNetwork = async ({
         ),
         untouched: [...(failure.committed ? [] : [run]), ...armed.slice(i + 1)],
       });
-      throw new Error(
-        `${failure.message}\nNo device keeps a change from this run:\n${summary(
-          outcomes
-        )}`
-      );
+      // Committed somewhere and undone, or stopped before any commit.
+      const undone = committed.length > 0 || failure.committed;
+      const message = `${failure.message}\nNo device keeps a change from this run:\n${summary(outcomes)}`;
+      throw undone ? new RolledBack(message) : new Error(message);
     }
   }
 
@@ -200,7 +228,9 @@ export const provisionNetwork = async ({
         untouched: [],
         unreachable: [run],
       });
-      throw new Error(
+      // Its own watchdog undoes it at its deadline.
+      run.report?.({ at: run.now(), device: run.hostname, step: "recovering" });
+      throw new RolledBack(
         `Provisioning was rolled back: the new configuration cut off access to ` +
           `${
             run.hostname

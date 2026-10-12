@@ -217,3 +217,19 @@ test("the removal cascade falls back to the named packages if apk output is unus
     ["firewall4"]
   );
 });
+
+test("a rollback restarts what a reload would leave on its old devices, after the reload", (t) => {
+  const commands = armWatchdogCommands({
+    runId: "r1",
+    timeoutSeconds: 90,
+    filesToRestore: [],
+    filesToDelete: [],
+    packagesToUninstallOnRollback: [],
+    restartAfterRestore: ["odhcpd"],
+  });
+  const watchdog = commands.join("\n");
+  const reload = watchdog.indexOf("reload_config");
+  const restart = watchdog.indexOf(`for s in 'odhcpd'; do`);
+  t.true(reload >= 0 && restart > reload, "restarted once the restored config is reloaded");
+  t.false(armWatchdogCommands({ runId: "r1", timeoutSeconds: 90, filesToRestore: [], filesToDelete: [], packagesToUninstallOnRollback: [] }).join("\n").includes("for s in"));
+});

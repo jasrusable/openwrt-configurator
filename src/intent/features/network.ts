@@ -110,7 +110,10 @@ export const network: Feature = (intent) => {
   return {
     services: [
       { ".if": everyDevice, name: "network", running: true },
-      { ".if": onRouter, name: "odhcpd", running: true },
+      // Its reload keeps the devices it had: after a rollback that moved the
+      // LAN (br-lan.1 back to br-lan) it sent to one that was gone, and the
+      // whole LAN lost IPv6 (seen on a real router). So a rollback restarts it.
+      { ".if": onRouter, name: "odhcpd", running: true, restart_after_rollback: true },
     ],
     config: {
       network: {

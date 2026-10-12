@@ -74,7 +74,14 @@ export const armWatchdogCommands = ({
   mode = "reload-then-reboot",
   recoverSeconds = 60,
   reloadWireless = false,
+  restartAfterRestore = [],
 }: {
+  /**
+   * Services restarted once the restored config is reloaded: a reload keeps
+   * the devices a service had (odhcpd went on sending to a LAN device the
+   * rollback removed, and the whole LAN lost IPv6; seen on a real router).
+   */
+  restartAfterRestore?: string[];
   runId: string;
   timeoutSeconds: number;
   filesToRestore: string[];
@@ -174,6 +181,13 @@ export const armWatchdogCommands = ({
             // fires the triggers for every package whose config changed.
             `reload_config`,
             ...(reloadWireless ? [`wifi reload`] : []),
+            // Once the network has settled on the restored devices.
+            ...(restartAfterRestore.length
+              ? [
+                  `sleep 5`,
+                  `for s in ${restartAfterRestore.map(shellQuote).join(" ")}; do [ -x "/etc/init.d/$s" ] && "/etc/init.d/$s" restart >/dev/null 2>&1; done; true`,
+                ]
+              : []),
             // A reload is not proof the operator can reach the device again, so
             // wait for them to get back in and say so. Rebooting without this
             // check would make the reload pointless; skipping the reboot

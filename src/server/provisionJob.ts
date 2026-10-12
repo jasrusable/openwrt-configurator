@@ -7,6 +7,7 @@
 // The job provisions a snapshot of the intent taken when it starts, so edits
 // made meanwhile are not half-applied. Only a successful run promotes that
 // snapshot to `live.json`: the UI compares the draft with it.
+import { ApplyProgress, parseEvents, progressOf } from "../applyEvents";
 import { Platform } from "../platform";
 import { appliedWithProblemsExit } from "../devicePhases";
 import { shellQuote } from "../shell";
@@ -32,6 +33,8 @@ export type ProvisionStatus = {
   exitCode?: number;
   /** The job's output so far, newest last. */
   log: string;
+  /** Where each device is in the run, and how it ended, as the run reported it. */
+  progress: ApplyProgress;
   /** Whether the saved draft is what was last provisioned. */
   live: "none" | "matches" | "differs";
 };
@@ -49,6 +52,8 @@ export const jobPaths = (intentPath: string) => {
     started: `${dir}/provision.started`,
     /** Held from start to exit (mkdir is atomic), so two requests cannot both start a job. */
     lock: `${dir}/provision.lock`,
+    /** Where each device is and how the run ended, as JSON lines (applyEvents.ts). */
+    events: `${dir}/provision.events`,
   };
 };
 
@@ -112,6 +117,7 @@ export const provisionStatus = async ({
     startedAt: started ? Number(started) : undefined,
     exitCode,
     log: (read(files, paths.log) ?? "").split("\n").slice(-400).join("\n"),
+    progress: started ? progressOf(parseEvents(read(files, paths.events) ?? "")) : { devices: {} },
     live: !live
       ? "none"
       : draft && canonical(draft) === canonical(live)
@@ -139,7 +145,7 @@ export const startProvision = async ({
   const paths = jobPaths(intentPath);
   const q = shellQuote;
   // It refreshes the device facts as it reads the devices (deviceFacts.ts).
-  const command = [...files.selfCommand(), "provision", paths.snapshot, "--facts-for", intentPath]
+  const command = [...files.selfCommand(), "provision", paths.snapshot, "--facts-for", intentPath, "--events", paths.events]
     .map(q)
     .join(" ");
   // The subshell is backgrounded with every stream redirected, so `sh` returns
@@ -153,7 +159,7 @@ export const startProvision = async ({
     `mkdir -p ${q(paths.dir)} && chmod 700 ${q(paths.dir)}`,
     `mkdir ${q(paths.lock)} 2>/dev/null || { [ ${q(paths.pid)} -nt ${q(paths.lock)} ] && ! kill -0 "$(cat ${q(paths.pid)})" 2>/dev/null && touch ${q(paths.lock)}; } || exit ${alreadyRunning}`,
     `echo ${now()} > ${q(paths.started)}`,
-    `rm -f ${q(paths.exit)} ${q(paths.log)}`,
+    `rm -f ${q(paths.exit)} ${q(paths.log)} ${q(paths.events)}`,
     `cp ${q(intentPath)} ${q(paths.snapshot)}`,
     `( ${command} > ${q(paths.log)} 2>&1; code=$?;` +
       ` if [ $code -eq 0 ] || [ $code -eq ${appliedWithProblemsExit} ]; then mv ${q(paths.snapshot)} ${q(paths.live)}; fi;` +

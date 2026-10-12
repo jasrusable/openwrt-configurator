@@ -1,3 +1,4 @@
+import { Reporter } from "./applyEvents";
 import { assertSupportedRelease } from "./release";
 import { DeviceSchema } from "./deviceSchema";
 import { getDeviceSchema } from "./getDeviceSchema";
@@ -161,7 +162,10 @@ export const provisionConfig = async ({
   timing,
   onDeviceSchema,
   hostKeys = {},
+  report,
 }: {
+  /** Where each device is, and how the run ended, as data (applyEvents.ts). */
+  report?: Reporter;
   oncConfig: ONCConfig;
   /** Per hostname: the key its address was found by, which every connection to it must show. */
   hostKeys?: Record<string, { type: string; key: string }>;
@@ -244,6 +248,7 @@ export const provisionConfig = async ({
       sleep: platform.sleep,
       now: Date.now,
       timing: timing ?? confirmTiming(),
+      report,
     })),
     await defaultGateway(platform)
   );
@@ -254,7 +259,7 @@ export const provisionConfig = async ({
         : ".")
   );
   try {
-    await provisionNetwork({ devices, confirm, confirmTimeoutSeconds });
+    await provisionNetwork({ devices, confirm, confirmTimeoutSeconds, report });
   } finally {
     devices.forEach((device) => {
       try {

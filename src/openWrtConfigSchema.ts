@@ -89,7 +89,7 @@ export type OpenWrtState = {
    */
   configsToNotReset?: string[];
   /** Services to keep enabled and started; `running` ones are checked. */
-  services?: { name: string; running: boolean; enabled?: boolean }[];
+  services?: { name: string; running: boolean; enabled?: boolean; restart_after_rollback?: boolean }[];
   files?: {
     path: string;
     content: string;

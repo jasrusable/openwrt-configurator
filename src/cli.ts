@@ -1,3 +1,4 @@
+import { ApplyEvent } from "./applyEvents";
 import { rpcdAuth } from "./server/auth";
 import { AppliedWithProblems, appliedWithProblemsExit } from "./devicePhases";
 import { assertSupportedRelease } from "./release";
@@ -87,6 +88,10 @@ export const main = async ({
         default: "reload-then-reboot",
       },
       {
+        flags: "--events <file>",
+        description: "write where each device is, and how the run ended, as JSON lines (what the UI shows)",
+      },
+      {
         flags: "--facts-for <intent>",
         description: "keep each device's facts (model, ports, radios) beside this intent file, as the UI reads them",
       },
@@ -125,9 +130,18 @@ export const main = async ({
       const { oncConfig, hostKeys } = options.factsFor
         ? await withLocatedAddresses(loaded.oncConfig, options.factsFor, platform)
         : { oncConfig: loaded.oncConfig, hostKeys: {} };
+      // Appended a line at a time: read by the UI while the run goes.
+      const report = options.events
+        ? (event: ApplyEvent) => {
+            const path = options.events as string;
+            const before = platform.fileMode(path) === undefined ? "" : platform.readTextFile(path);
+            platform.writeTextFile(path, `${before}${JSON.stringify(event)}\n`);
+          }
+        : undefined;
       await provisionConfig({
         oncConfig,
         hostKeys,
+        report,
         ...(options.factsFor
           ? {
               onDeviceSchema: (hostname: string, schema: DeviceSchema) =>

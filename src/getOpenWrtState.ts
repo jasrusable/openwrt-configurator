@@ -63,13 +63,17 @@ export const getOpenWrtState = ({
     .filter((service) =>
       conditionMatches({ condition: service[".if"], deviceConfig, deviceSchema })
     )
-    .reduce<{ name: string; running: boolean; enabled?: boolean }[]>(
-      (acc, { name, running, enabled }) => {
+    .reduce<{ name: string; running: boolean; enabled?: boolean; restart_after_rollback?: boolean }[]>(
+      (acc, { name, running, enabled, restart_after_rollback }) => {
         const on = enabled !== false;
         const known = acc.find((s) => s.name === name);
-        const merged = known
-          ? { name, running: known.running || !!running, ...(known.enabled === false && !on ? { enabled: false } : {}) }
-          : { name, running: !!running, ...(on ? {} : { enabled: false }) };
+        const restart = !!restart_after_rollback || !!known?.restart_after_rollback;
+        const merged = {
+          ...(known
+            ? { name, running: known.running || !!running, ...(known.enabled === false && !on ? { enabled: false } : {}) }
+            : { name, running: !!running, ...(on ? {} : { enabled: false }) }),
+          ...(restart ? { restart_after_rollback: true } : {}),
+        };
         return known ? acc.map((s) => (s.name === name ? merged : s)) : [...acc, merged];
       },
       []

@@ -1137,3 +1137,29 @@ test("larger frames over cable off: the mesh splits its packets there, and no MT
   const devices = onDevice("home-router", "friendlyarm,nanopi-r6s", intent).network.device;
   t.deepEqual(devices.filter((d: any) => d.mtu), []);
 });
+
+test("odhcpd is re-bound when a network comes up, and restarted after a rollback", (t) => {
+  const state = getOpenWrtState({
+    oncConfig: compile(),
+    deviceConfig: compile().devices.find((d) => d.hostname === "home-router")!,
+    deviceSchema: deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", "friendlyarm,nanopi-r6s.json"), "utf8"))),
+  });
+  t.like(state.services!.find((s) => s.name === "odhcpd"), { restart_after_rollback: true });
+  const hook = state.files!.find((f) => f.path === "/etc/hotplug.d/iface/30-odhcpd-ra-fix")!.content;
+  // Run it as netifd would, with odhcpd's init script and pidof stubbed.
+  const dir = mkdtempSync(join(tmpdir(), "onc-hook-"));
+  const stub = (name: string, body: string) => writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  stub("pidof", "exit 0");
+  stub("logger", "true");
+  stub("sleep", "true");
+  const script = hook.replace(/\/etc\/init\.d\/odhcpd restart/g, `echo restarted >> ${dir}/log`).replace(/\/tmp\/onc-/g, `${dir}/onc-`);
+  const run = (iface: string, action = "ifup") =>
+    spawnSync("sh", ["-c", `${script}\nwait`], { env: { PATH: `${dir}:/usr/bin:/bin`, ACTION: action, INTERFACE: iface }, encoding: "utf8" });
+  run("guest");
+  spawnSync("sleep", ["0.3"]);
+  t.is(readFileSync(join(dir, "log"), "utf8").trim(), "restarted", "a network up: restarted");
+  run("lan", "ifdown");
+  run("somethingelse");
+  spawnSync("sleep", ["0.3"]);
+  t.is(readFileSync(join(dir, "log"), "utf8").trim().split("\n").length, 1, "down, or not ours: nothing");
+});

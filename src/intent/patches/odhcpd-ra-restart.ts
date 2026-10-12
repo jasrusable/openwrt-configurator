@@ -6,7 +6,9 @@ export const odhcpdRaRestart: Patch = {
   why:
     "odhcpd starts before wan6 has an IPv6 default route, advertises a lifetime of 0 and " +
     "never recovers, so every client is left link-local only; restarting it once the " +
-    "route exists fixes it (seen on 25.12.5, odhcpd 2026.06.29).",
+    "route exists fixes it (seen on 25.12.5, odhcpd 2026.06.29). Its reload also keeps the " +
+    "device a network had: an apply that moved the LAN (br-lan to br-lan.1) left it sending " +
+    "to one that was gone, the same silence; so it is restarted when one of the networks comes up.",
   upstream: "https://github.com/openwrt/odhcpd/issues/388",
   target: { roles: ["router"] },
   // Only the internet's IPv6 brings up wan6 and router advertisements.
@@ -28,6 +30,25 @@ export const odhcpdRaRestart: Patch = {
 # that must restart odhcpd \u2014 a cooldown that ignores it leaves every client
 # link-local only. Concurrent overlapping runs are serialised with mkdir.
 [ "$ACTION" = "ifup" ] || exit 0
+
+# A network of ours coming up (an apply that moved it to another device,
+# br-lan to br-lan.1): odhcpd's reload keeps the device it had and goes on
+# sending to one that is gone, so the whole network loses IPv6 (seen on a
+# real router). Restart it, once for several networks coming up together.
+case " ${intent.networks.map((n) => n.id).join(" ")} " in *" $INTERFACE "*)
+	(
+		LOCK=/tmp/onc-odhcpd-lan.lock
+		mkdir "$LOCK" 2>/dev/null || exit 0
+		trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+		sleep 3
+		pidof odhcpd >/dev/null 2>&1 || exit 0
+		logger -t onc-ipv6 "$INTERFACE came up: restarting odhcpd so it advertises on it"
+		/etc/init.d/odhcpd restart
+	) >/dev/null 2>&1 &
+	exit 0
+	;;
+esac
+
 [ "$INTERFACE" = "${ipv6Interface(primaryConnection(intent))}" ] || exit 0
 
 (

@@ -11,6 +11,7 @@
 // waitForRecovery (the watchdog rolled back; tell it not to reboot). Each
 // phase takes the record and returns an updated one or throws a
 // ProvisionFailure, so provisionNetwork can run them across several devices.
+import { DeviceStep, Reporter } from "./applyEvents";
 import {
   ConfirmTiming,
   reachableSession,
@@ -72,7 +73,13 @@ export type DeviceRunOptions = {
   /** The clock deadlines are measured on (Date.now; virtual in tests). */
   now: () => number;
   timing: ConfirmTiming;
+  /** Where the device is, as data (applyEvents.ts); the log says it in words. */
+  report?: Reporter;
 };
+
+/** Say where a device is, if anyone listens. */
+const step = (run: Pick<DeviceRunOptions, "hostname" | "now" | "report">, deviceStep: DeviceStep) =>
+  run.report?.({ at: run.now(), device: run.hostname, step: deviceStep });
 
 export type DeviceRun = DeviceRunOptions & {
   runId: string;
@@ -107,6 +114,9 @@ export class ProvisionFailure extends Error {
  * so the UI does not say otherwise.
  */
 export class AppliedWithProblems extends Error {}
+
+/** A device's change was committed and then undone: the run applied nothing. */
+export class RolledBack extends Error {}
 export const appliedWithProblemsExit = 3;
 
 // --- plan --------------------------------------------------------------------
@@ -117,6 +127,7 @@ export const planDevice = async (
 ): Promise<DeviceRun> => {
   const { ssh, hostname, ipAddress, deviceModelId, state } = options;
   console.log(`Planning ${hostname} @ ${ipAddress}...`);
+  step(options, "planning");
 
   // One round trip for everything the plan needs from the device.
   const facts = await runProbes(ssh, {
@@ -278,6 +289,9 @@ export const armRollback = async (
       // reload_config already covers wireless; this just makes the rollback
       // path independent of that trigger still being registered.
       reloadWireless: Object.keys(state.config || {}).includes("wireless"),
+      // From this run's declarations, so it holds even where the files it
+      // restores are older ones (an earlier fix-up hook that did not cover it).
+      restartAfterRestore: (state.services || []).filter((s) => s.restart_after_rollback).map((s) => s.name),
     }),
   });
   if (!armed.ok) {
@@ -320,6 +334,7 @@ export const revertStaged = async (
     if (disarm) {
       await ssh.execCommand(`touch ${confirmFlag}`);
       console.error(`Reverted.`);
+      step(run, "reverted");
     } else {
       // The rollback has to stay armed, because only the watchdog can put
       // the packages and files back. The *reboot* is a different question:
@@ -415,6 +430,7 @@ export const configureDevice = async (run: DeviceRun): Promise<DeviceRun> => {
     managedFiles: run.managedFiles,
   });
   console.log(`Setting configuration on ${hostname}...`);
+  step(run, "configuring");
   await runOrRevert(run, stageCommands);
 
   // The guarantee, checked rather than assumed: whatever the wipe missed or
@@ -471,6 +487,7 @@ export const commitDevice = async (run: DeviceRun) => {
   // instead of rejecting. Treating that as a failed command would revert a
   // commit that actually succeeded, in exactly the case this feature exists for.
   console.log(`Committing ${hostname}...`);
+  step(run, "committing");
   let commitFailed: string | undefined;
   try {
     if (!run.finaliseCommands) {
@@ -517,6 +534,7 @@ export const commitDevice = async (run: DeviceRun) => {
  */
 export const confirmDevice = async (run: DeviceRun): Promise<Session> => {
   const { connect, ipAddress, hostname, sleep } = run;
+  step(run, "confirming");
   console.log(
     run.ssh.local
       ? `Confirming that ${ipAddress} still answers SSH...`
@@ -562,6 +580,7 @@ export const disarmDevice = async (run: DeviceRun, session: Session) => {
       `rm -rf ${rollbackDir} ${pidFile} ${sleepPidFile} ${confirmFlag} ${watchdogPath}`
     );
     console.log(`Confirmed ${run.hostname}.`);
+    step(run, "confirmed");
   } else {
     console.warn(
       `Confirmed ${run.hostname}, but could not verify its rollback watchdog stopped. ` +
@@ -637,8 +656,10 @@ export const waitForRecovery = async (run: DeviceRun) => {
     await session.execCommand(`touch ${runPaths(run.runId).recoveredFlag}`);
     session.dispose();
     console.error(`${hostname} rolled back and recovered without rebooting.`);
+    step(run, "rolled-back");
     return true;
   } catch {
+    step(run, "recovering");
     console.error(
       `Could not reach ${hostname} after its rollback. ` +
         (rollbackMode === "reload"
@@ -656,6 +677,7 @@ export const waitForRecovery = async (run: DeviceRun) => {
  */
 export const rollBackNow = async (run: DeviceRun, session?: Session) => {
   console.error(`Rolling back ${run.hostname}...`);
+  step(run, "rolling-back");
   try {
     const live =
       session ??

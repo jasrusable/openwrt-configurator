@@ -1,6 +1,7 @@
 import test from "ava";
 // Serial: these silence console globally while a run prints its progress.
 import { fakeDevice, virtualClock } from "../helpers/fakeDevice";
+import { ApplyEvent, parseEvents, progressOf } from "../../applyEvents";
 import { provisioningOrder, provisionNetwork } from "../../provisionNetwork";
 
 const quietly = async <T>(fn: () => Promise<T>) => {
@@ -160,4 +161,40 @@ test.serial("the gateway and the device running the tool go last", (t) => {
     ["10.0.0.9", "10.0.0.2", "10.0.0.3"],
     "a mesh repeater before what it hangs off"
   );
+});
+
+test.serial("a run says where each device is, and how it ended, as data", async (t) => {
+  const reported = async (devices: ReturnType<typeof fakeDevice>[]) => {
+    const clock = virtualClock();
+    const events: ApplyEvent[] = [];
+    const report = (e: ApplyEvent) => events.push(e);
+    await quietly(() =>
+      provisionNetwork({
+        devices: devices.map((d) => ({ ...d.options(clock), report })),
+        confirm: true,
+        confirmTimeoutSeconds: 60,
+        report,
+      })
+    ).catch(() => {});
+    return events;
+  };
+  const ok = await reported([fakeDevice({ hostname: "ap" })]);
+  t.deepEqual(
+    ok.map((e) => ("step" in e ? e.step : e.outcome)),
+    ["planning", "configuring", "committing", "confirming", "confirmed", "applied"]
+  );
+  const cut = progressOf(await reported([fakeDevice({ hostname: "a" }), fakeDevice({ hostname: "b", lockedOutAfterCommit: true })]));
+  t.is(cut.outcome, "rolled-back");
+  t.is(cut.devices.b, "recovering", "unreachable: it rolls itself back");
+  t.is(cut.devices.a, "rolled-back");
+});
+
+test("events read back as progress: the latest step each, the outcome, a torn line skipped", (t) => {
+  const text = [
+    JSON.stringify({ at: 1, device: "ap", step: "planning" }),
+    JSON.stringify({ at: 2, device: "ap", step: "confirmed" }),
+    JSON.stringify({ at: 3, outcome: "applied" }),
+    '{"at": 4, "devi',
+  ].join("\n");
+  t.deepEqual(progressOf(parseEvents(text)), { devices: { ap: "confirmed" }, outcome: "applied" });
 });
