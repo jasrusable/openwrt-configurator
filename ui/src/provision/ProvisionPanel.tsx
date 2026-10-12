@@ -77,7 +77,7 @@ export const ProvisionPanel = () => {
 
       <Changes info={info} />
 
-      <DeviceChangesSection devices={info.devices} />
+      <DeviceChangesSection devices={info.devices} running={info.state === "running"} />
 
       {info.state !== "idle" && (
         <Section title="Progress">

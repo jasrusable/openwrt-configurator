@@ -1,68 +1,114 @@
 import test from "ava";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { applyDiff } from "../../applyDiff";
-import { DeviceFacts } from "../../deviceFacts";
+import { DeviceNow, deviceDiff } from "../../applyDiff";
 import { deviceSchemaSchema } from "../../deviceSchema";
+import { getOpenWrtState } from "../../getOpenWrtState";
 import { compileIntent } from "../../intent/compile";
 import { Intent, intentSchema } from "../../intent/schema";
 import { oncConfigSchema } from "../../oncConfigSchema";
+import { OpenWrtState } from "../../openWrtConfigSchema";
+import { nodePlatform } from "../../platforms/node";
+import { provisionableDevices } from "../../provisionConfig";
+import { declaredConfigs } from "../../uci";
 
 const root = join(__dirname, "..", "..", "..");
 const sample = (): Intent =>
   intentSchema.parse(JSON.parse(readFileSync(join(root, "sampleConfigs", "intent.json"), "utf8")));
-const compile = (intent: Intent) => oncConfigSchema.parse(compileIntent(intent));
-const facts = (hostname: string, model: string): DeviceFacts => ({
-  hostname,
-  readAt: 0,
-  schema: deviceSchemaSchema.parse(
-    JSON.parse(readFileSync(join(root, "deviceSchemas", `${model}.json`), "utf8"))
-  ),
-});
-const known = {
-  "home-router": facts("home-router", "friendlyarm,nanopi-r6s"),
-  "home-ap-1": facts("home-ap-1", "zyxel,nwa50ax-pro"),
-};
-const diff = (change: (intent: Intent) => void, withFacts: Record<string, DeviceFacts | undefined> = known) => {
-  const after = sample();
-  change(after);
-  return applyDiff({ before: compile(sample()), after: compile(after), facts: withFacts });
-};
-const device = (diffs: ReturnType<typeof applyDiff>, hostname: string) => {
-  const d = diffs.find((x) => x.hostname === hostname)!;
-  if ("unknown" in d) throw new Error(`${hostname} unknown`);
-  return d;
-};
+const models: Record<string, string> = { "home-router": "friendlyarm,nanopi-r6s", "home-ap-1": "zyxel,nwa50ax-pro" };
 
-test("nothing changed: no lines, packages or files", (t) => {
-  for (const d of diff(() => {})) {
-    t.false("unknown" in d);
-    if (!("unknown" in d)) t.deepEqual([d.config, d.packages, d.files], [[], { added: [], removed: [] }, []]);
+/** What the apply leaves on `hostname` for this intent. */
+const stateFor = (intent: Intent, hostname: string) => {
+  const oncConfig = oncConfigSchema.parse(compileIntent(intent));
+  const deviceConfig = provisionableDevices(oncConfig).ready.find((d) => d.hostname === hostname)!;
+  const deviceSchema = deviceSchemaSchema.parse(
+    JSON.parse(readFileSync(join(root, "deviceSchemas", `${models[hostname]}.json`), "utf8"))
+  );
+  return getOpenWrtState({ oncConfig, deviceConfig, deviceSchema });
+};
+const written = (content: string) => nodePlatform.sha256(content.endsWith("\n") ? content : `${content}\n`);
+
+/** A device that an apply of `state` has just left as it should be. */
+const appliedWith = (state: OpenWrtState): DeviceNow => ({
+  config: declaredConfigs(state.config),
+  installed: (state.packagesToInstall ?? []).map((p) => p.packageName),
+  managed: (state.files ?? []).map((f) => f.path),
+  hashes: Object.fromEntries((state.files ?? []).map((f) => [f.path, written(f.content)])),
+});
+const diff = (state: OpenWrtState, now: DeviceNow) =>
+  deviceDiff({ hostname: "x", state, now, sha256: nodePlatform.sha256 }) as Extract<
+    ReturnType<typeof deviceDiff>,
+    { config: unknown }
+  >;
+
+test("a device already as the settings say: nothing changes", (t) => {
+  for (const hostname of Object.keys(models)) {
+    const state = stateFor(sample(), hostname);
+    const d = diff(state, appliedWith(state));
+    t.deepEqual([d.config, d.packages, d.files], [[], { added: [], removed: [] }, []], hostname);
   }
 });
 
-test("a setting's change shows as the UCI lines it changes, on the devices it touches", (t) => {
-  const d = diff((i) => (i.networks[1].subnet = "10.0.21.0/24"));
-  t.deepEqual(
-    device(d, "home-router").config.find((c) => c.key === "network.guest.ipaddr"),
-    { key: "network.guest.ipaddr", before: "'10.0.20.1'", after: "'10.0.21.1'" }
-  );
-  t.true(device(d, "home-ap-1").config.every((c) => !c.key.startsWith("dhcp.")), "an access point serves no DHCP");
+test("a setting's change shows as the UCI lines it changes", (t) => {
+  const changed = sample();
+  changed.networks[1].subnet = "10.0.21.0/24";
+  const d = diff(stateFor(changed, "home-router"), appliedWith(stateFor(sample(), "home-router")));
+  t.deepEqual(d.config, [
+    ...d.config.filter((c) => c.key !== "network.guest.ipaddr"),
+    { key: "network.guest.ipaddr", before: "'10.0.20.1'", after: "'10.0.21.1'" },
+  ].sort((a, b) => a.key.localeCompare(b.key)));
 });
 
-test("a Wi-Fi password change shows, but never the password", (t) => {
-  const d = device(diff((i) => (i.wifi[0].password = "a-new-secret-1")), "home-ap-1");
+test("a Wi-Fi password change shows, but never the password on either side", (t) => {
+  const before = sample();
+  before.wifi[0].password = "the-old-secret-1";
+  const after = sample();
+  after.wifi[0].password = "a-new-secret-1";
+  const d = diff(stateFor(after, "home-ap-1"), appliedWith(stateFor(before, "home-ap-1")));
   const keys = d.config.filter((c) => c.key.endsWith(".key"));
   t.true(keys.length > 0);
   t.true(keys.every((c) => c.before === "(hidden)" && c.after === "(hidden)"));
-  t.false(JSON.stringify(d).includes("a-new-secret-1"));
+  t.false(JSON.stringify(d).includes("secret-1"));
 });
 
-test("nothing applied yet: everything is new; never read: unknown", (t) => {
-  const after = compile(sample());
-  const first = applyDiff({ after, facts: { "home-router": known["home-router"] } });
-  const router = device(first, "home-router");
-  t.true(router.config.length > 50 && router.config.every((c) => c.before === undefined));
-  t.true(router.packages.added.length > 0);
-  t.deepEqual(first.find((d) => d.hostname === "home-ap-1"), { hostname: "home-ap-1", unknown: true });
+test("what the device has and the settings do not is removed, except what is kept", (t) => {
+  const state = stateFor(sample(), "home-router");
+  const now = appliedWith(state);
+  const keep = (state.configsToNotReset ?? []).find((k) => k.endsWith(".*") && !k.startsWith("?"))!;
+  const keptConfig = keep.replace(/\.\*$/, "");
+  const d = diff(state, {
+    ...now,
+    config: {
+      ...now.config,
+      network: [...now.config.network, { type: "interface", options: { proto: "dhcp" } }],
+      [keptConfig]: [{ type: "anything", name: "mine", options: { x: "1" } }],
+    },
+  });
+  // As uci shows it: an anonymous section's index counts every section of its type.
+  const index = now.config.network.filter((s) => s.type === "interface").length;
+  t.deepEqual(d.config, [
+    { key: `network.@interface[${index}]`, before: "interface", after: undefined },
+    { key: `network.@interface[${index}].proto`, before: "'dhcp'", after: undefined },
+  ]);
+});
+
+test("packages and files: missing, unwanted, changed and no longer managed", (t) => {
+  const state = stateFor(sample(), "home-router");
+  const now = appliedWith(state);
+  const [missing, ...installed] = now.installed;
+  const file = (state.files ?? [])[0];
+  const d = diff(
+    { ...state, packagesToUninstall: ["odhcpd-ipv6only"] },
+    {
+      ...now,
+      installed: [...installed, "odhcpd-ipv6only"],
+      managed: [...now.managed, "/etc/old"],
+      hashes: { ...now.hashes, [file.path]: "0".repeat(64), "/etc/old": "1".repeat(64) },
+    }
+  );
+  t.deepEqual(d.packages, { added: [missing], removed: ["odhcpd-ipv6only"] });
+  t.deepEqual(d.files, [
+    { path: "/etc/old", change: "removed" },
+    { path: file.path, change: "changed" },
+  ].sort((a, b) => a.path.localeCompare(b.path)));
 });

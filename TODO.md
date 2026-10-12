@@ -67,8 +67,8 @@ and the React UI in `ui/`.
       onto every device (status objects only, never UCI; its own reviewed
       step: hashed password with a stable salt); `/api/status` and a live
       Overview plus a Clients page (leases, Wi-Fi stations, reservations),
-      with realtime graphs kept only in the browser; logs per device; "Check
-      devices" for drift (SSH, on request, results without values); actions
+      with realtime graphs kept only in the browser; logs per device (drift shows
+      on Apply, read live); actions
       (reboot, restart Wi-Fi, ping) over SSH with a confirmation; then LuCI
       off the devices (uhttpd and rpcd stay; `rpcd-mod-iwinfo` explicit);
       long-term history last.

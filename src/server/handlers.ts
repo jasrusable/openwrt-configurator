@@ -2,7 +2,7 @@
 // Transport-free, so the Node server (`ui`) and CGI under uhttpd on a router
 // (`cgi`) answer every request with the same code. The UI uses relative URLs,
 // so it works wherever it is mounted: / on a Mac, /cgi-bin/onc/ on a router.
-import { applyDiff } from "../applyDiff";
+import { readApplyDiff } from "../applyDiff";
 import { adopt, discover, Inspected, inspect } from "../discover";
 import { readFacts, readFailures, refreshStale, staleDevices } from "../deviceFacts";
 import { compileIntent } from "../intent/compile";
@@ -285,16 +285,13 @@ export const statusApi =
     return status ? json(200, status) : json(409, { error: "The saved settings are not valid." });
   };
 
-/** GET: what an apply would change on each device, as UCI (src/applyDiff.ts). */
+/** GET: what an apply would change on each device, as UCI, read from the devices now (src/applyDiff.ts). */
 export const applyDiffApi =
-  ({ intentPath, files }: { intentPath: string; files: Files }): HttpHandler =>
+  ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
   async ({ method }) => {
     if (method !== "GET") return json(405, { error: "GET" });
-    const after = compiled(files, intentPath);
-    if (!after) return json(409, { error: "The saved settings are not valid." });
-    const before = compiled(files, jobPaths(intentPath).live);
-    const facts = readFacts(files, intentPath, after.intent.hardware.map((d) => d.name));
-    return json(200, { devices: applyDiff({ before: before?.config, after: after.config, facts }) });
+    if (!compiled(platform, intentPath)) return json(409, { error: "The saved settings are not valid." });
+    return json(200, { devices: await readApplyDiff({ intentPath, platform }) });
   };
 
 export const uiHandler = ({
@@ -310,7 +307,7 @@ export const uiHandler = ({
     "/api/intent": intentApi({ intentPath, files: platform }),
     "/api/provision": provisionApi({ intentPath, platform }),
     "/api/devices": devicesApi({ intentPath, platform }),
-    "/api/apply/diff": applyDiffApi({ intentPath, files: platform }),
+    "/api/apply/diff": applyDiffApi({ intentPath, platform }),
     "/api/status": statusApi({ intentPath, platform }),
     "/api/admin/key": ownKeyApi({ intentPath, platform }),
     "/api/discover": discoverApi({ intentPath, platform }),

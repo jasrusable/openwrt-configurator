@@ -1,10 +1,8 @@
 // What an apply changes on each device, as OpenWrt sees it (src/applyDiff.ts):
-// a row per device with a summary, and its `uci show` lines on request.
-// Secrets show as "(hidden)"; a device never read cannot be worked out
-// exactly yet.
+// read from the devices while this page is open, a row per device with a
+// summary, and its `uci show` lines on request. Secrets show as "(hidden)".
 import { Box, Button, Code, Collapse, Text } from "@mantine/core";
 import { useState } from "react";
-import { useNavigate } from "react-router";
 import type { DeviceDiff } from "../../../src/applyDiff";
 import { useApplyDiff } from "../data/devices";
 import { Section, SettingRow } from "../kit/layout";
@@ -12,7 +10,7 @@ import { Section, SettingRow } from "../kit/layout";
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** "12 settings · 1 package · 2 files", or that nothing changes. */
-const summary = (d: Exclude<DeviceDiff, { unknown: true }>) => {
+const summary = (d: Exclude<DeviceDiff, { error: string }>) => {
   const packages = d.packages.added.length + d.packages.removed.length;
   const parts = [
     d.config.length && plural(d.config.length, "setting"),
@@ -23,7 +21,7 @@ const summary = (d: Exclude<DeviceDiff, { unknown: true }>) => {
 };
 
 /** Its changes as lines: + added, − removed, before → after. */
-const Lines = ({ diff }: { diff: Exclude<DeviceDiff, { unknown: true }> }) => {
+const Lines = ({ diff }: { diff: Exclude<DeviceDiff, { error: string }> }) => {
   const line = (sign: "+" | "−" | "~", text: string, key: string) => (
     <Text
       key={key}
@@ -55,17 +53,8 @@ const Lines = ({ diff }: { diff: Exclude<DeviceDiff, { unknown: true }> }) => {
 };
 
 const DeviceChanges = ({ diff }: { diff: DeviceDiff }) => {
-  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  if ("unknown" in diff) {
-    return (
-      <SettingRow label={diff.hostname} description="Read from devices (Hardware) to see exactly what changes on it.">
-        <Button variant="subtle" color="gray" size="compact-sm" onClick={() => navigate("/hardware")}>
-          Hardware
-        </Button>
-      </SettingRow>
-    );
-  }
+  if ("error" in diff) return <SettingRow label={diff.hostname} description={`Not reached: ${diff.error}`} />;
   const changes = diff.config.length + diff.packages.added.length + diff.packages.removed.length + diff.files.length;
   return (
     <Box>
@@ -89,8 +78,8 @@ const DeviceChanges = ({ diff }: { diff: DeviceDiff }) => {
  * Every device the apply reconfigures, with what changes on it; the uci lines
  * on request, for people who know OpenWrt.
  */
-export const DeviceChangesSection = ({ devices }: { devices: string[] }) => {
-  const diff = useApplyDiff();
+export const DeviceChangesSection = ({ devices, running }: { devices: string[]; running: boolean }) => {
+  const diff = useApplyDiff(!running);
   return (
     <Section
       title="Devices"
@@ -101,7 +90,7 @@ export const DeviceChangesSection = ({ devices }: { devices: string[] }) => {
         return d ? (
           <DeviceChanges key={name} diff={d} />
         ) : (
-          <SettingRow key={name} label={name} description={diff.isPending ? "Working out its changes…" : "Will be reconfigured"} />
+          <SettingRow key={name} label={name} description={running ? "Being applied…" : diff.isFetching ? "Reading what it has now…" : "Will be reconfigured"} />
         );
       })}
     </Section>

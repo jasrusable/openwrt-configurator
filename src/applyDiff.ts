@@ -1,11 +1,21 @@
-// What an apply changes on each device, as OpenWrt sees it: the last-applied
-// and the saved intents compiled and resolved against the device's facts
-// with the engine's own code (getOpenWrtState), then compared as `uci show`
-// lines. Secrets (Wi-Fi keys, passwords) are compared but never shown.
-// Offline: it reads no device, only the facts last read from one.
-import { DeviceFacts } from "./deviceFacts";
+// What an apply changes on each device, as OpenWrt sees it: the device's
+// config as it is now (read live, `uci export`) against what the apply leaves
+// (the saved intent compiled and resolved with the engine's own code, over the
+// wipe and its keep rules), compared as `uci show` lines; plus packages and
+// managed files. Read only while the Apply page is open, held in memory,
+// never stored. Secret options (Wi-Fi keys, passwords) are compared but their
+// values never leave this module.
+import { readFacts } from "./deviceFacts";
+import { installedPackages, managedFiles, Probe, runProbes, uciConfigs } from "./deviceProbes";
+import { managedFilesManifest } from "./getDeviceScript";
 import { getOpenWrtState } from "./getOpenWrtState";
-import { ONCConfig } from "./oncConfigSchema";
+import { loadOncConfig } from "./loadConfig";
+import { OpenWrtState } from "./openWrtConfigSchema";
+import { Platform } from "./platform";
+import { provisionableDevices } from "./provisionConfig";
+import { readEach } from "./readEach";
+import { shellQuote } from "./shell";
+import { declaredConfigs, isKept, UciConfigs, UciSection } from "./uci";
 
 export type UciChange = {
   /** As `uci show` prints it: network.lan, or network.lan.ipaddr. */
@@ -14,50 +24,74 @@ export type UciChange = {
   after?: string;
 };
 
+export type FileChange = { path: string; change: "added" | "removed" | "changed" };
+
 export type DeviceDiff =
   | {
       hostname: string;
       config: UciChange[];
       packages: { added: string[]; removed: string[] };
-      files: { path: string; change: "added" | "removed" | "changed" }[];
+      files: FileChange[];
     }
-  /** Never read from: its ports and radios are not known, so neither is its UCI. */
-  | { hostname: string; unknown: true };
+  /** Not reached: what it holds now is not known, so neither is the change. */
+  | { hostname: string; error: string };
 
-/** Options whose values are never shown: Wi-Fi keys and passwords. */
-const isSecret = (option: string) => /^(key|password|sae_password|auth_secret|acct_secret)$/.test(option);
+/** Options whose values are never shown: keys and passwords. */
+const isSecret = (option: string) =>
+  /^(key|password|sae_password|auth_secret|acct_secret|private_key|preshared_key)$/.test(option);
 
-/** A value as uci shows it: '1' for true, each list item quoted. */
-const show = (value: unknown): string =>
-  Array.isArray(value)
-    ? value.map(show).join(" ")
-    : `'${typeof value === "boolean" ? (value ? "1" : "0") : String(value)}'`;
+/** What the device holds after the apply: kept sections as they are, declared ones merged in or added. */
+export const configsAfter = ({
+  current,
+  declared,
+  keep,
+}: {
+  current: UciConfigs;
+  declared: UciConfigs;
+  keep: string[];
+}): UciConfigs =>
+  Object.fromEntries(
+    [...new Set([...Object.keys(current), ...Object.keys(declared)])].flatMap((configKey) => {
+      const wants = declared[configKey] ?? [];
+      const merged = wants.filter((s) => isKept(keep, configKey, s.type));
+      const kept = (current[configKey] ?? [])
+        .filter((s) => isKept(keep, configKey, s.type))
+        .map((s) => {
+          const over = s.name !== undefined ? merged.find((w) => w.name === s.name) : undefined;
+          return over ? { ...s, options: { ...s.options, ...over.options } } : s;
+        });
+      const added = wants.filter(
+        (w) => !isKept(keep, configKey, w.type) || !kept.some((s) => s.name !== undefined && s.name === w.name)
+      );
+      const sections = [...kept, ...added];
+      return configKey in current || sections.length > 0 ? [[configKey, sections]] : [];
+    })
+  );
 
 type Line = { value: string; secret: boolean };
 
-/** A device's resolved config as `uci show` lines, by key. */
-export const uciLines = (config: Record<string, Record<string, Record<string, unknown>[]>>) => {
+const show = (value: string | string[]) => (Array.isArray(value) ? value : [value]).map((v) => `'${v}'`).join(" ");
+
+/** Configs as `uci show` lines, by key: anonymous sections as `@type[i]`. */
+export const uciLines = (configs: UciConfigs) => {
   const lines = new Map<string, Line>();
-  Object.entries(config).forEach(([pkg, types]) =>
-    Object.entries(types).forEach(([type, sections]) =>
-      sections.forEach((section) => {
-        const name = `${pkg}.${section[".name"]}`;
-        lines.set(name, { value: type, secret: false });
-        Object.entries(section)
-          .filter(([option, value]) => !option.startsWith(".") && value !== undefined && value !== "")
-          .filter(([, value]) => !(Array.isArray(value) && value.length === 0))
-          .forEach(([option, value]) =>
-            lines.set(`${name}.${option}`, { value: show(value), secret: isSecret(option) })
-          );
-      })
-    )
-  );
+  Object.entries(configs).forEach(([configKey, sections]) => {
+    const seen: Record<string, number> = {};
+    sections.forEach((section: UciSection) => {
+      const index = (seen[section.type] = (seen[section.type] ?? -1) + 1);
+      const name = `${configKey}.${section.name ?? `@${section.type}[${index}]`}`;
+      lines.set(name, { value: section.type, secret: false });
+      Object.entries(section.options).forEach(([option, value]) =>
+        lines.set(`${name}.${option}`, { value: show(value), secret: isSecret(option) })
+      );
+    });
+  });
   return lines;
 };
 
 const hidden = "(hidden)";
 
-/** The lines that differ, in the order a reader expects: sorted by key. */
+/** The lines that differ, sorted by key; a secret's value only ever as "(hidden)". */
 export const diffLines = (before: Map<string, Line>, after: Map<string, Line>): UciChange[] =>
   [...new Set([...before.keys(), ...after.keys()])]
     .sort()
@@ -69,51 +103,108 @@ export const diffLines = (before: Map<string, Line>, after: Map<string, Line>): 
       return [{ key, before: shown(a), after: shown(b) }];
     });
 
-/**
- * Each device's changes from `before` (the last applied; undefined when
- * nothing was) to `after` (the saved). A device without facts is `unknown`.
- */
-export const applyDiff = ({
-  before,
-  after,
-  facts,
+/** What a device holds now, as read. */
+export type DeviceNow = {
+  config: UciConfigs;
+  installed: string[];
+  /** Files the last apply wrote, from its manifest. */
+  managed: string[];
+  /** sha256 of each file asked about that exists; "?" where it could not be hashed. */
+  hashes: Record<string, string>;
+};
+
+/** One device's changes, from what it holds now to what the apply leaves. Pure. */
+export const deviceDiff = ({
+  hostname,
+  state,
+  now,
+  sha256,
 }: {
-  before?: ONCConfig;
-  after: ONCConfig;
-  facts: Record<string, DeviceFacts | undefined>;
-}): DeviceDiff[] =>
-  after.devices.map((deviceConfig) => {
-    const known = facts[deviceConfig.hostname];
-    if (!known) return { hostname: deviceConfig.hostname, unknown: true as const };
-    const deviceSchema = known.schema;
-    const stateOf = (oncConfig?: ONCConfig) => {
-      const device = oncConfig?.devices.find((d) => d.hostname === deviceConfig.hostname);
-      return oncConfig && device ? getOpenWrtState({ oncConfig, deviceConfig: device, deviceSchema }) : undefined;
-    };
-    const was = stateOf(before);
-    const will = stateOf(after)!;
-    const names = (state?: ReturnType<typeof stateOf>) =>
-      (state?.packagesToInstall ?? []).map((p) => p.packageName);
-    const filesOf = (state?: ReturnType<typeof stateOf>) =>
-      new Map((state?.files ?? []).map((f) => [f.path, `${f.mode ?? ""}\n${f.content}`]));
-    const oldFiles = filesOf(was);
-    const newFiles = filesOf(will);
-    return {
-      hostname: deviceConfig.hostname,
-      config: diffLines(uciLines((was?.config ?? {}) as never), uciLines(will.config as never)),
-      packages: {
-        added: names(will).filter((p) => !names(was).includes(p)),
-        removed: names(was).filter((p) => !names(will).includes(p)),
-      },
-      files: [...new Set([...oldFiles.keys(), ...newFiles.keys()])].sort().flatMap(
-        (path): { path: string; change: "added" | "removed" | "changed" }[] =>
-        !oldFiles.has(path)
-          ? [{ path, change: "added" }]
-          : !newFiles.has(path)
-          ? [{ path, change: "removed" }]
-          : oldFiles.get(path) !== newFiles.get(path)
-          ? [{ path, change: "changed" }]
+  hostname: string;
+  state: OpenWrtState;
+  now: DeviceNow;
+  sha256: (text: string) => string;
+}): DeviceDiff => {
+  const after = configsAfter({
+    current: now.config,
+    declared: declaredConfigs(state.config),
+    keep: state.configsToNotReset ?? [],
+  });
+  // As the apply writes it: a final newline added where there is none.
+  const written = (content: string) => sha256(content.endsWith("\n") ? content : `${content}\n`);
+  const files = state.files ?? [];
+  return {
+    hostname,
+    config: diffLines(uciLines(now.config), uciLines(after)),
+    packages: {
+      added: (state.packagesToInstall ?? []).map((p) => p.packageName).filter((p) => !now.installed.includes(p)),
+      removed: (state.packagesToUninstall ?? []).filter((p) => now.installed.includes(p)),
+    },
+    files: [
+      ...files.flatMap((f): FileChange[] =>
+        !(f.path in now.hashes)
+          ? [{ path: f.path, change: "added" }]
+          : now.hashes[f.path] !== written(f.content)
+          ? [{ path: f.path, change: "changed" }]
           : []
       ),
-    };
+      ...now.managed
+        .filter((path) => path in now.hashes && !files.some((f) => f.path === path))
+        .map((path): FileChange => ({ path, change: "removed" })),
+    ].sort((a, b) => a.path.localeCompare(b.path)),
+  };
+};
+
+/** sha256 of each of `paths` that is a file: `<hash>  <path>`, or `? <path>` without sha256sum. */
+const fileHashes = (paths: string[]): Probe<Record<string, string>> => ({
+  command: paths.length
+    ? `for p in ${paths.map(shellQuote).join(" ")}; do [ -f "$p" ] || continue; sha256sum "$p" 2>/dev/null || printf '? %s\\n' "$p"; done`
+    : "true",
+  parse: ({ stdout }) =>
+    Object.fromEntries(
+      stdout.split("\n").flatMap((line) => {
+        const match = /^([0-9a-f]{64}|\?)\s+(.+)$/.exec(line.trim());
+        return match ? [[match[2], match[1]]] : [];
+      })
+    ),
+});
+
+/** Long enough to find a device and read every config it has. */
+const timeoutMs = 20000;
+
+/** Every device's changes, read from the devices now (read-only). */
+export const readApplyDiff = async ({
+  intentPath,
+  platform,
+}: {
+  intentPath: string;
+  platform: Platform;
+}): Promise<DeviceDiff[]> => {
+  const { oncConfig } = await loadOncConfig({ path: intentPath, platform });
+  const { ready } = provisionableDevices(oncConfig);
+  return readEach<DeviceDiff>({
+    intentPath,
+    platform,
+    devices: ready,
+    facts: readFacts(platform, intentPath, ready.map((d) => d.hostname)),
+    timeoutMs,
+    read: async (found) => {
+      const deviceConfig = ready.find((d) => d.hostname === found.hostname)!;
+      const state = getOpenWrtState({ oncConfig, deviceConfig, deviceSchema: found.schema });
+      const first = await runProbes(found.session, {
+        config: uciConfigs,
+        installed: installedPackages,
+        managed: managedFiles(managedFilesManifest),
+      });
+      const paths = [...new Set([...(state.files ?? []).map((f) => f.path), ...first.managed])];
+      const { hashes } = await runProbes(found.session, { hashes: fileHashes(paths) });
+      return deviceDiff({
+        hostname: found.hostname,
+        state,
+        now: { config: first.config.configs, installed: first.installed, managed: first.managed, hashes },
+        sha256: platform.sha256,
+      });
+    },
+    failed: (hostname, error) => ({ hostname, error }),
   });
+};

@@ -30,5 +30,9 @@ export const useFreshDevices = () => {
   return { ...devices, reading: refresh.isPending };
 };
 
-/** Fetched afresh on each visit to the Apply page, so it follows saves and runs. */
-export const useApplyDiff = () => useQuery({ queryKey: diffKey, queryFn: loadApplyDiff });
+/**
+ * Read from the devices afresh on each visit to the Apply page, so it follows
+ * saves and runs; not while an apply is running, when they hold half of it.
+ */
+export const useApplyDiff = (enabled = true) =>
+  useQuery({ queryKey: diffKey, queryFn: loadApplyDiff, enabled, refetchOnWindowFocus: false });
