@@ -2,13 +2,14 @@
 // adding a file here and a line below; when OpenWrt fixes one upstream, give
 // it `releases.before` the fixed release, and drop it once no device runs an
 // older one.
+import { leasesToRam } from "./leases-to-ram";
 import { odhcpdRaRestart } from "./odhcpd-ra-restart";
 import { Intent } from "../schema";
 import { applyPatches, patchesFor } from "./patch";
 import { r6sPacketSteering } from "./r6s-packet-steering";
 import { ubihealthdConfig } from "./ubihealthd-config";
 
-export const patches = [r6sPacketSteering, odhcpdRaRestart, ubihealthdConfig];
+export const patches = [r6sPacketSteering, odhcpdRaRestart, ubihealthdConfig, leasesToRam];
 
 export const patchesFeature = applyPatches(patches);
 

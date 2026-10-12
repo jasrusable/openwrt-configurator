@@ -88,6 +88,20 @@ const macs: Probe<string[]> = {
   ],
 };
 
+/**
+ * The address the device answered on, as dropbear tells the session
+ * (SSH_CONNECTION: "client port server port"): a name (name.lan) is the
+ * router's DHCP leases, which an apply can empty (dnsmasq restarted on a new
+ * lease file), so what follows (the apply, its last reconnect) uses this.
+ */
+const answeredOn: Probe<string | undefined> = {
+  command: 'echo "$SSH_CONNECTION"',
+  parse: ({ stdout }) => {
+    const server = stdout.trim().split(/\s+/)[2];
+    return server && isAddress(server) ? server : undefined;
+  },
+};
+
 const routerTables = {
   leases: { command: leasesCommand, parse: ({ stdout }) => parseLeases(stdout) } as Probe<Lease[]>,
   neighbours: { command: "ip -4 neigh show 2>/dev/null || true", parse: ({ stdout }) => parseNeighbours(stdout) } as Probe<Neighbour[]>,
@@ -158,13 +172,14 @@ const tryAddress = async (
     if (facts && schema.name !== facts.schema.name) {
       throw new Error(`${address} is a ${schema.model ?? schema.name}, not ${deviceConfig.hostname}`);
     }
-    const read = await runProbes(session, { macs });
+    const read = await runProbes(session, { macs, answeredOn });
     // Its key: the pinned one, or the one just trusted on first use.
     const key = pin ?? knownKey(platform, file, address);
     return {
       hostname: deviceConfig.hostname,
       session,
-      address,
+      // An address, never a name, once it has answered: held to its key all the same.
+      address: read.answeredOn ?? address,
       schema,
       macs: read.macs,
       ...(key ? { hostKey: { type: key.type, key: key.key } } : {}),

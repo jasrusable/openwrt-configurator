@@ -129,6 +129,9 @@ export const wifi: Feature = (intent) => {
             // key-holder for WPA3), the same on every access point; FT over
             // the air.
             ieee80211r: ssid.fast_roaming,
+            // Over the air, said rather than left to the default: over the
+            // network (DS) trips up some clients.
+            ...(ssid.fast_roaming ? { ft_over_ds: false } : {}),
             ieee80211k: takesPart(intent, ssid),
             bss_transition: takesPart(intent, ssid),
             time_advertisement: 2,

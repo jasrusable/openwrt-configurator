@@ -366,7 +366,7 @@ test("SSIDs: security mode, hidden, off, and fast roaming", (t) => {
   const slow = iface((w) => (w.fast_roaming = false));
   t.is(slow.ieee80211r, false);
   t.true(slow.bss_transition, "802.11v stays on");
-  t.false("ft_over_ds" in iface(() => {}), "OpenWrt's default: over the air");
+  t.is(iface(() => {}).ft_over_ds, false, "over the air, said rather than left to the default");
   t.like(iface((w) => (w.roaming_assistance = false)), { ieee80211k: false, bss_transition: false });
   // Steering Off turns neighbour lists off on every SSID, whatever each says.
   const offEverywhere = sample();
@@ -489,6 +489,7 @@ test("patches apply only where they say: by model, by role", (t) => {
     "/usr/libexec/platform/packet-steering.sh",
     "/etc/hotplug.d/iface/30-odhcpd-ra-fix",
     "/usr/libexec/onc/ubihealthd-config",
+    "/usr/libexec/onc/leases-to-ram",
   ]);
   t.deepEqual(files("home-ap-1", "zyxel,nwa50ax-pro"), [
     "/etc/hotplug.d/net/20-aql",
@@ -498,7 +499,7 @@ test("patches apply only where they say: by model, by role", (t) => {
     files("home-router", "friendlyarm,nanopi-r6s", (i) => (i.internet.connections[0].ipv6 = false)).filter(
       (p: string) => !p.includes("avahi")
     ),
-    ["/usr/libexec/platform/packet-steering.sh", "/usr/libexec/onc/ubihealthd-config"],
+    ["/usr/libexec/platform/packet-steering.sh", "/usr/libexec/onc/ubihealthd-config", "/usr/libexec/onc/leases-to-ram"],
     "the odhcpd fix only where the internet's IPv6 is on"
   );
 });

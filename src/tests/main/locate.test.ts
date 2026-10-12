@@ -10,7 +10,7 @@ import { nodePlatform } from "../../platforms/node";
 import { ProvisionableDevice } from "../../provisionConfig";
 
 /** A machine on the fake network: its board, MACs, host key, and (a router) its tables. */
-type Machine = { board: string; macs: string[]; key: string; leases?: string; neighbours?: string };
+type Machine = { board: string; macs: string[]; key: string; leases?: string; neighbours?: string; ip?: string };
 
 const board = (id: string) =>
   JSON.stringify({ model: { id, name: id }, network: { lan: { ports: ["lan1"], protocol: "static" } } });
@@ -32,6 +32,8 @@ const session = (m: Machine): Session => ({
         ? m.leases ?? ""
         : part.includes("neigh")
         ? m.neighbours ?? ""
+        : part.includes("SSH_CONNECTION")
+        ? (m.ip ? `10.0.0.200 51515 ${m.ip} 22` : "")
         : "";
     return { stdout: parts.map((p) => `${answer(p)}\n__ONC_PROBE__0\n`).join(""), stderr: "", code: 0 };
   },
@@ -151,4 +153,11 @@ test("a name SSH already trusts is held to that key", async (t) => {
   writeFileSync(net.knownHosts, formatKnownHost({ host: "home-ap-1.lan", type: "ssh-ed25519", key: "AP-KEY" }));
   const [, a] = await settle(locateEach({ devices: [router, ap], facts: {}, platform: net.platform }));
   t.like(a, { address: "home-ap-1.lan", hostKey: { type: "ssh-ed25519", key: "AP-KEY" } });
+});
+
+test("found by name, used by the address it answered on: a name can go when the router's leases do", async (t) => {
+  const net = network({ "10.0.0.1": routerMachine(""), "home-ap-1.lan": { ...apMachine, ip: "10.0.0.50" } });
+  writeFileSync(net.knownHosts, formatKnownHost({ host: "home-ap-1.lan", type: "ssh-ed25519", key: "AP-KEY" }));
+  const [, a] = await settle(locateEach({ devices: [router, ap], facts: {}, platform: net.platform }));
+  t.like(a, { address: "10.0.0.50", hostKey: { type: "ssh-ed25519", key: "AP-KEY" } });
 });
