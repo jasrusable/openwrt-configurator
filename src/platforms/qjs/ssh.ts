@@ -206,8 +206,16 @@ const dropbear = (target: SshTarget, host: string): Transport => {
     ...(target.username ? ["-l", target.username] : []),
   ];
   const env = environment({ DROPBEAR_PASSWORD: target.password, ...(home ? { HOME: home } : {}) });
+  const plain = transport((command) => ["dbclient", ...options, host, command], env);
+  // A server offering a key of another type than the pinned one is "not in
+  // the trusted hosts file": dbclient then asks, and with no terminal (CGI)
+  // reads the answer from stdin, where a command's input would be taken for
+  // it. So stdin always starts with "n", which refuses; when dbclient does
+  // not ask, the far side drops that one byte before the command reads.
+  const pinned: Transport["exec"] = (command, options) =>
+    plain.exec(`dd bs=1 count=1 >/dev/null 2>&1; ${command}`, { ...options, stdin: `n${options?.stdin ?? ""}` });
   return {
-    ...transport((command) => ["dbclient", ...options, host, command], env),
+    exec: home ? pinned : plain.exec,
     ...(home
       ? {
           cleanup: () => {

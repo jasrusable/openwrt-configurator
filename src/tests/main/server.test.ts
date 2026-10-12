@@ -131,17 +131,21 @@ test("on a router, the API needs a session from the root password; the UI's file
   const intentPath = join(dir, "intent.json");
   writeFileSync(intentPath, readFileSync(join(__dirname, "../../../sampleConfigs/intent.json")));
   const sid = "0123456789abcdef0123456789abcdef";
+  const other = "fedcba9876543210fedcba9876543210";
   const calls: unknown[] = [];
   // rpcd through ucode's ubus module, as on 25.12.5: the request on stdin.
   const run = async (argv: string[], options?: { stdin?: string }) => {
+    if (argv[0] !== "ucode") return nodePlatform.run(argv, options);
     calls.push({ argv, stdin: options?.stdin });
     const { method, args } = JSON.parse(options?.stdin ?? "{}");
     const result =
       method === "login"
         ? args.password === "right" ? { ubus_rpc_session: sid } : null
         : method === "access"
-          ? args.ubus_rpc_session === sid ? { access: true } : null
-          : {};
+          ? [sid, other].includes(args.ubus_rpc_session) ? { access: true } : null
+          : method === "list"
+            ? args.ubus_rpc_session === sid ? { data: { username: "root" } } : args.ubus_rpc_session === other ? { data: { username: "luci-user" } } : null
+            : {};
     return { code: 0, stdout: JSON.stringify({ result, error: result ? null : "Not found" }), stderr: "" };
   };
   const platform = { ...nodePlatform, run, sleep: async () => {} };
@@ -156,6 +160,21 @@ test("on a router, the API needs a session from the root password; the UI's file
   t.regex(right.headers["set-cookie"], new RegExp(`^onc_session=${sid}; Path=/; HttpOnly; SameSite=Strict$`));
   t.is((await api("GET", "/api/intent", "", `onc_session=${sid}`)).status, 200);
   t.is((await api("GET", "/api/intent", "", "onc_session=ffffffffffffffffffffffffffffffff")).status, 401);
+  t.is((await api("GET", "/api/intent", "", `onc_session=${other}`)).status, 401, "another user's session, though it may write");
   t.false(calls.some((c: any) => c.argv.join(" ").includes("right")), "the password never on a command line");
   t.regex((await api("POST", "/api/logout", "", `onc_session=${sid}`)).headers["set-cookie"] ?? "", /Max-Age=0/);
+});
+
+test("wrong passwords sent side by side are counted together: after five in a minute, logins pause", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "onc-auth-"));
+  const intentPath = join(dir, "intent.json");
+  writeFileSync(intentPath, readFileSync(join(__dirname, "../../../sampleConfigs/intent.json")));
+  const run = async (argv: string[], options?: { stdin?: string }) =>
+    argv[0] === "ucode" ? { code: 0, stdout: JSON.stringify({ result: null }), stderr: "" } : nodePlatform.run(argv, options);
+  const platform = { ...nodePlatform, run, sleep: async () => {} };
+  const handle = uiHandler({ intentPath, uiRoot: dir, platform, auth: rpcdAuth(platform) });
+  const guess = () => handle({ method: "POST", path: "/api/login", body: JSON.stringify({ password: "nope" }), headers: { "x-onc": "1" } });
+  const statuses = (await Promise.all([1, 2, 3, 4, 5, 6, 7].map(guess))).map((r) => r.status);
+  t.true(statuses.includes(429), JSON.stringify(statuses));
+  t.is((await guess()).status, 429, "and the next too, until the minute passes");
 });

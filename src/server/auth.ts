@@ -57,6 +57,10 @@ export const rpcdAuth = (platform: Pick<Platform, "run">): Auth => {
     check: async (request) => {
       const sid = sessionOf(request);
       if (!sid) return false;
+      // Root's (rpcd keeps it as data.username, checked on 25.12.5), made by this login or LuCI's: another user's session (LuCI
+      // can have others) may not change the whole network.
+      const owner = await session("list", { ubus_rpc_session: sid });
+      if (owner?.data?.username !== "root") return false;
       // Asking renews it; may it change settings (root's may)?
       const access = await session("access", { ubus_rpc_session: sid, scope: "uci", object: "network", function: "write" });
       return access?.access === true;

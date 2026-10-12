@@ -333,8 +333,22 @@ const withCookie = (response: HttpResponse, sid: string | undefined): HttpRespon
 });
 
 /** POST {password}: a session (cookie) for the router's root password; or ends it. */
+/** Wrong passwords allowed within the window, from anywhere, before logins pause. */
+const loginAttempts = 5;
+const loginWindowMs = 60_000;
+
 const sessionApi =
-  ({ auth, platform }: { auth: Auth; platform: Pick<Platform, "sleep"> }): HttpHandler =>
+  ({
+    auth,
+    platform,
+    intentPath,
+    now = Date.now,
+  }: {
+    auth: Auth;
+    platform: Pick<Platform, "sleep" | "writeTextFile" | "mkdirp" | "removeFile" | "run">;
+    intentPath: string;
+    now?: () => number;
+  }): HttpHandler =>
   async (request) => {
     if (request.method !== "POST") return json(405, { error: "POST" });
     if (request.path === "/api/logout") {
@@ -347,12 +361,37 @@ const sessionApi =
     } catch {
       return json(400, { error: "The body is not JSON." });
     }
+    // Every attempt is a file of its own, made before the password is
+    // checked and then counted with the others of the last minute: under CGI
+    // each request is its own process, and attempts sent side by side must
+    // see each other (making a file is atomic; reading and rewriting a count
+    // is not). A success removes its own; failures stay until they age out.
+    const dir = `${intentPath}.state/login-attempts`;
+    platform.mkdirp(dir);
+    const mine = `${now()}-${Math.random().toString(36).slice(2, 10)}`;
+    platform.writeTextFile(`${dir}/${mine}`, "");
+    const listed = await platform.run(["ls", dir]).catch(() => ({ stdout: "" }));
+    const recent = listed.stdout
+      .split("\n")
+      .map((name) => name.trim())
+      .filter((name) => {
+        const at = Number(name.split("-")[0]);
+        if (!name || !Number.isFinite(at)) return false;
+        if (now() - at >= loginWindowMs) {
+          platform.removeFile(`${dir}/${name}`);
+          return false;
+        }
+        return true;
+      });
+    if (recent.length > loginAttempts) {
+      return json(429, { error: "Too many wrong passwords: wait a minute and try again." });
+    }
     const sid = typeof password === "string" && password ? await auth.login(password) : undefined;
     if (!sid) {
-      // No memory between requests under CGI: a second per wrong guess instead.
       await platform.sleep(1000);
       return json(401, { error: "That is not the router's password." });
     }
+    platform.removeFile(`${dir}/${mine}`);
     return withCookie(json(200, { ok: true }), sid);
   };
 
@@ -381,7 +420,7 @@ export const uiHandler = ({
     "/api/mesh/speed": meshSpeedApi({ intentPath, platform }),
   };
   const ui = staticFiles({ root: uiRoot, files: platform });
-  const session = auth && sessionApi({ auth, platform });
+  const session = auth && sessionApi({ auth, platform, intentPath });
   return async (request) => {
     const api = request.path.startsWith("/api/");
     // Every API request must carry a header a cross-site page cannot send
