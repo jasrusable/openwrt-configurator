@@ -8,6 +8,8 @@ import type { NetworkStatus } from "../../../src/status/network";
 import type { Intent } from "../../../src/intent/schema";
 import type { ProvisionStatus } from "../../../src/server/provisionJob";
 
+import { forgetDeviceReads } from "./persist";
+
 export type Issue = { path: string; message: string };
 
 /** Every write carries it: the server refuses writes without (CSRF). */
@@ -27,7 +29,11 @@ export const onLoginNeeded = (listener: () => void) => {
 
 const call = async (url: string, init: RequestInit = {}) => {
   const response = await fetch(url, { ...init, headers: { ...writeHeaders, ...(init.headers as Record<string, string>) } });
-  if (response.status === 401) loginListeners.forEach((listener) => listener());
+  if (response.status === 401) {
+    // Logged out: keep nothing of the network in this browser.
+    forgetDeviceReads();
+    loginListeners.forEach((listener) => listener());
+  }
   return response;
 };
 

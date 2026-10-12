@@ -88,7 +88,11 @@ export const DeviceChangesSection = ({ devices, running }: { devices: string[]; 
   return (
     <Section
       title="Devices"
-      description="What applying writes on each, as uci shows it. Passwords and keys are hidden."
+      description={
+        diff.isFetching && diff.data
+          ? "What applying writes on each, as uci shows it; checking the devices again…"
+          : "What applying writes on each, as uci shows it. Passwords and keys are hidden."
+      }
     >
       {devices.map((name) => {
         const d = diff.data?.find((x) => x.hostname === name);

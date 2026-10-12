@@ -18,6 +18,8 @@ import { IconTopologyStar3 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { logIn, onLoginNeeded } from "./data/api";
+import { prefetchApplyDiff, useFreshDevices } from "./data/devices";
+import { prefetchNetworkStatus } from "./data/status";
 import {
   createHashRouter,
   Navigate,
@@ -255,6 +257,21 @@ const LoginPage = ({ onDone }: { onDone: () => void }) => {
   );
 };
 
+/**
+ * As the app opens, what the pages that read devices will show is read in
+ * the background: stale facts, the network's status (once, not polled), and
+ * what an apply would change. The app being open is the viewer they wait for.
+ */
+const Warmup = () => {
+  const queryClient = useQueryClient();
+  useFreshDevices();
+  useEffect(() => {
+    void prefetchNetworkStatus(queryClient);
+    void prefetchApplyDiff(queryClient);
+  }, [queryClient]);
+  return null;
+};
+
 export const App = () => {
   const queryClient = useQueryClient();
   const [loggedOut, setLoggedOut] = useState(false);
@@ -282,8 +299,12 @@ export const App = () => {
   }
   return (
     // Keyed by the saved file, so a save or a reload restarts the form from it.
-    <IntentForm key={JSON.stringify(intent.data)} intent={intent.data}>
-      <RouterProvider router={router} />
-    </IntentForm>
+    <>
+      {/* Once per load, outside the form, which starts again on every save. */}
+      <Warmup />
+      <IntentForm key={JSON.stringify(intent.data)} intent={intent.data}>
+        <RouterProvider router={router} />
+      </IntentForm>
+    </>
   );
 };
