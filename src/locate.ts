@@ -5,13 +5,13 @@
 // the router's DHCP leases by name, then by MAC in the leases and neighbour
 // table. No subnet is ever scanned.
 //
-// The app logs in as root, so a wrong guess must never reach another box.
-// Before an address is tried for a device whose host key is known, the
-// address is pinned to that key: any other machine there is refused by the
-// usual host-key check; an address already pinned to another key is skipped.
-// Once in, the board must be the one recorded. A device never reached before
-// is trusted on first use at its configured address or leased name only, as
-// before.
+// The app logs in as root, so a wrong guess must never reach another box,
+// nor be handed a password. Only the address the settings give may be
+// trusted on first use (as before). Any address the app found itself is
+// tried only for a device whose host key is on record, pinned to that key
+// first: any other machine there is refused by the usual host-key check
+// before credentials are sent; an address already pinned to another key is
+// skipped. Once in, the board must be the one recorded.
 import type { DeviceFacts } from "./deviceFacts";
 import { Probe, runProbes } from "./deviceProbes";
 import { DeviceSchema } from "./deviceSchema";
@@ -34,7 +34,12 @@ export const parseNeighbours = (text: string): Neighbour[] =>
     return m ? [{ address: m[1], mac: m[2].toLowerCase() }] : [];
   });
 
-export type Candidate = { address: string; why: string };
+export type Candidate = {
+  address: string;
+  why: string;
+  /** From the settings: the one address that may be trusted on first use. Every other was found, and anyone can claim it. */
+  configured: boolean;
+};
 
 /** Where to look for a device, best first, each address once. */
 export const candidatesFor = ({
@@ -50,11 +55,17 @@ export const candidatesFor = ({
 }): Candidate[] => {
   const macs = new Set(facts?.macs ?? []);
   const all: Candidate[] = [
-    ...(facts?.address ? [{ address: facts.address, why: "where it was last reached" }] : []),
-    { address: deviceConfig.ipaddr, why: "where your settings put it" },
-    ...leases.filter((l) => l.name === deviceConfig.hostname).map((l) => ({ address: l.address, why: "its name in the router's leases" })),
-    ...leases.filter((l) => macs.has(l.mac)).map((l) => ({ address: l.address, why: "its MAC in the router's leases" })),
-    ...neighbours.filter((n) => macs.has(n.mac)).map((n) => ({ address: n.address, why: "its MAC on the router's network" })),
+    ...(facts?.address ? [{ address: facts.address, why: "where it was last reached", configured: false }] : []),
+    { address: deviceConfig.ipaddr, why: "where your settings put it", configured: true },
+    ...leases
+      .filter((l) => l.name === deviceConfig.hostname)
+      .map((l) => ({ address: l.address, why: "its name in the router's leases", configured: false })),
+    ...leases
+      .filter((l) => macs.has(l.mac))
+      .map((l) => ({ address: l.address, why: "its MAC in the router's leases", configured: false })),
+    ...neighbours
+      .filter((n) => macs.has(n.mac))
+      .map((n) => ({ address: n.address, why: "its MAC on the router's network", configured: false })),
   ];
   return all.filter((c, i) => all.findIndex((d) => d.address === c.address) === i);
 };
@@ -88,12 +99,14 @@ export type Located = {
 
 export type NotLocated = { hostname: string; error: string };
 
-const knownHostsOf = (platform: Platform, file: string) => {
-  try {
-    return parseKnownHosts(platform.readTextFile(file));
-  } catch {
-    return [];
-  }
+/**
+ * The known_hosts file's text: empty only when there is no file yet. One
+ * that exists but cannot be read stops the attempt (fail closed): treating it
+ * as empty would accept any key, and rewriting it would lose every other.
+ */
+const readKnownHosts = (platform: Platform, file: string) => {
+  if (platform.fileMode(file) === undefined) return "";
+  return platform.readTextFile(file);
 };
 
 /**
@@ -110,18 +123,10 @@ const tryAddress = async (
   const file = sshConnectOptions({ deviceConfig: at, platform }).knownHostsFile!;
   if (facts?.hostKey) {
     const pin: KnownHost = { host: address, ...facts.hostKey };
-    const seen = checkHostKey(knownHostsOf(platform, file), pin);
+    const existing = readKnownHosts(platform, file);
+    const seen = checkHostKey(parseKnownHosts(existing), pin);
     if (seen === "changed") throw new Error(`${address} has another device's host key`);
-    if (seen === "new") {
-      const existing = (() => {
-        try {
-          return platform.readTextFile(file);
-        } catch {
-          return "";
-        }
-      })();
-      platform.writeFileAtomic(file, existing + formatKnownHost(pin), 0o600);
-    }
+    if (seen === "new") platform.writeFileAtomic(file, existing + formatKnownHost(pin), 0o600);
   }
   // A shorter handshake than an apply's: a wrong guess should give way quickly.
   const session = await platform.connect({
@@ -134,7 +139,7 @@ const tryAddress = async (
       throw new Error(`${address} is a ${schema.model ?? schema.name}, not ${deviceConfig.hostname}`);
     }
     const read = await runProbes(session, { macs });
-    const key = knownHostsOf(platform, file).find((k) => k.host === address);
+    const key = parseKnownHosts(readKnownHosts(platform, file)).find((k) => k.host === address);
     return {
       hostname: deviceConfig.hostname,
       session,
@@ -157,7 +162,14 @@ const locate = async (
   platform: Platform
 ): Promise<Located | NotLocated> => {
   const failures: string[] = [];
-  for (const { address, why } of candidates) {
+  for (const { address, why, configured } of candidates) {
+    // Fail closed: an address the app found (a lease, a MAC, the last one)
+    // could be anyone's. It is tried only pinned to the device's recorded
+    // host key, which both SSH clients check before any credential is sent.
+    if (!configured && !facts?.hostKey) {
+      failures.push(`${address} (${why}): not tried, no host key on record to check it against`);
+      continue;
+    }
     try {
       return await tryAddress(deviceConfig, address, facts, platform);
     } catch (e) {

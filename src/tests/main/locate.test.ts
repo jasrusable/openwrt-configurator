@@ -1,5 +1,5 @@
 import test from "ava";
-import { mkdtempSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { DeviceFacts } from "../../deviceFacts";
@@ -132,4 +132,31 @@ test("first contact: trusted at its configured address, and its key remembered",
   const net = network({ "10.0.0.1": routerMachine(""), "home-ap-1.lan": apMachine });
   const [, a] = await settle(locateEach({ devices: [router, ap], facts: {}, platform: net.platform }));
   t.like(a, { address: "home-ap-1.lan", hostKey: { type: "ssh-ed25519", key: "AP-KEY" } });
+});
+
+test("fail closed: an address the app found is never tried without a host key to pin it to", async (t) => {
+  // An impostor claims the access point's name in DHCP; the real one is not yet known by key.
+  const net = network({
+    "10.0.0.1": routerMachine("1 ff:ff:ff:00:00:00 10.0.0.66 home-ap-1 *\n1 aa:bb:cc:00:00:01 10.0.0.77 * *"),
+    "10.0.0.66": { board: board("zyxel,nwa50ax-pro"), macs: ["ff:ff:ff:00:00:00"], key: "IMPOSTOR-KEY" },
+  });
+  const { hostKey: _none, ...withoutKey } = apFacts;
+  for (const facts of [{}, { "home-ap-1": withoutKey }]) {
+    net.tried.length = 0;
+    const [, a] = await settle(locateEach({ devices: [router, ap], facts, platform: net.platform }));
+    t.false("session" in a);
+    t.false(net.tried.includes("10.0.0.66"), "no credentials sent to a name anyone can claim");
+    t.false(net.tried.includes("10.0.0.77") || net.tried.includes("10.0.0.50"));
+    t.regex((a as NotLocated).error, /not tried, no host key on record/);
+  }
+});
+
+test("a known_hosts that cannot be read stops the attempt and is left as it is", async (t) => {
+  const net = network({ "10.0.0.1": routerMachine(""), "10.0.0.50": apMachine });
+  const unreadable = join(mkdtempSync(join(tmpdir(), "onc-locate-")), "known_hosts");
+  mkdirSync(unreadable); // exists, but reading it fails
+  const platform = { ...net.platform, env: (name: string) => (name === "ONC_KNOWN_HOSTS" ? unreadable : undefined) };
+  const [, a] = await settle(locateEach({ devices: [router, ap], facts: { "home-ap-1": apFacts }, platform }));
+  t.false("session" in a);
+  t.true(statSync(unreadable).isDirectory(), "not rewritten");
 });
