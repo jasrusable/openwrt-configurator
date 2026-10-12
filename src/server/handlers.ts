@@ -9,7 +9,8 @@ import { adopt, discover, Inspected, inspect } from "../discover";
 import { readFacts, readFailures, refreshStale, staleDevices } from "../deviceFacts";
 import { compileIntent } from "../intent/compile";
 import { lockoutReason, ownPublicKey } from "../loginAccess";
-import { readNetworkStatus } from "../status/read";
+import { readNetworkStatus, StatusView, statusViews } from "../status/read";
+import { latestRelease, restartService, speedTest } from "../status/actions";
 import { diffIntent } from "../intent/diff";
 import { migrateIntent } from "../intent/migrations";
 import { intentSchema } from "../intent/schema";
@@ -290,10 +291,48 @@ export const ownKeyApi =
 /** GET: what the network is doing now, read from the devices (src/status/). Polled only while a page shows it. */
 export const statusApi =
   ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
+  async ({ method, path }) => {
+    if (method !== "GET") return json(405, { error: "GET" });
+    // /api/status, or /api/status/<view>: what each Status tab reads.
+    const view = path.split("/")[3] ?? "overview";
+    if (!statusViews.includes(view as StatusView)) return json(404, { error: "No such view." });
+    const status = await readNetworkStatus({ intentPath, platform, view: view as StatusView });
+    return status ? json(200, status) : json(409, { error: "The saved settings are not valid." });
+  };
+
+/** POST {device, service}: restart a service the settings declare on that device (a Status fix). */
+export const fixApi =
+  ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
+  async ({ method, body }) => {
+    if (method !== "POST") return json(405, { error: "POST" });
+    let input: { device?: unknown; service?: unknown };
+    try {
+      input = JSON.parse(body || "{}");
+    } catch {
+      return json(400, { error: "The body is not JSON." });
+    }
+    if (typeof input.device !== "string" || typeof input.service !== "string" || !/^[A-Za-z0-9_-]+$/.test(input.service)) {
+      return json(400, { error: "Give a device and a service." });
+    }
+    const result = await restartService({ intentPath, platform, hostname: input.device, service: input.service });
+    return json("error" in result ? 502 : 200, result);
+  };
+
+/** POST: the router's download speed now. GET /api/firmware: OpenWrt's latest release. */
+export const internetSpeedApi =
+  ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
+  async ({ method }) => {
+    if (method !== "POST") return json(405, { error: "POST" });
+    const result = await speedTest({ intentPath, platform });
+    return json("error" in result ? 502 : 200, result);
+  };
+
+export const firmwareApi =
+  ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
   async ({ method }) => {
     if (method !== "GET") return json(405, { error: "GET" });
-    const status = await readNetworkStatus({ intentPath, platform });
-    return status ? json(200, status) : json(409, { error: "The saved settings are not valid." });
+    const result = await latestRelease({ intentPath, platform });
+    return json("error" in result ? 502 : 200, result);
   };
 
 /** GET: what an apply would change on each device, as UCI, read from the devices now (src/applyDiff.ts). */
@@ -418,6 +457,10 @@ export const uiHandler = ({
     "/api/discover/inspect": discoverApi({ intentPath, platform }),
     "/api/discover/adopt": discoverApi({ intentPath, platform }),
     "/api/mesh/speed": meshSpeedApi({ intentPath, platform }),
+    "/api/fix": fixApi({ intentPath, platform }),
+    "/api/internet/speed": internetSpeedApi({ intentPath, platform }),
+    "/api/firmware": firmwareApi({ intentPath, platform }),
+    ...Object.fromEntries(statusViews.map((v) => [`/api/status/${v}`, statusApi({ intentPath, platform })])),
   };
   const ui = staticFiles({ root: uiRoot, files: platform });
   const session = auth && sessionApi({ auth, platform, intentPath });

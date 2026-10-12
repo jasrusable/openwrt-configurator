@@ -22,11 +22,11 @@ import { SystemPage } from "./SystemPage";
 import { HardwarePage } from "./HardwarePage";
 import { InternetPage } from "./InternetPage";
 import { NetworksPage } from "./NetworksPage";
-import { OverviewPage } from "./OverviewPage";
+import { StatusSection } from "./status";
 import { WifiSection } from "./wifi";
 
 export const pages = [
-  { group: "status", id: "overview", label: placeName("overview"), icon: IconLayoutDashboard, color: "teal", Page: OverviewPage },
+  { group: "status", id: "overview", label: placeName("overview"), icon: IconLayoutDashboard, color: "teal", Page: StatusSection },
   { group: "settings", id: "system", label: placeName("system"), icon: IconAdjustments, color: "gray", Page: SystemPage },
   { group: "settings", id: "internet", label: placeName("internet"), icon: IconWorld, color: "indigo", Page: InternetPage },
   { group: "settings", id: "networks", label: placeName("networks"), icon: IconNetwork, color: "green", Page: NetworksPage },

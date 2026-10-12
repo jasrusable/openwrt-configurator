@@ -20,6 +20,7 @@ import { ago, duration, modelOf, portsOf, routerFacts } from "../facts";
 import { useDraftValue } from "../form/draft";
 import { Section, SettingRow, SettingsPage, StatusDot } from "../kit/layout";
 import { applyStatus } from "../provision/status";
+import { AttentionSection } from "./status/shared";
 
 const connections: Record<string, string> = { dhcp: "DHCP", pppoe: "PPPoE", static: "Static IP" };
 const providers: Record<string, string> = { cloudflare: "Cloudflare", google: "Google", quad9: "Quad9" };
@@ -96,6 +97,7 @@ export const OverviewPage = () => {
           : intent.site.name
       }
     >
+      <AttentionSection items={live?.attention} />
       {apply && (
         <Section title="Devices and settings">
           <SettingRow label={apply.title} description={apply.detail}>

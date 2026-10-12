@@ -4,7 +4,7 @@
 // these parsers stay and only the transport changes (CLAUDE.md, "Reading
 // devices"). Parsing is defensive: a field a release lacks is left out, never
 // an error. Nothing here prints a config value.
-import { Probe, runProbes } from "../deviceProbes";
+import { notRunning, Probe, runProbes } from "../deviceProbes";
 import { parseJson } from "../parseJson";
 import { Session } from "../platform";
 
@@ -20,7 +20,14 @@ export type InterfaceStatus = {
   ipv6: string[];
 };
 
-export type WifiClient = { mac: string; signal?: number; rxBytes?: number; txBytes?: number };
+export type WifiClient = {
+  mac: string;
+  signal?: number;
+  rxBytes?: number;
+  txBytes?: number;
+  /** Seconds since it associated. */
+  connected?: number;
+};
 
 export type WifiInterface = {
   /** hostapd's interface, e.g. phy1-ap0. */
@@ -29,8 +36,39 @@ export type WifiInterface = {
   /** MHz. */
   freq?: number;
   channel?: number;
+  /** From iwinfo: the mode and width (HE80), transmit power (dBm), noise floor (dBm). */
+  htmode?: string;
+  txpower?: number;
+  noise?: number;
   clients: WifiClient[];
 };
+
+/** A port's link: up, and at what speed (Mbit/s) when it says. */
+export type PortLink = { name: string; up: boolean; speed?: number };
+
+/** Router advertisements sent and solicitations heard, per device, since it came up. */
+export type Adverts = { device: string; sent: number; solicits: number };
+
+/** The kernel's neighbour table: who answered on which address lately. */
+export type NeighbourEntry = { address: string; mac: string; state: string };
+
+/** odhcpd's IPv6 leases: by DUID, the MAC where the DUID holds one. */
+export type Ipv6Lease = { duid: string; mac?: string; hostname?: string; addresses: string[] };
+
+/** Read only for the Internet view: how the line is doing from the router. */
+export type InternetCheck = {
+  /** Average round trip to a public resolver, ms; undefined when none answered. */
+  latencyMs?: number;
+  /** The address the internet sees (another NAT may sit before the router's WAN). */
+  publicIpv4?: string;
+  /** The router's own DNS (dnsmasq, and its upstream) answering. */
+  dnsOk: boolean;
+  /** Smart queueing on each device it shapes: bytes sent and packets it dropped (to keep latency down). */
+  queues: { device: string; sentBytes: number; dropped: number }[];
+};
+
+/** Read only for the Activity view: a device's own log, the lines worth telling. */
+export type LogLine = { at: number; text: string };
 
 export type Lease = { mac: string; address: string; name?: string; /** s since the epoch */ expires: number };
 
@@ -63,6 +101,19 @@ export type DeviceStatus = {
   meshWiredPath?: { small: number; large: number };
   /** Its WireGuard peers: when each last completed a handshake. */
   wireguard: WireguardPeer[];
+  /** Free and total space where packages and config live (the overlay), KiB. */
+  storage?: { availableKb: number; totalKb: number };
+  /** The hottest thermal zone, °C, where it has any. */
+  temperature?: number;
+  /** Each network device's link (Wi-Fi interfaces too; the UI picks the ports). */
+  links: PortLink[];
+  adverts: Adverts[];
+  neighbours: NeighbourEntry[];
+  ipv6Leases: Ipv6Lease[];
+  /** Of the services the settings say must run, those that are not (or are not installed). */
+  notRunning: { name: string; missing: boolean }[];
+  internet?: InternetCheck;
+  log?: LogLine[];
 };
 
 export type WireguardPeer = {
@@ -144,6 +195,14 @@ export const parseWifi = (list: unknown): WifiInterface[] =>
         ...(str(status.ssid) ? { ssid: str(status.ssid) } : {}),
         ...(num(status.freq) !== undefined ? { freq: num(status.freq) } : {}),
         ...(num(status.channel) !== undefined ? { channel: num(status.channel) } : {}),
+        ...(() => {
+          const info = obj(entry.info);
+          return {
+            ...(str(info.htmode) ? { htmode: str(info.htmode) } : {}),
+            ...(num(info.txpower) !== undefined ? { txpower: num(info.txpower) } : {}),
+            ...(num(info.noise) !== undefined && num(info.noise) !== 0 ? { noise: num(info.noise) } : {}),
+          };
+        })(),
         clients: Object.entries(clients).map(([mac, client]) => {
           const c = obj(client);
           const bytes = obj(c.bytes);
@@ -152,6 +211,7 @@ export const parseWifi = (list: unknown): WifiInterface[] =>
             ...(num(c.signal) !== undefined ? { signal: num(c.signal) } : {}),
             ...(num(bytes.rx) !== undefined ? { rxBytes: num(bytes.rx) } : {}),
             ...(num(bytes.tx) !== undefined ? { txBytes: num(bytes.tx) } : {}),
+            ...(num(c.connected_time) !== undefined ? { connected: num(c.connected_time) } : {}),
           };
         }),
       };
@@ -196,6 +256,7 @@ const wifi: Probe<unknown> = {
     "for o in $(ubus list 'hostapd.*' 2>/dev/null); do",
     `  printf '%s{"object":"%s","status":' "$sep" "$o"; ubus call "$o" get_status 2>/dev/null || printf 'null'`,
     `  printf ',"clients":'; ubus call "$o" get_clients 2>/dev/null || printf 'null'`,
+  `  printf ',"info":'; ubus call iwinfo info "{\\"device\\":\\"\${o#hostapd.}\\"}" 2>/dev/null || printf 'null'`,
     "  printf '}'; sep=','",
     "done; printf ']'",
   ].join("\n"),
@@ -296,13 +357,166 @@ const leases: Probe<string> = {
   parse: ({ stdout }) => stdout,
 };
 
+const raw = (command: string): Probe<string> => ({ command, parse: ({ stdout }) => stdout });
+
+/** `df -k`'s last line: "<fs> <total> <used> <available> <use%> <mount>". */
+export const parseStorage = (text: string) => {
+  const f = text.trim().split("\n").pop()?.trim().split(/\s+/) ?? [];
+  const [totalKb, availableKb] = [Number(f[1]), Number(f[3])];
+  return Number.isFinite(totalKb) && Number.isFinite(availableKb) && totalKb > 0 ? { totalKb, availableKb } : undefined;
+};
+
+/** Thermal zones in millidegrees, one per line: the hottest, °C. */
+export const parseTemperature = (text: string) => {
+  const t = text.split("\n").map(Number).filter((v) => Number.isFinite(v) && v > 0);
+  return t.length ? Math.round(Math.max(...t) / 100) / 10 : undefined;
+};
+
+/** "<name> <carrier> <speed>" per line; speed -1 or absent when it does not say. */
+export const parseLinks = (text: string): PortLink[] =>
+  text.split("\n").flatMap((line) => {
+    const [name, carrier, speed] = line.trim().split(/\s+/);
+    if (!name) return [];
+    const mbps = Number(speed);
+    return [{ name, up: carrier === "1", ...(Number.isFinite(mbps) && mbps > 0 ? { speed: mbps } : {}) }];
+  });
+
+/** "<device> <adverts sent> <solicits heard>" per line. */
+export const parseAdverts = (text: string): Adverts[] =>
+  text.split("\n").flatMap((line) => {
+    const [device, sent, solicits] = line.trim().split(/\s+/);
+    return device && sent !== undefined ? [{ device, sent: Number(sent) || 0, solicits: Number(solicits) || 0 }] : [];
+  });
+
+/** `ip neigh show`: "<address> dev <dev> lladdr <mac> [router] <STATE>"; entries without a MAC skipped. */
+export const parseNeighbourTable = (text: string): NeighbourEntry[] =>
+  text.split("\n").flatMap((line) => {
+    const m = /^(\S+)\s.*\blladdr\s+([0-9a-f:]{17})\b.*\s([A-Z]+)\s*$/i.exec(line.trim());
+    return m ? [{ address: m[1], mac: m[2].toLowerCase(), state: m[3] }] : [];
+  });
+
+/** A MAC inside a DUID: DUID-LLT (0001, hardware type, time) and DUID-LL (0003, hardware type). */
+const macOfDuid = (duid: string) => {
+  const hex = duid.toLowerCase().replace(/[^0-9a-f]/g, "");
+  const mac = hex.startsWith("00010001") && hex.length === 28 ? hex.slice(16) : hex.startsWith("00030001") && hex.length === 20 ? hex.slice(8) : undefined;
+  return mac?.match(/../g)?.join(":");
+};
+
+/** `ubus call dhcp ipv6leases`: per device, each lease's DUID, hostname and addresses. */
+export const parseIpv6Leases = (value: unknown): Ipv6Lease[] =>
+  Object.values(obj(obj(value).device)).flatMap((device) =>
+    arr(obj(device).leases)
+      .map(obj)
+      .flatMap((lease) => {
+        const duid = str(lease.duid);
+        if (!duid) return [];
+        const mac = macOfDuid(duid);
+        const addresses = arr(lease["ipv6-addr"]).map(obj).flatMap((a) => (str(a.address) ? [str(a.address)!] : []));
+        return [{ duid, ...(mac ? { mac } : {}), ...(str(lease.hostname) ? { hostname: str(lease.hostname) } : {}), addresses }];
+      })
+  );
+
+/**
+ * The Internet view's checks, one per line: "ping <avg ms or ->", "ip <address
+ * or ->", "dns <ok or fail>", then "qdisc <device> <sent bytes> <dropped>" per
+ * shaped device.
+ */
+export const parseInternetCheck = (text: string): InternetCheck => {
+  const lines = text.split("\n").map((l) => l.trim().split(/\s+/));
+  const field = (key: string) => lines.find((l) => l[0] === key)?.[1];
+  const ping = Number(field("ping"));
+  const ip = field("ip");
+  return {
+    ...(Number.isFinite(ping) && ping > 0 ? { latencyMs: ping } : {}),
+    ...(ip && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip) ? { publicIpv4: ip } : {}),
+    dnsOk: field("dns") === "ok",
+    queues: lines.filter((l) => l[0] === "qdisc" && l.length >= 4).map(([, device, sent, dropped]) => ({
+      device,
+      sentBytes: Number(sent) || 0,
+      dropped: Number(dropped) || 0,
+    })),
+  };
+};
+
+/** logread's lines: "<Day Mon DD HH:MM:SS YYYY> <facility.level> <tag>: <message>". */
+export const parseLog = (text: string): LogLine[] =>
+  text.split("\n").flatMap((line) => {
+    const m = /^\w{3} (\w{3}) +(\d+) (\d\d:\d\d:\d\d) (\d{4}) \S+ (.*)$/.exec(line.trim());
+    if (!m) return [];
+    const at = Date.parse(`${m[1]} ${m[2]} ${m[4]} ${m[3]}`);
+    return Number.isFinite(at) ? [{ at, text: m[5] }] : [];
+  });
+
+const storage = raw("df -k /overlay 2>/dev/null || df -k / 2>/dev/null");
+const temperature = raw("cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null || true");
+// Devices with hardware behind them (a port, a radio), not bridges or VLANs.
+const links = raw(
+  'for d in /sys/class/net/*; do [ -e "$d/device" ] || [ -e "$d/phys_port_name" ] || continue; echo "${d##*/} $(cat "$d/carrier" 2>/dev/null || echo 0) $(cat "$d/speed" 2>/dev/null || echo -1)"; done'
+);
+const adverts = raw(
+  'for f in /proc/net/dev_snmp6/*; do awk -v n="${f##*/}" \'$1=="Icmp6OutRouterAdvertisements"{o=$2} $1=="Icmp6InRouterSolicits"{i=$2} END{if (o + i > 0) print n, o + 0, i + 0}\' "$f"; done'
+);
+const neighbourTable = raw("ip neigh show 2>/dev/null || true");
+const ipv6Leases: Probe<unknown> = {
+  command: "ubus call dhcp ipv6leases 2>/dev/null || echo '{}'",
+  parse: ({ stdout }) => json(stdout || "{}", "dhcp ipv6leases"),
+};
+
+/** The Internet view's checks, from the router (see parseInternetCheck). */
+const internetCheck = (shaped: string[]) =>
+  raw(
+    [
+      `echo "ping $(ping -c 3 -W 2 1.1.1.1 2>/dev/null | sed -n 's/.*= [0-9.]*\\/\\([0-9.]*\\)\\/.*/\\1/p')"`,
+      `echo "ip $(uclient-fetch -q -T 4 -O - https://api.ipify.org 2>/dev/null | head -c 15)"`,
+      `nslookup openwrt.org 127.0.0.1 >/dev/null 2>&1 && echo "dns ok" || echo "dns fail"`,
+      ...shaped.map(
+        (device) =>
+          `tc -s qdisc show dev ${device} 2>/dev/null | awk '/Sent/ {print "qdisc ${device}", $2, $7 + 0; exit}' | tr -d ','`
+      ),
+    ].join("; ")
+  );
+
+/** What happened lately worth telling: links, interfaces, reboots, this app's own marks (see the Activity view). */
+const logProbe = raw(
+  "logread -l 400 2>/dev/null | grep -E 'onc|netifd: Interface|link is (up|down)|odhcpd.*(Failed|error)|AP-ENABLED|AP-DISABLED|init complete|mwan3.*(online|offline)' | tail -n 120"
+);
+
+/** What only some views read: the Internet view's checks, the Activity view's log. */
+export type StatusExtras = { internet?: { shaped: string[] }; log?: boolean };
+
 /** Read what `hostname` is doing, over an open session. */
 export const readDeviceStatus = async (
   hostname: string,
   session: Session,
-  now: () => number
+  now: () => number,
+  /** The services the settings say must run there. */
+  mustRun: string[] = [],
+  extras: StatusExtras = {}
 ): Promise<DeviceStatus> => {
-  const read = await runProbes(session, { systemInfo, interfaces, wifi, leases, mwan3, originators, handshakes, meshWired });
+  const read = await runProbes(session, {
+    systemInfo,
+    interfaces,
+    wifi,
+    leases,
+    mwan3,
+    originators,
+    handshakes,
+    meshWired,
+    storage,
+    temperature,
+    links,
+    adverts,
+    neighbourTable,
+    ipv6Leases,
+    notRunning: notRunning(mustRun),
+    // Device names only (eth1, pppoe-wan): they go inside an awk program, unquoted.
+    internetCheck: extras.internet
+      ? internetCheck(extras.internet.shaped.filter((d) => /^[A-Za-z0-9._@-]+$/.test(d)))
+      : raw("true"),
+    log: extras.log ? logProbe : raw("true"),
+  });
+  const storageRead = parseStorage(read.storage);
+  const temperatureRead = parseTemperature(read.temperature);
   return {
     hostname,
     readAt: now(),
@@ -316,5 +530,26 @@ export const readDeviceStatus = async (
       ? { meshWiredMtu: read.meshWired.mtu, meshWiredPath: { small: read.meshWired.small, large: read.meshWired.large } }
       : {}),
     wireguard: parseHandshakes(read.handshakes),
+    ...(storageRead ? { storage: storageRead } : {}),
+    ...(temperatureRead !== undefined ? { temperature: temperatureRead } : {}),
+    links: parseLinks(read.links),
+    adverts: parseAdverts(read.adverts),
+    neighbours: parseNeighbourTable(read.neighbourTable),
+    ipv6Leases: parseIpv6Leases(read.ipv6Leases),
+    notRunning: read.notRunning,
+    ...(extras.internet ? { internet: parseInternetCheck(read.internetCheck) } : {}),
+    ...(extras.log ? { log: parseLog(read.log) } : {}),
   };
+};
+
+/** The probes' commands, to record their output on a real image (src/tests/helpers/status/). */
+export const statusCommands = {
+  storage: storage.command,
+  temperature: temperature.command,
+  links: links.command,
+  adverts: adverts.command,
+  neighbourTable: neighbourTable.command,
+  ipv6Leases: ipv6Leases.command,
+  internetCheck: internetCheck(["eth0"]).command,
+  log: logProbe.command,
 };

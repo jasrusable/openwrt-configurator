@@ -5,6 +5,7 @@ import type { Candidate, Inspected } from "../../../src/discover";
 import type { DeviceFacts, ReadAttempt } from "../../../src/deviceFacts";
 import type { Change } from "../../../src/intent/diff";
 import type { NetworkStatus } from "../../../src/status/network";
+import type { StatusView } from "../../../src/status/read";
 import type { Intent } from "../../../src/intent/schema";
 import type { ProvisionStatus } from "../../../src/server/provisionJob";
 
@@ -126,10 +127,37 @@ export const loadApplyDiff = async (): Promise<DeviceDiff[]> => {
   return body.devices;
 };
 
-export const loadNetworkStatus = async (): Promise<NetworkStatus> => {
-  const response = await call("api/status", { headers: writeHeaders });
+export const loadNetworkStatus = async (view: StatusView = "overview"): Promise<NetworkStatus> => {
+  const response = await call(`api/status/${view}`, { headers: writeHeaders });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not read the network's status.");
+  return body;
+};
+
+/** A JSON POST that says what went wrong in words. */
+const postJson = async <T,>(path: string, input: unknown, failed: string): Promise<T> => {
+  const response = await call(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error ?? failed);
+  return body;
+};
+
+/** Restart a service the settings declare on a device: a Status fix. */
+export const restartService = (device: string, service: string) =>
+  postJson<{ ok: true }>("api/fix", { device, service }, "Could not restart it.");
+
+/** The router's download speed now. */
+export const runSpeedTest = () => postJson<{ downMbps: number }>("api/internet/speed", {}, "The speed test did not finish.");
+
+/** OpenWrt's latest stable release. */
+export const loadLatestRelease = async (): Promise<{ version: string }> => {
+  const response = await call("api/firmware");
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error ?? "Could not ask openwrt.org.");
   return body;
 };
 

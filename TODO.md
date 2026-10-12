@@ -112,3 +112,9 @@ and the React UI in `ui/`.
 - The wired mesh's MTU and path check on real switches (verified only in Docker, and a 1500-only Docker bridge as the bad switch).
 - A mesh neighbour's name comes from facts' MACs: until they are re-read (a day), a new neighbour shows as a MAC and its speed test is refused.
 
+## Status
+
+- Wi-Fi: channel airtime and neighbouring networks (a survey; iwinfo's scan, on request), and usteer's roaming moves.
+- Clients: traffic per device (needs nlbwmon or conntrack accounting), and names learnt from mDNS.
+- Activity: kept across reads (the logs roll over), and this app's own applies in the timeline.
+- Upload in the speed test.

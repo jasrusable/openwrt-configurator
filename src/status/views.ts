@@ -1,0 +1,328 @@
+// What the Status tabs show, worked out from what the devices said
+// (device.ts) and the saved settings: what needs attention, who is on the
+// network, each device's health and ports, each access point's radios, the
+// internet line as the router sees it, and what happened lately in words.
+// Pure, like networkStatus: tested against recorded output.
+import type { DeviceFacts } from "../deviceFacts";
+import { primaryConnection } from "../intent/connections";
+import type { Intent } from "../intent/schema";
+import type { DeviceStatus, InternetCheck, PortLink } from "./device";
+
+type Reached = DeviceStatus;
+type Reachability = DeviceStatus | { hostname: string; error: string };
+const reached = (r: Reachability | undefined): r is Reached => !!r && !("error" in r);
+
+export type Attention = {
+  /** Stable, for keys and for remembering one was seen. */
+  id: string;
+  severity: "problem" | "warning" | "info";
+  title: string;
+  detail: string;
+  /** A one-click fix: restart this service on this device (only services the settings declare there). */
+  fix?: { device: string; service: string; label: string };
+  /** Where to change what causes it: a page path, like "/apply" or "/hardware". */
+  link?: string;
+};
+
+export type ClientView = {
+  mac: string;
+  name?: string;
+  ipv4?: string;
+  ipv6: string[];
+  /** The network it is on, by name. */
+  network?: string;
+  connection:
+    | { kind: "wifi"; accessPoint: string; ssid?: string; band?: string; signal?: number; connected?: number }
+    | { kind: "wired" }
+    | { kind: "unknown" };
+  /** Online now (on Wi-Fi, or answering on the network), seen lately, or only holding a lease. */
+  state: "online" | "recent" | "away";
+  /** A fixed address in your settings. */
+  reserved: boolean;
+};
+
+export type DeviceView = {
+  name: string;
+  role: string;
+  model?: string;
+  version?: string;
+  reachable: boolean;
+  error?: string;
+  uptime?: number;
+  load?: number;
+  memoryUsed?: number;
+  storage?: { availableKb: number; totalKb: number };
+  temperature?: number;
+  /** Its physical ports (from its facts), each with its link. */
+  ports: PortLink[];
+};
+
+export type RadioView = {
+  accessPoint: string;
+  ifname: string;
+  ssid?: string;
+  band?: string;
+  channel?: number;
+  htmode?: string;
+  txpower?: number;
+  noise?: number;
+  clients: number;
+};
+
+export type ActivityView = { at: number; device: string; text: string };
+
+/** The band a frequency is in. */
+export const bandOf = (freq?: number) =>
+  freq === undefined ? undefined : freq < 3000 ? "2.4 GHz" : freq < 5925 ? "5 GHz" : "6 GHz";
+
+const networkOfAddress = (intent: Intent, address: string) =>
+  intent.networks.find((n) => address.startsWith(n.subnet.split(".").slice(0, 3).join(".") + "."));
+
+/** Who is on the network: the router's leases and neighbours, and every access point's Wi-Fi clients; our own devices left out. */
+export const clientsOf = (
+  intent: Intent,
+  devices: Reachability[],
+  facts: Record<string, DeviceFacts | undefined>
+): ClientView[] => {
+  const routerName = intent.hardware.find((d) => d.role === "router")?.name;
+  const router = devices.find((d) => d.hostname === routerName);
+  const ours = new Set(Object.values(facts).flatMap((f) => f?.macs ?? []));
+  const reservations = intent.networks.flatMap((n) => n.reservations.map((r) => ({ ...r, mac: r.mac.toLowerCase() })));
+  const wifi = devices.filter(reached).flatMap((d) =>
+    d.wifi.flatMap((w) => w.clients.map((c) => ({ ...c, accessPoint: d.hostname, ssid: w.ssid, band: bandOf(w.freq) })))
+  );
+  const leases = reached(router) ? router.leases : [];
+  const neighbours = reached(router) ? router.neighbours : [];
+  const v6 = reached(router) ? router.ipv6Leases : [];
+  const macs = [
+    ...new Set([...leases.map((l) => l.mac), ...wifi.map((c) => c.mac), ...neighbours.filter((n) => !n.address.startsWith("fe80")).map((n) => n.mac)]),
+  ].filter((mac) => !ours.has(mac));
+  return macs
+    .map((mac) => {
+      const lease = leases.find((l) => l.mac === mac);
+      const air = wifi.find((c) => c.mac === mac);
+      const seen = neighbours.filter((n) => n.mac === mac);
+      const ipv4 = lease?.address ?? seen.find((n) => !n.address.includes(":"))?.address;
+      const reservation = reservations.find((r) => r.mac === mac);
+      const ipv6 = [
+        ...new Set([
+          ...v6.filter((l) => l.mac === mac).flatMap((l) => l.addresses),
+          ...seen.filter((n) => n.address.includes(":") && !n.address.startsWith("fe80")).map((n) => n.address),
+        ]),
+      ];
+      const active = seen.some((n) => ["REACHABLE", "DELAY", "PROBE"].includes(n.state));
+      const network = ipv4 ? networkOfAddress(intent, ipv4)?.name : undefined;
+      return {
+        mac,
+        ...(reservation?.name ?? lease?.name ?? v6.find((l) => l.mac === mac)?.hostname
+          ? { name: reservation?.name ?? lease?.name ?? v6.find((l) => l.mac === mac)?.hostname }
+          : {}),
+        ...(ipv4 ? { ipv4 } : {}),
+        ipv6,
+        ...(network ? { network } : {}),
+        connection: air
+          ? {
+              kind: "wifi" as const,
+              accessPoint: air.accessPoint,
+              ...(air.ssid ? { ssid: air.ssid } : {}),
+              ...(air.band ? { band: air.band } : {}),
+              ...(air.signal !== undefined ? { signal: air.signal } : {}),
+              ...(air.connected !== undefined ? { connected: air.connected } : {}),
+            }
+          : seen.length
+            ? { kind: "wired" as const }
+            : { kind: "unknown" as const },
+        state: air || active ? ("online" as const) : seen.length ? ("recent" as const) : ("away" as const),
+        reserved: !!reservation,
+      };
+    })
+    .sort((a, b) => (a.state === b.state ? (a.name ?? a.mac).localeCompare(b.name ?? b.mac) : a.state === "online" ? -1 : b.state === "online" ? 1 : a.state === "recent" ? -1 : 1));
+};
+
+export const devicesOf = (intent: Intent, devices: Reachability[], facts: Record<string, DeviceFacts | undefined>): DeviceView[] =>
+  intent.hardware.map((d) => {
+    const status = devices.find((s) => s.hostname === d.name);
+    const f = facts[d.name];
+    const portNames = (f?.schema.ports ?? []).filter((p) => !p.sw_config_cpu_name).map((p) => p.name);
+    return {
+      name: d.name,
+      role: d.role,
+      ...(f?.schema.model ? { model: f.schema.model } : {}),
+      ...(f?.schema.version ? { version: f.schema.version } : {}),
+      reachable: reached(status),
+      ...(status && "error" in status ? { error: status.error } : {}),
+      ...(reached(status)
+        ? {
+            uptime: status.uptime,
+            load: status.load[0],
+            memoryUsed: status.memory.total ? 1 - status.memory.available / status.memory.total : 0,
+            ...(status.storage ? { storage: status.storage } : {}),
+            ...(status.temperature !== undefined ? { temperature: status.temperature } : {}),
+          }
+        : {}),
+      ports: portNames.map((name) => (reached(status) ? status.links.find((l) => l.name === name) : undefined) ?? { name, up: false }),
+    };
+  });
+
+export const radiosOf = (devices: Reachability[]): RadioView[] =>
+  devices.filter(reached).flatMap((d) =>
+    d.wifi.map((w) => ({
+      accessPoint: d.hostname,
+      ifname: w.ifname,
+      ...(w.ssid ? { ssid: w.ssid } : {}),
+      ...(bandOf(w.freq) ? { band: bandOf(w.freq) } : {}),
+      ...(w.channel !== undefined ? { channel: w.channel } : {}),
+      ...(w.htmode ? { htmode: w.htmode } : {}),
+      ...(w.txpower !== undefined ? { txpower: w.txpower } : {}),
+      ...(w.noise !== undefined ? { noise: w.noise } : {}),
+      clients: w.clients.length,
+    }))
+  );
+
+/** The router's Internet checks, when the Internet view read them. */
+export const internetOf = (intent: Intent, devices: Reachability[]): InternetCheck | undefined => {
+  const routerName = intent.hardware.find((d) => d.role === "router")?.name;
+  const router = devices.find((d) => d.hostname === routerName);
+  return reached(router) ? router.internet : undefined;
+};
+
+/** A device's log lines, said in words; lines not worth telling are left out. */
+export const activityOf = (intent: Intent, devices: Reachability[]): ActivityView[] => {
+  const nameOf = (id: string) =>
+    intent.networks.find((n) => n.id === id)?.name ??
+    intent.internet.connections.find((c) => c.id === id || `${c.id}6` === id)?.name ??
+    id;
+  const say = (text: string): string | undefined => {
+    let m: RegExpExecArray | null;
+    if ((m = /netifd: Interface '([^']+)' is now (up|down)/.exec(text))) return `${nameOf(m[1])} ${m[2] === "up" ? "came up" : "went down"}`;
+    if ((m = /netifd: Network device '([^']+)' link is (up|down)/.exec(text))) return `Port ${m[1]} ${m[2] === "up" ? "connected" : "disconnected"}`;
+    if (/procd: - init complete -/.test(text)) return "Started up";
+    if ((m = /hostapd: (\S+): AP-(ENABLED|DISABLED)/.exec(text))) return `Wi-Fi ${m[1]} ${m[2] === "ENABLED" ? "on" : "off"}`;
+    if ((m = /mwan3\S*: .*interface (\S+) is (online|offline)/i.exec(text))) return `${nameOf(m[1])} is ${m[2]}`;
+    if (/odhcpd.*Failed to send/.test(text)) return "IPv6 announcements are failing";
+    if ((m = /onc[\w-]*(?:\[\d+\])?: (.*)/.exec(text))) return m[1].charAt(0).toUpperCase() + m[1].slice(1);
+    return undefined;
+  };
+  return devices
+    .filter(reached)
+    .flatMap((d) =>
+      (d.log ?? []).flatMap((line) => {
+        const text = say(line.text);
+        return text ? [{ at: line.at, device: d.hostname, text }] : [];
+      })
+    )
+    .filter((e, i, all) => i === all.findIndex((o) => o.device === e.device && o.text === e.text && Math.abs(o.at - e.at) < 2000))
+    .sort((a, b) => b.at - a.at)
+    .slice(0, 150);
+};
+
+/** What needs attention, worst first: each with what it means, and a fix or a link where there is one. */
+export const attentionOf = ({
+  intent,
+  devices,
+  facts,
+  applied,
+}: {
+  intent: Intent;
+  devices: Reachability[];
+  facts: Record<string, DeviceFacts | undefined>;
+  /** Whether the saved settings are what was last applied from here. */
+  applied?: "none" | "matches" | "differs";
+}): Attention[] => {
+  const out: Attention[] = [];
+  const routerName = intent.hardware.find((d) => d.role === "router")?.name;
+  const router = devices.find((d) => d.hostname === routerName);
+  for (const d of intent.hardware) {
+    const status = devices.find((s) => s.hostname === d.name);
+    if (!reached(status)) {
+      out.push({
+        id: `unreachable:${d.name}`,
+        severity: "problem",
+        title: `${d.name} cannot be reached`,
+        detail: status && "error" in status ? status.error : "It did not answer.",
+        link: "/hardware",
+      });
+      continue;
+    }
+    for (const s of status.notRunning) {
+      out.push({
+        id: `service:${d.name}:${s.name}`,
+        severity: "warning",
+        title: `${s.name} is ${s.missing ? "not installed" : "not running"} on ${d.name}`,
+        detail: s.missing ? "Your settings need it there: applying installs it." : "Your settings need it running.",
+        ...(s.missing ? { link: "?apply" } : { fix: { device: d.name, service: s.name, label: `Restart ${s.name}` } }),
+      });
+    }
+    if (status.storage && (status.storage.availableKb < 2048 || status.storage.availableKb / status.storage.totalKb < 0.1)) {
+      out.push({
+        id: `storage:${d.name}`,
+        severity: "warning",
+        title: `${d.name} is nearly out of storage`,
+        detail: `${Math.round(status.storage.availableKb / 1024)} MiB free: an apply that installs packages could fail.`,
+      });
+    }
+    if (status.temperature !== undefined && status.temperature >= 85) {
+      out.push({ id: `temperature:${d.name}`, severity: "warning", title: `${d.name} is running hot`, detail: `${status.temperature} °C.` });
+    }
+    if (status.memory.total && status.memory.available / status.memory.total < 0.1) {
+      out.push({ id: `memory:${d.name}`, severity: "warning", title: `${d.name} is nearly out of memory`, detail: "Under 10% free." });
+    }
+    // An SSID of yours that this access point does not broadcast.
+    if (d.role === "access-point") {
+      const here = new Set(status.wifi.map((w) => w.ssid));
+      for (const w of intent.wifi.filter((w) => w.enabled !== false && !here.has(w.ssid))) {
+        out.push({
+          id: `ssid:${d.name}:${w.ssid}`,
+          severity: "warning",
+          title: `“${w.ssid}” is not on the air at ${d.name}`,
+          detail: "Your settings have it there, but the access point is not broadcasting it.",
+          link: "?apply",
+        });
+      }
+    }
+  }
+  if (reached(router)) {
+    const connections = intent.internet.connections;
+    const up = connections.filter((c) => {
+      const line = router.lines.find((l) => l.id === c.id);
+      return line ? line.state === "online" || line.state === "disconnecting" : !!router.interfaces.find((i) => i.id === c.id)?.up;
+    });
+    if (up.length === 0) {
+      out.push({ id: "internet:down", severity: "problem", title: "No internet", detail: "No internet connection is working.", link: "/internet" });
+    } else {
+      for (const c of connections.filter((c) => !up.includes(c))) {
+        out.push({
+          id: `line:${c.id}`,
+          severity: "warning",
+          title: `${c.name || "A connection"} is down`,
+          detail: `Using ${up.map((u) => u.name || u.id).join(", ")} meanwhile.`,
+          link: "/internet",
+        });
+      }
+    }
+    // The router stopped announcing IPv6 on a network: clients ask (solicits
+    // climb) and get no answer (adverts flat). Seen twice on the user's router.
+    const main = primaryConnection(intent);
+    if (main?.ipv6) {
+      const silent = intent.networks.flatMap((n) => {
+        const device = router.interfaces.find((i) => i.id === n.id)?.device;
+        const a = router.adverts.find((x) => x.device === device);
+        return a && n.ipv6 !== false && a.solicits >= 5 && a.sent * 2 < a.solicits ? [n.name] : [];
+      });
+      if (silent.length) {
+        out.push({
+          id: "ipv6:silent",
+          severity: "problem",
+          title: `No IPv6 on ${silent.join(", ")}`,
+          detail: "The router stopped announcing IPv6 there: devices ask and get no answer. Restarting its IPv6 service fixes it.",
+          fix: { device: router.hostname, service: "odhcpd", label: "Restart IPv6" },
+        });
+      }
+    }
+  }
+  if (applied === "differs") {
+    out.push({ id: "apply:pending", severity: "info", title: "Saved settings are not applied yet", detail: "Your devices still run the settings applied before.", link: "?apply" });
+  }
+  const order = { problem: 0, warning: 1, info: 2 };
+  return out.sort((a, b) => order[a.severity] - order[b.severity]);
+};

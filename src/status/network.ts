@@ -6,7 +6,8 @@
 import { meshMtu } from "../intent/features/mesh";
 import { failoverOrder, ipv6Interface } from "../intent/connections";
 import type { Intent } from "../intent/schema";
-import { DeviceStatus } from "./device";
+import { DeviceStatus, InternetCheck } from "./device";
+import type { ActivityView, Attention, ClientView, DeviceView, RadioView } from "./views";
 
 
 /** A mesh link slower than this (BATMAN_V's estimate) shows as weak: below it, a cable or a nearer node would help. */
@@ -65,6 +66,13 @@ export type NetworkStatus = {
   };
   /** On the devices but not in your settings: shown, so a mismatch is never hidden. */
   unexpected: { interfaces: string[]; ssids: string[] };
+  // The Status tabs (views.ts), added by readNetworkStatus.
+  attention?: Attention[];
+  clientList?: ClientView[];
+  deviceViews?: DeviceView[];
+  radios?: RadioView[];
+  internetCheck?: InternetCheck;
+  activity?: ActivityView[];
 };
 
 const reached = (r: Reachability | undefined): r is DeviceStatus => !!r && !("error" in r);

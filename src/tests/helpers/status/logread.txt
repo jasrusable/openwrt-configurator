@@ -1,0 +1,12 @@
+Mon Oct 12 22:04:15 2026 daemon.notice netifd: Interface 'lan' is enabled
+Mon Oct 12 22:04:15 2026 daemon.notice netifd: Interface 'lan' is setting up now
+Mon Oct 12 22:04:15 2026 daemon.notice netifd: Interface 'lan' is now up
+Mon Oct 12 22:04:15 2026 daemon.notice netifd: bridge 'br-lan' link is up
+Mon Oct 12 22:04:15 2026 daemon.notice netifd: Interface 'lan' has link connectivity
+Mon Oct 12 22:04:15 2026 daemon.notice netifd: Interface 'loopback' is enabled
+Mon Oct 12 22:04:15 2026 daemon.notice netifd: Interface 'loopback' is setting up now
+Mon Oct 12 22:04:15 2026 daemon.notice netifd: Interface 'loopback' is now up
+Mon Oct 12 22:04:15 2026 daemon.notice netifd: bridge 'br-lan' link is down
+Mon Oct 12 22:04:15 2026 daemon.notice netifd: Interface 'lan' has link connectivity loss
+Mon Oct 12 22:04:15 2026 daemon.notice netifd: Network device 'eth0' link is up
+Mon Oct 12 22:04:15 2026 daemon.notice netifd: bridge 'br-lan' link is up

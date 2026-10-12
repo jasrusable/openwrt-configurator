@@ -36,17 +36,18 @@ const write = (saved: Saved) => {
 /** Put back what was kept, as of when it was read; then keep each new read. */
 export const persistDeviceReads = (queryClient: QueryClient) => {
   const now = Date.now();
+  // Kept by the whole query key ("network-status:clients"), so each Status tab has its own.
   Object.entries(read()).forEach(([key, { data, updatedAt }]) => {
-    if (kept.includes(key) && now - updatedAt < maxAgeMs) {
-      queryClient.setQueryData([key], data, { updatedAt });
+    if (kept.includes(key.split(":")[0]) && now - updatedAt < maxAgeMs) {
+      queryClient.setQueryData(key.split(":"), data, { updatedAt });
     }
   });
   queryClient.getQueryCache().subscribe((event) => {
-    const [key] = event.query.queryKey;
-    if (event.type !== "updated" || typeof key !== "string" || !kept.includes(key)) return;
+    const queryKey = event.query.queryKey;
+    if (event.type !== "updated" || typeof queryKey[0] !== "string" || !kept.includes(queryKey[0])) return;
     const { data, dataUpdatedAt, status } = event.query.state;
     if (status !== "success" || data === undefined) return;
-    write({ ...read(), [key]: { data, updatedAt: dataUpdatedAt } });
+    write({ ...read(), [queryKey.join(":")]: { data, updatedAt: dataUpdatedAt } });
   });
 };
 
