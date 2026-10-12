@@ -1,4 +1,4 @@
-import { Badge, Text } from "@mantine/core";
+import { Text } from "@mantine/core";
 import {
   SegmentedField,
   SelectField,
@@ -7,7 +7,9 @@ import {
   When,
 } from "../form/fields";
 import { defineList, ListPage } from "../form/ListPage";
-import { Section } from "../kit/layout";
+import { IconAccessPoint, IconRouter } from "@tabler/icons-react";
+import { useDraftValue } from "../form/draft";
+import { ItemIcon, ItemName, Section } from "../kit/layout";
 
 // Unset is automatic, so it is offered by `emptyLabel`, not listed here.
 const channels = (numbers: number[]) =>
@@ -19,9 +21,15 @@ const channels5g = channels([
 ]);
 
 const roles = [
-  { value: "router" as const, label: "Router" },
-  { value: "access-point" as const, label: "Access point" },
+  { value: "router" as const, label: "Router", icon: IconRouter, color: "blue" },
+  { value: "access-point" as const, label: "Access point", icon: IconAccessPoint, color: "cyan" },
 ];
+
+/** A router or an access point, at a glance. */
+const RoleIcon = ({ index }: { index: number }) => {
+  const role = roles.find((r) => r.value === useDraftValue(`hardware.${index}.role`)) ?? roles[1];
+  return <ItemIcon icon={role.icon} color={role.color} />;
+};
 
 const channel = (value?: number | "auto") =>
   value === undefined || value === "auto" ? "Auto" : String(value);
@@ -39,9 +47,9 @@ const hardware = defineList({
     {
       header: "Name",
       cell: (i) => (
-        <Text size="sm" fw={500}>
+        <ItemName icon={<RoleIcon index={i} />}>
           <Value name={`hardware.${i}.name`} fallback="Unnamed" />
-        </Text>
+        </ItemName>
       ),
     },
     {
@@ -50,9 +58,9 @@ const hardware = defineList({
         <Value
           name={`hardware.${i}.role`}
           format={(role) => (
-            <Badge variant="light" color={role === "router" ? "blue" : "gray"}>
+            <Text size="sm" c="dimmed">
               {roles.find((r) => r.value === role)?.label}
-            </Badge>
+            </Text>
           )}
         />
       ),

@@ -1,8 +1,8 @@
 // Every page, in sidebar order. Adding a page is adding a line here. A page
 // with pages of its own shows them as tabs (Wi-Fi, Firewall). Names come from
 // src/intent/places.ts, which every "Wi-Fi › Radios" in the text is built from.
-// Each has an icon on its own colour, as macOS Settings does, shown in the
-// sidebar and beside the page's title.
+// Each has an icon on its own colour in the sidebar, as macOS Settings does;
+// page titles and tabs stay text only, so the icon is not repeated.
 import {
   IconAdjustments,
   IconFlame,

@@ -86,7 +86,7 @@ const ruled = <T,>(options: Option<T>[], option: Availability["option"]) =>
   });
 
 /** A segmented control's options, each with its reason in a tooltip. */
-const segments = <T extends string>(options: (Option<T> & { reason?: string })[]) =>
+export const segments = <T extends string>(options: (Option<T> & { reason?: string })[]) =>
   options.map(({ value, label, disabled, reason }) => ({
     value,
     disabled,
@@ -574,38 +574,6 @@ export const DurationField = (row: RowProps) => {
           w={110}
         />
       </Group>
-    </FieldRow>
-  );
-};
-
-/**
- * A choice that also fills in other settings, which stay adjustable: e.g. a
- * network's purpose sets its access switches. `presets[value]` is written to
- * `fills` when that value is picked.
- */
-export const PresetField = <T extends string>({
-  options,
-  fills,
-  presets,
-  ...row
-}: RowProps & {
-  options: Option<T>[];
-  fills: IntentField;
-  presets: Record<T, unknown>;
-}) => {
-  const field = useField(row.name);
-  const draft = useDraft();
-  return (
-    <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
-      <SegmentedControl
-        data={segments(ruled(options, field.option))}
-        disabled={!!field.unavailable}
-        value={field.value}
-        onChange={(value) => {
-          field.onChange(value);
-          draft.set(fills, presets[value as T]);
-        }}
-      />
     </FieldRow>
   );
 };

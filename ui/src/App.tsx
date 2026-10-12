@@ -28,7 +28,7 @@ import { useIntent } from "./data/intent";
 import { useDraftValue } from "./form/draft";
 import { IntentForm, useDraftChanged, useSaveActions } from "./form/IntentForm";
 import { ProblemCount, ProblemsButton, usePageProblems } from "./form/Problems";
-import { AppIcon, CurrentPageMark } from "./kit/layout";
+import { AppIcon } from "./kit/layout";
 import { pages } from "./pages";
 import { ProvisionButton } from "./provision/ProvisionButton";
 
@@ -75,7 +75,6 @@ const Shell = () => {
     document.title = site;
   }, [site]);
   const isActive = (id: string) => pathname === `/${id}` || pathname.startsWith(`/${id}/`);
-  const current = pages.find((page) => isActive(page.id));
   return (
     <AppShell
       header={{ height: 56 }}
@@ -118,9 +117,7 @@ const Shell = () => {
         ))}
       </AppShell.Navbar>
       <AppShell.Main>
-        <CurrentPageMark.Provider value={current && { icon: current.icon, color: current.color }}>
-          <Outlet />
-        </CurrentPageMark.Provider>
+        <Outlet />
       </AppShell.Main>
     </AppShell>
   );

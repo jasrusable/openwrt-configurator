@@ -104,15 +104,3 @@ export const accessSchema = z
 
 export type Access = z.infer<typeof accessSchema>;
 
-/**
- * A new network's access, from its purpose: home is trusted (the router and
- * every other network); guests and IoT get the internet and the router's
- * services only. A starting point, edited on the network afterwards.
- */
-export const accessForPurpose = (
-  purpose: "home" | "guest" | "iot",
-  otherNetworks: string[]
-): Access =>
-  purpose === "home"
-    ? { internet: true, networks: otherNetworks, router: "full" }
-    : { internet: true, networks: [], router: "services" };

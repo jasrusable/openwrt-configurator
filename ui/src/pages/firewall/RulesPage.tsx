@@ -1,8 +1,9 @@
 // Your own rules: exceptions to what each network's access allows, in order.
+import { IconBan, IconCircleCheck } from "@tabler/icons-react";
+import { ItemIcon, ItemName } from "../../kit/layout";
 import { useDraftValue } from "../../form/draft";
 import { Text } from "@mantine/core";
 import {
-  ActionBadge,
   actionOptions,
   EndSelectField,
   protocolOptions,
@@ -30,6 +31,13 @@ const RuleMatch = ({ index }: { index: number }) => {
 };
 
 
+/** Allow or block, grey while the rule is off. */
+const RuleIcon = ({ index }: { index: number }) => {
+  const allow = useDraftValue(`firewall.rules.${index}.action`) === "allow";
+  const on = useDraftValue(`firewall.rules.${index}.enabled`) !== false;
+  return <ItemIcon icon={allow ? IconCircleCheck : IconBan} color={allow ? "green" : "red"} off={!on} />;
+};
+
 const rules = defineList({
   name: "firewall.rules",
   title: "Rules",
@@ -51,9 +59,9 @@ const rules = defineList({
       header: "Name",
       width: 210,
       cell: (i) => (
-        <Text size="sm" fw={500}>
+        <ItemName icon={<RuleIcon index={i} />}>
           <Value name={`firewall.rules.${i}.name`} fallback="Unnamed" />
-        </Text>
+        </ItemName>
       ),
     },
     { header: "Traffic", cell: (i) => <RuleMatch index={i} /> },
@@ -61,7 +69,9 @@ const rules = defineList({
       header: "Action",
       width: 110,
       cell: (i) => (
-        <Value name={`firewall.rules.${i}.action`} format={(a) => <ActionBadge action={a} />} />
+        <Text size="sm" c="dimmed">
+          <Value name={`firewall.rules.${i}.action`} format={(a) => (a === "allow" ? "Allow" : "Block")} />
+        </Text>
       ),
     },
     {

@@ -62,7 +62,6 @@
     {
       "id": "lan",
       "name": "Home",
-      "purpose": "home",
       "subnet": "10.0.0.0/24",
       "dhcp": {
         "size": 250,
@@ -80,7 +79,6 @@
     {
       "id": "guest",
       "name": "Guests",
-      "purpose": "guest",
       "vlan": 20,
       "subnet": "10.0.20.0/24",
       "dhcp": {

@@ -1,29 +1,42 @@
 import {
   ActionIcon,
-  Badge,
   Button,
   Group,
   NumberInput,
+  SegmentedControl,
   Text,
   TextInput,
 } from "@mantine/core";
-import { IconAddressBook, IconPlus, IconX } from "@tabler/icons-react";
+import {
+  IconAddressBook,
+  IconAdjustmentsHorizontal,
+  IconBulb,
+  IconHome,
+  IconPlus,
+  IconUsers,
+  IconX,
+} from "@tabler/icons-react";
 import { useDraft, useDraftValue, useFieldError } from "../form/draft";
 import { withNetworkAdded, withoutNetwork } from "../../../src/intent/edits";
 import {
-  allowed,
+  availability,
   reachableNetworks,
 } from "../../../src/intent/choices";
-import { accessForPurpose } from "../../../src/intent/firewall";
+import {
+  NetworkTemplate,
+  templateOf,
+  templateSettings,
+  withTemplate,
+} from "../../../src/intent/networkTemplates";
 import { deviceOf } from "../../../src/intent/features/network";
 import { where } from "../../../src/intent/places";
-import { Intent, parseSubnet, Purpose } from "../../../src/intent/schema";
+import { Intent, parseSubnet } from "../../../src/intent/schema";
 import {
   DurationField,
   MultiSelectField,
   NumberField,
   OptionalField,
-  PresetField,
+  segments,
   SegmentedField,
   SubnetField,
   SwitchField,
@@ -33,13 +46,32 @@ import {
   When,
 } from "../form/fields";
 import { defineList, ListPage } from "../form/ListPage";
-import { EmptyState, Section, SettingRow } from "../kit/layout";
+import { EmptyState, ItemIcon, ItemName, Section, SettingRow } from "../kit/layout";
 
-const purposes: { value: Purpose; label: string; color: string }[] = [
-  { value: "home", label: "Home", color: "blue" },
-  { value: "guest", label: "Guest", color: "orange" },
-  { value: "iot", label: "IoT", color: "grape" },
+/** Each template, and Custom for a network that follows none (networkTemplates.ts). */
+const types: {
+  value: NetworkTemplate | "custom";
+  label: string;
+  color: string;
+  icon: typeof IconHome;
+}[] = [
+  { value: "home", label: "Home", color: "blue", icon: IconHome },
+  { value: "guest", label: "Guest", color: "orange", icon: IconUsers },
+  { value: "iot", label: "IoT", color: "grape", icon: IconBulb },
+  { value: "custom", label: "Custom", color: "gray", icon: IconAdjustmentsHorizontal },
 ];
+
+/** Which template network `index` follows, read off its settings. */
+const useType = (index: number) => {
+  const networks: Intent["networks"] = useDraftValue("networks") ?? [];
+  return types.find((t) => t.value === templateOf(networks, index)) ?? types[3];
+};
+
+/** A network's type, at a glance. */
+const TypeIcon = ({ index }: { index: number }) => {
+  const type = useType(index);
+  return <ItemIcon icon={type.icon} color={type.color} />;
+};
 
 /** A fresh network: the next free id, VLAN (10, 20, ...) and address range. */
 const newNetwork = (
@@ -63,15 +95,13 @@ const newNetwork = (
       networks.map((n) => n.id),
     ),
     name: "",
-    purpose: "guest" as const,
     vlan,
     subnet,
     dhcp: { size: 100, lease: "12h" },
     // As the internet side has it.
     ipv6: intent.internet.ipv6,
-    access: accessForPurpose("guest", []),
     reservations: [],
-    share_devices: false,
+    ...templateSettings("guest", []),
   };
 };
 
@@ -94,28 +124,14 @@ const networks = defineList({
     {
       header: "Name",
       cell: (i) => (
-        <Text size="sm" fw={500}>
+        <ItemName icon={<TypeIcon index={i} />}>
           <Value name={`networks.${i}.name`} fallback="Unnamed" />
-        </Text>
+        </ItemName>
       ),
     },
     {
-      header: "Purpose",
-      cell: (i) => (
-        <Value
-          name={`networks.${i}.purpose`}
-          format={(purpose) => {
-            const p = purposes.find((x) => x.value === purpose);
-            return (
-              p && (
-                <Badge variant="light" color={p.color}>
-                  {p.label}
-                </Badge>
-              )
-            );
-          }}
-        />
-      ),
+      header: "Type",
+      cell: (i) => <TypeLabel index={i} />,
     },
     {
       header: "VLAN",
@@ -141,7 +157,7 @@ const networks = defineList({
     <>
       <Section>
         <NameField index={i} />
-        <PurposeField index={i} />
+        <TypeField index={i} />
       </Section>
       <AccessSection index={i} />
       <ReservationsSection index={i} />
@@ -194,7 +210,6 @@ const useReachable = (index: number) => {
     .map((n) => ({ value: n.id, label: n.name || "Unnamed" }));
 };
 
-/** Picking a purpose sets the network's access, which stays adjustable. */
 /** Its name, with what it is called on the devices: what to look for in LuCI or over SSH. */
 const NameField = ({ index }: { index: number }) => {
   const network: Intent["networks"][number] | undefined = useDraftValue(`networks.${index}`);
@@ -207,29 +222,50 @@ const NameField = ({ index }: { index: number }) => {
   );
 };
 
-const PurposeField = ({ index }: { index: number }) => {
+const TypeLabel = ({ index }: { index: number }) => (
+  <Text size="sm" c="dimmed">
+    {useType(index).label}
+  </Text>
+);
+
+/**
+ * Home, Guest or IoT fill in its access and sharing below, which stay
+ * adjustable; changed by hand, it reads Custom. Nothing is stored: the
+ * selection is read off the settings, so it never disagrees with them.
+ */
+const TypeField = ({ index }: { index: number }) => {
+  const draft = useDraft();
   const intent: Intent = useDraftValue();
-  const others = reachableNetworks(intent.networks ?? [], index);
-  // Only what the network may have (the rules): the main one keeps full router access.
-  const preset = (purpose: Purpose) => {
-    const access = accessForPurpose(purpose, others);
-    return allowed(intent, `networks.${index}.access.router`, access.router)
-      ? access
-      : { ...access, router: "full" as const };
-  };
+  const current = useType(index);
+  // The main network keeps full router access: Guest and IoT would take it away.
+  const servicesOnly = availability(intent, `networks.${index}.access.router`).option("services").unavailable;
   return (
-    <PresetField
-      name={`networks.${index}.purpose`}
-      label="Purpose"
-      description="Presets its access: home reaches all, guests the internet."
-      options={purposes}
-      fills={`networks.${index}.access`}
-      presets={{
-        home: preset("home"),
-        guest: preset("guest"),
-        iot: preset("iot"),
-      }}
-    />
+    <SettingRow label="Type" description="Fills in its access and sharing; Custom once you change them.">
+      <SegmentedControl
+        value={current.value}
+        onChange={(value) => {
+          if (value !== "custom") draft.replace(withTemplate(draft.get(), index, value as NetworkTemplate));
+        }}
+        data={segments(
+          types.map(({ value, label }) => ({
+            value,
+            label,
+            // Custom is not chosen but reached: by changing access or sharing below.
+            disabled:
+              (value === "custom" && current.value !== "custom") ||
+              ((value === "guest" || value === "iot") && !!servicesOnly),
+            reason:
+              value === "custom"
+                ? current.value === "custom"
+                  ? "Its access and sharing follow no template."
+                  : "Change its access or sharing below, and it becomes Custom."
+                : (value === "guest" || value === "iot") && servicesOnly
+                ? servicesOnly
+                : undefined,
+          }))
+        )}
+      />
+    </SettingRow>
   );
 };
 

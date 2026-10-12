@@ -166,7 +166,6 @@ export const fields: FieldInfo[] = [
   { path: "networks", label: "Networks" },
   { path: "networks.*", label: (n) => `“${n?.name || "unnamed"}”` },
   { path: "networks.*.name", label: "Name" },
-  { path: "networks.*.purpose", label: "Purpose" },
   {
     path: "networks.*.vlan",
     label: "VLAN",

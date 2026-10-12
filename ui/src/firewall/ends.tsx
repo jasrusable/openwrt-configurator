@@ -1,7 +1,6 @@
 // Shared by the firewall pages: where a rule's traffic comes from and goes
 // to (a network, the internet, the router, anywhere), and how a rule reads.
 import { useDraftValue } from "../form/draft";
-import { Badge } from "@mantine/core";
 import { anywhere, internet, router } from "../../../src/intent/firewall";
 import { Intent } from "../../../src/intent/schema";
 import { SelectField } from "../form/fields";
@@ -11,12 +10,6 @@ export const actionOptions = [
   { value: "allow" as const, label: "Allow" },
   { value: "block" as const, label: "Block" },
 ];
-
-export const ActionBadge = ({ action }: { action?: string }) => (
-  <Badge variant="light" color={action === "allow" ? "green" : "red"}>
-    {action === "allow" ? "Allow" : "Block"}
-  </Badge>
-);
 
 export const protocolOptions = [
   { value: "tcp+udp" as const, label: "TCP and UDP" },

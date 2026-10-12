@@ -2,13 +2,13 @@
 // them, and the tests check them without a browser.
 import { Intent } from "./schema";
 
-/** After adding network `index`: home networks may reach it, as they reach the rest. */
+/** After adding network `index`: trusted networks (full router access) may reach it, as they reach the rest. */
 export const withNetworkAdded = (intent: Intent, index: number): Intent => {
   const id = intent.networks[index].id;
   return {
     ...intent,
     networks: intent.networks.map((network, i) =>
-      i !== index && network.purpose === "home" && !network.access.networks.includes(id)
+      i !== index && network.access.router === "full" && !network.access.networks.includes(id)
         ? { ...network, access: { ...network.access, networks: [...network.access.networks, id] } }
         : network
     ),

@@ -33,13 +33,17 @@ export const theme = createTheme({
 });
 
 /**
- * Mantine derives its "light" tints (light buttons, badges) from the
- * palette, and in dark mode they come out near black; these are Apple's
- * dark-mode fills instead.
+ * Mantine derives its "light" tints (light buttons, badges, list icons)
+ * from the palette's far shades: navy text in light mode, near-black fills
+ * in dark. These are Apple's system blue and greys instead.
  */
 export const cssVariables: CSSVariablesResolver = () => ({
   variables: {},
-  light: {},
+  light: {
+    "--mantine-color-blue-light": "rgba(0, 122, 255, 0.12)",
+    "--mantine-color-blue-light-hover": "rgba(0, 122, 255, 0.18)",
+    "--mantine-color-blue-light-color": "#007aff",
+  },
   dark: {
     "--mantine-color-blue-light": "rgba(10, 132, 255, 0.2)",
     "--mantine-color-blue-light-hover": "rgba(10, 132, 255, 0.28)",

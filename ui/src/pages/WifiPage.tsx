@@ -1,4 +1,5 @@
 import { Badge, Group, Text } from "@mantine/core";
+import { IconWifi, IconWifiOff } from "@tabler/icons-react";
 import { ReactNode } from "react";
 import { placeName, where } from "../../../src/intent/places";
 import {
@@ -20,7 +21,7 @@ import {
   Value,
 } from "../form/fields";
 import { defineList, ListPage } from "../form/ListPage";
-import { Section } from "../kit/layout";
+import { ItemIcon, ItemName, Section } from "../kit/layout";
 
 const bandLabels: Record<string, string> = {
   "2g": "2.4 GHz",
@@ -32,6 +33,12 @@ const securityLabels: Record<string, string> = {
   wpa2: "WPA2",
   "wpa2-wpa3": "WPA2/WPA3",
   wpa3: "WPA3",
+};
+
+/** An SSID, crossed out while it is off. */
+const SsidIcon = ({ index }: { index: number }) => {
+  const on = useDraftValue(`wifi.${index}.enabled`) !== false;
+  return <ItemIcon icon={on ? IconWifi : IconWifiOff} color="blue" off={!on} />;
 };
 
 const wifiNetworks = defineList({
@@ -60,19 +67,9 @@ const wifiNetworks = defineList({
       header: "Name",
       cell: (i) => (
         <Group gap={8} wrap="nowrap">
-          <Text size="sm" fw={500}>
+          <ItemName icon={<SsidIcon index={i} />}>
             <Value name={`wifi.${i}.ssid`} fallback="Unnamed" />
-          </Text>
-          <Value
-            name={`wifi.${i}.enabled`}
-            format={(on) =>
-              on === false && (
-                <Badge variant="light" color="gray">
-                  Off
-                </Badge>
-              )
-            }
-          />
+          </ItemName>
           <Value
             name={`wifi.${i}.hidden`}
             format={(hidden) =>

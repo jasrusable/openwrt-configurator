@@ -2,8 +2,8 @@
 // a friendly empty state. Its title and Add live in the page's header.
 import { Group, Table, Text } from "@mantine/core";
 import { IconChevronRight } from "@tabler/icons-react";
-import { ReactNode } from "react";
-import { EmptyState } from "./layout";
+import { ReactNode, useContext } from "react";
+import { EmptyState, InCard } from "./layout";
 
 export type Column = {
   header: string;
@@ -30,7 +30,7 @@ export const DataTable = ({
   rowMarker?: (index: number) => ReactNode;
   empty: ReactNode;
 }) => (
-  <div className="onc-card">
+  <div className={useContext(InCard) ? undefined : "onc-card"}>
     {rowCount === 0 ? (
       <EmptyState>{empty}</EmptyState>
     ) : (

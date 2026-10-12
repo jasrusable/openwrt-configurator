@@ -139,13 +139,6 @@ const reservation = z
   })
   .strict();
 
-/**
- * What a network is for. It sets up the network's firewall zone when the
- * network is created (zoneForPurpose); after that the firewall owns access.
- */
-export const purposes = ["home", "guest", "iot"] as const;
-export type Purpose = (typeof purposes)[number];
-
 const network = z
   .object({
     /**
@@ -157,7 +150,6 @@ const network = z
       .regex(/^[a-z][a-z0-9]{0,9}$/, "a short id")
       .refine((id) => !reservedIds.includes(id), "reserved"),
     name: z.string().min(1, "required").max(32),
-    purpose: z.enum(purposes),
 
     /** Absent for the main network, which is untagged on every port. */
     vlan: z

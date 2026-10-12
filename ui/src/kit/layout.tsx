@@ -14,6 +14,9 @@ export type Crumb = { label: ReactNode; onClick?: () => void };
  */
 export const SectionNav = createContext<ReactNode>(null);
 
+/** Inside a section's card: a table there draws no card of its own, so it never doubles up. */
+export const InCard = createContext(false);
+
 /** A page's icon on its colour, as macOS Settings draws them: the sidebar, and beside a page's title. */
 export type PageMark = { icon: typeof IconInbox; color: string };
 
@@ -23,8 +26,6 @@ export const AppIcon = ({ icon: Icon, color, size = 22 }: PageMark & { size?: nu
   </ThemeIcon>
 );
 
-/** The current page's mark, set by the app shell from the route. */
-export const CurrentPageMark = createContext<PageMark | undefined>(undefined);
 
 export const SettingsPage = ({
   title,
@@ -49,7 +50,7 @@ export const SettingsPage = ({
       <SectionNavSlot />
       <Group justify="space-between" wrap="nowrap" gap="md">
         <Title order={2}>
-          {Array.isArray(title) ? <Crumbs crumbs={title} /> : <Titled>{title}</Titled>}
+          {Array.isArray(title) ? <Crumbs crumbs={title} /> : title}
         </Title>
         {actions && (
           <Group gap="xs" wrap="nowrap">
@@ -66,19 +67,6 @@ export const SettingsPage = ({
     {children}
   </Stack>
 );
-
-/** A page's own title with its mark; an item's page ("Networks / Home") has none. */
-const Titled = ({ children }: { children: ReactNode }) => {
-  const mark = useContext(CurrentPageMark);
-  return mark ? (
-    <Group gap={12} wrap="nowrap" component="span">
-      <AppIcon {...mark} size={30} />
-      <span>{children}</span>
-    </Group>
-  ) : (
-    <>{children}</>
-  );
-};
 
 const SectionNavSlot = () => {
   const nav = useContext(SectionNav);
@@ -138,7 +126,9 @@ export const Section = ({
           {actions}
         </Group>
       )}
-      <div className="onc-card onc-rows">{children}</div>
+      <div className="onc-card onc-rows">
+        <InCard.Provider value={true}>{children}</InCard.Provider>
+      </div>
       {description && (
         <Text size="xs" c="dimmed" px={4}>
           {description}
@@ -222,4 +212,29 @@ export const EmptyState = ({ icon: Icon = IconInbox, children }: { icon?: typeof
       {children}
     </Text>
   </Stack>
+);
+
+/** What kind of thing a list row is: a tinted icon before its name, grey while it is off. */
+export const ItemIcon = ({
+  icon: Icon,
+  color,
+  off = false,
+}: {
+  icon: typeof IconInbox;
+  color: string;
+  off?: boolean;
+}) => (
+  <ThemeIcon size={28} radius={8} variant="light" color={off ? "gray" : color} aria-hidden>
+    <Icon size={16} stroke={1.8} />
+  </ThemeIcon>
+);
+
+/** A list row's first cell: its icon, then its name. */
+export const ItemName = ({ icon, children }: { icon: ReactNode; children: ReactNode }) => (
+  <Group gap={10} wrap="nowrap">
+    {icon}
+    <Text size="sm" fw={500} truncate>
+      {children}
+    </Text>
+  </Group>
 );

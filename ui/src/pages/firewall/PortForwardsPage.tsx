@@ -1,4 +1,7 @@
 import { Group, Text } from "@mantine/core";
+import { IconArrowBarToRight } from "@tabler/icons-react";
+import { useDraftValue } from "../../form/draft";
+import { ItemIcon, ItemName } from "../../kit/layout";
 import {
   SegmentedField,
   SwitchField,
@@ -14,6 +17,12 @@ const protocolOptions = [
   { value: "tcp" as const, label: "TCP" },
   { value: "udp" as const, label: "UDP" },
 ];
+
+/** Traffic let in from the internet, grey while the forward is off. */
+const ForwardIcon = ({ index }: { index: number }) => {
+  const on = useDraftValue(`firewall.port_forwards.${index}.enabled`) !== false;
+  return <ItemIcon icon={IconArrowBarToRight} color="teal" off={!on} />;
+};
 
 const forwards = defineList({
   name: "firewall.port_forwards",
@@ -39,9 +48,9 @@ const forwards = defineList({
     {
       header: "Name",
       cell: (i) => (
-        <Text size="sm" fw={500}>
+        <ItemName icon={<ForwardIcon index={i} />}>
           <Value name={`firewall.port_forwards.${i}.name`} fallback="Unnamed" />
-        </Text>
+        </ItemName>
       ),
     },
     {
