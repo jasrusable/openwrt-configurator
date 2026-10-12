@@ -148,10 +148,14 @@ start_service() {
       : {}),
     // Installed whether on or not, where a node could be: every access
     // point, and a router with Wi-Fi (which also needs the full wpad, for SAE).
+    // On every device that could be a node, mesh on or off, as every
+    // feature's packages are (about 0.4 MiB; the full wpad, which access
+    // points have anyway, 0.8 MiB more on a router): turning it on is then a
+    // config change, and a repeater never installs over the link it changes.
     package_profiles: [
       { ".if": onAccessPoints, packages: ["kmod-batman-adv", "batctl-default"] },
       {
-        ".if": `${onRouter} AND (device.wifi_2g == true OR device.wifi_5g == true)`,
+        ".if": `${onRouter} AND (device.wifi_2g == true OR device.wifi_5g == true OR device.wifi_6g == true)`,
         packages: ["kmod-batman-adv", "batctl-default", "-wpad-basic-mbedtls", "wpad-mbedtls"],
       },
     ],

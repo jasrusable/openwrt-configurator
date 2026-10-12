@@ -57,16 +57,21 @@ export const getOpenWrtState = ({
     })
     .flatMap((a) => a.configs);
 
-  // One entry per service: running if any declaration says so.
+  // One entry per service: running if any declaration says so, and off
+  // only if every declaration says so.
   const services = (oncConfig.services || [])
     .filter((service) =>
       conditionMatches({ condition: service[".if"], deviceConfig, deviceSchema })
     )
-    .reduce<{ name: string; running: boolean }[]>(
-      (acc, { name, running }) =>
-        acc.some((s) => s.name === name)
-          ? acc.map((s) => (s.name === name ? { name, running: s.running || !!running } : s))
-          : [...acc, { name, running: !!running }],
+    .reduce<{ name: string; running: boolean; enabled?: boolean }[]>(
+      (acc, { name, running, enabled }) => {
+        const on = enabled !== false;
+        const known = acc.find((s) => s.name === name);
+        const merged = known
+          ? { name, running: known.running || !!running, ...(known.enabled === false && !on ? { enabled: false } : {}) }
+          : { name, running: !!running, ...(on ? {} : { enabled: false }) };
+        return known ? acc.map((s) => (s.name === name ? merged : s)) : [...acc, merged];
+      },
       []
     );
 

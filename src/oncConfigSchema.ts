@@ -98,6 +98,8 @@ export const oncConfigSchema = z
             ".if": conditionSchema.optional(),
             name: z.string().regex(/^[A-Za-z0-9_-]+$/, "must be an init script name"),
             running: z.boolean().optional(),
+            /** false: installed but off, stopped and disabled (a package fixed per role whose feature is not used). */
+            enabled: z.boolean().optional(),
           })
           .strict()
       )

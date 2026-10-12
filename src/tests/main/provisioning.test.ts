@@ -3,6 +3,7 @@ import {
   getDeviceScript,
   getFinaliseCommands,
   revertPendingCommands,
+  servicesCommands,
 } from "../../getDeviceScript";
 import {
   installedPackages,
@@ -350,4 +351,10 @@ test("pending changes are summarised per package, without values", (t) => {
   );
   t.deepEqual(summary, { dropbear: 1, wireless: 1, network: 2 });
   t.false(JSON.stringify(summary).includes("hunter2"));
+});
+
+test("a service declared off is disabled and stopped, one declared on enabled and started", (t) => {
+  const [on, off] = servicesCommands({ config: {} as any, services: [{ name: "dnsmasq", running: true }, { name: "mwan3", running: false, enabled: false }] });
+  t.regex(on, /for s in 'dnsmasq'; do/);
+  t.regex(off, /for s in 'mwan3'; do[\s\S]*disable[\s\S]*stop/);
 });

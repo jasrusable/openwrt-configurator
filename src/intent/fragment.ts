@@ -11,7 +11,7 @@ export type Fragment = {
   package_profiles?: { ".if": string; packages: string[] }[];
   configs_to_not_reset?: { ".if": string; configs: string[] }[];
   /** Services kept enabled and started; `running` ones must have a process. */
-  services?: { ".if": string; name: string; running?: boolean }[];
+  services?: { ".if": string; name: string; running?: boolean; enabled?: boolean }[];
   /** config -> section type -> sections */
   config?: Record<string, Record<string, Section[]>>;
   /** Files a package reads that are not UCI, e.g. avahi's config. */
@@ -78,3 +78,12 @@ export const merge = (fragments: Fragment[]) =>
     }),
     { devices: [], package_profiles: [], configs_to_not_reset: [], services: [], files: [], config: {} }
   );
+
+/**
+ * A service its feature runs when used, else installed but off: stopped and
+ * disabled. An empty or disabled config is not always nothing (https-dns-proxy
+ * kept a resolver and a firewall table, usteer ran despite enabled 0, mwan3
+ * marked every packet; verified on 25.12.5).
+ */
+export const serviceWhen = (condition: string, name: string, used: boolean) =>
+  used ? { ".if": condition, name, running: true } : { ".if": condition, name, enabled: false };

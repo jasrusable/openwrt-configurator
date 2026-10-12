@@ -754,7 +754,13 @@ test("two internet connections: a line on a LAN port, mwan3 over both, queueing 
 
   const packages = compile(twoLines("failover")).package_profiles!.flatMap((p: any) => p.packages);
   t.true(packages.includes("mwan3"));
-  t.false(compile().package_profiles!.flatMap((p: any) => p.packages).includes("mwan3"), "one line: no mwan3");
+  t.true(compile().package_profiles!.flatMap((p: any) => p.packages).includes("mwan3"), "one line: installed all the same");
+  const oneLine = getOpenWrtState({
+    oncConfig: compile(),
+    deviceConfig: compile().devices.find((d) => d.hostname === "home-router")!,
+    deviceSchema: deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", "friendlyarm,nanopi-r6s.json"), "utf8"))),
+  });
+  t.like(oneLine.services!.find((s) => s.name === "mwan3"), { enabled: false }, "...and off: stopped and disabled");
   t.is(onDevice("home-router", "friendlyarm,nanopi-r6s").mwan3, undefined);
 });
 

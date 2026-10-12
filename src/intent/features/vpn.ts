@@ -7,7 +7,7 @@
 // stay on the main one, and without "use the others when it is down" an
 // unreachable rule after it is the kill switch. Zones and the WAN rules are
 // the firewall feature's.
-import { Feature, onRouter } from "../fragment";
+import { Feature, onRouter, serviceWhen } from "../fragment";
 import { ovpnOption, ovpnSafeLines } from "../ovpn";
 import { clientAddresses, vpnRouterAddresses } from "../vpn";
 import type { Intent } from "../schema";
@@ -68,7 +68,7 @@ export const vpn: Feature = (intent) => {
   return {
     // Installed whether used or not: a setting changes config, not packages.
     package_profiles: [{ ".if": onRouter, packages: ["kmod-wireguard", "wireguard-tools", "openvpn-mbedtls"] }],
-    services: ovpnTunnels.length ? [{ ".if": onRouter, name: "openvpn", running: true }] : [],
+    services: [serviceWhen(onRouter, "openvpn", ovpnTunnels.length > 0)],
     // The provider's .ovpn and login: root's alone (keys and a password in them).
     files: ovpnTunnels.flatMap((tunnel) => {
       // Read at start only: a changed file needs the tunnel restarted, which

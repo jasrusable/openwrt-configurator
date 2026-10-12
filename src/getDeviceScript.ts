@@ -153,18 +153,34 @@ export const getPostReloadCommands = (state: OpenWrtState) =>
  * take effect only as it starts, so a lockout there must still roll back.
  */
 export const servicesCommands = (state: OpenWrtState) => {
-  const names = (state.services || []).map((s) => shellQuote(s.name));
-  return names.length === 0
-    ? []
-    : [
-        [
-          `for s in ${names.join(" ")}; do`,
-          '  [ -x "/etc/init.d/$s" ] || continue',
-          '  "/etc/init.d/$s" enabled || "/etc/init.d/$s" enable || echo "could not enable $s" >&2',
-          `  ubus call service list '{"name":"'"$s"'"}' 2>/dev/null | grep -q "^[[:space:]]*\\"$s\\"" || "/etc/init.d/$s" start || echo "could not start $s" >&2`,
-          "done",
-        ].join("\n"),
-      ];
+  const on = (state.services || []).filter((s) => s.enabled !== false).map((s) => shellQuote(s.name));
+  // Installed but not used: stopped and disabled, as an empty config is not
+  // always nothing (mwan3 with none still marks every packet; verified).
+  const off = (state.services || []).filter((s) => s.enabled === false).map((s) => shellQuote(s.name));
+  return [
+    ...(on.length
+      ? [
+          [
+            `for s in ${on.join(" ")}; do`,
+            '  [ -x "/etc/init.d/$s" ] || continue',
+            '  "/etc/init.d/$s" enabled || "/etc/init.d/$s" enable || echo "could not enable $s" >&2',
+            `  ubus call service list '{"name":"'"$s"'"}' 2>/dev/null | grep -q "^[[:space:]]*\\"$s\\"" || "/etc/init.d/$s" start || echo "could not start $s" >&2`,
+            "done",
+          ].join("\n"),
+        ]
+      : []),
+    ...(off.length
+      ? [
+          [
+            `for s in ${off.join(" ")}; do`,
+            '  [ -x "/etc/init.d/$s" ] || continue',
+            '  ! "/etc/init.d/$s" enabled || "/etc/init.d/$s" disable || echo "could not disable $s" >&2',
+            '  ! "/etc/init.d/$s" running >/dev/null 2>&1 || "/etc/init.d/$s" stop >/dev/null 2>&1 || echo "could not stop $s" >&2',
+            "done",
+          ].join("\n"),
+        ]
+      : []),
+  ];
 };
 
 /**

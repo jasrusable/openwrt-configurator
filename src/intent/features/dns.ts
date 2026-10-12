@@ -1,7 +1,7 @@
 // Name resolution on the router: dnsmasq answers the home network, caches,
 // and names local devices <name>.<domain>. With DNS over HTTPS it forwards
 // everything to https-dns-proxy, which encrypts it to the chosen provider.
-import { Feature, onRouter } from "../fragment";
+import { Feature, onRouter, serviceWhen } from "../fragment";
 
 const providers = {
   cloudflare: {
@@ -43,7 +43,7 @@ export const dns: Feature = (intent) => {
     services: [
       { ".if": onRouter, name: "dnsmasq", running: true },
       // Unconfigured (no encryption), it runs nothing.
-      { ".if": onRouter, name: "https-dns-proxy", running: upstream.type === "encrypted" },
+      serviceWhen(onRouter, "https-dns-proxy", upstream.type === "encrypted"),
     ],
     config: {
       dhcp: {

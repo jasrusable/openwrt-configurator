@@ -2,7 +2,7 @@
 // between access points, and each band's radios set as Wi-Fi › Radios says.
 // Radios are matched to bands on the device, so a band an access point lacks
 // (6 GHz on most) is skipped there; the intent only pins channels per device.
-import { Feature, mainNetwork, onAccessPoints, onDevice } from "../fragment";
+import { Feature, mainNetwork, onAccessPoints, onDevice, serviceWhen } from "../fragment";
 import { uniqueNames } from "../names";
 import { Band, Intent } from "../schema";
 import {
@@ -74,7 +74,7 @@ export const wifi: Feature = (intent) => {
     ],
     services: [
       { ".if": onAccessPoints, name: "wpad", running: true },
-      { ".if": onAccessPoints, name: "usteer", running: steeredSsids(intent).length > 0 },
+      serviceWhen(onAccessPoints, "usteer", steeredSsids(intent).length > 0),
     ],
     config: {
       wireless: {

@@ -1,7 +1,7 @@
 // The router's internet side: each connection (a line on a port), smart
 // queueing on each line whose speed is known, and with several lines mwan3
 // using them together. The firewall is its own feature (firewall.ts).
-import { Feature, mainNetwork, onRouter } from "../fragment";
+import { Feature, mainNetwork, onRouter, serviceWhen } from "../fragment";
 import { checkOf, Connection, failoverOrder, ipv6Interface, multiWan, primaryConnection, slowLine, stickySeconds } from "../connections";
 import { named } from "../names";
 import { fnv } from "./network";
@@ -265,16 +265,18 @@ export const internet: Feature = (intent) => {
           "ddns-scripts-cloudflare",
         ],
       },
-      // The exception: mwan3 brings iptables, ipset and their kernel modules
-      // (23 packages on 25.12), too much for every router with one line.
-      ...(several ? [{ ".if": onRouter, packages: ["mwan3"] }] : []),
+      // On every router, as every feature's packages are (about 2.1 MiB with
+      // its 23 dependencies on 25.12): adding a line is then a config change.
+      { ".if": onRouter, packages: ["mwan3"] },
     ],
     services: [
       // sqm sets up queues and exits; miniupnpd runs only when UPnP is on.
       { ".if": onRouter, name: "sqm" },
-      { ".if": onRouter, name: "miniupnpd", running: upnp },
-      ...(several ? [{ ".if": onRouter, name: "mwan3", running: true }] : []),
-      { ".if": onRouter, name: "ddns", running: !!intent.internet.ddns },
+      serviceWhen(onRouter, "miniupnpd", upnp),
+      // With one line, off: stopped and disabled, as with no config it still
+      // marks every packet and keeps four monitors running (verified on 25.12.5).
+      serviceWhen(onRouter, "mwan3", several),
+      serviceWhen(onRouter, "ddns", !!intent.internet.ddns),
     ],
     config: {
       network: { interface: routerOnly(interfaces) },

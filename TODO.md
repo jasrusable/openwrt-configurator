@@ -101,6 +101,7 @@ and the React UI in `ui/`.
 - [ ] Run a line on a swconfig router on real hardware (compiled to OpenWrt's own layout, VLAN 2 with the CPU tagged; checked only against the Archer C50's schema).
 - [ ] On a router (CGI, dbclient), pinned host keys cannot be checked: dbclient refuses them, so access points (found by name) are refused there. Pin with OpenSSH on the router, or ship a small checker, before `cgi` is used.
 - [ ] CLI `provision` (no `--facts-for`) still trusts an access point's `name.lan` on first use through the shared known_hosts; only the UI's apply holds it to a pin.
+- [ ] **Check free storage before installing.** Packages are fixed per role (mwan3 ~2.1 MiB, the mesh's ~0.4 MiB, the full wpad), so a small-flash device (8 MB) may not fit them: read the overlay's free space as a fact and have the apply refuse before `apk add` ("needs 2.1 MiB, has 1.4"), rather than filling the flash mid-run.
 - [ ] **Authentication before `cgi` is exposed anywhere.** The API reads and
       writes Wi-Fi passwords, and has no login: on a router anyone on the
       LAN could use it. Likely reuse rpcd's login session (`ubus call
