@@ -48,6 +48,31 @@ const Changes = ({ info }: { info: ProvisionInfo }) =>
     </Section>
   );
 
+/**
+ * A rollback, said plainly at the top: while it happens, and after, with the
+ * run's own reason and what became of each device (from its log).
+ */
+const RollbackNotice = ({ info }: { info: ProvisionInfo }) => {
+  const log = info.log ?? "";
+  const rolling = info.state === "running" && /Rolling back|rolled back|roll(s)? (itself )?back/i.test(log);
+  if (rolling) {
+    return (
+      <Alert color="orange" title="Rolling back">
+        A device could not be confirmed, so every device is going back to its previous settings. This can take a few minutes.
+      </Alert>
+    );
+  }
+  if (info.state !== "failed" || !/rolled back|rolling back/i.test(log)) return null;
+  const error = log.slice(log.lastIndexOf("Error:") + "Error:".length).trim();
+  return (
+    <Alert color="red" title="Not applied: your devices kept their previous settings">
+      <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+        {log.includes("Error:") ? error : "The run rolled back. Its log is below."}
+      </Text>
+    </Alert>
+  );
+};
+
 /** The preview of a provision, the button that starts it, and its progress. */
 export const ProvisionPanel = () => {
   const provision = useProvision();
@@ -65,6 +90,7 @@ export const ProvisionPanel = () => {
 
   return (
     <Stack gap="xl">
+      <RollbackNotice info={info} />
       <Status info={info} />
 
       {unsaved && (

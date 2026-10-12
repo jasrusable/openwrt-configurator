@@ -1,7 +1,7 @@
 // The header's Apply button (LuCI's "Save & Apply", for every device at once)
 // and, beside it, where the devices stand in a few words; it opens the Apply
 // sheet (ApplyModal.tsx). The CLI calls it provision.
-import { Button, Group, Text } from "@mantine/core";
+import { Button, Group, Loader, Text } from "@mantine/core";
 import { IconCloudUpload } from "@tabler/icons-react";
 import { useProvision } from "../data/provision";
 import { useApplySheet } from "./ApplyModal";
@@ -24,15 +24,15 @@ export const ProvisionButton = ({ quiet = false }: { quiet?: boolean }) => {
           {status.short}
         </Text>
       )}
+      {/* Never a loading button while a run goes: that cannot be clicked, and
+          the sheet is where the run is followed (and a rollback seen). */}
       <Button
         variant={status?.pending && !quiet ? "filled" : "default"}
-        leftSection={<IconCloudUpload size={16} />}
+        leftSection={running ? <Loader size={14} type="dots" /> : <IconCloudUpload size={16} />}
         title={status?.short}
-        loading={running}
-        loaderProps={{ type: "dots" }}
         onClick={sheet.open}
       >
-        Apply
+        {running ? "Applying…" : "Apply"}
       </Button>
     </Group>
   );
