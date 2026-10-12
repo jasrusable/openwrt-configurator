@@ -1,10 +1,8 @@
 import { Alert, Loader, Stack, Text, ThemeIcon } from "@mantine/core";
 import { IconCheck, IconCloudUpload, IconLoader2 } from "@tabler/icons-react";
-import { notify } from "../kit/notify";
 import type { ProvisionInfo } from "../data/api";
-import { useProvision, useStartProvision } from "../data/provision";
+import { useProvision } from "../data/provision";
 import { useDraftChanged } from "../form/IntentForm";
-import { ConfirmButton } from "../kit/ConfirmButton";
 import { Section, SettingRow } from "../kit/layout";
 import { LogView } from "../kit/LogView";
 import { applyStatus, lastRun } from "./status";
@@ -85,32 +83,5 @@ export const ProvisionPanel = () => {
         </Section>
       )}
     </Stack>
-  );
-};
-
-/** The Apply page's action, at the top right of its title: confirms, then starts a run. */
-export const ApplyNowButton = () => {
-  const provision = useProvision();
-  const start = useStartProvision();
-  const unsaved = useDraftChanged();
-  const info = provision.data;
-  const running = info?.state === "running";
-  return (
-    <ConfirmButton
-      disabled={!info || unsaved || running}
-      loading={running || start.isPending}
-      title="Apply to your network?"
-      message={`This reconfigures ${(info?.devices ?? []).join(
-        ", "
-      )}. It takes a few minutes, and devices may briefly drop off the network. If any device cannot be reached afterwards, all of them roll back on their own.`}
-      confirmLabel="Apply"
-      onConfirm={() =>
-        start.mutate(undefined, {
-          onError: (e) => notify.error((e as Error).message),
-        })
-      }
-    >
-      Apply
-    </ConfirmButton>
   );
 };

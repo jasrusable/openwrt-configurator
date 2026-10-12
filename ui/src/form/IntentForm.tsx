@@ -4,7 +4,6 @@ import { ReactNode, useState } from "react";
 import { Intent } from "../../../src/intent/schema";
 import { SaveError } from "../data/api";
 import { useSaveIntent } from "../data/intent";
-import { notify } from "../kit/notify";
 import { Draft, DraftProvider, useDraft, useDraftChanged, useIssues } from "./draft";
 
 export type { IntentField } from "./draft";
@@ -23,26 +22,30 @@ export const useSaveActions = () => {
   const dirty = useDraftChanged();
   const issues = useIssues();
 
+  // Shown beside the buttons, not as a toast; a save that works says
+  // nothing (Save greys out).
+  const [error, setError] = useState<string>();
   const submit = async () => {
-    if (issues.length) {
-      notify.error("Some settings need fixing.");
-      return;
-    }
+    if (issues.length) return;
+    setError(undefined);
     try {
       const sent = draft.value;
       draft.savedAs(sent, await save.mutateAsync(sent));
-      notify.success("Saved.");
     } catch (e) {
       if (e instanceof SaveError) {
         draft.setServerIssues(e.issues);
       }
-      notify.error((e as Error).message);
+      setError((e as Error).message);
     }
   };
 
   return {
     save: submit,
-    revert: () => draft.reset(),
+    revert: () => {
+      setError(undefined);
+      draft.reset();
+    },
+    error,
     dirty,
     valid: issues.length === 0,
     issues,

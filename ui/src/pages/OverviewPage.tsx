@@ -99,7 +99,7 @@ export const OverviewPage = () => {
       {apply && (
         <Section title="Devices and settings">
           <SettingRow label={apply.title} description={apply.detail}>
-            <Link to="/apply">Apply</Link>
+            <Link to="?apply">Apply</Link>
           </SettingRow>
         </Section>
       )}

@@ -36,30 +36,37 @@ import { IntentForm, useDraftChanged, useSaveActions } from "./form/IntentForm";
 import { ProblemCount, ProblemsButton, usePageProblems } from "./form/Problems";
 import { AppIcon } from "./kit/layout";
 import { groups, pages } from "./pages";
-import { ApplyPage } from "./provision/ApplyPage";
+import { ApplyModal } from "./provision/ApplyModal";
 import { ProvisionButton } from "./provision/ProvisionButton";
 
-/** Unsaved edits: Revert and Save, Save the one primary action meanwhile. */
+/**
+ * Revert and Save, always there, greyed out with nothing to save (as LuCI's
+ * Save and Reset); Save the one primary action while there are edits. A save
+ * that fails says why beside them, no toast.
+ */
 const SaveBar = () => {
-  const { save, revert, dirty, valid, saving } = useSaveActions();
+  const { save, revert, dirty, valid, saving, error } = useSaveActions();
   return (
     <Group gap="xs" wrap="nowrap">
       <ProblemsButton />
-      {dirty && (
-        <>
-          {valid && (
-            <Text size="sm" c="dimmed" visibleFrom="sm">
-              Unsaved changes
-            </Text>
-          )}
-          <Button variant="subtle" color="gray" onClick={revert} disabled={saving}>
-            Revert
-          </Button>
-          <Button onClick={save} disabled={!valid} loading={saving}>
-            Save
-          </Button>
-        </>
+      {error ? (
+        <Text size="sm" c="red" visibleFrom="sm" maw={260} truncate title={error}>
+          Not saved: {error}
+        </Text>
+      ) : (
+        dirty &&
+        valid && (
+          <Text size="sm" c="dimmed" visibleFrom="sm">
+            Unsaved changes
+          </Text>
+        )
       )}
+      <Button variant="subtle" color="gray" onClick={revert} disabled={!dirty || saving}>
+        Revert
+      </Button>
+      <Button variant={dirty ? "filled" : "default"} onClick={save} disabled={!dirty || !valid} loading={saving}>
+        Save
+      </Button>
     </Group>
   );
 };
@@ -136,6 +143,7 @@ const Shell = () => {
       <AppShell.Main>
         <Outlet />
       </AppShell.Main>
+      <ApplyModal />
     </AppShell>
   );
 };
@@ -174,7 +182,8 @@ const router = createHashRouter([
     children: [
       { index: true, element: <Navigate to="overview" replace /> },
       ...pages.map((page) => ({ path: `${page.id}/*`, element: <page.Page /> })),
-      { path: "apply", element: <ApplyPage /> },
+      // Apply was a page: it is the sheet over the Overview now.
+      { path: "apply", element: <Navigate to="/overview?apply" replace /> },
       { path: "general/*", element: <MovedTo base="/system" /> },
       // Old addresses: General is System, SSIDs and Radios are Wi-Fi's tabs.
       { path: "ssids/*", element: <MovedTo base="/wifi" /> },

@@ -15,7 +15,6 @@ import { useAdopt, useCandidates, useInspect } from "../data/discover";
 import { ago, bandsOf, modelOf, portsOf } from "../facts";
 import { useDraft, useDraftValue } from "../form/draft";
 import { EmptyState, Section, SettingRow, SettingsPage } from "../kit/layout";
-import { notify } from "../kit/notify";
 
 const roles = [
   { value: "access-point", label: "Access point" },
@@ -176,7 +175,6 @@ export const AddHardwarePage = () => {
   const pick = (address: string) =>
     read.mutate(address, {
       onSuccess: (device) => setChoice({ ...device.suggested, location: "" }),
-      onError: (e) => notify.error((e as Error).message),
     });
   const device = read.data;
   // Its facts are kept, then it joins the draft like any edit; as a router,
@@ -206,7 +204,6 @@ export const AddHardwarePage = () => {
           draft.replace(swap ? swap.apply(added) : added);
           navigate(`/hardware/${index}`);
         },
-        onError: (e) => notify.error((e as Error).message),
       }
     );
   return (
@@ -228,6 +225,12 @@ export const AddHardwarePage = () => {
         )
       }
     >
+      {/* What went wrong, here rather than as a toast. */}
+      {(read.error || adopt.error) && (
+        <Alert color="red" mb="md">
+          {((adopt.error ?? read.error) as Error).message}
+        </Alert>
+      )}
       {device ? (
         <Found device={device} choice={choice} onChange={setChoice} />
       ) : read.isPending ? (
