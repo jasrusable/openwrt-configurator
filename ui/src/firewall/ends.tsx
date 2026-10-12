@@ -37,26 +37,16 @@ export const useEndOptions = ({ destination }: { destination?: boolean } = {}) =
   ];
 };
 
+/** A rule's source or destination; what it may not be is greyed out by the rules (choices.ts). */
 export const EndSelectField = ({
   destination,
-  allowed,
   ...row
 }: {
   name: IntentField;
   label: string;
   description?: string;
   destination?: boolean;
-  /** Choices it may not take are greyed out. */
-  allowed?: (value: string) => boolean;
-}) => (
-  <SelectField
-    {...row}
-    options={useEndOptions({ destination }).map((o) => ({
-      ...o,
-      disabled: allowed ? !allowed(o.value) : false,
-    }))}
-  />
-);
+}) => <SelectField {...row} options={useEndOptions({ destination })} />;
 
 /** "TCP from Guests to Home 10.0.0.20, port 631 9100": a rule, read aloud. */
 export const useRuleSummary = (rule?: Intent["firewall"]["rules"][number]) => {

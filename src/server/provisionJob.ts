@@ -123,7 +123,7 @@ export const startProvision = async ({
 }) => {
   const status = await provisionStatus({ intentPath, files });
   if (status.state === "running") {
-    return { started: false as const, reason: "A provision is already running." };
+    return { started: false as const, reason: "Settings are already being applied." };
   }
   const paths = jobPaths(intentPath);
   const q = shellQuote;

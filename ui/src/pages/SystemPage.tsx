@@ -14,8 +14,11 @@ const countryOptions = countries
   .map((code) => ({ value: code, label: countryName.of(code) ?? code }))
   .sort((a, b) => a.label.localeCompare(b.label));
 
-export const GeneralPage = () => (
-  <SettingsPage title="General" description="Your network as a whole.">
+export const SystemPage = () => (
+  <SettingsPage
+    title="System"
+    description="Your network as a whole: its name, time and how devices are administered."
+  >
     <Section>
       <TextField name="site.name" label="Name" />
       <SelectField

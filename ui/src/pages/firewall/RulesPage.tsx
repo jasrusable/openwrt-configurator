@@ -1,7 +1,6 @@
 // Your own rules: exceptions to what each network's access allows, in order.
 import { useDraftValue } from "../../form/draft";
 import { Text } from "@mantine/core";
-import { portsApply, ruleDestinationAllowed } from "../../../../src/intent/choices";
 import {
   ActionBadge,
   actionOptions,
@@ -30,18 +29,6 @@ const RuleMatch = ({ index }: { index: number }) => {
   );
 };
 
-/** Where to: only what the source allows (not the internet, from the internet). */
-const RuleToField = ({ index }: { index: number }) => {
-  const from: string = useDraftValue(`firewall.rules.${index}.from`);
-  return (
-    <EndSelectField
-      name={`firewall.rules.${index}.to`}
-      label="To"
-      destination
-      allowed={(to) => ruleDestinationAllowed(from, to)}
-    />
-  );
-};
 
 const rules = defineList({
   name: "firewall.rules",
@@ -102,7 +89,7 @@ const rules = defineList({
           description="Addresses or ranges, like 10.0.0.20 or 10.0.0.0/28."
           placeholder="Any"
         />
-        <RuleToField index={i} />
+        <EndSelectField name={`firewall.rules.${i}.to`} label="To" destination />
         <TagsField
           name={`firewall.rules.${i}.destination_addresses`}
           label="To devices"
@@ -113,18 +100,13 @@ const rules = defineList({
           label="Protocol"
           options={protocolOptions}
         />
-        <When
-          name={`firewall.rules.${i}.protocol`}
-          test={portsApply}
-        >
-          <TextField
-            name={`firewall.rules.${i}.destination_port`}
-            label="Ports"
-            description="Like 443, 8000-8100 or 80 443."
-            placeholder="Any"
-            chars={/[\d ,-]/}
-          />
-        </When>
+        <TextField
+          name={`firewall.rules.${i}.destination_port`}
+          label="Ports"
+          description="Like 443, 8000-8100 or 80 443."
+          placeholder="Any"
+          chars={/[\d ,-]/}
+        />
       </Section>
     </>
   ),

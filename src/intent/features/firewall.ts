@@ -3,6 +3,7 @@
 // network's access, OpenWrt's stock rules, the router's services for
 // networks that get only those, then the user's rules in their order, and
 // port forwards (DNAT) into the zone of their target's network.
+import { portsApply } from "../choices";
 import { anywhere, internet, isIpv6, router, Rule } from "../firewall";
 import { Feature, onRouter } from "../fragment";
 
@@ -77,7 +78,8 @@ const userRule = (rule: Rule): Section => {
     ...(rule.to === router ? {} : { dest: rule.to === anywhere ? "*" : zoneOf(rule.to) }),
     ...(rule.source_addresses?.length ? { src_ip: rule.source_addresses } : {}),
     ...(rule.destination_addresses?.length ? { dest_ip: rule.destination_addresses } : {}),
-    ...(rule.destination_port ? { dest_port: rule.destination_port } : {}),
+    // Kept in the intent for when the protocol is TCP or UDP again.
+    ...(rule.destination_port && portsApply(protocol) ? { dest_port: rule.destination_port } : {}),
     proto: protocol === "tcp+udp" ? ["tcp", "udp"] : protocol === "any" ? ["all"] : [protocol],
     ...(family ? { family } : {}),
     // Blocked from the internet: dropped, so a scan learns nothing. From

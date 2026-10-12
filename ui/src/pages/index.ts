@@ -11,14 +11,14 @@ import {
 } from "@tabler/icons-react";
 import { DnsPage } from "./DnsPage";
 import { FirewallPage } from "./firewall";
-import { GeneralPage } from "./GeneralPage";
+import { SystemPage } from "./SystemPage";
 import { HardwarePage } from "./HardwarePage";
 import { InternetPage } from "./InternetPage";
 import { NetworksPage } from "./NetworksPage";
 import { WifiSection } from "./wifi";
 
 export const pages = [
-  { id: "general", label: "General", icon: IconAdjustments, Page: GeneralPage },
+  { id: "system", label: "System", icon: IconAdjustments, Page: SystemPage },
   { id: "internet", label: "Internet", icon: IconWorld, Page: InternetPage },
   { id: "networks", label: "Networks", icon: IconNetwork, Page: NetworksPage },
   { id: "wifi", label: "Wi-Fi", icon: IconWifi, Page: WifiSection },

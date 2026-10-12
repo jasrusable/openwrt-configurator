@@ -44,7 +44,7 @@ export type ProvisionInfo = ProvisionStatus & {
 
 export const loadProvision = async (): Promise<ProvisionInfo> => {
   const response = await fetch("api/provision");
-  if (!response.ok) throw new Error("Could not load the provisioning status.");
+  if (!response.ok) throw new Error("Could not load the apply status.");
   return response.json();
 };
 
@@ -54,5 +54,5 @@ export const startProvision = async () => {
     headers: writeHeaders,
   });
   const body = await response.json();
-  if (!response.ok) throw new Error(body.error ?? "Could not start provisioning.");
+  if (!response.ok) throw new Error(body.error ?? "Could not start applying.");
 };

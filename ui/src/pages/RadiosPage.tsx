@@ -2,7 +2,7 @@
 // a page per band (/wifi/radios/5g) with its settings explained.
 import { Badge, Button, Text } from "@mantine/core";
 import { useNavigate } from "react-router";
-import { channelWidths, widthAllowed } from "../../../src/intent/choices";
+import { channelWidths } from "../../../src/intent/choices";
 import { Band } from "../../../src/intent/schema";
 import { useIssues } from "../form/draft";
 import {
@@ -35,12 +35,11 @@ const bands: { band: Band; label: string; description: string }[] = [
   },
 ];
 
-const widths = (band: Band) =>
-  channelWidths.map((w) => ({
-    value: w,
-    label: w === "auto" ? "Auto" : `${w} MHz`,
-    disabled: !widthAllowed(band, w),
-  }));
+// What a band may not use (80 MHz on 2.4 GHz) is greyed out by the rules (choices.ts).
+const widths = channelWidths.map((w) => ({
+  value: w,
+  label: w === "auto" ? "Auto" : `${w} MHz`,
+}));
 
 const powers = [
   { value: "auto", label: "Auto" },
@@ -122,7 +121,7 @@ const RadiosTable = () => {
           {
             header: "Channel width",
             cell: (i) =>
-              cell(bands[i].band, "width", labelOf(widths(bands[i].band))),
+              cell(bands[i].band, "width", labelOf(widths)),
           },
           {
             header: "Transmit power",
@@ -169,7 +168,7 @@ const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
               ? "Wider is faster but crowds neighbours; 2.4 GHz is at most 40 MHz, and 20 MHz is best where there are many networks."
               : "Wider is faster but has fewer clear channels. Auto picks the band's usual width."
           }
-          options={widths(band)}
+          options={widths}
         />
         <SegmentedField
           name={at("power")}

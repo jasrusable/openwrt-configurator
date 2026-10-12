@@ -30,7 +30,7 @@ const hardware = defineList({
   name: "hardware",
   title: "Hardware",
   description:
-    "Your router and access points. Each is set up entirely from these settings; what it is (model, ports, radios) is read from it when it is provisioned.",
+    "Your router and access points. Each is set up entirely from these settings; what it is (model, ports, radios) is read from it when settings are applied.",
   addLabel: "Add access point",
   newItem: () => ({ name: "", role: "access-point" as const }),
   itemTitle: (i) => <Value name={`hardware.${i}.name`} fallback="New access point" />,

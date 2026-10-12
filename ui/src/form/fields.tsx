@@ -2,6 +2,7 @@
 // renders a SettingRow with its control and its validation error, so a page
 // only says which settings it shows, in what order, and how they are labelled.
 import {
+  Box,
   Button,
   Group,
   MultiSelect,
@@ -14,9 +15,12 @@ import {
   TagsInput,
   Text,
   TextInput,
+  Tooltip,
 } from "@mantine/core";
-import { ReactNode, useRef } from "react";
+import { ReactNode, useMemo, useRef } from "react";
 import { SettingRow } from "../kit/layout";
+import { availability, Availability, inUse } from "../../../src/intent/choices";
+import { fieldInfo } from "../../../src/intent/fields";
 import { parseSubnet } from "../../../src/intent/schema";
 import { IntentField, useDraft, useDraftValue, useFieldError } from "./draft";
 
@@ -29,37 +33,145 @@ const control = {
 type RowProps = {
   name: IntentField;
   label: ReactNode;
+  /** What OpenWrt calls it, when not the same for every item (src/intent/fields.ts has the rest). */
+  openwrt?: string;
   description?: ReactNode;
   /** Just the control, e.g. in a table cell; the label becomes its name. */
   inline?: boolean;
 };
 
+/** A setting's row, with its ⓘ: what it does and what OpenWrt calls it (src/intent/fields.ts). */
+const FieldRow = ({
+  name,
+  unavailable,
+  children,
+  ...props
+}: Parameters<typeof SettingRow>[0] & { name: IntentField; unavailable?: string }) => {
+  const info = fieldInfo(name.split("."));
+  return (
+    <SettingRow {...props} openwrt={props.openwrt ?? info?.openwrt} explain={info?.explain}>
+      <Because reason={unavailable}>{children}</Because>
+    </SettingRow>
+  );
+};
+
+/**
+ * A control that cannot be changed now: greyed out by its own disabled
+ * state, with why in a tooltip. Disabled controls get no pointer events, so
+ * the tooltip and the not-allowed cursor are on a wrapper.
+ */
+export const Because = ({ reason, children }: { reason?: string; children: ReactNode }) =>
+  reason ? (
+    <Tooltip label={reason} multiline w={280} withArrow events={{ hover: true, focus: true, touch: true }}>
+      <Box component="span" tabIndex={0} style={{ display: "inline-block", cursor: "not-allowed" }}>
+        <Box component="span" style={{ display: "contents", pointerEvents: "none" }}>
+          {children}
+        </Box>
+      </Box>
+    </Tooltip>
+  ) : (
+    <>{children}</>
+  );
+
+/** Options with the rules applied (src/intent/choices.ts): greyed out with why, or what else choosing one changes. */
+const ruled = <T,>(options: Option<T>[], option: Availability["option"]) =>
+  options.map((o) => {
+    const { unavailable, swap } = option(o.value);
+    return { ...o, disabled: o.disabled || !!unavailable, reason: unavailable ?? swap?.note };
+  });
+
+/** A segmented control's options, each with its reason in a tooltip. */
+const segments = <T extends string>(options: (Option<T> & { reason?: string })[]) =>
+  options.map(({ value, label, disabled, reason }) => ({
+    value,
+    disabled,
+    label: reason ? (
+      <Tooltip label={reason} multiline w={260} withArrow events={{ hover: true, focus: true, touch: true }}>
+        {/* Over the segment's padding too, so hovering anywhere on it shows why. */}
+        <span style={{ pointerEvents: "auto", display: "block", margin: "-3px -10px", padding: "3px 10px" }}>
+          {label}
+        </span>
+      </Tooltip>
+    ) : (
+      label
+    ),
+  }));
+
+/** A list option's label, with why it is greyed out (or what it changes) beneath. */
+const optionWithReason = (reasons: Record<string, string | undefined>) =>
+  ({ option }: { option: { value: string; label: string } }) => (
+    <Stack gap={0}>
+      <Text size="sm">{option.label}</Text>
+      {reasons[option.value] && (
+        <Text size="xs" c="dimmed">
+          {reasons[option.value]}
+        </Text>
+      )}
+    </Stack>
+  );
+
 /** A control in its row, with its label and error; or alone, when inline. */
 const Row = ({
   row,
   error,
+  unavailable,
   children,
 }: {
   row: RowProps;
   error?: string;
+  unavailable?: string;
   children: ReactNode;
 }) =>
   row.inline ? (
-    <>{children}</>
+    <Because reason={unavailable}>{children}</Because>
   ) : (
-    <SettingRow label={row.label} description={row.description} error={error}>
+    <FieldRow
+      name={row.name}
+      label={row.label}
+      description={row.description}
+      openwrt={row.openwrt}
+      error={error}
+      unavailable={unavailable}
+    >
       {children}
-    </SettingRow>
+    </FieldRow>
   );
 
-/** A setting's value, its problem, and how to change it. */
+/** The rules for a setting, given the draft (or the intent passed in). */
+const useAvailability = (path: string, given?: unknown) => {
+  const draftValue = useDraftValue();
+  const intent = given ?? draftValue;
+  return useMemo(() => availability(intent, path), [intent, path]);
+};
+
+/**
+ * A setting's value, its problem, how to change it, and what the rules
+ * (src/intent/choices.ts) allow: choosing a value that swaps applies the
+ * whole swap, so the draft never passes through a broken state.
+ */
 const useField = (name: IntentField) => {
   const draft = useDraft();
+  const intent = useDraftValue();
+  const value = useDraftValue(name);
+  const rules = useAvailability(name, intent);
+  const whole = rules.unavailable;
   return {
-    value: useDraftValue(name),
-    onChange: (value: unknown) => draft.set(name, value),
+    value,
+    onChange: (next: unknown) => {
+      const swap = rules.option(next).swap;
+      if (swap) draft.replace(swap.apply(draft.get()));
+      else draft.set(name, next);
+    },
     onBlur: () => {},
     error: useFieldError(name),
+    /**
+     * Why it cannot be changed now. A refused value already set stays
+     * editable, so it can be cleared; an ignored one is greyed out and kept.
+     */
+    unavailable: whole && !(whole.refuses && inUse(value)) ? whole.reason : undefined,
+    /** Whether its value is ignored for now (shown off, kept for later). */
+    ignored: !!whole && !whole.refuses,
+    option: rules.option,
   };
 };
 
@@ -74,8 +186,9 @@ export const TextField = ({
 }) => {
   const field = useField(row.name);
   return (
-    <SettingRow {...row} error={field.error}>
+    <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
       <TextInput
+        disabled={!!field.unavailable}
         value={field.value ?? ""}
         // Cleared is unset: "" would fail a pattern an optional field allows.
         onChange={(e) => {
@@ -89,15 +202,16 @@ export const TextField = ({
         spellCheck={false}
         style={control.wide}
       />
-    </SettingRow>
+    </FieldRow>
   );
 };
 
 export const PasswordField = (row: RowProps) => {
   const field = useField(row.name);
   return (
-    <SettingRow {...row} error={field.error}>
+    <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
       <PasswordInput
+        disabled={!!field.unavailable}
         value={field.value ?? ""}
         // Cleared is unset: "" would fail a pattern an optional field allows.
         onChange={(e) => field.onChange(e.currentTarget.value || undefined)}
@@ -105,7 +219,7 @@ export const PasswordField = (row: RowProps) => {
         error={!!field.error}
         style={control.wide}
       />
-    </SettingRow>
+    </FieldRow>
   );
 };
 
@@ -118,8 +232,9 @@ export const NumberField = ({
 }: RowProps & { unit?: string; min?: number; max?: number; integer?: boolean }) => {
   const field = useField(row.name);
   return (
-    <SettingRow {...row} error={field.error}>
+    <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
       <NumberInput
+        disabled={!!field.unavailable}
         value={field.value ?? ""}
         onChange={(value) => field.onChange(value === "" ? undefined : Number(value))}
         onBlur={field.onBlur}
@@ -132,7 +247,7 @@ export const NumberField = ({
         error={!!field.error}
         style={control.narrow}
       />
-    </SettingRow>
+    </FieldRow>
   );
 };
 
@@ -144,11 +259,14 @@ export const SwitchField = ({
   disabled?: boolean;
 }) => {
   const field = useField(row.name);
+  // Off when ignored; otherwise its value, and whether flipping it is allowed.
+  const off = disabled || field.ignored;
+  const reason = field.unavailable ?? (off ? undefined : field.option(!field.value).unavailable);
   return (
-    <Row row={row} error={field.error}>
+    <Row row={row} error={field.error} unavailable={reason}>
       <Switch
-        disabled={disabled}
-        checked={!disabled && !!field.value}
+        disabled={off || !!reason}
+        checked={!off && !!field.value}
         onChange={(e) => field.onChange(e.currentTarget.checked)}
         aria-label={typeof row.label === "string" ? row.label : undefined}
         size="md"
@@ -175,18 +293,23 @@ export const SelectField = <T extends string | number>({
 }) => {
   const field = useField(row.name);
   const empty = "\u0000";
+  const choices = ruled(options, field.option);
   const data = [
     ...(emptyLabel ? [{ value: empty, label: emptyLabel }] : []),
-    ...options.map((option) => ({
+    ...choices.map((option) => ({
       value: String(option.value),
       label: option.label,
       disabled: option.disabled,
     })),
   ];
   return (
-    <Row row={row} error={field.error}>
+    <Row row={row} error={field.error} unavailable={field.unavailable}>
       <Select
         data={data}
+        disabled={!!field.unavailable}
+        renderOption={optionWithReason(
+          Object.fromEntries(choices.map((o) => [String(o.value), o.reason]))
+        )}
         value={field.value === undefined ? (emptyLabel ? empty : null) : String(field.value)}
         onChange={(value) =>
           field.onChange(
@@ -211,9 +334,10 @@ export const SegmentedField = <T extends string>({
 }: RowProps & { options: Option<T>[] }) => {
   const field = useField(row.name);
   return (
-    <Row row={row} error={field.error}>
+    <Row row={row} error={field.error} unavailable={field.unavailable}>
       <SegmentedControl
-        data={options}
+        data={segments(ruled(options, field.option))}
+        disabled={!!field.unavailable}
         value={field.value}
         onChange={field.onChange}
         size={row.inline ? "xs" : "sm"}
@@ -232,16 +356,19 @@ export const VariantField = <T extends { type: string }>({
   ...row
 }: RowProps & { variants: (Option<T["type"]> & { initial: T })[] }) => {
   const field = useField(row.name);
+  // The rules are about the variant's type (e.g. dns.upstream.type).
+  const types = useAvailability(`${row.name}.type`);
   return (
-    <SettingRow {...row} error={field.error}>
+    <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
       <SegmentedControl
-        data={variants.map(({ value, label }) => ({ value, label }))}
+        data={segments(ruled(variants.map(({ value, label }) => ({ value, label })), types.option))}
+        disabled={!!field.unavailable}
         value={field.value?.type}
         onChange={(type) =>
           field.onChange(variants.find((variant) => variant.value === type)!.initial)
         }
       />
-    </SettingRow>
+    </FieldRow>
   );
 };
 
@@ -261,15 +388,16 @@ export const OptionalField = ({
   if (on) last.current = field.value;
   return (
     <>
-      <SettingRow {...row} error={field.error}>
+      <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
         <Switch
           checked={on}
+          disabled={!!field.unavailable}
           onChange={(e) =>
             field.onChange(e.currentTarget.checked ? (last.current ?? initial) : undefined)
           }
           size="md"
         />
-      </SettingRow>
+      </FieldRow>
       {on && children}
     </>
   );
@@ -284,12 +412,13 @@ export const PasswordListField = ({
   const items: string[] = field.value ?? [];
   const set = (next: string[]) => field.onChange(next.length ? next : undefined);
   return (
-    <SettingRow {...row} error={field.error}>
+    <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
       <Stack gap={6} style={control.wide}>
         {items.map((item, i) => (
           <PasswordInput
             key={i}
             value={item}
+            disabled={!!field.unavailable}
             onChange={(e) =>
               set(items.map((old, j) => (j === i ? e.currentTarget.value : old)))
             }
@@ -306,11 +435,16 @@ export const PasswordListField = ({
             }
           />
         ))}
-        <Button variant="light" size="xs" onClick={() => set([...items, ""])}>
+        <Button
+          variant="light"
+          size="xs"
+          disabled={!!field.unavailable}
+          onClick={() => set([...items, ""])}
+        >
           {addLabel}
         </Button>
       </Stack>
-    </SettingRow>
+    </FieldRow>
   );
 };
 
@@ -377,7 +511,7 @@ export const SubnetField = (row: RowProps) => {
     : undefined;
   const prefix = match ? `${match[1]}.${match[2]}.${match[3]}` : "";
   return (
-    <SettingRow
+    <FieldRow
       {...row}
       description={row.description ?? (problem ? undefined : `Devices get ${prefix}.x addresses.`)}
       error={problem ?? field.error}
@@ -398,7 +532,7 @@ export const SubnetField = (row: RowProps) => {
         spellCheck={false}
         style={control.wide}
       />
-    </SettingRow>
+    </FieldRow>
   );
 };
 
@@ -415,9 +549,10 @@ export const DurationField = (row: RowProps) => {
   const amount = match ? Number(match[1]) : 12;
   const unit = match ? match[2] : "h";
   return (
-    <SettingRow {...row} error={field.error}>
+    <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
       <Group gap={6} wrap="nowrap">
         <NumberInput
+          disabled={!!field.unavailable}
           value={amount}
           min={1}
           allowDecimal={false}
@@ -426,6 +561,7 @@ export const DurationField = (row: RowProps) => {
           w={90}
         />
         <Select
+          disabled={!!field.unavailable}
           data={units}
           value={unit}
           allowDeselect={false}
@@ -433,7 +569,7 @@ export const DurationField = (row: RowProps) => {
           w={110}
         />
       </Group>
-    </SettingRow>
+    </FieldRow>
   );
 };
 
@@ -455,16 +591,17 @@ export const PresetField = <T extends string>({
   const field = useField(row.name);
   const draft = useDraft();
   return (
-    <SettingRow {...row} error={field.error}>
+    <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
       <SegmentedControl
-        data={options}
+        data={segments(ruled(options, field.option))}
+        disabled={!!field.unavailable}
         value={field.value}
         onChange={(value) => {
           field.onChange(value);
           draft.set(fills, presets[value as T]);
         }}
       />
-    </SettingRow>
+    </FieldRow>
   );
 };
 
@@ -503,10 +640,13 @@ export const MultiSelectField = ({
   emptyIsUnset?: boolean;
 }) => {
   const field = useField(row.name);
+  const choices = ruled(options, field.option);
   return (
-    <SettingRow {...row} error={field.error}>
+    <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
       <MultiSelect
-        data={options}
+        data={choices.map(({ value, label, disabled }) => ({ value, label, disabled }))}
+        renderOption={optionWithReason(Object.fromEntries(choices.map((o) => [o.value, o.reason])))}
+        disabled={!!field.unavailable}
         value={field.value ?? []}
         onChange={(values) =>
           field.onChange(emptyIsUnset && values.length === 0 ? undefined : values)
@@ -515,7 +655,7 @@ export const MultiSelectField = ({
         error={!!field.error}
         style={control.wide}
       />
-    </SettingRow>
+    </FieldRow>
   );
 };
 
@@ -529,15 +669,16 @@ export const TagsField = ({
 }: RowProps & { placeholder?: string }) => {
   const field = useField(row.name);
   return (
-    <SettingRow {...row} error={field.error}>
+    <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
       <TagsInput
+        disabled={!!field.unavailable}
         value={field.value ?? []}
         onChange={(values) => field.onChange(values.length ? values : undefined)}
         placeholder={placeholder}
         error={!!field.error}
         style={control.wide}
       />
-    </SettingRow>
+    </FieldRow>
   );
 };
 

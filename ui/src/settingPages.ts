@@ -5,8 +5,8 @@
  * URL of one item's page. The problems list and the sidebar's marks use it.
  */
 export const settingPages: { path: string; page: string; item?: (index: string) => string }[] = [
-  { path: "site", page: "general" },
-  { path: "admin", page: "general" },
+  { path: "site", page: "system" },
+  { path: "admin", page: "system" },
   { path: "internet", page: "internet" },
   { path: "firewall.rules", page: "firewall", item: (i) => `/firewall/rules/${i}` },
   { path: "firewall.port_forwards", page: "firewall", item: (i) => `/firewall/${i}` },

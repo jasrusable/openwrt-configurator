@@ -242,7 +242,7 @@ test("internet: IPv6 asks for the prefix size; PPPoE gets an explicit wan6", (t)
   intent.networks[1].ipv6 = true;
   t.deepEqual(
     intentSchema.safeParse(intent).error?.issues.map((i) => `${i.path.join(".")}: ${i.message}`),
-    ["internet.ipv6_prefix: a /64 has room for 1 network; 2 use IPv6"]
+    ["internet.ipv6_prefix: 2 networks have IPv6, and a /64 has room for 1."]
   );
 });
 
@@ -375,7 +375,7 @@ test("SSIDs: security mode, hidden, off, and fast roaming", (t) => {
   intent.wifi[0].security = "wpa3";
   t.deepEqual(
     intentSchema.safeParse(intent).error?.issues.map((i) => `${i.path.join(".")}: ${i.message}`),
-    ["wifi.0.extra_passwords: only with WPA2: WPA3 has one password per network"]
+    ["wifi.0.extra_passwords: Only with WPA2: WPA3 has one password per network."]
   );
 });
 
@@ -568,11 +568,16 @@ test("rules across settings are checked, at the field they concern", (t) => {
     "firewall.rules.0.from: pick a network, the internet or anywhere",
   ]);
   t.deepEqual(issues((i) => (i.networks[0].access.router = "services")), [
-    "networks.0.access.router: the main network manages the router: it needs full access",
+    "networks.0.access.router: The main network manages the router and access points: it keeps full access.",
   ]);
-  t.deepEqual(issues((i) => (i.firewall.rules[0].protocol = "icmp")), [
-    "firewall.rules.0.destination_port: ports need TCP or UDP",
-  ]);
+  // Ports are kept for when the protocol is TCP or UDP again, and left out meanwhile.
+  t.deepEqual(issues((i) => (i.firewall.rules[0].protocol = "icmp")), []);
+  const icmp = sample();
+  icmp.firewall.rules[0].protocol = "icmp";
+  const compiledRule = (compile(icmp).config as any).firewall.rule.find(
+    (r: any) => r.name === icmp.firewall.rules[0].name
+  );
+  t.is(compiledRule?.dest_port, undefined);
   t.deepEqual(issues((i) => i.firewall.rules[0].destination_addresses.push("fd00::1")), [
     "firewall.rules.0.destination_addresses: IPv4 and IPv6 addresses cannot share a rule",
   ]);

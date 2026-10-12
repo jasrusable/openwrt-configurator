@@ -1,5 +1,6 @@
-// The header's Provision button: how many saved changes are waiting, and a
-// panel with their preview, the confirmation and the run's progress.
+// The header's Apply button (LuCI's "Save & Apply", for every device at once):
+// how many saved changes are not on the devices yet, and a panel with their
+// preview, the confirmation and the run's progress. The CLI calls it provision.
 import { Badge, Button, Drawer } from "@mantine/core";
 import { IconCloudUpload } from "@tabler/icons-react";
 import { useState } from "react";
@@ -28,18 +29,25 @@ export const ProvisionButton = () => {
             </Badge>
           )
         }
+        title={
+          pending === "New"
+            ? "Not applied to the devices yet"
+            : pending
+            ? `${pending} unapplied change${pending === "1" ? "" : "s"}`
+            : "The devices are up to date"
+        }
         loading={running}
         loaderProps={{ type: "dots" }}
         onClick={() => setOpen(true)}
       >
-        Provision
+        Apply
       </Button>
       <Drawer
         opened={open}
         onClose={() => setOpen(false)}
         position="right"
         size="lg"
-        title="Provision"
+        title="Apply to devices"
       >
         <ProvisionPanel />
       </Drawer>

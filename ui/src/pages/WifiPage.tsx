@@ -1,8 +1,4 @@
 import { Badge, Group, Text } from "@mantine/core";
-import {
-  bandAvailable,
-  extraPasswordsAllowed,
-} from "../../../src/intent/choices";
 import { Band, Intent } from "../../../src/intent/schema";
 import { useDraftValue } from "../form/draft";
 import {
@@ -189,45 +185,27 @@ const NetworkName = ({ index }: { index: number }) => {
 
 export const WifiPage = ({ sub }: { sub: string }) => <ListPage list={wifiNetworks} sub={sub} />;
 
-/** Only bands whose radios are on (Wi-Fi › Radios) can be picked. */
-const BandsField = ({ index }: { index: number }) => {
-  const radios: Intent["radios"] = useDraftValue("radios");
-  return (
-    <MultiSelectField
-      name={`wifi.${index}.bands`}
-      label="Bands"
-      description="Empty: every band that is on. A band that is off can be turned on under Wi-Fi › Radios."
-      options={(Object.entries(bandLabels) as [Band, string][]).map(
-        ([value, label]) => ({
-          value,
-          label,
-          disabled: !!radios && !bandAvailable(radios, value),
-        }),
-      )}
-      placeholder="All enabled"
-      emptyIsUnset
-    />
-  );
-};
+/** Bands whose radios are off are greyed out, with why (choices.ts). */
+const BandsField = ({ index }: { index: number }) => (
+  <MultiSelectField
+    name={`wifi.${index}.bands`}
+    label="Bands"
+    description="Empty: every band that is on. A band that is off can be turned on under Wi-Fi › Radios."
+    options={(Object.entries(bandLabels) as [Band, string][]).map(([value, label]) => ({
+      value,
+      label,
+    }))}
+    placeholder="All enabled"
+    emptyIsUnset
+  />
+);
 
-/** Only with WPA2, which has per-device passwords; shown while any are left to remove. */
-const ExtraPasswordsField = ({ index }: { index: number }) => {
-  const security: string = useDraftValue(`wifi.${index}.security`) ?? "wpa2";
-  const extra: string[] | undefined = useDraftValue(
-    `wifi.${index}.extra_passwords`,
-  );
-  if (!extraPasswordsAllowed(security) && !extra?.length) return null;
-  return (
-    <PasswordListField
-      name={`wifi.${index}.extra_passwords`}
-      label="More passwords"
-      description={
-        // Otherwise its error says why it has to go.
-        extraPasswordsAllowed(security)
-          ? "Each works on its own, e.g. one per person."
-          : undefined
-      }
-      addLabel="Add password"
-    />
-  );
-};
+/** Only with WPA2, which has per-device passwords: greyed out otherwise, with why (choices.ts). */
+const ExtraPasswordsField = ({ index }: { index: number }) => (
+  <PasswordListField
+    name={`wifi.${index}.extra_passwords`}
+    label="More passwords"
+    description="Each works on its own, e.g. one per person."
+    addLabel="Add password"
+  />
+);

@@ -61,14 +61,15 @@ and the React UI in `ui/`.
       the router's firewall).
 - [ ] Provisioning jaculu from its intent. Parity checked offline (both
       configs through the engine against the captured R6S and NWA50AX Pro
-      schemas, secrets masked): the three model scripts match byte for byte
-      and every other difference is deliberate (rebind protection on, DHCP
+      schemas, secrets masked): the R6S and odhcpd scripts match byte for
+      byte, the per-band AQL hook sets the same limits, and every other
+      difference is deliberate (rebind protection on, DHCP
       pool .5-.254, ra_default 1, LuCI's cgi_prefix, DirectInterface, the
       off states of UPnP/avahi, ubihealthd kept from the device, stock
-      uhttpd limits). Still to decide: the ULA prefix (derived from the site
-      name, so it changes from the hand-written one), curl on the router,
-      conloglevel 8. The intent's Wi-Fi passwords must be the real ones
-      before a provision (the hand config takes them from the keychain).
+      uhttpd limits, the ULA prefix derived from the site name, no
+      conloglevel, no curl: https-dns-proxy's HTTP/2 is libcurl's). The intent's Wi-Fi passwords
+      must be the real ones before a provision (the hand config takes them
+      from the keychain).
       Then a print-uci-commands against the devices, on request.
 - [ ] Open schema questions: a second AP (`jaculu-ap-2`)? Why two SSIDs on
       one LAN? What are the extra Wi-Fi passwords for? Keep LuCI? Wi-Fi on

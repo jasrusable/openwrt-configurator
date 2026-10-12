@@ -9,12 +9,12 @@ import { LogView } from "../kit/LogView";
 
 const liveBadge: Record<ProvisionInfo["live"], [string, string]> = {
   matches: ["green", "Up to date"],
-  differs: ["orange", "Changes not provisioned"],
-  none: ["gray", "Not provisioned from here yet"],
+  differs: ["orange", "Unapplied changes"],
+  none: ["gray", "Not applied from here yet"],
 };
 
 const runBadge: Partial<Record<ProvisionInfo["state"], [string, string]>> = {
-  running: ["blue", "Provisioning…"],
+  running: ["blue", "Applying…"],
   succeeded: ["green", "Last run succeeded"],
   failed: ["red", "Last run failed"],
   interrupted: ["red", "Last run was interrupted"],
@@ -22,8 +22,8 @@ const runBadge: Partial<Record<ProvisionInfo["state"], [string, string]>> = {
 
 const Changes = ({ info }: { info: ProvisionInfo }) =>
   info.live === "none" ? (
-    <Section description="The first provision from here sets up every device from the whole configuration.">
-      <SettingRow label="Everything" description="Nothing has been provisioned from this app yet." />
+    <Section description="The first apply from here sets up every device from the whole configuration.">
+      <SettingRow label="Everything" description="Nothing has been applied from this app yet." />
     </Section>
   ) : info.changes.length === 0 ? (
     <Section>
@@ -59,7 +59,7 @@ export const ProvisionPanel = () => {
 
   if (provision.isError) {
     return (
-      <Alert color="red" title="Could not load the provisioning status">
+      <Alert color="red" title="Could not load the apply status">
         {provision.error.message}
       </Alert>
     );
@@ -90,7 +90,7 @@ export const ProvisionPanel = () => {
 
       {unsaved && (
         <Alert color="orange" title="Unsaved changes">
-          Save or revert your changes first: only saved settings are provisioned.
+          Save or revert your changes first: only saved settings are applied.
         </Alert>
       )}
 
@@ -107,11 +107,11 @@ export const ProvisionPanel = () => {
           size="md"
           disabled={unsaved || running}
           loading={running || start.isPending}
-          title="Provision your network?"
+          title="Apply to your network?"
           message={`This reconfigures ${info.devices.join(
             ", "
           )}. It takes a few minutes, and devices may briefly drop off the network. If any device cannot be reached afterwards, all of them roll back on their own.`}
-          confirmLabel="Provision"
+          confirmLabel="Apply"
           onConfirm={() =>
             start.mutate(undefined, {
               onError: (e) =>
@@ -119,7 +119,7 @@ export const ProvisionPanel = () => {
             })
           }
         >
-          Provision
+          Apply
         </ConfirmButton>
       </Group>
 

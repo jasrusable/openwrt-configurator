@@ -1,7 +1,8 @@
 // Page structure, in the style of macOS System Settings: a page is a title
 // and grouped sections; a section is a card of rows; a row is a label (and
 // an explanation) on the left, its control on the right.
-import { Anchor, Box, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import { Anchor, Box, Group, Paper, Stack, Text, ThemeIcon, Title, Tooltip } from "@mantine/core";
+import { IconInfoCircle } from "@tabler/icons-react";
 import { createContext, ReactNode, useContext } from "react";
 import "./kit.css";
 
@@ -127,16 +128,53 @@ export const SettingRow = ({
   label,
   description,
   error,
+  openwrt,
+  explain,
   children,
 }: {
   label: ReactNode;
   description?: ReactNode;
   error?: string;
+  /** What OpenWrt calls it, at the foot of the ⓘ tooltip beside the label, for people who know LuCI. */
+  openwrt?: string;
+  /** What it does on the devices, in more depth than the description: the tooltip's body. */
+  explain?: string;
   children?: ReactNode;
 }) => (
   <Group justify="space-between" wrap="nowrap" gap="md" px="md" py="sm" mih={52}>
     <Box style={{ flex: 1, minWidth: 0 }}>
-      <Text size="sm">{label}</Text>
+      <Group gap={4} wrap="nowrap">
+        <Text size="sm">{label}</Text>
+        {(explain || openwrt) && (
+          <Tooltip
+            label={
+              <Stack gap={6}>
+                {explain && <Text size="xs">{explain}</Text>}
+                {openwrt && (
+                  <Text size="xs" c="gray.4" ff="monospace">
+                    OpenWrt: {openwrt}
+                  </Text>
+                )}
+              </Stack>
+            }
+            multiline
+            w={320}
+            withArrow
+            openDelay={150}
+            events={{ hover: true, focus: true, touch: true }}
+          >
+            <ThemeIcon
+              variant="transparent"
+              size={16}
+              c="gray.5"
+              tabIndex={0}
+              aria-label={[explain, openwrt && `OpenWrt: ${openwrt}`].filter(Boolean).join(" ")}
+            >
+              <IconInfoCircle size={14} stroke={1.6} />
+            </ThemeIcon>
+          </Tooltip>
+        )}
+      </Group>
       {description && (
         <Text size="xs" c="dimmed">
           {description}

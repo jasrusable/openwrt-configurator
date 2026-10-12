@@ -11,11 +11,11 @@ import { IconPlus, IconX } from "@tabler/icons-react";
 import { useDraft, useDraftValue, useFieldError } from "../form/draft";
 import { withNetworkAdded, withoutNetwork } from "../../../src/intent/edits";
 import {
-  networkIpv6Applies,
+  allowed,
   reachableNetworks,
-  routerAccessAllowed,
 } from "../../../src/intent/choices";
 import { accessForPurpose } from "../../../src/intent/firewall";
+import { deviceOf } from "../../../src/intent/features/network";
 import { Intent, parseSubnet, Purpose } from "../../../src/intent/schema";
 import {
   DurationField,
@@ -139,7 +139,7 @@ const networks = defineList({
   editor: (i) => (
     <>
       <Section>
-        <TextField name={`networks.${i}.name`} label="Name" />
+        <NameField index={i} />
         <PurposeField index={i} />
       </Section>
       <AccessSection index={i} />
@@ -194,13 +194,25 @@ const useReachable = (index: number) => {
 };
 
 /** Picking a purpose sets the network's access, which stays adjustable. */
+/** Its name, with what it is called on the devices: what to look for in LuCI or over SSH. */
+const NameField = ({ index }: { index: number }) => {
+  const network: Intent["networks"][number] | undefined = useDraftValue(`networks.${index}`);
+  return (
+    <TextField
+      name={`networks.${index}.name`}
+      label="Name"
+      openwrt={network?.id ? `interface ${network.id} on ${deviceOf(network)}` : undefined}
+    />
+  );
+};
+
 const PurposeField = ({ index }: { index: number }) => {
-  const networks: Intent["networks"] = useDraftValue("networks") ?? [];
-  const others = reachableNetworks(networks, index);
-  // Only what the network may have: the main one keeps full router access.
+  const intent: Intent = useDraftValue();
+  const others = reachableNetworks(intent.networks ?? [], index);
+  // Only what the network may have (the rules): the main one keeps full router access.
   const preset = (purpose: Purpose) => {
     const access = accessForPurpose(purpose, others);
-    return routerAccessAllowed(networks, index, access.router)
+    return allowed(intent, `networks.${index}.access.router`, access.router)
       ? access
       : { ...access, router: "full" as const };
   };
@@ -223,7 +235,6 @@ const PurposeField = ({ index }: { index: number }) => {
 const AccessSection = ({ index }: { index: number }) => {
   const reachable = useReachable(index);
   const networks: Intent["networks"] = useDraftValue("networks") ?? [];
-  const servicesAllowed = routerAccessAllowed(networks, index, "services");
   return (
     <Section
       title="Access"
@@ -253,17 +264,9 @@ const AccessSection = ({ index }: { index: number }) => {
       <SegmentedField
         name={`networks.${index}.access.router`}
         label="Router access"
-        description={
-          servicesAllowed
-            ? "Network services: addresses, DNS and time only. Full: also the router's admin pages and SSH."
-            : "Always full on the main network: the router and access points are managed over it."
-        }
+        description="Network services: addresses, DNS and time only. Full: also the router's admin pages and SSH."
         options={[
-          {
-            value: "services",
-            label: "Network services",
-            disabled: !servicesAllowed,
-          },
+          { value: "services", label: "Network services" },
           { value: "full", label: "Full" },
         ]}
       />
@@ -271,17 +274,10 @@ const AccessSection = ({ index }: { index: number }) => {
   );
 };
 
-const Ipv6Field = ({ index }: { index: number }) => {
-  const applies = networkIpv6Applies(useDraftValue("internet.ipv6") !== false);
-  return (
-    <SwitchField
-      name={`networks.${index}.ipv6`}
-      label="IPv6"
-      description={applies ? undefined : "Turn on IPv6 under Internet first."}
-      disabled={!applies}
-    />
-  );
-};
+/** Greyed out without the internet's IPv6, or when its prefix is full, with why (choices.ts). */
+const Ipv6Field = ({ index }: { index: number }) => (
+  <SwitchField name={`networks.${index}.ipv6`} label="IPv6" />
+);
 
 /** 12 hex digits, however typed (AA-BB-..., aabb...), as aa:bb:cc:dd:ee:ff. */
 const tidyMac = (typed: string) => {

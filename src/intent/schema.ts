@@ -3,14 +3,7 @@
 // are read from the devices when they are provisioned. The UI edits this file
 // and nothing else; src/intent/compile.ts turns it into the low-level config.
 import { z } from "zod";
-import {
-  bandAvailable,
-  extraPasswordsAllowed,
-  portsApply,
-  routerAccessAllowed,
-  ruleDestinationAllowed,
-  widthAllowed,
-} from "./choices";
+import { choiceIssues } from "./choices";
 import { countries } from "./countries";
 import {
   accessSchema,
@@ -404,17 +397,8 @@ export const intentSchema = z
         issue(at("dns"), "add a DNS server, or choose other DNS servers under DNS & DHCP");
       }
     }
-    const prefix = intent.internet.ipv6_prefix;
-    if (intent.internet.ipv6 && prefix !== "auto") {
-      const room = 2 ** (64 - Number(prefix));
-      const want = intent.networks.filter((n) => n.ipv6).length;
-      if (want > room) {
-        issue(
-          ["internet", "ipv6_prefix"],
-          `a /${prefix} has room for ${room} network${room === 1 ? "" : "s"}; ${want} use IPv6`
-        );
-      }
-    }
+    // What one setting may be given the rest: the rules the UI greys out by.
+    choiceIssues(intent).forEach(({ path, message }) => issue(path, message));
 
     const untagged = intent.networks.filter((n) => n.vlan === undefined);
     if (untagged.length !== 1) {
@@ -432,16 +416,9 @@ export const intentSchema = z
         issue(["networks", i, "subnet"], "already used by another network");
       }
     });
-    bands.forEach((band) => {
-      if (!widthAllowed(band, intent.radios[band].width)) {
-        issue(["radios", band, "width"], "2.4 GHz is at most 40 MHz wide");
-      }
-    });
     intent.wifi.forEach((wifi, i) => {
-      if (wifi.extra_passwords?.length && !extraPasswordsAllowed(wifi.security)) {
-        issue(["wifi", i, "extra_passwords"], "only with WPA2: WPA3 has one password per network");
-      }
-      if (wifi.bands && !wifi.bands.some((band) => bandAvailable(intent.radios, band))) {
+      // The UI cannot get here (choices.ts); a hand-edited file can.
+      if (wifi.bands && !wifi.bands.some((band) => intent.radios[band].enabled)) {
         issue(["wifi", i, "bands"], "none of its bands is on (Wi-Fi › Radios)");
       }
     });
@@ -484,10 +461,6 @@ export const intentSchema = z
 
     // Access and rules name real networks.
     intent.networks.forEach((network, i) => {
-      if (!routerAccessAllowed(intent.networks, i, network.access.router)) {
-        // SSH and the admin pages: this tool manages the devices over it.
-        issue(["networks", i, "access", "router"], "the main network manages the router: it needs full access");
-      }
       network.access.networks.forEach((id) => {
         if (id === network.id) {
           issue(["networks", i, "access", "networks"], "a network always reaches itself");
@@ -504,12 +477,6 @@ export const intentSchema = z
       }
       if (![internet, anywhere, router].includes(rule.to) && !ids.includes(rule.to)) {
         issue(at("to"), "pick a network, the router, the internet or anywhere");
-      }
-      if (!ruleDestinationAllowed(rule.from, rule.to)) {
-        issue(at("to"), "the internet to itself does not pass the router");
-      }
-      if (rule.destination_port && !portsApply(rule.protocol)) {
-        issue(at("destination_port"), "ports need TCP or UDP");
       }
       const addresses = [...(rule.source_addresses ?? []), ...(rule.destination_addresses ?? [])];
       if (addresses.some(isIpv6) && addresses.some((a) => !isIpv6(a))) {

@@ -94,8 +94,8 @@ const PageError = () => {
         <Text size="sm" mb="md">
           {(error as Error)?.message ?? String(error)}
         </Text>
-        <Button variant="default" onClick={() => (window.location.hash = "/general")}>
-          Go to General
+        <Button variant="default" onClick={() => (window.location.hash = "/system")}>
+          Go to System
         </Button>
       </Alert>
     </Center>
@@ -114,12 +114,13 @@ const router = createHashRouter([
     element: <Shell />,
     errorElement: <PageError />,
     children: [
-      { index: true, element: <Navigate to="general" replace /> },
+      { index: true, element: <Navigate to="system" replace /> },
       ...pages.map((page) => ({ path: `${page.id}/*`, element: <page.Page /> })),
-      // Where SSIDs and Radios were before they were Wi-Fi's tabs.
+      { path: "general/*", element: <MovedTo base="/system" /> },
+      // Old addresses: General is System, SSIDs and Radios are Wi-Fi's tabs.
       { path: "ssids/*", element: <MovedTo base="/wifi" /> },
       { path: "radios/*", element: <MovedTo base="/wifi/radios" /> },
-      { path: "*", element: <Navigate to="general" replace /> },
+      { path: "*", element: <Navigate to="system" replace /> },
     ],
   },
 ]);

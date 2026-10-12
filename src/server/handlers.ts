@@ -157,7 +157,7 @@ export const provisionApi =
         draft.success && oncConfigSchema.safeParse(compileIntent(draft.data));
       if (!draft.success || !compiled || !compiled.success) {
         return json(409, {
-          error: "The saved settings are not valid: fix them, save, then provision.",
+          error: "The saved settings are not valid: fix them, save, then apply.",
         });
       }
       const result = await startProvision({
