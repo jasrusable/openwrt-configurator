@@ -11,11 +11,13 @@ import {
   IconRouter,
   IconShieldLock,
   IconWifi,
+  IconLock,
   IconWorld,
 } from "@tabler/icons-react";
 import { placeName } from "../../../src/intent/places";
 import { DnsPage } from "./DnsPage";
 import { FirewallPage } from "./firewall";
+import { VpnPage } from "./vpn";
 import { SystemPage } from "./SystemPage";
 import { HardwarePage } from "./HardwarePage";
 import { InternetPage } from "./InternetPage";
@@ -31,6 +33,7 @@ export const pages = [
   { group: "settings", id: "wifi", label: placeName("wifi"), icon: IconWifi, color: "blue", Page: WifiSection },
   // After Networks: who may reach what is each network's access; this is the exceptions.
   { group: "settings", id: "firewall", label: placeName("firewall"), icon: IconFlame, color: "red", Page: FirewallPage },
+  { group: "settings", id: "vpn", label: placeName("vpn"), icon: IconLock, color: "teal", Page: VpnPage },
   { group: "settings", id: "dns", label: placeName("dns"), icon: IconShieldLock, color: "violet", Page: DnsPage },
   { group: "settings", id: "hardware", label: placeName("hardware"), icon: IconRouter, color: "orange", Page: HardwarePage },
 ] as const;

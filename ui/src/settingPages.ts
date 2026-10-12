@@ -17,6 +17,11 @@ export const settingPages: { path: string; page: string; item?: (index: string) 
   { path: "roaming", page: "wifi", item: () => "/wifi/roaming" },
   { path: "mesh", page: "wifi", item: () => "/wifi/mesh" },
   { path: "dns", page: "dns" },
+  { path: "vpn.clients", page: "vpn", item: (i) => `/vpn/${i}` },
+  { path: "vpn", page: "vpn" },
+  { path: "sites.peers", page: "vpn", item: (i) => `/vpn/sites/${i}` },
+  { path: "sites", page: "vpn", item: () => "/vpn/sites" },
+  { path: "tunnels", page: "vpn", item: (i) => `/vpn/providers/${i}` },
   { path: "hardware", page: "hardware", item: (i) => `/hardware/${i}` },
 ];
 

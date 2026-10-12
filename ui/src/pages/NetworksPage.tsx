@@ -30,6 +30,7 @@ import {
   withTemplate,
 } from "../../../src/intent/networkTemplates";
 import { internetIpv6 } from "../../../src/intent/connections";
+import { vpnZones } from "../../../src/intent/vpn";
 import { deviceOf } from "../../../src/intent/features/network";
 import { where } from "../../../src/intent/places";
 import { Intent, parseSubnet } from "../../../src/intent/schema";
@@ -207,11 +208,14 @@ const networks = defineList({
 
 /** The networks network `index` may be given access to, by name. */
 const useReachable = (index: number) => {
-  const networks: Intent["networks"] = useDraftValue("networks") ?? [];
+  const intent: Intent = useDraftValue();
+  const networks = intent.networks ?? [];
   const ids = reachableNetworks(networks, index);
-  return networks
-    .filter((n) => ids.includes(n.id))
-    .map((n) => ({ value: n.id, label: n.name || "Unnamed" }));
+  return [
+    ...networks.filter((n) => ids.includes(n.id)).map((n) => ({ value: n.id, label: n.name || "Unnamed" })),
+    // Remote access's clients and the linked sites, when there are any.
+    ...vpnZones(intent).map((z) => ({ value: z, label: z === "vpn" ? "Remote access clients" : "Linked sites" })),
+  ];
 };
 
 /** Its name, with what it is called on the devices: what to look for in LuCI or over SSH. */
@@ -499,15 +503,16 @@ const LineSection = ({ index }: { index: number }) => {
   const line = intent.networks[index]?.line;
   const error = useFieldError(`${path}.connection`);
   const { connections } = intent.internet;
-  if (connections.length < 2) return null;
+  if (connections.length < 2 && !intent.tunnels.length) return null;
   const automatic = "\u0000";
   return (
     <Section title="Internet">
-      <FieldRow name={path} label="Internet line" description="Which connection its devices use." error={error}>
+      <FieldRow name={path} label="Internet line" description="Which connection or VPN provider its devices use." error={error}>
         <Select
           data={[
             { value: automatic, label: "Automatic" },
             ...connections.map((c) => ({ value: c.id, label: c.name || "Unnamed" })),
+            ...intent.tunnels.map((t) => ({ value: t.id, label: `${t.name || "Unnamed"} (VPN)` })),
           ]}
           value={line?.connection ?? automatic}
           onChange={(value) =>

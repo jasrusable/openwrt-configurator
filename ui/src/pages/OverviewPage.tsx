@@ -207,6 +207,30 @@ export const OverviewPage = () => {
         </Section>
       )}
 
+      {live?.vpn && (live.vpn.clients.length || live.vpn.sites.length || live.vpn.tunnels.length) ? (
+        <Section title="VPN">
+          {[
+            ...live.vpn.clients.map((c) => ({ ...c, kind: "Remote client" })),
+            ...live.vpn.sites.map((s) => ({ ...s, kind: "Linked site" })),
+          ].map(({ name, since, kind }) => (
+            <SettingRow
+              key={`${kind}-${name}`}
+              label={name}
+              description={`${kind} · ${since === undefined ? "never connected" : since < 180 ? "connected" : `last seen ${duration(since)} ago`}`}
+            >
+              <State up={since !== undefined && since < 180 ? true : undefined}>
+                {since !== undefined && since < 180 ? "Connected" : "Away"}
+              </State>
+            </SettingRow>
+          ))}
+          {live.vpn.tunnels.map((t) => (
+            <SettingRow key={`tunnel-${t.name}`} label={t.name} description="VPN provider">
+              <State up={t.up}>{t.up ? "Up" : "Down"}</State>
+            </SettingRow>
+          ))}
+        </Section>
+      ) : null}
+
       <Section title="Networks">
         {intent.networks.map((network, i) => {
           const now = live?.networks.find((n) => n.id === network.id);

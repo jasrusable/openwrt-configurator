@@ -8,6 +8,7 @@
 // Free-text values (an address, a name) are checked by the schema alone.
 import { internetIpv6, multiWan, primaryConnection } from "./connections";
 import { internet } from "./firewall";
+import { newPrivateKey } from "../wireguard";
 import { where } from "./places";
 import { steeringLabels } from "./roaming";
 import type { Band, Intent } from "./schema";
@@ -265,8 +266,43 @@ export const choices: Choice[] = [
   {
     // Ignored with one line; kept for when there are several again.
     path: "networks.*.line",
-    unavailable: (intent) => !multiWan(intent) && "With one internet connection, every network uses it.",
+    unavailable: (intent) =>
+      !multiWan(intent) &&
+      !intent.tunnels?.length &&
+      `With one internet connection and no VPN provider (${where("vpnProviders")}), every network uses it.`,
     refuses: false,
+  },
+  {
+    // A network out through a provider's tunnel: its IPv6 would go around it.
+    path: "networks.*.ipv6",
+    values: [true],
+    unavailable: (intent, [i]) => {
+      const tunnel = intent.tunnels?.find((t) => t.id === intent.networks[Number(i)]?.line?.connection);
+      return tunnel && `It goes out through ${tunnel.name}: IPv6 would go around the tunnel.`;
+    },
+    refuses: false,
+  },
+  {
+    // Turning it on makes the router's key, and lets clients reach the main network.
+    path: "vpn.enabled",
+    values: [true],
+    swap: (intent) =>
+      intent.vpn.private_key
+        ? undefined
+        : {
+            note: "Makes the router's WireGuard key.",
+            apply: (next) => ({
+              ...next,
+              vpn: {
+                ...next.vpn,
+                enabled: true,
+                private_key: newPrivateKey(),
+                access: next.vpn.access.networks.length
+                  ? next.vpn.access
+                  : { ...next.vpn.access, networks: next.networks.filter((n) => n.vlan === undefined).map((n) => n.id) },
+              },
+            }),
+          },
   },
   {
     path: "internet.connections.*.metered",

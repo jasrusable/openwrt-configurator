@@ -61,7 +61,8 @@ export const dns: Feature = (intent) => {
             localservice: true,
             cachesize: 5000,
             dnsforwardmax: 1000,
-            interface: intent.networks.map((n) => n.id),
+            // Remote access's clients ask the router too.
+            interface: [...intent.networks.map((n) => n.id), ...(intent.vpn.enabled ? ["vpn"] : [])],
             quietdhcp: true,
             ...(servers ? { noresolv: true, server: servers } : {}),
             // Answers from outside may not point inside (DNS rebinding);

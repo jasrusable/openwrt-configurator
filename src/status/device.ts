@@ -49,6 +49,16 @@ export type DeviceStatus = {
   lines: LineStatus[];
   /** Its mesh neighbours, where batman-adv runs: each directly linked node and the link's quality. */
   mesh: MeshNeighbour[];
+  /** Its WireGuard peers: when each last completed a handshake. */
+  wireguard: WireguardPeer[];
+};
+
+export type WireguardPeer = {
+  /** The WireGuard interface: vpn, sites, tun1. */
+  iface: string;
+  publicKey: string;
+  /** Seconds since its last handshake; undefined if it has never made one. */
+  since?: number;
 };
 
 export type MeshNeighbour = {
@@ -221,6 +231,27 @@ export const parseOriginators = (text: string): MeshNeighbour[] =>
     .filter((r) => r.originator === r.nexthop)
     .map((r) => ({ mac: r.originator, quality: r.quality, lastSeen: r.lastSeen }));
 
+/**
+ * WireGuard's handshakes, after the device's clock: "<now>" then lines of
+ * "<interface> <peer key> <unix time>". Never `wg show dump`, which prints
+ * each interface's private key.
+ */
+const handshakes: Probe<string> = {
+  command: "date +%s; wg show all latest-handshakes 2>/dev/null || true",
+  parse: ({ stdout }) => stdout,
+};
+
+export const parseHandshakes = (text: string): WireguardPeer[] => {
+  const [first = "", ...lines] = text.split("\n");
+  const now = Number(first.trim());
+  return lines.flatMap((line) => {
+    const [iface, publicKey, time] = line.trim().split(/\s+/);
+    if (!iface || !publicKey || time === undefined) return [];
+    const at = Number(time);
+    return [{ iface, publicKey, ...(at > 0 && Number.isFinite(now) ? { since: Math.max(0, now - at) } : {}) }];
+  });
+};
+
 const leases: Probe<string> = {
   command: "cat /tmp/dhcp.leases 2>/dev/null || true",
   parse: ({ stdout }) => stdout,
@@ -232,7 +263,7 @@ export const readDeviceStatus = async (
   session: Session,
   now: () => number
 ): Promise<DeviceStatus> => {
-  const read = await runProbes(session, { systemInfo, interfaces, wifi, leases, mwan3, originators });
+  const read = await runProbes(session, { systemInfo, interfaces, wifi, leases, mwan3, originators, handshakes });
   return {
     hostname,
     readAt: now(),
@@ -242,5 +273,6 @@ export const readDeviceStatus = async (
     leases: parseLeases(read.leases),
     lines: parseLines(read.mwan3),
     mesh: parseOriginators(read.originators),
+    wireguard: parseHandshakes(read.handshakes),
   };
 };

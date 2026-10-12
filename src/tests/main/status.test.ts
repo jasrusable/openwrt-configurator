@@ -81,6 +81,7 @@ const device = (hostname: string, parts: Partial<DeviceStatus>): DeviceStatus =>
   leases: [],
   lines: [],
   mesh: [],
+  wireguard: [],
   ...parts,
 });
 
@@ -207,4 +208,13 @@ test("a mesh link's measured speed, from batctl's throughput meter", async (t) =
   t.is(parseThroughput("Test duration 5030ms.\nSent 29880512 Bytes.\nThroughput: 5.67 MB/s (47.52 Mbps)\n"), 47.52);
   t.is(parseThroughput("Throughput: 120.1 MB/s (1.01 Gbps)"), 1010);
   t.is(parseThroughput("Error - can't find bat0"), undefined);
+});
+
+test("WireGuard peers: how long since each last made a handshake, from the device's own clock", async (t) => {
+  const { parseHandshakes } = await import("../../status/device");
+  // Recorded from the router container: a phone connected to vpn, a provider's tunnel.
+  const peers = parseHandshakes(readFileSync(join(__dirname, "..", "helpers", "status", "wg-handshakes.txt"), "utf8"));
+  t.true(peers.some((p) => p.iface === "vpn" && p.since !== undefined && p.since < 600));
+  t.deepEqual(parseHandshakes("1700000000\nvpn abc= 0\n"), [{ iface: "vpn", publicKey: "abc=" }], "never: no age");
+  t.deepEqual(parseHandshakes(""), []);
 });

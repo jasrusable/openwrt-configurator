@@ -42,6 +42,16 @@ export type NetworkStatus = {
    * directly (by name where its MAC is known from facts) with the quality.
    */
   mesh?: { name: string; links: { to: string; quality: number }[] }[];
+  /**
+   * Remote access's clients and the linked sites, by their keys: how long
+   * since each last made a handshake (a few minutes is connected); and each
+   * VPN provider's tunnel, up or not.
+   */
+  vpn?: {
+    clients: { name: string; since?: number }[];
+    sites: { name: string; since?: number }[];
+    tunnels: { name: string; up: boolean }[];
+  };
   /** On the devices but not in your settings: shown, so a mismatch is never hidden. */
   unexpected: { interfaces: string[]; ssids: string[] };
 };
@@ -117,6 +127,25 @@ export const networkStatus = (
         }
       : {}),
     connections,
+    ...(routerUp && (intent.vpn?.enabled || intent.sites?.peers.length || intent.tunnels?.length)
+      ? {
+          vpn: {
+            clients: (intent.vpn?.enabled ? intent.vpn.clients : []).map((c) => ({
+              name: c.name,
+              since: routerUp.wireguard.find((p) => p.iface === "vpn" && p.publicKey === c.public_key)?.since,
+            })),
+            sites: (intent.sites?.peers ?? []).map((s) => ({
+              name: s.name,
+              since: routerUp.wireguard.find((p) => p.iface === "sites" && p.publicKey === s.public_key)?.since,
+            })),
+            // A tunnel is up when its interface is, and a WireGuard one has a recent handshake.
+            tunnels: (intent.tunnels ?? []).map((t) => {
+              const shake = routerUp.wireguard.find((p) => p.iface === t.id)?.since;
+              return { name: t.name, up: !!iface(t.id)?.up && (t.type !== "wireguard" || (shake !== undefined && shake < 180)) };
+            }),
+          },
+        }
+      : {}),
     ...(intent.mesh?.enabled
       ? {
           mesh: intent.hardware.flatMap((d) => {

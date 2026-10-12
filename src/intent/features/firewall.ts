@@ -100,6 +100,18 @@ export const firewall: Feature = (intent) => {
   const wanInterfaces = intent.internet.connections.flatMap((c, i) =>
     i === 0 && c.ipv6 ? [c.id, ipv6Interface(c)] : [c.id]
   );
+  // What has a zone and an access: each network, and remote access's clients
+  // and the linked sites when there are any, which networks may reach in turn.
+  const areas = [
+    ...networks.map((n) => ({ id: n.id, access: n.access })),
+    ...(intent.vpn.enabled ? [{ id: "vpn", access: intent.vpn.access }] : []),
+    ...(intent.sites.peers.length ? [{ id: "sites", access: intent.sites.access }] : []),
+  ];
+  // Networks out through a provider's tunnel (their Internet line).
+  const viaTunnel = networks.flatMap((n) => {
+    const tunnel = intent.tunnels.find((t) => t.id === n.line?.connection);
+    return tunnel ? [{ network: n, tunnel }] : [];
+  });
   // The network an address is on: where a port forward lands.
   const networkOf = (address: string) => {
     const prefix = address.split(".").slice(0, 3).join(".");
@@ -125,13 +137,24 @@ export const firewall: Feature = (intent) => {
           // what forwardings allow; to the router as its access says. Section
           // names are the zone's, so adding or reordering networks never
           // renames another zone (the apply diff would show it all changing).
-          ...networks.map((network) => ({
-            ".name": network.id,
-            name: network.id,
-            input: network.access.router === "full" ? "ACCEPT" : "REJECT",
+          ...areas.map((area) => ({
+            ".name": area.id,
+            name: area.id,
+            input: area.access.router === "full" ? "ACCEPT" : "REJECT",
             output: "ACCEPT",
             forward: "REJECT",
-            network: [network.id],
+            network: [area.id],
+          })),
+          // A provider's tunnel: out like the internet, masqueraded.
+          ...intent.tunnels.map((tunnel) => ({
+            ".name": tunnel.id,
+            name: tunnel.id,
+            input: "REJECT",
+            output: "ACCEPT",
+            forward: "REJECT",
+            masq: true,
+            mtu_fix: true,
+            network: [tunnel.id],
           })),
           {
             ".name": wan,
@@ -144,17 +167,25 @@ export const firewall: Feature = (intent) => {
             network: wanInterfaces,
           },
         ]),
-        forwarding: routerOnly(
-          networks.flatMap((network) => [
-            ...(network.access.internet ? [{ ".name": `${network.id}_${wan}`, src: network.id, dest: wan }] : []),
-            ...network.access.networks.map((to) => ({ ".name": `${network.id}_${to}`, src: network.id, dest: to })),
-          ])
-        ),
+        forwarding: routerOnly([
+          ...areas.flatMap((area) => [
+            ...(area.access.internet ? [{ ".name": `${area.id}_${wan}`, src: area.id, dest: wan }] : []),
+            ...area.access.networks.map((to) => ({ ".name": `${area.id}_${to}`, src: area.id, dest: to })),
+          ]),
+          ...viaTunnel.map(({ network, tunnel }) => ({ ".name": `${network.id}_${tunnel.id}`, src: network.id, dest: tunnel.id })),
+        ]),
         // Named by their names: order still matters to fw4, but inserting
         // one renames no other.
         rule: routerOnly(named("rule", [
           ...stockRules(main.id),
-          ...networks.filter((n) => n.access.router === "services").flatMap((n) => serviceRules(n.id)),
+          ...areas.filter((a) => a.access.router === "services").flatMap((a) => serviceRules(a.id)),
+          // WireGuard from the internet: remote access's clients, the sites.
+          ...(intent.vpn.enabled
+            ? [{ name: "Allow-WireGuard", src: wan, proto: ["udp"], dest_port: String(intent.vpn.port), target: "ACCEPT" }]
+            : []),
+          ...(intent.sites.peers.length
+            ? [{ name: "Allow-WireGuard-sites", src: wan, proto: ["udp"], dest_port: String(intent.sites.port), target: "ACCEPT" }]
+            : []),
           // Sharing devices: the router's reflector must hear the network's mDNS.
           ...networks
             .filter((n) => n.share_devices && n.access.router === "services")

@@ -5,7 +5,7 @@ import { Feature, mainNetwork, onRouter } from "../fragment";
 import { checkOf, Connection, ipv6Interface, multiWan, slowLine, stickySeconds } from "../connections";
 import { named } from "../names";
 import { fnv } from "./network";
-import { lineTypes, netmask } from "../schema";
+import { Intent, lineTypes, netmask } from "../schema";
 
 /**
  * Per-packet overhead by line, as OpenWrt's SQM guidance gives it: fibre is
@@ -41,6 +41,43 @@ const upnpUuid = (siteName: string) => {
 
 /** A connection's line: its port (unset, the board's WAN port), tagged with its VLAN. */
 const portOf = (connection: Connection) => connection.port ?? "@wan_port";
+
+/** Each provider's ddns-scripts service name. */
+const ddnsServices = { cloudflare: "cloudflare.com-v4", duckdns: "duckdns.org", dynv6: "dynv6.com" } as const;
+
+/** Where the public address is read from: the web, as the WAN may be behind another NAT. */
+const ddnsIpUrl = "https://api.ipify.org";
+
+/** The ddns-scripts service for a name that follows the internet address. */
+const ddnsService = (ddns: NonNullable<Intent["internet"]["ddns"]>) => {
+  const labels = ddns.hostname.split(".");
+  // Cloudflare's script takes "record@zone": home@example.com for home.example.com.
+  const domain =
+    ddns.provider === "cloudflare"
+      ? labels.length > 2
+        ? `${labels[0]}@${labels.slice(1).join(".")}`
+        : `@${ddns.hostname}`
+      : ddns.hostname;
+  return {
+    ".name": "main",
+    enabled: true,
+    service_name: ddnsServices[ddns.provider],
+    lookup_host: ddns.hostname,
+    domain,
+    username: ddns.provider === "cloudflare" ? "Bearer" : ddns.provider === "duckdns" ? "NA" : "none",
+    password: ddns.token,
+    use_https: true,
+    cacert: "/etc/ssl/certs",
+    ip_source: "web",
+    ip_url: ddnsIpUrl,
+    interface: "wan",
+    use_ipv6: false,
+    check_interval: 10,
+    check_unit: "minutes",
+    force_interval: 72,
+    force_unit: "hours",
+  };
+};
 
 export const internet: Feature = (intent) => {
   const { connections, mode, upnp } = intent.internet;
@@ -216,7 +253,16 @@ export const internet: Feature = (intent) => {
       {
         ".if": onRouter,
         // Installed whether used or not: a setting changes config, not packages.
-        packages: ["sqm-scripts", "luci-app-sqm", "miniupnpd-nftables", "luci-app-upnp"],
+        packages: [
+          "sqm-scripts",
+          "luci-app-sqm",
+          "miniupnpd-nftables",
+          "luci-app-upnp",
+          // A name that follows the address: the providers offered (choices).
+          "ddns-scripts",
+          "ddns-scripts-services",
+          "ddns-scripts-cloudflare",
+        ],
       },
       // The exception: mwan3 brings iptables, ipset and their kernel modules
       // (23 packages on 25.12), too much for every router with one line.
@@ -227,6 +273,7 @@ export const internet: Feature = (intent) => {
       { ".if": onRouter, name: "sqm" },
       { ".if": onRouter, name: "miniupnpd", running: upnp },
       ...(several ? [{ ".if": onRouter, name: "mwan3", running: true }] : []),
+      { ".if": onRouter, name: "ddns", running: !!intent.internet.ddns },
     ],
     config: {
       network: { interface: routerOnly(interfaces) },
@@ -267,6 +314,11 @@ export const internet: Feature = (intent) => {
         ], (r) => r.comment)),
       },
       sqm: { queue: routerOnly(connections.map(queue)) },
+      // Declared on or off: no service is no updating.
+      ddns: {
+        ddns: routerOnly([{ ".name": "global", upd_privateip: false }]),
+        service: routerOnly(intent.internet.ddns ? [ddnsService(intent.internet.ddns)] : []),
+      },
       ...(mwan3 ? { mwan3 } : {}),
     },
   };

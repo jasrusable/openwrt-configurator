@@ -1,7 +1,7 @@
 // Page structure, in the style of macOS System Settings: a page is a title
 // and grouped sections; a section is a card of rows; a row is a label (and
 // an explanation) on the left, its control on the right.
-import { Anchor, Box, Group, Stack, Text, ThemeIcon, Title, Tooltip } from "@mantine/core";
+import { Anchor, Badge, Box, Group, Stack, Text, ThemeIcon, Title, Tooltip } from "@mantine/core";
 import { IconInbox, IconInfoCircle } from "@tabler/icons-react";
 import { createContext, ReactNode, useContext } from "react";
 import "./kit.css";
@@ -247,4 +247,19 @@ export const StatusDot = ({ color }: { color: "green" | "orange" | "red" | "gray
     h={8}
     style={{ display: "inline-block", flexShrink: 0, borderRadius: 4, background: `var(--mantine-color-${color}-6)` }}
   />
+);
+
+/** Marks something built but not yet run on a real router, with why in a tooltip. */
+export const ExperimentalBadge = () => (
+  <Tooltip
+    label="Not yet tested on real routers: built to OpenWrt's documented setup and checked in containers only, so it may need fixes."
+    multiline
+    w={280}
+    withArrow
+    events={{ hover: true, focus: true, touch: true }}
+  >
+    <Badge variant="light" color="orange" size="sm" tabIndex={0} style={{ cursor: "help" }}>
+      Experimental
+    </Badge>
+  </Tooltip>
 );

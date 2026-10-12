@@ -53,7 +53,7 @@ const routerInterface = (network: Network, ipv6: boolean, ipv6Upstream: string) 
     : {}),
 });
 
-const dhcpServer = (network: Network, ipv6: boolean) => ({
+const dhcpServer = (network: Network, ipv6: boolean, tunnelDns: string[] = []) => ({
   force: true,
   // The pool ends at .254, so the low addresses stay free.
   start: 255 - network.dhcp.size,
@@ -77,7 +77,12 @@ const dhcpServer = (network: Network, ipv6: boolean) => ({
   // servers instead of the router, when the network names them.
   dhcp_option: [
     `42,${gatewayOf(network)}`,
-    ...(network.dhcp.dns_servers?.length ? [`6,${network.dhcp.dns_servers.join(",")}`] : []),
+    ...(network.dhcp.dns_servers?.length
+      ? [`6,${network.dhcp.dns_servers.join(",")}`]
+      : tunnelDns.length
+        ? // Out through a provider's tunnel: its DNS, asked through the tunnel too.
+          [`6,${tunnelDns.join(",")}`]
+        : []),
   ],
 });
 
@@ -86,7 +91,10 @@ export const network: Feature = (intent) => {
   const main = networks.find(isMain)!;
   // A network's IPv6 needs the internet's: without it there is only a
   // local range, which would be announced as if it went somewhere.
-  const ipv6 = (n: Network) => networkIpv6Applies(internetIpv6(intent)) && n.ipv6;
+  // A provider's tunnel a network goes out through (its Internet line).
+  const tunnelOf = (n: Network) => intent.tunnels.find((t) => t.id === n.line?.connection);
+  // Not a network out through a provider's tunnel: its IPv6 would go around it.
+  const ipv6 = (n: Network) => networkIpv6Applies(internetIpv6(intent)) && n.ipv6 && !tunnelOf(n);
   // Prefixes from the main connection's IPv6 interface (wan6 for wan).
   const ipv6Upstream = ipv6Interface(primaryConnection(intent));
   // What a section changes on a mesh node (features/mesh.ts), when the mesh is on.
@@ -198,7 +206,7 @@ export const network: Feature = (intent) => {
           ".name": n.id,
           interface: n.id,
           ".overrides": [
-            { ".if": onRouter, override: dhcpServer(n, ipv6(n)) },
+            { ".if": onRouter, override: dhcpServer(n, ipv6(n), tunnelOf(n)?.dns ?? []) },
             {
               ".if": onAccessPoints,
               override: {

@@ -1,14 +1,14 @@
 // Wi-Fi › Mesh: access points linked over Wi-Fi (802.11s with batman-adv),
 // so one needs no cable. Experimental: the compiler follows a setup run at
 // another site, but this app has not yet run it on real hardware.
-import { Alert, Badge, Group, Text } from "@mantine/core";
+import { Alert, Group, Text } from "@mantine/core";
 import { meshChannels } from "../../../src/intent/choices";
 import { where } from "../../../src/intent/places";
 import { Intent } from "../../../src/intent/schema";
 import { useDevices } from "../data/devices";
 import { useDraftValue } from "../form/draft";
 import { PasswordField, SegmentedField, SelectField, SwitchField } from "../form/fields";
-import { Section, SettingRow, SettingsPage } from "../kit/layout";
+import { ExperimentalBadge, Section, SettingRow, SettingsPage } from "../kit/layout";
 
 const bandLabels = { "2g": "2.4 GHz", "5g": "5 GHz", "6g": "6 GHz" } as const;
 
@@ -64,9 +64,7 @@ export const MeshPage = () => {
       title={
         <Group gap={10}>
           Mesh
-          <Badge variant="light" color="orange" size="sm">
-            Experimental
-          </Badge>
+          <ExperimentalBadge />
         </Group>
       }
       description="Access points link over Wi-Fi, so they need only power."

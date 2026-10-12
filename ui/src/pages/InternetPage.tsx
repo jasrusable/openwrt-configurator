@@ -2,7 +2,7 @@
 // its own smart queueing), and how several are used together. The first is
 // the main one: the networks' IPv6 comes from it, and in failover it carries
 // everything while it works.
-import { Button, Text } from "@mantine/core";
+import { Button, Group, Text } from "@mantine/core";
 import { IconWorld } from "@tabler/icons-react";
 import { useLocation, useNavigate } from "react-router";
 import { portTakenBy } from "../../../src/intent/connections";
@@ -24,7 +24,7 @@ import {
   When,
 } from "../form/fields";
 import { defineList, ListPage } from "../form/ListPage";
-import { ItemIcon, ItemName, Section, SettingRow } from "../kit/layout";
+import { ExperimentalBadge, ItemIcon, ItemName, Section, SettingRow } from "../kit/layout";
 
 const address = /[\d.]/;
 
@@ -344,6 +344,32 @@ const Together = () => {
           )}
         </Section>
       )}
+      <Section
+        title={
+          <Group gap={8}>
+            Name on the internet
+            <ExperimentalBadge />
+          </Group>
+        }
+      >
+        <OptionalField
+          name="internet.ddns"
+          label="Name on the internet"
+          initial={{ provider: "duckdns", hostname: "", token: "" }}
+        >
+          <SelectField
+            name="internet.ddns.provider"
+            label="Provider"
+            options={[
+              { value: "duckdns", label: "Duck DNS" },
+              { value: "cloudflare", label: "Cloudflare" },
+              { value: "dynv6", label: "dynv6" },
+            ]}
+          />
+          <TextField name="internet.ddns.hostname" label="Name" placeholder="myhome.duckdns.org" />
+          <PasswordField name="internet.ddns.token" label="API token" />
+        </OptionalField>
+      </Section>
       <Section description="Main network only; devices open ports for themselves.">
         <SwitchField name="internet.upnp" label="UPnP and NAT-PMP" description="Lets games and apps open the ports they need." />
       </Section>

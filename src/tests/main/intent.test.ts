@@ -894,3 +894,59 @@ test("mesh rescue: a repeater gets a rescue Wi-Fi (off), its own link-local addr
   intent.hardware[1].uplink = "cable";
   t.is(onDevice("home-ap-1", "zyxel,nwa50ax-pro", intent).wireless["wifi-iface"].find((w: any) => w.ifname === "rescue0"), undefined, "cabled: none");
 });
+
+test("remote access, sites and a provider's tunnel: WireGuard on the router, zones from access, a network out through the tunnel", async (t) => {
+  const { newPrivateKey, publicKeyOf } = await import("../../wireguard");
+  const intent = sample();
+  intent.vpn = {
+    enabled: true,
+    port: 51820,
+    subnet: "10.0.99.0/24",
+    private_key: newPrivateKey(),
+    access: { internet: true, networks: ["lan"], router: "full" },
+    clients: [{ id: "c1", name: "Phone", public_key: publicKeyOf(newPrivateKey()), host: 2, route: "home" }],
+  };
+  intent.sites = {
+    private_key: newPrivateKey(),
+    port: 51821,
+    access: { internet: false, networks: ["lan"], router: "services" },
+    peers: [{ id: "s1", name: "Cabin", public_key: publicKeyOf(newPrivateKey()), endpoint: "cabin.example.com:51821", subnets: ["192.168.50.0/24"] }],
+  };
+  intent.tunnels = [
+    {
+      id: "tun1",
+      name: "Mullvad",
+      private_key: newPrivateKey(),
+      address: "10.64.12.34/32",
+      dns: ["10.64.0.1"],
+      peer: { public_key: publicKeyOf(newPrivateKey()), endpoint: "203.0.113.5:51820" },
+    },
+  ];
+  intent.networks[1].line = { connection: "tun1", fallback: false };
+  const r = onDevice("home-router", "friendlyarm,nanopi-r6s", intent);
+  const iface = (name: string) => r.network.interface.find((i: any) => i[".name"] === name);
+  t.like(iface("vpn"), { proto: "wireguard", listen_port: 51820 });
+  t.deepEqual(iface("vpn").addresses[0], "10.0.99.1/24");
+  t.like(r.network.wireguard_vpn[0], { route_allowed_ips: false });
+  t.deepEqual(r.network.wireguard_vpn[0].allowed_ips[0], "10.0.99.2/32");
+  t.like(r.network.wireguard_sites[0], { endpoint_host: "cabin.example.com", endpoint_port: 51821, route_allowed_ips: true });
+  t.like(iface("tun1"), { proto: "wireguard", ip4table: 101 });
+  t.like(r.network.wireguard_tun1[0], { endpoint_host: "203.0.113.5", route_allowed_ips: true });
+  t.deepEqual(
+    r.network.rule.map((x: any) => [x[".name"], x.lookup ?? x.action]),
+    [["local_first", "main"], ["via_guest", 101], ["only_guest", "unreachable"]]
+  );
+  const zone = (name: string) => r.firewall.zone.find((z: any) => z.name === name);
+  t.like(zone("vpn"), { input: "ACCEPT", network: ["vpn"] });
+  t.like(zone("tun1"), { masq: true });
+  t.truthy(r.firewall.forwarding.find((f: any) => f.src === "guest" && f.dest === "tun1"));
+  t.truthy(r.firewall.forwarding.find((f: any) => f.src === "vpn" && f.dest === "lan"));
+  t.truthy(r.firewall.rule.find((x: any) => x.name === "Allow-WireGuard" && x.dest_port === "51820"));
+  const guestDhcp = r.dhcp.dhcp.find((d: any) => d[".name"] === "guest");
+  t.true(guestDhcp.dhcp_option.includes("6,10.64.0.1"), "the provider's DNS, through the tunnel");
+  t.is(iface("guest").ip6assign, undefined, "no IPv6 around the tunnel");
+
+  intent.sites.peers[0].subnets = ["10.0.0.0/16"];
+  const clash = intentSchema.safeParse(intent);
+  t.true(!clash.success && clash.error.issues.some((i) => i.message.includes("overlaps")));
+});

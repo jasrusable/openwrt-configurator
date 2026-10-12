@@ -17,6 +17,7 @@ import {
   router,
 } from "./firewall";
 import { timezones } from "./timezones";
+import { wireguardKey } from "../wireguard";
 
 const name = z
   .string()
@@ -127,6 +128,47 @@ const radio = (defaults: { enabled: boolean }) =>
 
 export const internetModes = ["failover", "balance"] as const;
 
+const tunnelId = z.string().regex(/^tun\d$/, "an id like tun1");
+const tunnelName = z.string().min(1, "required").max(32);
+
+/** A WireGuard key, as `wg` prints it. */
+const wgKey = z.string().regex(wireguardKey, "a WireGuard key (44 characters, ending in =)");
+
+/** host:port, a name or an address ([…] for IPv6). */
+const hostPort = z
+  .string()
+  .regex(/^(\[[0-9A-Fa-f:]+\]|[A-Za-z0-9.-]+):\d{1,5}$/, "like vpn.example.com:51820");
+
+/** A private IPv4 range of any size, as a remote site's: 10.1.0.0/16. */
+const ipv4Cidr = z
+  .string()
+  .refine((cidr) => parseCidr(cidr) !== undefined, "an IPv4 range, like 192.168.10.0/24");
+
+/** An IPv4 address with its prefix length, as a tunnel's own: 10.64.0.2/32. */
+const ipv4WithPrefix = z
+  .string()
+  .regex(/^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/, "like 10.64.0.2/32")
+  .refine((a) => parseIpv4(a.split("/")[0]) !== undefined && Number(a.split("/")[1]) <= 32, "like 10.64.0.2/32");
+
+/** A range as numbers: its first address and its size; undefined if it is not one. */
+export const parseCidr = (cidr: string) => {
+  const [address, length] = cidr.split("/");
+  const start = parseIpv4(address ?? "");
+  const bits = Number(length);
+  if (start === undefined || !Number.isInteger(bits) || bits < 8 || bits > 32) return undefined;
+  const size = 2 ** (32 - bits);
+  return start % size === 0 ? { start, size } : undefined;
+};
+
+/** Whether two IPv4 ranges share any address. */
+export const overlaps = (a: string, b: string) => {
+  const [x, y] = [parseCidr(a), parseCidr(b)];
+  return !!x && !!y && x.start < y.start + y.size && y.start < x.start + x.size;
+};
+
+export const vpnRoutes = ["home", "all"] as const;
+export const ddnsProviders = ["cloudflare", "duckdns", "dynv6"] as const;
+
 /** One way to the internet: a line on a port of the router. */
 const internetConnection = z
   .object({
@@ -214,8 +256,12 @@ const network = z
     id: z
       .string()
       .regex(/^[a-z][a-z0-9]{0,9}$/, "a short id")
-      // Not "wan…": the internet connections' interfaces are named so.
-      .refine((id) => !reservedIds.includes(id) && !id.startsWith("wan"), "reserved"),
+      // Not "wan…", "tun…", "vpn" or "sites": the internet connections' and
+      // the VPN's interfaces are named so.
+      .refine(
+        (id) => !reservedIds.includes(id) && !/^(wan|tun\d)/.test(id) && !["vpn", "sites"].includes(id),
+        "reserved"
+      ),
     name: z.string().min(1, "required").max(32),
 
     /** Absent for the main network, which is untagged on every port. */
@@ -341,6 +387,16 @@ export const intentSchema = z
         upnp: z.boolean().default(false),
         /** Sharing traffic: each device keeps to one line (not only for secure websites). */
         share_per_device: z.boolean().default(false),
+        /** A name that follows the internet address (dynamic DNS), for remote access and sites. */
+        ddns: z
+          .object({
+            provider: z.enum(ddnsProviders),
+            hostname: z.string().regex(/^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/, "like home.example.com"),
+            /** The provider's API token. */
+            token: z.string().min(1, "required"),
+          })
+          .strict()
+          .optional(),
       })
       .strict(),
 
@@ -405,6 +461,104 @@ export const intentSchema = z
         steering: z.enum(steeringLevels).default("advise"),
         /** Ask dual-band devices with a strong signal to leave 2.4 GHz. */
         prefer_5g: z.boolean().default(false),
+      })
+      .strict()
+      .default({}),
+
+    /**
+     * Remote access: phones and laptops reach home over WireGuard, as a zone
+     * of their own with an access like a network's. Each client's private
+     * key stays with the client; only its public key is kept.
+     */
+    vpn: z
+      .object({
+        enabled: z.boolean().default(false),
+        port: z.number().int().min(1).max(65535).default(51820),
+        /** The clients' addresses. */
+        subnet: ipv4Subnet.default("10.0.99.0/24"),
+        /** Where clients connect to: a name or an address; unset, the dynamic DNS name. */
+        endpoint: z.string().regex(/^[A-Za-z0-9.:-]+$/, "a name or an address").optional(),
+        /** The router's; made when remote access is turned on. */
+        private_key: wgKey.optional(),
+        access: accessSchema.default({ internet: true, networks: [], router: "full" }),
+        clients: z
+          .array(
+            z
+              .object({
+                id: z.string().regex(/^c\d{1,3}$/, "an id like c1"),
+                name: z.string().min(1, "required").max(32),
+                public_key: wgKey,
+                /** Its address in the subnet: .2 to .254, fixed so its config keeps working. */
+                host: z.number().int().min(2).max(254),
+                /** Everything through home, or only home's networks. */
+                route: z.enum(vpnRoutes).default("home"),
+              })
+              .strict()
+          )
+          .default([]),
+      })
+      .strict()
+      .default({}),
+
+    /**
+     * VPN providers (Mullvad, Proton, …): tunnels a network's internet can
+     * go out through (its Internet line), from the provider's .conf.
+     */
+    tunnels: z
+      .array(
+        z.union([
+          z
+            .object({
+              id: tunnelId,
+              name: tunnelName,
+              type: z.literal("wireguard").default("wireguard"),
+              private_key: wgKey,
+              address: ipv4WithPrefix,
+              /** The provider's DNS servers: the networks out through it use them. */
+              dns: z.array(dnsServer).optional(),
+              peer: z
+                .object({ public_key: wgKey, preshared_key: wgKey.optional(), endpoint: hostPort })
+                .strict(),
+            })
+            .strict(),
+          z
+            .object({
+              id: tunnelId,
+              name: tunnelName,
+              type: z.literal("openvpn"),
+              /** The provider's .ovpn, as given (its keys inline). */
+              config: z.string().min(1, "paste the provider's .ovpn").refine((c) => /^\s*remote\s/m.test(c), "no remote in it"),
+              /** Where the provider asks for them. */
+              username: z.string().optional(),
+              password: z.string().optional(),
+              dns: z.array(dnsServer).optional(),
+            })
+            .strict(),
+        ])
+      )
+      .default([]),
+
+    /** Other sites linked over WireGuard: each reaches the other's networks, as its access says. */
+    sites: z
+      .object({
+        private_key: wgKey.optional(),
+        port: z.number().int().min(1).max(65535).default(51821),
+        access: accessSchema.default({ internet: false, networks: [], router: "services" }),
+        peers: z
+          .array(
+            z
+              .object({
+                id: z.string().regex(/^s\d{1,2}$/, "an id like s1"),
+                name: z.string().min(1, "required").max(32),
+                public_key: wgKey,
+                /** Where it is; unset, it connects to this site. */
+                endpoint: hostPort.optional(),
+                /** Its networks, which this site routes to it. */
+                subnets: z.array(ipv4Cidr).min(1, "at least one range"),
+              })
+              .strict()
+          )
+          .default([]),
       })
       .strict()
       .default({}),
@@ -476,7 +630,7 @@ export const intentSchema = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, path, message });
     intent.networks.forEach((network, i) => {
       const line = network.line?.connection;
-      if (line && !intent.internet.connections.some((c) => c.id === line)) {
+      if (line && !intent.internet.connections.some((c) => c.id === line) && !intent.tunnels.some((t) => t.id === line)) {
         issue(["networks", i, "line", "connection"], "pick a connection");
       }
     });
@@ -541,6 +695,31 @@ export const intentSchema = z
       }
     });
     const ids = intent.networks.map((n) => n.id);
+    // The VPN's zones, as targets of an access: its clients, the linked sites.
+    const zones = [...(intent.vpn.enabled ? ["vpn"] : []), ...(intent.sites.peers.length ? ["sites"] : [])];
+    if (intent.vpn.enabled && !intent.vpn.private_key) issue(["vpn", "private_key"], "required");
+    if (intent.sites.peers.length && !intent.sites.private_key) issue(["sites", "private_key"], "required");
+    intent.vpn.clients.forEach((client, i) => {
+      if (intent.vpn.clients.slice(0, i).some((c) => c.host === client.host)) {
+        issue(["vpn", "clients", i, "host"], "another client has this address");
+      }
+    });
+    if (intent.vpn.enabled && intent.networks.some((n) => n.subnet === intent.vpn.subnet)) {
+      issue(["vpn", "subnet"], "a network uses this range");
+    }
+    const local = [...intent.networks.map((n) => n.subnet), ...(intent.vpn.enabled ? [intent.vpn.subnet] : [])];
+    intent.sites.peers.forEach((site, i) =>
+      site.subnets.forEach((range) => {
+        const mine = local.find((l) => overlaps(l, range));
+        if (mine) issue(["sites", "peers", i, "subnets"], `${range} overlaps this site's ${mine}`);
+      })
+    );
+    const accessOf = (path: (string | number)[], access: { networks: string[] }, own: string) =>
+      access.networks.forEach((id) => {
+        if (id === own || (!ids.includes(id) && !zones.includes(id))) issue([...path, "access", "networks"], `no network "${id}"`);
+      });
+    if (intent.vpn.enabled) accessOf(["vpn"], intent.vpn.access, "vpn");
+    if (intent.sites.peers.length) accessOf(["sites"], intent.sites.access, "sites");
     intent.wifi.forEach((wifi, i) => {
       if (!ids.includes(wifi.network)) {
         issue(["wifi", i, "network"], "pick a network");
@@ -582,7 +761,7 @@ export const intentSchema = z
       network.access.networks.forEach((id) => {
         if (id === network.id) {
           issue(["networks", i, "access", "networks"], "a network always reaches itself");
-        } else if (!ids.includes(id)) {
+        } else if (!ids.includes(id) && !zones.includes(id)) {
           issue(["networks", i, "access", "networks"], `no network "${id}"`);
         }
       });

@@ -8,6 +8,7 @@ import { dns } from "./features/dns";
 import { firewall } from "./features/firewall";
 import { internet } from "./features/internet";
 import { mesh } from "./features/mesh";
+import { vpn } from "./features/vpn";
 import { network } from "./features/network";
 import { roles } from "./features/roles";
 import { system } from "./features/system";
@@ -27,6 +28,7 @@ const features: Feature[] = [
   wifi,
   airtime,
   mesh,
+  vpn,
   discovery,
   roles,
   // Last: fixes layered over everything else (src/intent/patches).

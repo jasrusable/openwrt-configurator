@@ -89,7 +89,31 @@ export const getFinaliseCommands = ({
     "commit"
   ),
   "reload_config",
+  ...protocolRefreshCommands(state),
 ];
+
+/**
+ * netifd learns its protocol handlers (/lib/netifd/proto/*.sh) only when it
+ * starts: one a package installed by this run (wireguard, batadv) is unknown
+ * to it, and reload_config does not change that, so the interface would stay
+ * down until a reboot (verified on 25.12.5). So when a declared interface's
+ * protocol is one netifd does not know, it is restarted, once, here: inside
+ * the confirm window, so a restart that cut the device off is rolled back.
+ */
+export const protocolRefreshCommands = (state: OpenWrtState) => {
+  const protos = [
+    ...new Set(
+      (state.config.network?.interface ?? []).flatMap((i: { proto?: unknown }) =>
+        typeof i.proto === "string" ? [i.proto] : []
+      )
+    ),
+  ];
+  return protos.length
+    ? [
+        `for p in ${protos.map(shellQuote).join(" ")}; do ubus call network get_proto_handlers | grep -q "\\"$p\\":" || { /etc/init.d/network restart; break; }; done`,
+      ]
+    : [];
+};
 
 /**
  * Hooks that must not run until the new config is actually live.
