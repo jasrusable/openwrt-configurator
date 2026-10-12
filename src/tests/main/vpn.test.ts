@@ -145,9 +145,22 @@ test("an .ovpn is read as OpenVPN reads it: quoted, --prefixed and setenv opt sp
   const typical = [
     "client", "dev tun", "proto udp", "remote nl1.example.com 1194", "resolv-retry infinite", "nobind",
     "persist-key", "persist-tun", "remote-cert-tls server", "cipher AES-256-GCM", "auth SHA512", "verb 3",
-    "# a comment", "; another", "auth-user-pass", "<ca>", "-----BEGIN CERTIFICATE-----", "up and away", "-----END CERTIFICATE-----", "</ca>",
-    "key-direction 1", "<tls-auth>", "abc", "</tls-auth>",
+    "# a comment", "; another", "auth-user-pass", "<ca>", "-----BEGIN CERTIFICATE-----", "MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF", "-----END CERTIFICATE-----", "</ca>",
+    "key-direction 1", "<tls-auth>", "#", "# 2048 bit OpenVPN static key", "#", "-----BEGIN OpenVPN Static key V1-----", "e685bdaf659a25a200e2b9e4c2ee2b9a", "-----END OpenVPN Static key V1-----", "</tls-auth>",
   ].join("\n");
   t.deepEqual(ovpnUnsafe(typical), [], "certificate content is data, not options");
-  t.deepEqual(ovpnUnsafe("client\nremote a 1\n<script>\nx\n</script>\n"), ["script"], "an unknown block is refused");
+  t.deepEqual(ovpnUnsafe("client\nremote a 1\n<script>\nx\n</script>\n"), ["script", "<script> content"], "an unknown block is refused");
+});
+
+test("an .ovpn may not read a file of the router's, nor blur where its key blocks end", (t) => {
+  const base = "client\nremote a.example.com 1194\n";
+  t.deepEqual(ovpnUnsafe(`${base}auth-user-pass /etc/shadow\n`), ["auth-user-pass from a file"]);
+  t.deepEqual(ovpnUnsafe(`${base}ca /etc/ssl/x.pem\nhttp-proxy p 8080 /etc/shadow\n`), ["ca from a file", "http-proxy"]);
+  t.deepEqual(ovpnUnsafe(`${base}auth-user-pass\ntls-auth [inline] 1\n`), [], "the console and inline are fine");
+  t.deepEqual(ovpnUnsafe(`${base} <ca>\nup /bin/sh\n</ca>\n`), ["<ca>", "up", "</ca>"], "a tag that is not exact is no tag");
+  t.deepEqual(ovpnUnsafe(`${base}<ca>\nMIIBIjANBgkqhkiG9w0BAQEFAAOC\nup /bin/sh\n</ca>\n`), ["<ca> content"]);
+  // A quoted auth-user-pass is still the router's to set: stripped from what is written.
+  const file = ovpnFile({ id: "tun1", config: `${base}"auth-user-pass"\n`, username: "u" });
+  t.is(file.match(/auth-user-pass/g)?.length, 1);
+  t.regex(file, /auth-user-pass \/etc\/openvpn\/tun1\.auth/);
 });

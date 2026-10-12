@@ -8,7 +8,7 @@
 // unreachable rule after it is the kill switch. Zones and the WAN rules are
 // the firewall feature's.
 import { Feature, onRouter } from "../fragment";
-import { ovpnSafeLines } from "../ovpn";
+import { ovpnOption, ovpnSafeLines } from "../ovpn";
 import { clientAddresses, vpnRouterAddresses } from "../vpn";
 import type { Intent } from "../schema";
 
@@ -31,8 +31,9 @@ type OvpnTunnel = Extract<Tunnel, { type: "openvpn" }>;
  */
 export const ovpnFile = (tunnel: Pick<OvpnTunnel, "id" | "config" | "username">) =>
   [
+    // The router's own, set below: read as OpenVPN reads them, so no spelling slips past.
     ...ovpnSafeLines(tunnel.config).filter(
-      (line) => !/^\s*(dev|dev-type|auth-user-pass|route-nopull|redirect-gateway|route)\b/.test(line)
+      (line) => !["dev", "dev-type", "auth-user-pass", "route-nopull", "redirect-gateway", "route", "route-ipv6"].includes(ovpnOption(line) ?? "")
     ),
     "",
     "# Set by openwrt-configurator: its own device, no routes from the provider, no scripts.",
