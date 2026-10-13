@@ -2,7 +2,8 @@ import test from "ava";
 import { sampleIntent } from "../helpers/fixtures";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { DeviceNow, deviceDiff } from "../../applyDiff";
+import { DeviceRead, deviceDiff } from "../../applyDiff";
+import { DeviceNow, stateHash, uciLines } from "../../deviceState";
 import { deviceSchemaSchema } from "../../deviceSchema";
 import { getOpenWrtState } from "../../engine/getOpenWrtState";
 import { compileIntent } from "../../intent/compile";
@@ -11,6 +12,12 @@ import { OpenWrtState } from "../../engine/openWrtState";
 import { nodePlatform } from "../../platforms/node";
 import { provisionableDevices } from "../../apply/provisionConfig";
 import { declaredConfigs } from "../../engine/uci";
+import { AppliedStamp, originsOf, stampOf } from "../../applyChanges";
+import { durationWords, effectsOf, impactFacts, secondsOf, worst } from "../../applyImpact";
+import { buildApplyPlan } from "../../applyPlan";
+import { planText } from "../../applyPlanText";
+import { ok, err } from "../../result";
+import { problem } from "../../problem";
 
 const root = join(__dirname, "..", "..", "..");
 const sample = (): Intent =>
@@ -35,11 +42,18 @@ const appliedWith = (state: OpenWrtState): DeviceNow => ({
   managed: state.files.map((f) => f.path),
   hashes: Object.fromEntries(state.files.map((f) => [f.path, written(f.content)])),
 });
-const diff = (state: OpenWrtState, now: DeviceNow) =>
-  deviceDiff({ hostname: "x", state, now, sha256: nodePlatform.sha256 }) as Extract<
-    ReturnType<typeof deviceDiff>,
-    { config: unknown }
-  >;
+type Read = Extract<ReturnType<typeof deviceDiff>, { config: unknown }>;
+/** The lines, packages and files that change, without why or what they are called (tested below). */
+const diff = (state: OpenWrtState, now: DeviceNow) => {
+  const d = deviceDiff({ hostname: "x", state, now, sha256: nodePlatform.sha256 }) as Read;
+  return {
+    config: d.config.map(({ key, before, after, renamedFrom }): { key: string; before?: string; after?: string; renamedFrom?: string } =>
+      renamedFrom ? { key, renamedFrom } : { key, before, after }
+    ),
+    packages: { added: d.packages.added, removed: d.packages.removed },
+    files: d.files.map(({ path, change }) => ({ path, change })),
+  };
+};
 
 test("a device already as the settings say: nothing changes", (t) => {
   for (const hostname of Object.keys(models)) {
@@ -170,4 +184,184 @@ test("sections with little in common are removed and added, not renamed", (t) =>
   });
   t.false(d.config.some((c) => c.renamedFrom));
   t.true(d.config.some((c) => c.key === "dropbear.old" && c.after === undefined));
+});
+
+const classified = ({
+  hostname = "home-router",
+  intent,
+  now,
+  last,
+  stamp,
+}: {
+  hostname?: string;
+  intent: Intent;
+  now: DeviceNow;
+  last?: OpenWrtState;
+  stamp?: AppliedStamp;
+}) => {
+  const plan = compileIntent(intent);
+  const deviceConfig = provisionableDevices(plan).ready.find((d) => d.hostname === hostname)!;
+  const deviceSchema = deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", `${models[hostname]}.json`), "utf8")));
+  return deviceDiff({
+    hostname,
+    state: getOpenWrtState({ plan, deviceConfig, deviceSchema }),
+    now,
+    sha256: nodePlatform.sha256,
+    ...(last ? { last: { state: last } } : {}),
+    ...(stamp ? { stamp } : {}),
+    origins: originsOf(plan, deviceConfig, deviceSchema),
+    intent,
+  }) as Read;
+};
+const stampFor = (state: OpenWrtState) => stampOf(uciLines(declaredConfigs(state.config)), state, nodePlatform.sha256);
+const whys = (d: Read) => Object.fromEntries(d.config.map((c) => [c.key, c.why]));
+
+test("each change says why: an edit, an app update, or a change on the device", (t) => {
+  const today = stateFor(sample(), "home-router");
+  // What an older version of the app wrote for the same settings: one option more.
+  const older: OpenWrtState = {
+    ...today,
+    config: {
+      ...today.config,
+      dropbear: { dropbear: today.config.dropbear.dropbear.map((s) => ({ ...s, Interface: "lan" })) },
+    },
+  };
+  const now = appliedWith(older);
+  // And by hand since: wan's forward policy.
+  const drifted: DeviceNow = {
+    ...now,
+    config: {
+      ...now.config,
+      firewall: now.config.firewall.map((s) => (s.name === "wan" ? { ...s, options: { ...s.options, forward: "ACCEPT" } } : s)),
+    },
+  };
+  const edited = sample();
+  edited.networks[1].subnet = "10.0.21.0/24";
+  const d = classified({ intent: edited, now: drifted, last: today, stamp: stampFor(older) });
+  t.like(whys(d), { "network.guest.ipaddr": "edit", "dropbear.main.Interface": "update", "firewall.wan.forward": "device" });
+  // Without a stamp the last two cannot be told apart; with nothing applied yet everything is new.
+  t.like(whys(classified({ intent: edited, now: drifted, last: today })), {
+    "network.guest.ipaddr": "edit",
+    "dropbear.main.Interface": "unknown",
+    "firewall.wan.forward": "unknown",
+  });
+  t.true(classified({ intent: edited, now: drifted }).config.every((c) => c.why === "first"));
+});
+
+test("a stamp holds hashes only, and never a secret's", (t) => {
+  const state = stateFor(sample(), "home-ap-1");
+  const stamp = stampFor(state);
+  t.false(Object.keys(stamp.lines).some((key) => key.endsWith(".key")));
+  t.true(Object.values(stamp.lines).every((hash) => /^[0-9a-f]{64}$/.test(hash)));
+  t.false(JSON.stringify(stamp).includes(sample().wifi.networks[0].password));
+});
+
+test("a change is named for the setting it comes from", (t) => {
+  const edited = sample();
+  edited.wifi.networks[0].ssid = "Renamed";
+  const d = classified({ hostname: "home-ap-1", intent: edited, now: appliedWith(stateFor(sample(), "home-ap-1")), last: stateFor(sample(), "home-ap-1") });
+  const ssid = d.config.filter((c) => c.key.endsWith(".ssid"));
+  t.true(ssid.length > 0);
+  t.true(ssid.every((c) => c.setting === "wifi.networks.0.ssid" && c.why === "edit" && !c.label.includes("wireless.")), JSON.stringify(ssid));
+});
+
+test("what applying is noticed as, and how long it takes", (t) => {
+  const facts = impactFacts(stateFor(sample(), "home-ap-1"), "ap");
+  const [radio, network] = [Object.keys(facts.radios)[0], Object.keys(facts.networks)[0]];
+  const nothing = { added: [], removed: [] };
+  const quiet = { hostname: "ap", keys: ["firewall.wan.forward"], packages: nothing, files: [], facts };
+  t.deepEqual(effectsOf(quiet), []);
+  // 25.12's hostapd.uc: a radio option restarts the radio; a network's, only that network.
+  const ssid = effectsOf({ ...quiet, keys: [`wireless.${network}.ssid`] });
+  t.deepEqual(ssid.map((e) => e.disruption), ["reconnect"]);
+  t.regex(ssid[0].text, /networks that change on ap restart.*other networks stay up/);
+  const channel = effectsOf({ ...quiet, keys: [`wireless.${radio}.channel`, `wireless.${network}.ssid`] });
+  t.is(channel.length, 1, "the network goes with its radio");
+  t.regex(channel[0].text, /^Wi-Fi restarts on ap's [\d.]+ GHz radio: every device on it reconnects/);
+  const loud = { ...quiet, keys: ["dhcp.lan.start"], packages: { added: ["a", "b"], removed: [] } };
+  t.true(effectsOf(loud).some((e) => e.text.startsWith("DNS and DHCP restart")));
+  t.true(effectsOf(loud).some((e) => e.text.startsWith("Installs 2 packages")));
+  t.is(worst(effectsOf(loud)), "brief");
+  const wifi = { ...quiet, keys: [`wireless.${radio}.channel`] };
+  t.true(secondsOf(wifi) > secondsOf(quiet));
+  t.is(durationWords([secondsOf(quiet)]), "about a minute");
+  t.is(durationWords([secondsOf(loud), secondsOf(loud)]), "about 3 minutes");
+});
+
+test("a state hash changes with the device, and never depends on a secret", (t) => {
+  const now = appliedWith(stateFor(sample(), "home-ap-1"));
+  const hash = (n: DeviceNow) => stateHash(n, nodePlatform.sha256);
+  const withOption = (option: string, value: string): DeviceNow => ({
+    ...now,
+    config: { ...now.config, wireless: now.config.wireless.map((s) => (s.type === "wifi-iface" ? { ...s, options: { ...s.options, [option]: value } } : s)) },
+  });
+  t.is(hash(now), hash({ ...now, installed: [...now.installed].reverse() }));
+  t.not(hash(now), hash(withOption("ssid", "Other")));
+  t.not(hash(now), hash({ ...now, installed: [...now.installed, "tcpdump"] }));
+  t.is(hash(now), hash(withOption("key", "another-secret")), "a key's value is not in it");
+});
+
+/** A device read for the plan: the sample applied, then `edit` made, the device changed by `drift`. */
+const readOf = ({
+  hostname = "home-ap-1",
+  edit = (i: Intent) => i,
+  drift = (n: DeviceNow) => n,
+  space,
+}: {
+  hostname?: string;
+  edit?: (intent: Intent) => Intent;
+  drift?: (now: DeviceNow) => DeviceNow;
+  space?: { needKb: number; freeKb: number };
+}): DeviceRead => {
+  const applied = stateFor(sample(), hostname);
+  const now = drift(appliedWith(applied));
+  return {
+    ...classified({ hostname, intent: edit(sample()), now, last: applied, stamp: stampFor(applied) }),
+    hash: stateHash(now, nodePlatform.sha256),
+    ...(space ? { space } : {}),
+  };
+};
+
+test("the plan: items by source, the most noticed first, with what to acknowledge", (t) => {
+  const edit = (i: Intent) => {
+    i.wifi.networks[0].ssid = "Renamed";
+    return i;
+  };
+  const drift = (n: DeviceNow): DeviceNow => ({
+    ...n,
+    config: { ...n.config, system: n.config.system.map((s) => ({ ...s, options: { ...s.options, zonename: "Somewhere" } })) },
+  });
+  const ap = readOf({ edit, drift, space: { needKb: 2048, freeKb: 1024 } });
+  const plan = buildApplyPlan({
+    reads: [ok(ap), err(problem("unreachable", "No answer", { hostname: "home-router" }))],
+    edits: [{ path: "wifi.networks.0.ssid", label: ["Wi-Fi", "“Home”", "Name"], kind: "changed", before: "Home", after: "Renamed" }],
+    readAt: 1,
+  });
+  const [first] = plan.items;
+  t.is(first.source, "edit");
+  t.is(first.effect.disruption, "reconnect");
+  t.is(first.change, "Home → Renamed");
+  // Its section is named for the SSID, so it is renamed too: renames after the configs.
+  t.deepEqual(first.lines[0].groups.map((g) => g.title), ["wireless", "renamed"]);
+  const drifted = plan.items.find((i) => i.source === "drift")!;
+  t.is(drifted.title, "Changed on home-ap-1");
+  t.deepEqual(plan.needs.map((n) => n.kind), ["disruption", "drift", "flash"]);
+  const [dropping] = plan.needs;
+  t.true(dropping.kind === "disruption" && dropping.effects.every((e) => /reconnect/.test(e)), "only what drops devices needs a tick");
+  t.regex(plan.summary.blocked ?? "", /too little flash/);
+  t.deepEqual(plan.unread, [{ device: "home-router", error: "No answer" }]);
+  t.deepEqual(plan.verify, { "home-ap-1": ap.hash });
+  t.regex(plan.summary.verdict, /^\d+ changes on home-ap-1\. Devices may drop off .* Replaces \d+ changes? made on the devices .* home-router could not be read/);
+  // The CLI says the same plan.
+  const text = planText(plan);
+  t.true(text.startsWith(plan.summary.verdict));
+  t.true(text.includes("[Your edit] Wi-Fi › “Home” › Name: Home → Renamed"));
+  t.false(text.includes(sample().wifi.networks[0].password), "no secret in words");
+});
+
+test("the plan: nothing to change is up to date", (t) => {
+  const plan = buildApplyPlan({ reads: [ok(readOf({}))], edits: [], readAt: 1 });
+  t.deepEqual(plan.items, []);
+  t.deepEqual(plan.needs, []);
+  t.is(plan.summary.verdict, "Everything is up to date: applying would change nothing.");
 });

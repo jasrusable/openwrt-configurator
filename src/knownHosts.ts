@@ -48,7 +48,7 @@ export const hostKeyAlgorithms = (type: string) =>
 /** A key pinned in a device's facts (found by src/locate.ts) did not match. */
 export const pinnedKeyChangedMessage = (host: string) =>
   `The SSH host key at ${host} is not the one on record for this device, so the connection was refused: ` +
-  `it may be another machine. If the device was reflashed, remove it from Hardware and add it again.`;
+  `it may be another machine. If the device was reset or flashed clean, take it back from its page in Hardware.`;
 
 export const hostKeyChangedMessage = (host: string, file: string) =>
   `The SSH host key for ${host} has changed, so the connection was refused: ` +

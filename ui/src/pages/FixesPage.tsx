@@ -4,7 +4,8 @@
 // a fix (not a tuning) asks first. Your settings are never changed by a fix:
 // a setting a fix overrides keeps your value, which applies again once the
 // fix does not.
-import { Badge, Button, Group, Stack, Switch, Text, Tooltip } from "@mantine/core";
+import { Badge, Button, Group, Stack, Switch, Text } from "@mantine/core";
+import { Hint } from "../kit/Hint";
 import { useState } from "react";
 import { placeName } from "../../../src/intent/places";
 import type { FixView } from "../../../src/intent/patches/status";
@@ -47,9 +48,9 @@ const Fix = ({ fix }: { fix: FixView }) => {
       description={fix.why}
       actions={
         fix.required ? (
-          <Tooltip label="Without it something breaks silently, so it stays on." withArrow>
+          <Hint label="Without it something breaks silently, so it stays on.">
             <span>{control}</span>
-          </Tooltip>
+          </Hint>
         ) : (
           control
         )
@@ -97,12 +98,12 @@ export const FixesPage = () => {
   return (
     <SettingsPage
       title={placeName("patches")}
-      description="What this app layers over OpenWrt for known problems, with the reason and sources for each. A patch never changes your settings: one it overrides keeps your value, which applies again once the patch goes."
+      description="Patches that change a setting, with the reason and sources for each. Your value is kept, and applies again once the patch goes."
     >
       {fixes.map((fix) => (
         <Fix key={fix.id} fix={fix} />
       ))}
-      {!fixes.length && <Text c="dimmed">No fixes.</Text>}
+      {!fixes.length && <Text c="dimmed">No patch changes a setting.</Text>}
     </SettingsPage>
   );
 };

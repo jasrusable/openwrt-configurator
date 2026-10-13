@@ -21,6 +21,7 @@ import {
   seededConfigPaths,
   servicesRecords,
 } from "../getDeviceScript";
+import { readDeviceNow, stateHash } from "../deviceState";
 import { err, ok } from "../result";
 import { knownConfigs } from "./knownConfigs";
 import { DeviceRun, DeviceRunOptions, failure, guarded, PhaseResult, step } from "./run";
@@ -48,6 +49,14 @@ export const planDevice = (options: DeviceRunOptions): Promise<PhaseResult> =>
     if (deviceModelId !== undefined && boardJson.model?.id !== deviceModelId) {
       return err(
         failure(`Mismatching device model id. Expected ${deviceModelId} but found ${boardJson.model?.id} in /etc/board.json`)
+      );
+    }
+
+    // Reviewed from what the device held then: one changed since (by hand,
+    // another tool, another apply) would have changes nobody saw.
+    if (options.verify && stateHash(await readDeviceNow(ssh, []), options.verify.sha256) !== options.verify.hash) {
+      return err(
+        failure(`${hostname} changed since its changes were reviewed: review them again. Nothing was changed.`, {}, "plan-stale")
       );
     }
 

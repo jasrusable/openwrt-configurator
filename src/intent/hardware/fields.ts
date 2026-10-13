@@ -1,5 +1,6 @@
 // What each hardware setting is called and does, for people (fields.ts).
 import type { FieldInfo } from "../feature";
+import { where } from "../places";
 
 export const hardwareFields: FieldInfo[] = [
   { path: "hardware", label: "Hardware" },
@@ -24,6 +25,13 @@ export const hardwareFields: FieldInfo[] = [
     openwrt: "system description",
     explain:
       "Shown as the device's description on LuCI's status page, to tell access points apart.",
+  },
+  {
+    path: "hardware.*.firmware",
+    label: "Firmware",
+    description: "Follow the network's release, hold, or pin one.",
+    explain:
+      `Unset, it upgrades with the rest of the network (${where("firmware")}). Hold keeps what it runs; a pinned release is what it moves to, older ones too (a downgrade, ticked when upgrading).`,
   },
   { path: "hardware.*.radios", label: "Radios" },
   {

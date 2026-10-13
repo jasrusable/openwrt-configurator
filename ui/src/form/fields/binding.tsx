@@ -1,7 +1,8 @@
 // What every bound field shares: its row (label, ⓘ, error), the rules for
 // its setting (src/intent/choices.ts), and reading and writing its value in
 // the draft. Each kind of control is in its own file beside this.
-import { Anchor, Badge, Box, Button, HoverCard, Stack, Text, Tooltip } from "@mantine/core";
+import { Anchor, Badge, Box, Button, Stack, Text } from "@mantine/core";
+import { Hint } from "../../kit/Hint";
 import { cloneElement, isValidElement, ReactNode } from "react";
 import { SettingRow, useRowAria } from "../../kit/layout";
 import { availability, Availability, inUse } from "../../../../src/intent/choices";
@@ -56,13 +57,9 @@ const OverrideChip = ({ override }: { override: Override }) => {
   const { patch } = override;
   const reference = patch.references[0];
   return (
-    <HoverCard width={300} withArrow openDelay={100} closeDelay={250} shadow="md">
-      <HoverCard.Target>
-        <Badge variant="light" color="orange" size="xs" radius="sm" style={{ textTransform: "none", cursor: "help" }} tabIndex={0}>
-          Fix
-        </Badge>
-      </HoverCard.Target>
-      <HoverCard.Dropdown>
+    <Hint
+      width={300}
+      label={
         <Stack gap={6}>
           <Text size="xs">{overrideText(override)}</Text>
           {reference && (
@@ -76,8 +73,12 @@ const OverrideChip = ({ override }: { override: Override }) => {
             </Button>
           )}
         </Stack>
-      </HoverCard.Dropdown>
-    </HoverCard>
+      }
+    >
+      <Badge variant="light" color="orange" size="xs" radius="sm" style={{ textTransform: "none", cursor: "help" }} tabIndex={0}>
+        Fix
+      </Badge>
+    </Hint>
   );
 };
 
@@ -126,13 +127,13 @@ export const Named = ({ children }: { children: ReactNode }) => {
  */
 export const Because = ({ reason, children }: { reason?: string; children: ReactNode }) =>
   reason ? (
-    <Tooltip label={reason} multiline w={280} withArrow events={{ hover: true, focus: true, touch: true }}>
+    <Hint label={reason} width={280}>
       <Box component="span" tabIndex={0} style={{ display: "inline-block", cursor: "not-allowed" }}>
         <Box component="span" style={{ display: "contents", pointerEvents: "none" }}>
           {children}
         </Box>
       </Box>
-    </Tooltip>
+    </Hint>
   ) : (
     <>{children}</>
   );
@@ -150,12 +151,12 @@ export const segments = <T extends string>(options: (Option<T> & { reason?: stri
     value,
     disabled,
     label: reason ? (
-      <Tooltip label={reason} multiline w={260} withArrow events={{ hover: true, focus: true, touch: true }}>
+      <Hint label={reason} width={260}>
         {/* Over the segment's padding too, so hovering anywhere on it shows why. */}
         <span style={{ pointerEvents: "auto", display: "block", margin: "-3px -10px", padding: "3px 10px" }}>
           {label}
         </span>
-      </Tooltip>
+      </Hint>
     ) : (
       label
     ),

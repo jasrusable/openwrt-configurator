@@ -9,6 +9,7 @@ import { join } from "path";
 import { AgentRecord, decodeRecords, encodeRecords } from "../../agent/records";
 import { stateOf } from "../helpers/fixtures";
 import { agentScript, bootScript } from "../../agent/script";
+import { appliedKeepList, appliedMarker } from "../../agent/paths";
 import { tempDir } from "../helpers/tempDir";
 
 const stub = (dir: string, name: string, body: string) => {
@@ -110,9 +111,10 @@ const expectSleeping = (d: ReturnType<typeof device>) => {
 
 const onc = (dir: string) => readdirSync(dir).filter((name) => name.startsWith("onc-"));
 
-test("armed, then disarmed and done: the config stays and nothing is left behind", async (t) => {
+test("armed, then disarmed and done: the config stays, marked applied for an upgrade to keep, and nothing is left behind", async (t) => {
   const d = device();
   await armed(d, "--timeout", "30", "--mode", "reload");
+  t.false(existsSync(`${d.root}${appliedMarker}`), "not applied until confirmed");
   t.true(existsSync(`${d.root}/etc/onc/rollback/t1/config/network`), "a boot-time copy on flash");
   t.true(lstatSync(`${d.root}/etc/rc.d/S11onc-rollback`).isSymbolicLink(), "its boot script enabled");
   t.true((await d.run("disarm")).includes("ONC_DISARMED"));
@@ -122,6 +124,9 @@ test("armed, then disarmed and done: the config stays and nothing is left behind
   t.false(existsSync(`${d.root}/etc/onc/rollback`), "a restart keeps the confirmed config");
   t.is(readFileSync(`${d.root}/etc/config/network`, "utf8"), "config interface 'wan'\n");
   t.notRegex(d.log(), /reload_config|^reboot/m);
+  // An image's first-boot defaults leave this device's settings alone after an upgrade that keeps them.
+  t.true(existsSync(`${d.root}${appliedMarker}`));
+  t.is(readFileSync(`${d.root}${appliedKeepList}`, "utf8"), `${appliedMarker}\n`);
 });
 
 test("a wedged system log (logger never returns) cannot stall a rollback", async (t) => {

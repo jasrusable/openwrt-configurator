@@ -6,7 +6,7 @@
 // reads the devices fast.
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { NetworkStatus } from "../../../src/status/network";
-import { loadLatestRelease, loadNetworkStatus, pingFrom, rebootDevice, restartService, restartWifi, runSpeedTest, runWifiSurvey } from "./api";
+import { loadNetworkStatus, pingFrom, rebootDevice, restartService, restartWifi, runSpeedTest, runWifiSurvey } from "./api";
 
 export const statusKey = ["network-status"] as const;
 
@@ -55,6 +55,3 @@ export const usePing = () => useMutation({ mutationFn: ({ device, target }: { de
 /** Each access point's survey: on request, as a scan can briefly disturb its clients. */
 export const useWifiSurvey = () => useMutation({ mutationFn: runWifiSurvey });
 
-/** OpenWrt's latest release: asked once a day at most (the server keeps it). */
-export const useLatestRelease = () =>
-  useQuery({ queryKey: ["openwrt-release"], queryFn: loadLatestRelease, staleTime: 3_600_000, retry: false });

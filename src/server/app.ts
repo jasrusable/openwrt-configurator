@@ -7,12 +7,14 @@ import { HttpHandler, HttpRequest, HttpResponse, Platform } from "../platform";
 import { actionRoutes } from "./api/actions";
 import { devicesRoutes } from "./api/devices";
 import { discoverRoutes } from "./api/discover";
+import { firmwareRoutes } from "./api/firmware";
 import { intentRoutes } from "./api/intent";
 import { provisionRoutes } from "./api/provision";
 import { sessionRoutes } from "./api/session";
 import { staticFiles } from "./api/static";
 import { statusRoutes } from "./api/status";
 import { patchesRoutes } from "./api/patches";
+import { backupRoutes } from "./api/backup";
 import { Auth } from "./auth";
 import { ApiContext, refuse, router } from "./router";
 import { messageOf } from "../result";
@@ -53,7 +55,7 @@ export const uiHandler = ({
   const context: ApiContext = { intentPath, platform, statusDir, now };
   const notFound = async () => refuse("not-found", "Not found.");
   const api = router(
-    [intentRoutes, provisionRoutes, devicesRoutes, statusRoutes, discoverRoutes, actionRoutes, patchesRoutes].flatMap((routes) => routes(context)),
+    [intentRoutes, provisionRoutes, devicesRoutes, statusRoutes, discoverRoutes, actionRoutes, patchesRoutes, firmwareRoutes, backupRoutes].flatMap((routes) => routes(context)),
     notFound
   );
   const session = auth && router(sessionRoutes({ auth, platform, intentPath, attemptsDir: loginAttemptsDir, now }), notFound);

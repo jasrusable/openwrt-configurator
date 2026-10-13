@@ -91,6 +91,9 @@ const request = async ({
 const isTransient = (e: unknown) => (e as HttpError)?.transient === true;
 
 const ASU_BASE = "https://sysupgrade.openwrt.org";
+
+/** Where ASU serves a built image: what a device upgrading itself downloads. */
+export const asuImageUrl = (binDir: string, name: string) => `${ASU_BASE}/store/${binDir}/${name}`;
 const DOWNLOADS_BASE = "https://downloads.openwrt.org";
 
 const overviewSchema = z.object({
@@ -295,7 +298,7 @@ export const downloadImage = async ({
   >;
 }): Promise<{ sha256: string; size: number; magic: string }> => {
   platform.mkdirp(dirname(outPath));
-  const url = `${ASU_BASE}/store/${binDir}/${name}`;
+  const url = asuImageUrl(binDir, name);
 
   try {
     const { bytes, contentLength } = await platform.http.download(url, outPath);

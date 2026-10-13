@@ -1,7 +1,8 @@
 // Page structure, in the style of macOS System Settings: a page is a title
 // and grouped sections; a section is a card of rows; a row is a label (and
 // an explanation) on the left, its control on the right.
-import { Anchor, Badge, Box, Group, HoverCard, Stack, Text, ThemeIcon, Title, Tooltip } from "@mantine/core";
+import { Anchor, Badge, Box, Group, Stack, Text, ThemeIcon, Title } from "@mantine/core";
+import { Hint } from "./Hint";
 import { IconInbox, IconInfoCircle } from "@tabler/icons-react";
 import { createContext, ReactNode, useContext, useId } from "react";
 import "./kit.css";
@@ -192,8 +193,18 @@ export const SettingRow = ({
           {(explain || openwrt) && (
             // A card that stays open while the pointer is on it, so a patch's
             // "why" link in the explainer can be followed.
-            <HoverCard width={320} withArrow openDelay={150} closeDelay={200} shadow="md">
-              <HoverCard.Target>
+            <Hint
+              label={
+                <Stack gap={6}>
+                  {explain && <Text size="xs">{withWhyLinks(explain)}</Text>}
+                  {openwrt && (
+                    <Text size="xs" ff="monospace" c="dimmed">
+                      OpenWrt: {openwrt}
+                    </Text>
+                  )}
+                </Stack>
+              }
+            >
                 <ThemeIcon
                   variant="transparent"
                   size={16}
@@ -203,24 +214,14 @@ export const SettingRow = ({
                 >
                   <IconInfoCircle size={14} stroke={1.6} />
                 </ThemeIcon>
-              </HoverCard.Target>
-              <HoverCard.Dropdown>
-                <Stack gap={6}>
-                  {explain && <Text size="xs">{withWhyLinks(explain)}</Text>}
-                  {openwrt && (
-                    <Text size="xs" ff="monospace" c="dimmed">
-                      OpenWrt: {openwrt}
-                    </Text>
-                  )}
-                </Stack>
-              </HoverCard.Dropdown>
-            </HoverCard>
+            </Hint>
           )}
           {marks}
         </Group>
         <Box id={ids.description}>
           {description && (
-            <Text size="xs" c="dimmed">
+            // A div: a description may hold a control, which a paragraph cannot.
+            <Text component="div" size="xs" c="dimmed">
               {description}
             </Text>
           )}
@@ -295,15 +296,12 @@ export const Experimental = ({ children }: { children: ReactNode }) => (
 
 /** Marks something built but not yet run on a real router, with why in a tooltip. */
 export const ExperimentalBadge = () => (
-  <Tooltip
+  <Hint
     label="Not yet tested on real routers: built to OpenWrt's documented setup and checked in containers only, so it may need fixes."
-    multiline
-    w={280}
-    withArrow
-    events={{ hover: true, focus: true, touch: true }}
+    width={280}
   >
     <Badge variant="light" color="orange" size="sm" tabIndex={0} style={{ cursor: "help" }}>
       Experimental
     </Badge>
-  </Tooltip>
+  </Hint>
 );

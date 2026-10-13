@@ -1,25 +1,11 @@
-import {
-  Alert,
-  AppShell,
-  Burger,
-  Button,
-  Center,
-  Group,
-  NavLink,
-  Paper,
-  PasswordInput,
-  Skeleton,
-  Stack,
-  Text,
-  ThemeIcon,
-  Tooltip,
-} from "@mantine/core";
+import { Alert, AppShell, Burger, Button, Center, Group, NavLink, Paper, PasswordInput, Skeleton, Stack, Text, ThemeIcon } from "@mantine/core";
+import { Hint } from "./kit/Hint";
 import { useDisclosure } from "@mantine/hooks";
 import { IconTopologyStar3 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { logIn, onLoginNeeded } from "./data/api";
-import { prefetchApplyDiff, useFreshDevices } from "./data/devices";
+import { logIn, NoSettingsError, onLoginNeeded } from "./data/api";
+import { prefetchApplyPlan, useFreshDevices } from "./data/devices";
 import { prefetchNetworkStatus } from "./data/status";
 import {
   createHashRouter,
@@ -32,10 +18,13 @@ import {
   useRouteError,
 } from "react-router";
 import { useIntent } from "./data/intent";
+import { FirstRun } from "./backup/FirstRun";
 import { useDraftValue } from "./form/draft";
 import { useDraftChanged } from "./form/draft";
 import { IntentForm, useSaveActions } from "./form/IntentForm";
 import { ProblemCount, ProblemsButton, usePageProblems } from "./form/Problems";
+import { useUpdates } from "./data/firmware";
+import { UpdateDot } from "./kit/UpdateDot";
 import { AppIcon } from "./kit/layout";
 import { groups, pages } from "./pages";
 import { ApplyModal } from "./provision/ApplyModal";
@@ -57,11 +46,11 @@ const SaveBar = () => {
             Not saved: {error}
           </Text>
           {/* On a phone, too little room for the reason: the word, the reason on a tap. */}
-          <Tooltip label={error} multiline w={260} withArrow events={{ hover: true, focus: true, touch: true }}>
+          <Hint label={error} width={260}>
             <Text size="sm" c="red" hiddenFrom="sm" tabIndex={0} aria-label={`Not saved: ${error}`}>
               Not saved
             </Text>
-          </Tooltip>
+          </Hint>
         </>
       ) : (
         dirty &&
@@ -87,6 +76,17 @@ const Mark = () => (
     <IconTopologyStar3 size={18} stroke={1.8} />
   </ThemeIcon>
 );
+
+/** Beside a page in the sidebar: its problems' count, and System's update dot. */
+const NavMarks = ({ id, problems }: { id: string; problems: number }) => {
+  const updates = useUpdates();
+  return (
+    <Group gap={6} wrap="nowrap">
+      {id === "system" && updates && <UpdateDot label={updates.text} />}
+      <ProblemCount count={problems} />
+    </Group>
+  );
+};
 
 const Shell = () => {
   const navigate = useNavigate();
@@ -135,7 +135,7 @@ const Shell = () => {
                   key={id}
                   label={label}
                   leftSection={<AppIcon icon={icon} color={color} />}
-                  rightSection={<ProblemCount count={problems(id)} />}
+                  rightSection={<NavMarks id={id} problems={problems(id)} />}
                   active={isActive(id)}
                   // A soft fill, as macOS selects among coloured icons.
                   className="onc-nav"
@@ -302,7 +302,7 @@ const Warmup = () => {
   useFreshDevices();
   useEffect(() => {
     void prefetchNetworkStatus(queryClient);
-    void prefetchApplyDiff(queryClient);
+    void prefetchApplyPlan(queryClient);
   }, [queryClient]);
   return null;
 };
@@ -331,6 +331,7 @@ export const App = () => {
     );
   }
   if (intent.isPending) return <Loading />;
+  if (intent.isError && intent.error instanceof NoSettingsError) return <FirstRun />;
   if (intent.isError) {
     return (
       <Center h="100vh">

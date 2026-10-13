@@ -3,7 +3,7 @@
 // the setting it was set from (plan/types.ts' Origin), so a patch that
 // changes it there marks that setting, by item (one SSID's fast roaming, not
 // every SSID's). Patches that add files, restarts or options no setting sets
-// mark nothing: System › Patches and each device's page list them.
+// mark nothing, and the pages do not list them.
 //
 // The intent is never changed by a patch: the user's value stays as stored,
 // and applies again as soon as the patch does not (switched off, its device

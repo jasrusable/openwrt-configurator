@@ -5,6 +5,8 @@ import { intentFileOrNothing } from "../settings";
 import { stateLayout } from "../store";
 import { CommandSpec, OptionSpec } from "../args";
 import { loopbackHosts } from "../platform";
+import { readReleases } from "../firmware/releases";
+import { finishSelfUpgrade } from "../firmware/self";
 import { uiHandler } from "../server/app";
 import { rpcdAuth } from "../server/auth";
 import { cgiRequest, cgiResponse } from "../server/cgi";
@@ -51,7 +53,7 @@ export const uiCommand = ({ platform, uiDir }: CliContext): CommandSpec => ({
     console.log(`Serving ${intentPath} at http://${options.host.includes(":") ? `[${options.host}]` : options.host}:${options.port}/`);
     // The Status pages' reads, kept beside the intent while this serves.
     const statusDir = stateLayout(intentPath).status;
-    void runCollector({ intentPath, platform, dir: statusDir });
+    void runCollector({ intentPath, platform, dir: statusDir, everyHour: () => readReleases({ intentPath, platform }) });
     await platform.serve(
       uiHandler({ intentPath, uiRoot: options.uiDir, platform, statusDir }),
       { host: options.host, port: Number(options.port) }
@@ -68,7 +70,10 @@ export const collectCommand = ({ platform }: CliContext): CommandSpec => ({
     { flags: "--dir <dir>", description: "where to keep what it reads", default: routerStatusDir },
   ],
   action: async ([intentPath], options) => {
-    await runCollector({ intentPath, platform, dir: options.dir });
+    // The first start after the router flashed itself: finished as that run would have (src/firmware/self.ts).
+    const finished = await finishSelfUpgrade({ intentPath, platform }).catch(() => undefined);
+    if (finished) console.error(finished.message);
+    await runCollector({ intentPath, platform, dir: options.dir, everyHour: () => readReleases({ intentPath, platform }) });
   },
 });
 

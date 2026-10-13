@@ -3,9 +3,9 @@
 // as a Result whose failure says what went wrong, so a page can say it and
 // the API answer with the right status. And the file as written, for what
 // works on any intent, valid or not (the editor, a diff, listing hardware).
-import { migrateIntent } from "./intent/migrations";
-import { Intent, intentSchema } from "./intent/schema";
-import { loadConfig, LoadedConfig } from "./loadConfig";
+import { formatOf, migrateIntent } from "./intent/migrations";
+import { Intent, intentSchema, intentVersion } from "./intent/schema";
+import { holdsSecretRefs, intentRefsRefused, loadConfig, LoadedConfig } from "./loadConfig";
 import { parseConfigJson } from "./parseJson";
 import { fileErrorCode, Platform } from "./platform";
 import { fail, Problem, problem } from "./problem";
@@ -50,6 +50,7 @@ export const loadSettings = async (intentPath: string, platform: Platform): Prom
 export const readIntentFile = (files: Pick<Platform, "readTextFile">, path: string): Result<unknown, Problem> => {
   try {
     const intent = migrateIntent(parseConfigJson(files.readTextFile(path), path));
+    if (holdsSecretRefs(intent)) throw new Error(intentRefsRefused);
     const parsed = intentSchema.safeParse(intent);
     return ok(parsed.success ? parsed.data : intent);
   } catch (thrown) {
@@ -61,4 +62,37 @@ export const readIntentFile = (files: Pick<Platform, "readTextFile">, path: stri
 export const intentFileOrNothing = (files: Pick<Platform, "readTextFile">, path: string): unknown => {
   const read = readIntentFile(files, path);
   return read.ok ? read.value : undefined;
+};
+
+/** Where the file a write replaced is kept, beside it. */
+export const backupPath = (path: string) => `${path}.bak`;
+
+/**
+ * The intent file written, owner-only (it holds passwords). The file it
+ * replaces is kept as `.bak` when `keepOld` says so: a restore or a reset
+ * replaces everything, and a file in an older format is not written over
+ * unseen (it was migrated in memory when read).
+ */
+export const writeIntentFile = (
+  files: Pick<Platform, "readTextFile" | "writeFileAtomic">,
+  path: string,
+  value: unknown,
+  { keepOld }: { keepOld: "always" | "older-format" }
+) => {
+  const old = (() => {
+    try {
+      return files.readTextFile(path);
+    } catch {
+      return undefined;
+    }
+  })();
+  const olderFormat = () => {
+    try {
+      return (formatOf(parseConfigJson(old!, path)) ?? intentVersion) < intentVersion;
+    } catch {
+      return false;
+    }
+  };
+  if (old !== undefined && (keepOld === "always" || olderFormat())) files.writeFileAtomic(backupPath(path), old, 0o600);
+  files.writeFileAtomic(path, JSON.stringify(value, null, 2) + "\n", 0o600);
 };

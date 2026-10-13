@@ -204,7 +204,7 @@ const BandsField = ({ index }: { index: number }) => (
   />
 );
 
-/** Only with WPA2, which has per-device passwords: greyed out otherwise, with why (choices.ts). */
+/** Only with WPA2, which has per-device passwords: not shown otherwise (choices.ts). */
 const ExtraPasswordsField = ({ index }: { index: number }) => (
   <PasswordListField
     name={`wifi.networks.${index}.extra_passwords`}

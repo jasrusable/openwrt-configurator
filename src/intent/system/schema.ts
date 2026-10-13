@@ -1,5 +1,6 @@
 // The site, and who logs in to its devices.
 import { z } from "zod";
+import { firmwareRelease } from "../validators";
 import { countries } from "./countries";
 import { timezones } from "./timezones";
 
@@ -67,5 +68,23 @@ export const systemSchema = z
       .object({ off: z.array(z.string()).default([]) })
       .strict()
       .default({}),
+    /**
+     * Which OpenWrt the devices run (System › Firmware): "stable" (the
+     * newest stable release of any series: it moves to the next series once
+     * that is out), a series ("25.12": its newest release, never the next
+     * series's) or one release ("25.12.5"). Unset, the oldest series this
+     * app supports. A device can hold or pin its own (hardware.*.firmware).
+     */
+    firmware: z
+      .object({
+        release: z
+          .union([
+            z.literal("stable"),
+            firmwareRelease(/^\d+\.\d+(\.\d+)?$/, "stable, a series like 25.12, or a release like 25.12.5"),
+          ])
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();

@@ -31,6 +31,7 @@ export const statusOf: Record<ProblemKind, number> = {
   unsupported: 405,
   conflict: 409,
   busy: 409,
+  "plan-stale": 409,
   "rate-limited": 429,
   internal: 500,
   unreachable: 502,

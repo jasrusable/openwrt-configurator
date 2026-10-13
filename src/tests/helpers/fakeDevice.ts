@@ -395,3 +395,81 @@ export const fakeDevice = ({
 
   return device;
 };
+
+/**
+ * A device as a firmware upgrade sees it (src/firmware/upgradeScript.ts's
+ * verbs): its free RAM, whether its download or sysupgrade's check fails, and
+ * the release it comes back on after a flash. `image` says whether its copy
+ * of the image is in RAM now.
+ */
+export const fakeUpgradeDevice = ({
+  release,
+  freeKb = 512 * 1024,
+  fetchFails = false,
+  checkFails = false,
+  comesBackOn,
+  local = false,
+  keepFails = false,
+}: {
+  release: string;
+  /** This app runs on it: its session is local. */
+  local?: boolean;
+  keepFails?: boolean;
+  freeKb?: number;
+  fetchFails?: boolean;
+  checkFails?: boolean;
+  /** After a flash: the release it answers on (unset, it never comes back). */
+  comesBackOn?: string;
+}) => {
+  const state = { release: release as string | undefined, image: false, script: false, verbs: [] as string[] };
+  const ok = (stdout: string): ExecResult => ({ stdout: `${stdout}\n`, stderr: "", code: 0 });
+  const failed = (why: string): ExecResult => {
+    state.image = false;
+    return { stdout: "", stderr: `onc-upgrade: ${why}\n`, code: 1 };
+  };
+  const session: Session = {
+    execCommand: async (command) => {
+      if (command === "ubus call system board") {
+        const now = state.release ?? comesBackOn;
+        return now ? ok(JSON.stringify({ release: { version: now } })) : { stdout: "", stderr: "", code: null };
+      }
+      if (/^cat > \/tmp\/onc-upgrade-[\w-]+\.sh$/.test(command)) {
+        state.script = true;
+        return ok("");
+      }
+      const [, verb, arg] = /^sh \/tmp\/onc-upgrade-[\w-]+\.sh ([\w-]+)(?: (\d+))?$/.exec(command) ?? [];
+      if (!verb || !state.script) return { stdout: "", stderr: "not found", code: 127 };
+      state.verbs.push(verb);
+      switch (verb) {
+        case "room":
+          return freeKb >= Number(arg) + 16 * 1024 ? ok("ONC_ROOM") : failed(`${freeKb} KiB of RAM free; the image and sysupgrade need ${Number(arg) + 16 * 1024} KiB`);
+        case "fetch":
+          if (fetchFails) return failed("could not download the image");
+          state.image = true;
+          return ok("ONC_FETCHED");
+        case "check":
+          return checkFails ? failed("sysupgrade refuses the image for this board") : ok("ONC_CHECKED");
+        case "keep-self":
+          return keepFails ? failed("could not keep a copy of this app's own package") : ok("ONC_KEPT");
+        case "flash":
+        case "flash-keys":
+          state.release = undefined;
+          return ok("ONC_FLASHING");
+        case "clean":
+          state.image = false;
+          state.script = false;
+          return ok("ONC_CLEAN");
+        default:
+          return { stdout: "", stderr: "unknown verb", code: 2 };
+      }
+    },
+    dispose: () => {},
+    ...(local ? { local: true } : {}),
+  };
+  return {
+    state,
+    session,
+    /** What it runs now; once flashed, the release it came back on. */
+    release: () => state.release ?? comesBackOn,
+  };
+};

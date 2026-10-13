@@ -9,14 +9,14 @@ import { PasswordField, SelectField, SwitchField, TextField } from "../form/fiel
 import { placeName } from "../../../src/intent/places";
 import { Section, SettingRow, SettingsPage } from "../kit/layout";
 
-const timezoneOptions = Object.keys(timezones).map((zone) => ({
+export const timezoneOptions = Object.keys(timezones).map((zone) => ({
   value: zone,
   label: zone.replace(/_/g, " "),
 }));
 
 // Names in the browser's language, from the same codes the schema accepts.
 const countryName = new Intl.DisplayNames(undefined, { type: "region" });
-const countryOptions = countries
+export const countryOptions = countries
   .map((code) => ({ value: code, label: countryName.of(code) ?? code }))
   .sort((a, b) => a.label.localeCompare(b.label));
 

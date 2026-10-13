@@ -4,6 +4,8 @@ import { fakeDevice, virtualClock } from "../helpers/fakeDevice";
 import { ApplyEvent, parseEvents, progressOf } from "../../applyEvents";
 import { RunResult } from "../../apply/outcome";
 import { provisioningOrder, provisionNetwork } from "../../apply/provisionNetwork";
+import { readDeviceNow, stateHash } from "../../deviceState";
+import { nodePlatform } from "../../platforms/node";
 
 const quietly = async <T>(fn: () => Promise<T>) => {
   const saved = [console.log, console.warn, console.error];
@@ -236,9 +238,12 @@ test.serial("a run says where each device is, and how it ended, as data", async 
   };
   const ok = await reported([fakeDevice({ hostname: "ap" })]);
   t.deepEqual(
-    ok.map((e) => ("step" in e ? e.step : e.outcome)),
-    ["planning", "configuring", "committing", "confirming", "confirmed", "applied"]
+    ok.map((e) => ("step" in e ? e.step : "outcome" in e ? e.outcome : "window")),
+    ["planning", "window", "configuring", "committing", "confirming", "confirmed", "applied"]
   );
+  // The window, once armed: confirm by the deadline; restored, at worst, a recover wait after it.
+  const window = ok.flatMap((e) => ("window" in e ? [e.window] : []))[0];
+  t.true(window.confirmBy > ok[0].at && window.restoredBy > window.confirmBy);
   const cut = progressOf(await reported([fakeDevice({ hostname: "a" }), fakeDevice({ hostname: "b", lockedOutAfterCommit: true })]));
   t.is(cut.outcome, "rolled-back");
   t.is(cut.devices.b, "rolled-back", "unreachable, it rolled itself back and came back");
@@ -252,7 +257,13 @@ test("events read back as progress: the latest step each, the outcome, a torn li
     JSON.stringify({ at: 3, outcome: "applied" }),
     '{"at": 4, "devi',
   ].join("\n");
-  t.deepEqual(progressOf(parseEvents(text)), { devices: { ap: "confirmed" }, outcome: "applied" });
+  t.deepEqual(progressOf(parseEvents(text)), {
+    devices: { ap: "confirmed" },
+    outcome: "applied",
+    startedAt: 1,
+    endedAt: 3,
+    times: { ap: { from: 1, to: 2 } },
+  });
 });
 
 test("a failing hook is logged by its first words only: never a value it holds", (t) => {
@@ -426,4 +437,33 @@ test.serial("confirming checks the commit's own marker: a finalise script that n
   const error = await failure(t, run([device]));
   t.regex(error!.message, /did not complete before its connection dropped/);
   t.true(device.events.includes("rollback-now"));
+});
+
+test.serial("a device changed since its plan was reviewed stops the run before anything is armed", async (t) => {
+  const clock = virtualClock();
+  const hashOf = async (device: ReturnType<typeof fakeDevice>) =>
+    stateHash(await readDeviceNow(device.options(clock).ssh, []), nodePlatform.sha256);
+  const router = fakeDevice({ hostname: "router" });
+  const ap = fakeDevice({ hostname: "ap" });
+  // As reviewed: the AP held one interface more than it does now.
+  const reviewed = fakeDevice({
+    hostname: "ap",
+    initialConfig: { system: [{ type: "system", options: { hostname: "OpenWrt" } }], network: [{ type: "interface", name: "gone", options: {} }] },
+  });
+  const verify = { router: await hashOf(router), ap: await hashOf(reviewed) };
+  const verified = (d: ReturnType<typeof fakeDevice>) => ({ ...d.options(clock), verify: { hash: verify[d.hostname as "router" | "ap"], sha256: nodePlatform.sha256 } });
+  const stale = await failure(t, quietly(() => provisionNetwork({ devices: [router, ap].map(verified), confirm: true, confirmTimeoutSeconds: 60 })));
+  t.is(stale?.end, "plan-stale");
+  t.is(stale?.kind, "plan-stale");
+  t.regex(stale?.message ?? "", /ap changed since its changes were reviewed/);
+  t.deepEqual([...router.events, ...ap.events].filter((e) => e !== "revert"), [], "nothing staged, armed or changed");
+  // Reviewed as it is: it applies.
+  const fresh = { ...verify, ap: await hashOf(ap) };
+  await applies(t, quietly(() =>
+    provisionNetwork({
+      devices: [router, ap].map((d) => ({ ...d.options(clock), verify: { hash: fresh[d.hostname as "router" | "ap"], sha256: nodePlatform.sha256 } })),
+      confirm: true,
+      confirmTimeoutSeconds: 60,
+    })
+  ));
 });

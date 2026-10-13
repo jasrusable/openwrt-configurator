@@ -1,9 +1,9 @@
-// Where the devices stand against the saved settings, in words: the header
-// beside Apply and the Apply page's Status both say it from here.
+// Where the devices stand against the saved settings, in words: the Apply
+// button's tooltip, and Overview. The sheet lists the changes themselves.
 import type { ProvisionInfo } from "../data/api";
 
 export type ApplyStatus = {
-  /** A few words, for the header. */
+  /** A few words: the Apply button's tooltip. */
   short: string;
   /** The Status row's label and explanation. */
   title: string;

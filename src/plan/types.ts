@@ -45,6 +45,8 @@ export type Origin = {
   item?: string;
   /** For options set from a setting: that setting's path ("wifi.networks.2.roaming.fast"). */
   settings?: Record<string, string>;
+  /** What the section is for, in a line, where its type alone does not say (the Apply page's change list). */
+  why?: string;
 };
 
 /** One UCI section to declare, where `when` holds, with `overrides` merged over its options where theirs do. */

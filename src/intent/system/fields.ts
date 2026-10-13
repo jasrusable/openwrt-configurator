@@ -38,6 +38,14 @@ export const systemFields: FieldInfo[] = [
     explain:
       "Root's password on every device: each apply sets it, so the web logins (LuCI, and this app on a router) need it. A device fresh from OpenWrt has none, and then any password logs in. The app also logs in with it over SSH when there is no key. A rollback leaves it set.",
   },
+  { path: "system.firmware", label: "Firmware" },
+  {
+    path: "system.firmware.release",
+    label: "OpenWrt release",
+    description: "Latest OpenWrt, the latest of one series, or one release.",
+    explain:
+      `What ${where("firmware")} upgrades the devices to. Latest OpenWrt is the newest stable release of any series: it moves on to a new series once OpenWrt releases one. Latest 25.12.x is that series's newest, never the next series's. One release (25.12.5) stays put. Release candidates and snapshots never count as the latest, and nothing is flashed until you upgrade. A device can hold its own or be pinned to another. Upgrading keeps each device's settings, then applies.`,
+  },
   { path: "system.ssh", label: "SSH" },
   {
     path: "system.ssh.authorized_keys",

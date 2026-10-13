@@ -5,18 +5,21 @@ import { Anchor, Badge, Group } from "@mantine/core";
 import { IconBook, IconBug, IconClipboardCheck, IconGitCommit, IconGitPullRequest, IconMessages } from "@tabler/icons-react";
 import { useMemo } from "react";
 import type { Reference } from "../../src/intent/patches/patch";
-import { FixState, patchStatus } from "../../src/intent/patches/status";
+import { FixState, patchStatus, shownPatches } from "../../src/intent/patches/status";
 import { useDevices } from "./data/devices";
 import { useDraft, useDraftValue } from "./form/draft";
 
 /** The devices' facts, as last read (empty until then: fixes then say "not read yet"). */
 export const useFacts = () => useDevices().data?.facts ?? {};
 
-/** Every fix, with its state on each device, for the draft as it is. */
+/** Patches that change a setting, with each device's state, for the draft as it is. */
 export const useFixes = () => {
   const intent = useDraftValue();
   const facts = useFacts();
-  return useMemo(() => patchStatus(intent, facts), [intent, facts]);
+  return useMemo(() => {
+    const shown = new Set(shownPatches(intent));
+    return patchStatus(intent, facts).filter((fix) => shown.has(fix.id));
+  }, [intent, facts]);
 };
 
 /** Turn a fix off, or back on: a decision in the intent (system.patches.off), saved like any other. */

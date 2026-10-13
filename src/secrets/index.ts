@@ -9,7 +9,7 @@ export { DEFAULT_SECRETS_FILE, secretsFileSource } from "./file";
 export { KEYCHAIN_SERVICE, SECURITY_PATH, keychainLookup, parseSecurityPassword, setKeychainSecret, stripOneTrailingNewline } from "./keychain";
 export { findPlaintextSecrets } from "./plaintext";
 export { redactSecretFields, redactValue } from "./redact";
-export { SECRET_NAME_PATTERN, assertSecretName, resolveSecrets } from "./refs";
+export { SECRET_NAME_PATTERN, assertSecretName, resolveSecrets, secretRefNames } from "./refs";
 export type { SecretLookup, SecretSource } from "./refs";
 
 /** The macOS keychain on macOS; elsewhere a 0600 JSON file. */

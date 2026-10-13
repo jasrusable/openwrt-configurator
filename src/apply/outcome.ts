@@ -11,7 +11,9 @@ export type RunEnd =
   /** A device's change was committed and then undone: the run applied nothing. */
   | "rolled-back"
   /** Stopped before anything was committed. */
-  | "failed";
+  | "failed"
+  /** Stopped before anything was armed: a device changed since its changes were reviewed. */
+  | "plan-stale";
 
 export type RunFailure = Problem<{ end: RunEnd }>;
 

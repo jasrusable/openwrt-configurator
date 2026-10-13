@@ -16,7 +16,7 @@
 //   stage-packages <pkg>...   fetch them for an offline reinstall; prints the count
 //   arm [options] < lists     snapshots, the boot-time copy, the watchdog
 //   commit-finished           whether the commit's marker is there
-//   disarm                    stand the watchdog down; or say it fired
+//   disarm                    stand the watchdog down (the applied marker set); or say it fired
 //   done                      the run is over here: what it leaves, removed
 //   rollback-now              end the watchdog's wait: it restores now
 //   recovered                 once its restore is done, tell it access is back
@@ -62,7 +62,7 @@
 // - The boot-time copy on flash (/etc/onc/rollback/<runId>) and its early
 //   init script cover a device restarted inside the window, when /tmp and the
 //   watchdog are gone; a confirm removes every run's copy.
-import { agentName, deviceTmp, runDirName, stepsDirName, watchdogPidFile } from "./paths";
+import { agentName, appliedKeepList, appliedMarker, deviceTmp, runDirName, stepsDirName, watchdogPidFile } from "./paths";
 
 /**
  * Restores the config of an apply never confirmed when the device restarts
@@ -544,8 +544,16 @@ watchdog() {
 	reboot
 }
 
+# Confirmed: this device's settings are this app's. An image's first-boot
+# defaults leave them alone after an upgrade that kept them: the marker says
+# so, and sysupgrade keeps it by its keep.d list.
+mark_applied() {
+	mkdir -p "$ROOT/etc/onc" "$ROOT/lib/upgrade/keep.d" && touch "$ROOT${appliedMarker}" &&
+		echo "${appliedMarker}" > "$ROOT${appliedKeepList}"
+}
+
 disarm() {
-	if [ -f "$DISARMED" ]; then rm -rf "$BOOT_ROOT"; echo ONC_DISARMED; return; fi
+	if [ -f "$DISARMED" ]; then rm -rf "$BOOT_ROOT"; mark_applied; echo ONC_DISARMED; return; fi
 	p="$(cat "$R/${watchdogPidFile}" 2>/dev/null)"; s="$(cat "$R/sleep.pid" 2>/dev/null)"
 	is_watchdog "$p" || { echo ONC_FIRED; return; }
 	touch "$R/confirmed"
@@ -559,6 +567,7 @@ disarm() {
 		# boot-time copy goes (an earlier one reverted, say, whose watchdog has
 		# not woken yet), or a restart would restore it over this.
 		rm -rf "$BOOT_ROOT"
+		mark_applied
 		echo ONC_DISARMED
 	else
 		echo ONC_FIRED

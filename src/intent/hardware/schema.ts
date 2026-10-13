@@ -1,7 +1,7 @@
 // The routers and access points: what each is called and does.
 import { z } from "zod";
 import { channelsOf } from "../radios";
-import { name } from "../validators";
+import { firmwareRelease, name } from "../validators";
 
 const channelHint = { "2g": "a 2.4 GHz channel, 1 to 13", "5g": "a 5 GHz channel, like 36 or 149" };
 
@@ -29,6 +29,11 @@ export const deviceSchema = z
       .object({ "2g": pinnedChannel("2g"), "5g": pinnedChannel("5g") })
       .strict()
       .optional(),
+    /**
+     * Its own firmware, over the network's (system.firmware): "hold" (never
+     * upgraded) or one release pinned. Unset, it follows the network.
+     */
+    firmware: z.union([z.literal("hold"), firmwareRelease(/^\d+\.\d+\.\d+$/, "a release, like 25.12.5")]).optional(),
   })
   .strict();
 

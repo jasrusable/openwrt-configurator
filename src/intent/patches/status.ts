@@ -6,9 +6,10 @@ import type { DeviceSchema } from "../../deviceSchema";
 import { deviceLookup } from "../../plan/device";
 import { evaluateChecked, when } from "../../plan/when";
 import { compareReleases } from "../../release";
+import { compileFeatures } from "../compile";
 import type { Intent } from "../schema";
 import { patches } from "./index";
-import { describeTarget, effectsOf, Patch } from "./patch";
+import { amendedSettings, describeTarget, effectsOf, Patch } from "./patch";
 
 /**
  * What a fix does on a device: active; turned off by you; not needed by
@@ -49,6 +50,18 @@ const onDevice = (patch: Patch, intent: Intent, device: Intent["hardware"][numbe
   if (releases?.before && (compareReleases(schema.version, releases.before) ?? -1) >= 0)
     return { state: "fixed", why: `fixed in OpenWrt ${releases.before}; it runs ${schema.version}` };
   return { state: "active" };
+};
+
+/**
+ * Patches the pages list: those that override a setting's compiled value.
+ * One turned off still counts, so it can be turned back on. The rest apply
+ * and stay off the pages.
+ */
+export const shownPatches = (intent: Intent): string[] => {
+  const on: Intent = { ...intent, system: { ...intent.system, patches: { ...intent.system.patches, off: [] } } };
+  return amendedSettings(patches, on, compileFeatures(on))
+    .filter((found) => found.overrides.length > 0)
+    .map((found) => found.patch.id);
 };
 
 /** Every fix, with where it applies on each device of the intent. */

@@ -1,6 +1,6 @@
 // Text controls bound to a setting: a line of text, a password, a list of
 // passwords, a subnet (typed as the router's address), tags.
-import { Button, PasswordInput, Stack, TagsInput, Text, TextInput } from "@mantine/core";
+import { Button, Group, PasswordInput, Stack, TagsInput, Text, TextInput } from "@mantine/core";
 import { parseSubnet } from "../../../../src/intent/validators";
 import { control, RowProps, FieldRow, asText, asTexts, useField } from "./binding";
 
@@ -50,44 +50,36 @@ export const PasswordField = (row: RowProps) => {
   );
 };
 
-/** A list of strings, edited one row each, e.g. extra Wi-Fi passwords. */
+/**
+ * A list of passwords, edited one row each, e.g. extra Wi-Fi passwords. Each
+ * keeps its show/hide eye, Remove beside it. Not shown at all while it cannot
+ * take any and holds none (extra passwords under WPA3).
+ */
 export const PasswordListField = ({
   addLabel,
   ...row
 }: RowProps & { addLabel: string }) => {
   const field = useField(row.name);
   const items = asTexts(field.value);
+  if (field.unavailable && !items.length) return null;
   const set = (next: string[]) => field.onChange(next.length ? next : undefined);
   return (
     <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
       <Stack gap={6} style={control.wide}>
         {items.map((item, i) => (
-          <PasswordInput
-            key={i}
-            value={item}
-            disabled={!!field.unavailable}
-            onChange={(e) =>
-              set(items.map((old, j) => (j === i ? e.currentTarget.value : old)))
-            }
-            rightSectionWidth={64}
-            rightSection={
-              <Button
-                variant="subtle"
-                color="red"
-                size="compact-xs"
-                onClick={() => set(items.filter((_, j) => j !== i))}
-              >
-                Remove
-              </Button>
-            }
-          />
+          <Group key={i} gap={4} wrap="nowrap">
+            <PasswordInput
+              style={{ flex: 1 }}
+              value={item}
+              disabled={!!field.unavailable}
+              onChange={(e) => set(items.map((old, j) => (j === i ? e.currentTarget.value : old)))}
+            />
+            <Button variant="subtle" color="red" size="compact-xs" onClick={() => set(items.filter((_, j) => j !== i))}>
+              Remove
+            </Button>
+          </Group>
         ))}
-        <Button
-          variant="light"
-          size="xs"
-          disabled={!!field.unavailable}
-          onClick={() => set([...items, ""])}
-        >
+        <Button variant="light" size="xs" disabled={!!field.unavailable} onClick={() => set([...items, ""])}>
           {addLabel}
         </Button>
       </Stack>

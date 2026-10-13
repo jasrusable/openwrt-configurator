@@ -15,8 +15,10 @@ import { DeviceSchema } from "./deviceSchema";
 import { deviceSchemaOf, deviceSchemaProbes } from "./getDeviceSchema";
 import { Intent } from "./intent/schema";
 import { namePattern } from "./intent/validators";
+import { where } from "./intent/places";
 import { isIpAddress } from "./intent/addresses";
 import { fingerprintOf } from "./sshFingerprint";
+import { formatKnownHost, parseKnownHosts } from "./knownHosts";
 import { knownKey, Located, locateEach, macsProbe, Neighbour } from "./locate";
 import { PlanDevice } from "./plan/types";
 import { Platform } from "./platform";
@@ -311,4 +313,80 @@ const keepAdopted = (files: StoreFiles, intentPath: string, name: string, inspec
     ...(inspected.hostKey ? { hostKey: inspected.hostKey } : {}),
   };
   writeFacts(files, intentPath, { ...located, readAt: now });
+};
+
+/** The known_hosts file every SSH client here checks host keys against. */
+const knownHostsFileOf = (platform: Platform) =>
+  sshConnectOptions({ deviceConfig: { hostname: "x", tags: {} }, platform }).knownHostsFile!;
+
+/** The keys on record for `address` gone, so the next connection there trusts what it shows (as a first use does). */
+const forgetHostKey = (platform: Platform, address: string) => {
+  const file = knownHostsFileOf(platform);
+  const text = (() => {
+    try {
+      return platform.readTextFile(file);
+    } catch {
+      return "";
+    }
+  })();
+  const kept = parseKnownHosts(text).filter((entry) => entry.host !== address && entry.host !== `[${address}]:22`);
+  platform.writeFileAtomic(file, kept.map(formatKnownHost).join(""), 0o600);
+};
+
+/**
+ * A device in Hardware that was reset or flashed clean: it made a new host
+ * key, so it is refused where it was known. Read again at `address`, the key
+ * on record for that address forgotten first, to show the new one's
+ * fingerprint before it is trusted (`readopt`).
+ */
+export const inspectReset = async ({
+  intentPath,
+  platform,
+  address,
+  name,
+}: {
+  intentPath: string;
+  platform: Platform;
+  address: string;
+  name: string;
+}): Promise<Result<Inspected, Problem>> => {
+  if (!isIpAddress(address)) return fail("invalid", "Give its IP address, like 10.0.0.143: a name can be claimed by any device on the network.");
+  const intent = await savedIntent(intentPath, platform);
+  if (!intent.ok) return intent;
+  if (!intent.value.hardware.some((d) => d.name === name)) return fail("not-found", `${name} is not in Hardware.`);
+  forgetHostKey(platform, address);
+  return inspectAt({ intentPath, platform, address });
+};
+
+/**
+ * Take a reset device back under its own name, its settings kept: only the
+ * same box (one of its MACs the one on record), never another device, which
+ * is added through Hardware's Add.
+ */
+export const readopt = async ({
+  intentPath,
+  platform,
+  address,
+  name,
+  now = Date.now,
+}: {
+  intentPath: string;
+  platform: Platform;
+  address: string;
+  name: string;
+  now?: () => number;
+}): Promise<Result<{ ok: true }, Problem>> => {
+  const inspected = read(platform, inspectedKey(intentPath, address));
+  if (!inspected) return fail("conflict", "Read the device first.");
+  const known = readFacts(platform, intentPath, [name])[name];
+  if (!known) return fail("not-found", `${name} has no facts on record: add it through ${where("hardware", "Add")}.`);
+  if (!(known.macs ?? []).some((mac) => inspected.macs.includes(mac))) {
+    return fail("conflict", `This is not ${name}: none of its MACs is the one on record. Another device is added through ${where("hardware", "Add")}.`);
+  }
+  try {
+    keepAdopted(platform, intentPath, name, inspected, now());
+  } catch (thrown) {
+    return fail("internal", `${name} could not be kept: ${messageOf(thrown)}`);
+  }
+  return ok({ ok: true as const });
 };

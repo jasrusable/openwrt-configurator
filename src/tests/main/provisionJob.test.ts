@@ -9,6 +9,8 @@ import { nodePlatform } from "../../platforms/node";
 import { jobEnding, jobPaths, jobRecordKey, provisionStatus, startProvision } from "../../server/provisionJob";
 import { write } from "../../store";
 import { tempDir } from "../helpers/tempDir";
+import { sampleIntentText } from "../helpers/fixtures";
+import { uiHandler } from "../../server/app";
 
 /** A machine of fake processes: each pid's command line, and what was started. */
 const machine = () => {
@@ -199,4 +201,100 @@ test("on this machine: a detached program is found by its run id while it runs, 
   t.true((await nodePlatform.commandLineOf(pid))?.includes("--run-id abc123"));
   await new Promise((r) => setTimeout(r, 2500));
   t.is(await nodePlatform.commandLineOf(pid), undefined);
+});
+
+test("an apply keeps the live settings it replaces, when each was applied, and what it changed", async (t) => {
+  const m = machine();
+  const intentPath = withIntent();
+  await start(intentPath, m);
+  m.run().exits(0);
+  const first = m.now();
+  m.advance(60_000);
+  writeFileSync(intentPath, JSON.stringify({ schema: 1, system: { name: "B" } }));
+  await start(intentPath, m);
+  const running = await status(intentPath, m);
+  t.false(running.run?.undo);
+  t.true((running.run?.changes ?? []).some((c) => c.path === "system.name"), "its changes, kept from its start");
+  m.run().exits(0);
+  const done = await status(intentPath, m);
+  t.is(JSON.parse(readFileSync(jobPaths(intentPath).previous, "utf8")).system.name, "A");
+  t.deepEqual(done.applied, { live: m.now(), previous: first });
+});
+
+test("a failed apply keeps the previous settings as they were", async (t) => {
+  const m = machine();
+  const intentPath = withIntent();
+  await start(intentPath, m);
+  m.run().exits(0);
+  writeFileSync(intentPath, JSON.stringify({ schema: 1, system: { name: "B" } }));
+  await start(intentPath, m);
+  m.run().exits(4);
+  t.false(existsSync(jobPaths(intentPath).previous), "nothing was replaced");
+  t.is(JSON.parse(readFileSync(jobPaths(intentPath).live, "utf8")).system.name, "A");
+});
+
+test("an undo applies the previous settings again, and leaves the saved file alone", async (t) => {
+  const m = machine();
+  const intentPath = withIntent();
+  await start(intentPath, m);
+  m.run().exits(0);
+  writeFileSync(intentPath, JSON.stringify({ schema: 1, system: { name: "B" } }));
+  await start(intentPath, m);
+  m.run().exits(0);
+  const paths = jobPaths(intentPath);
+  t.true((await startProvision({ intentPath, files: m.platform, now: m.now, source: paths.previous, undo: true })).started);
+  t.true((await status(intentPath, m)).run?.undo);
+  t.is(JSON.parse(readFileSync(paths.snapshot, "utf8")).system.name, "A", "the previous settings are what runs");
+  m.run().exits(0);
+  t.is(JSON.parse(readFileSync(paths.live, "utf8")).system.name, "A");
+  t.is(JSON.parse(readFileSync(paths.previous, "utf8")).system.name, "B", "and the undone one can be put back in turn");
+  t.is(JSON.parse(readFileSync(intentPath, "utf8")).system.name, "B", "the saved settings are untouched");
+  t.is((await status(intentPath, m)).live, "differs");
+});
+
+test("undo through the API: none to undo, refused while running, and restoring the saved settings too", async (t) => {
+  const m = machine();
+  const dir = tempDir("undo");
+  const intentPath = join(dir, "intent.json");
+  const sample = sampleIntentText();
+  writeFileSync(intentPath, sample, { mode: 0o600 });
+  const handle = uiHandler({ intentPath, uiRoot: dir, platform: m.platform, now: m.now });
+  const undo = (body: object) => handle({ method: "POST", path: "/api/provision/undo", body: JSON.stringify(body), headers: { "x-onc": "1" } });
+  t.is((await undo({})).status, 404, "nothing applied yet");
+  await start(intentPath, m);
+  m.run().exits(0);
+  const renamed = JSON.parse(sample);
+  renamed.system.name = "Elsewhere";
+  writeFileSync(intentPath, JSON.stringify(renamed), { mode: 0o600 });
+  await start(intentPath, m);
+  t.is((await undo({})).status, 409, "while a run is going");
+  m.run().exits(0);
+  const preview = JSON.parse((await handle({ method: "GET", path: "/api/provision", body: "", headers: { "x-onc": "1" } })).body);
+  t.true(preview.previous.changes.some((c: { path: string }) => c.path === "system.name"), "the preview: what the undo puts back");
+  t.is((await undo({ restoreSettings: true })).status, 202);
+  t.is(JSON.parse(readFileSync(intentPath, "utf8")).system.name, "Home", "the saved settings are the previous ones again");
+});
+
+test("an upgrade through the API is the apply job with its firmware step first: one at a time, devices by name", async (t) => {
+  const m = machine();
+  const dir = tempDir("upgrade-job");
+  const intentPath = join(dir, "intent.json");
+  writeFileSync(intentPath, sampleIntentText(), { mode: 0o600 });
+  const handle = uiHandler({ intentPath, uiRoot: dir, platform: m.platform, now: m.now });
+  const upgrade = (body: object) => handle({ method: "POST", path: "/api/firmware/upgrade", body: JSON.stringify(body), headers: { "x-onc": "1" } });
+  t.is((await upgrade({ devices: ["home ap; reboot"] })).status, 400);
+  t.is((await upgrade({ devices: ["home-ap-1"] })).status, 202);
+  const argv = m.processes.get(m.run().pid)!.split(" ");
+  t.deepEqual(argv.slice(argv.indexOf("--upgrade"), argv.indexOf("--upgrade") + 2), ["--upgrade", "home-ap-1"]);
+  t.is((await upgrade({})).status, 409, "while a run is going: an upgrade is an apply");
+  m.run().exits(0);
+  t.is((await upgrade({})).status, 202);
+  t.true(m.processes.get(m.run().pid)!.includes("--upgrade all"));
+  t.false(m.processes.get(m.run().pid)!.includes("--accept-new-series"), "a new series is acknowledged only when asked");
+  m.run().exits(0);
+  t.is((await upgrade({ acceptNewSeries: true })).status, 202);
+  t.true(m.processes.get(m.run().pid)!.includes("--upgrade all --accept-new-series"));
+  m.run().exits(0);
+  t.is((await upgrade({ devices: ["home-ap-1"], acceptDowngrade: true })).status, 202);
+  t.true(m.processes.get(m.run().pid)!.includes("--upgrade home-ap-1 --accept-downgrade"));
 });

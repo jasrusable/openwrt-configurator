@@ -154,6 +154,7 @@ export const runCollector = async ({
   tickMs = 2_000,
   stop = () => false,
   collect = collectOnce,
+  everyHour,
 }: {
   intentPath: string;
   platform: Platform;
@@ -163,9 +164,12 @@ export const runCollector = async ({
   stop?: () => boolean;
   /** One read (tests give their own). */
   collect?: typeof collectOnce;
+  /** Work done once an hour beside the reads: asking OpenWrt for its releases (it asks at most once a day). */
+  everyHour?: () => Promise<unknown>;
 }) => {
   let state: State = { histories: readHistories(platform, dir), counts: {} };
   let lastRead = -Infinity;
+  let lastHourly = -Infinity;
   let lastError: string | undefined;
   while (!stop()) {
     const t = now();
@@ -188,6 +192,11 @@ export const runCollector = async ({
         if (error !== undefined && error !== lastError) console.error(`Reading status: ${error}`);
         lastError = error;
       }
+    }
+    if (everyHour && t - lastHourly >= 3_600_000) {
+      lastHourly = t;
+      // Its own failures are its own: a missed ask is asked next hour.
+      await attempt(everyHour, () => undefined);
     }
     await platform.sleep(tickMs);
   }

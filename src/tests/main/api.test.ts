@@ -28,6 +28,7 @@ test("each kind of problem has its status", (t) => {
     forbidden: 403,
     "not-found": 404,
     unsupported: 405,
+    "plan-stale": 409,
     conflict: 409,
     busy: 409,
     "rate-limited": 429,

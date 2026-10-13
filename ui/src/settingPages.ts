@@ -7,6 +7,9 @@
 export const settingPages: { path: string; page: string; url?: string; item?: (index: string) => string }[] = [
   // The catalog is a tab of System, for the list and for one entry in it.
   { path: "system.patches", page: "system", url: "/system/patches" },
+  { path: "system.firmware", page: "system", url: "/system/firmware" },
+  // A device's firmware is set in the Firmware tab's table, beside the others'.
+  { path: "hardware.*.firmware", page: "system", url: "/system/firmware" },
   { path: "system", page: "system" },
   { path: "internet.lines", page: "internet", item: (i) => `/internet/${i}` },
   { path: "internet", page: "internet" },
@@ -31,10 +34,16 @@ export const settingPages: { path: string; page: string; url?: string; item?: (i
 ];
 
 /** The page, and the URL, where the setting at `path` is edited. */
+/** Whether `path` is the setting at `pattern` or within it; a `*` in the pattern stands for any one part. */
+const within = (path: string, pattern: string) => {
+  const [parts, wanted] = [path.split("."), pattern.split(".")];
+  return parts.length >= wanted.length && wanted.every((part, i) => part === "*" || part === parts[i]);
+};
+
 export const whereIs = (path: string) => {
-  const home = settingPages.find((s) => path === s.path || path.startsWith(`${s.path}.`));
+  const home = settingPages.find((s) => within(path, s.path));
   if (!home) return undefined;
-  const index = path.slice(home.path.length + 1).split(".")[0];
+  const index = path.split(".")[home.path.split(".").length];
   return {
     page: home.page,
     // A fixed address (a tab), else a list item by its index, else the page.

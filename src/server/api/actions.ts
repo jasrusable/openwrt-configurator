@@ -1,11 +1,11 @@
 // What a Status page can ask for (and only then, src/status/actions.ts):
 // restart a service the settings declare on a device, reboot one, restart
 // its Wi-Fi, ping from it, test the internet
-// line's speed, survey the air around the access points, OpenWrt's latest
-// release, and a mesh link's speed (src/meshSpeed.ts).
+// line's speed, survey the air around the access points, and a mesh link's
+// speed (src/meshSpeed.ts).
 import { measureLink } from "../../meshSpeed";
 import { fail } from "../../problem";
-import { latestRelease, pingFrom, rebootDevice, restartService, restartWifi, speedTest, wifiSurvey } from "../../status/actions";
+import { pingFrom, rebootDevice, restartService, restartWifi, speedTest, wifiSurvey } from "../../status/actions";
 import { ApiContext, field, respond, Route, withBody } from "../router";
 
 export const actionRoutes = ({ intentPath, platform, now }: ApiContext): Route[] => [
@@ -40,7 +40,6 @@ export const actionRoutes = ({ intentPath, platform, now }: ApiContext): Route[]
   },
   { path: "/api/internet/speed", POST: async () => respond(await speedTest({ intentPath, platform })) },
   { path: "/api/wifi/survey", POST: async () => respond(await wifiSurvey({ intentPath, platform })) },
-  { path: "/api/firmware", GET: async () => respond(await latestRelease({ intentPath, platform, now })) },
   {
     path: "/api/mesh/speed",
     POST: withBody(async (input) => {

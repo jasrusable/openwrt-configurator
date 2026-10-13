@@ -3,7 +3,8 @@
 // devices every 30 seconds while this page is open), interpreted against the
 // settings: what does not match them is shown, never hidden.
 import { meshMtu } from "../../../src/intent/mesh";
-import { where } from "../../../src/intent/places";
+import { placeName, where } from "../../../src/intent/places";
+import { releaseNotesUrl } from "../../../src/firmware/target";
 import { meshNodeState, peerState } from "../../../src/status/views";
 import { Anchor, Box, Button, Group, SimpleGrid, Stack, Text } from "@mantine/core";
 import { IconAccessPoint, IconChevronRight, IconRouter, IconWorld } from "@tabler/icons-react";
@@ -13,6 +14,7 @@ import { Intent } from "../../../src/intent/schema";
 import { internetIpv6 } from "../../../src/intent/connections";
 import { templateOf } from "../../../src/intent/networks";
 import { useFreshDevices } from "../data/devices";
+import { useUpdates } from "../data/firmware";
 import { useProvision } from "../data/provision";
 import { useSeries } from "../data/history";
 import { bitsWords } from "../kit/format";
@@ -34,6 +36,29 @@ const Link = ({ to, children }: { to: string; children: ReactNode }) => {
     <Button variant="subtle" color="gray" size="compact-sm" rightSection={<IconChevronRight size={14} />} onClick={() => navigate(to)}>
       {children}
     </Button>
+  );
+};
+
+/** A newer OpenWrt for some devices (System › Firmware): said, never done here. */
+const FirmwareUpdate = () => {
+  const update = useUpdates();
+  if (!update) return null;
+  return (
+    <Section title="Firmware">
+      <SettingRow
+        label={`OpenWrt ${update.version} is out`}
+        description={
+          <>
+            {devicesWord(update.devices.length)} can update.{" "}
+            <Anchor href={releaseNotesUrl(update.version)} target="_blank" rel="noreferrer" size="xs">
+              Release notes
+            </Anchor>
+          </>
+        }
+      >
+        <Link to="/system/firmware">{placeName("firmware")}</Link>
+      </SettingRow>
+    </Section>
   );
 };
 
@@ -376,6 +401,8 @@ export const OverviewPage = () => {
           );
         })}
       </Section>
+
+      <FirmwareUpdate />
 
       {unexpected && unexpected.length > 0 && (
         <Section

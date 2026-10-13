@@ -2,9 +2,11 @@
 // its pages, and the items nested in them, share them. Give it to the
 // section's pages through SectionNav.
 import { Tabs } from "@mantine/core";
+import { ReactNode } from "react";
 import { useNavigate } from "react-router";
 
-export type SectionTab = { value: string; label: string; path: string };
+/** `mark`: beside the label, like an update's dot. */
+export type SectionTab = { value: string; label: string; path: string; mark?: ReactNode };
 
 export const SectionTabs = ({ tabs, tab }: { tabs: SectionTab[]; tab: string }) => {
   const navigate = useNavigate();
@@ -15,7 +17,7 @@ export const SectionTabs = ({ tabs, tab }: { tabs: SectionTab[]; tab: string }) 
     >
       <Tabs.List>
         {tabs.map((t) => (
-          <Tabs.Tab key={t.value} value={t.value}>
+          <Tabs.Tab key={t.value} value={t.value} rightSection={t.mark}>
             {t.label}
           </Tabs.Tab>
         ))}

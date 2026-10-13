@@ -1,8 +1,8 @@
 // What a Status page can do when asked (and only then): restart a service the
 // settings need running on a device (the fix for, say, odhcpd gone silent),
 // reboot a device, restart its Wi-Fi, ping from it, test the internet line's
-// download speed from the router, survey the air around the access points,
-// and look up OpenWrt's latest release. Nothing here changes a setting.
+// download speed from the router, survey the air around the access points.
+// Nothing here changes a setting.
 import { z } from "zod";
 import { readFacts } from "../deviceFacts";
 import { Probe, runProbe } from "../deviceProbes";
@@ -232,43 +232,6 @@ export const speedTest = ({ intentPath, platform }: { intentPath: string; platfo
       return mbps ? ok({ downMbps: mbps }) : fail("failed", "The speed test did not finish.");
     });
   });
-
-const latestReleaseKey = (intentPath: string): StoreKey<{ at: number; version: string }> => ({
-  path: stateLayout(intentPath).release,
-  schema: z.object({ at: z.number(), version: z.string() }),
-  format: 1,
-  mode: 0o644,
-});
-
-/** OpenWrt's latest stable release, from its own downloads site; kept a day beside the intent. */
-export const latestRelease = async ({
-  intentPath,
-  platform,
-  now = Date.now,
-}: {
-  intentPath: string;
-  platform: Platform;
-  now?: () => number;
-}): Promise<Result<{ version: string }, Problem>> => {
-  const kept = read(platform, latestReleaseKey(intentPath));
-  if (kept && now() - kept.at < 24 * 3600 * 1000) return ok({ version: kept.version });
-  const asked = await attempt(
-    () => platform.http.request({ method: "GET", url: "https://downloads.openwrt.org/.versions.json" }),
-    (e) => problem("unreachable", `Could not ask openwrt.org: ${messageOf(e)}`)
-  );
-  if (!asked.ok) return asked;
-  const version = (() => {
-    try {
-      return (JSON.parse(asked.value.body) as { stable_version?: unknown }).stable_version;
-    } catch {
-      return undefined;
-    }
-  })();
-  if (typeof version !== "string") return fail("failed", "openwrt.org did not say.");
-  // Only so it is asked once a day: a write that fails asks again next time.
-  tryWrite(platform, latestReleaseKey(intentPath), { at: now(), version });
-  return ok({ version });
-};
 
 export type Survey = {
   accessPoint: string;

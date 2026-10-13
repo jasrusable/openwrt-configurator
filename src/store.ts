@@ -140,10 +140,16 @@ export const stateLayout = (intentPath: string) => {
     /** Wrong passwords, one marker file each (a Mac's; a router counts them in RAM). */
     loginAttempts: `${root}/login-attempts`,
     activity: `${root}/activity.json`,
-    /** OpenWrt's latest release, as last asked (src/status/actions.ts). */
-    release: `${root}/openwrt-release.json`,
+    /** OpenWrt's releases by series, as ASU last listed them (src/firmware/releases.ts). */
+    releases: `${root}/openwrt-releases.json`,
+    /** Firmware images built for an upgrade, by what went into them (src/firmware/builds.ts). */
+    images: `${root}/images`,
     /** Devices asked to reboot, and when (src/status/actions.ts). */
     rebooting: `${root}/rebooting.json`,
+    /** The settings last applied, as written then (src/server/provisionJob.ts keeps it). */
+    lastApplied: `${root}/live.json`,
+    /** What each device was left holding by the last apply, as hashes (src/applyChanges.ts). */
+    applied: `${root}/applied`,
     /** The lock a Status action takes, one action at a time. */
     actionLock: (name: string) => `${root}/${name}.lock`,
   };

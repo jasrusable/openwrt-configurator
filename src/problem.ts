@@ -14,6 +14,8 @@ export type ProblemKind =
   | "not-found"
   /** It cannot be done in the state things are in (invalid settings, changed elsewhere, an apply running). */
   | "conflict"
+  /** A device changed since the change plan was reviewed: nothing was done; review it again. */
+  | "plan-stale"
   /** One is already running. */
   | "busy"
   /** A device or service could not be reached. */

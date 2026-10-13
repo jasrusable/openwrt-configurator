@@ -1,7 +1,8 @@
 // Provisioning a whole network as one change: every device is confirmed, or
 // every device is rolled back.
 //
-//   1. plan every device (verify, read state)          — nothing changes
+//   1. plan every device (verify, read state; refuse     — nothing changes
+//      one changed since its plan was reviewed)
 //   2. stage, then arm, every device's rollback          — snapshots only
 //   3. configure and commit each, gateway and self last
 //   4. confirm every device; only then disarm them all
@@ -61,7 +62,7 @@ const withLiveSession = async (run: DeviceRun): Promise<DeviceRun> => {
 };
 
 /** How the run ended, when it did not simply apply. */
-const ended = (end: RunEnd, message: string): Err<RunFailure> => fail("failed", message, { end });
+const ended = (end: RunEnd, message: string): Err<RunFailure> => fail(end === "plan-stale" ? "plan-stale" : "failed", message, { end });
 
 type Outcome = "confirmed" | "rolled back" | "rolling back" | "untouched";
 
@@ -290,16 +291,18 @@ const runNetwork = async ({
   devices,
   confirm,
   confirmTimeoutSeconds,
+  report = silent,
 }: {
   devices: DeviceRunOptions[];
   confirm: boolean;
   confirmTimeoutSeconds: number;
+  report?: Reporter;
 }): Promise<RunResult> => {
   // 1. Plan: verify every device and read its state. Nothing changes yet.
   const runs: DeviceRun[] = [];
   for (const device of devices) {
     const planned = await planDevice(device);
-    if (!planned.ok) return ended("failed", planned.error.message);
+    if (!planned.ok) return ended(planned.error.kind === "plan-stale" ? "plan-stale" : "failed", planned.error.message);
     runs.push(planned.value);
   }
 
@@ -309,6 +312,16 @@ const runNetwork = async ({
   const armed = await armAll(runs, confirmTimeoutSeconds * runs.length);
   if (!armed.ok) return armed;
   const earliestDeadline = Math.min(...armed.value.map((run) => run.deadline!));
+  // The window, for the page: confirm by the earliest deadline; a device not
+  // confirmed has its old settings back by its own deadline plus the wait
+  // its watchdog gives them before rebooting onto them (agent, watchdog).
+  report({
+    at: armed.value[0].now(),
+    window: {
+      confirmBy: earliestDeadline,
+      restoredBy: Math.max(...armed.value.map((run) => run.deadline! + run.recoverSeconds * 1000)),
+    },
+  });
 
   // 3, 4. Configure and commit each; confirm all; only then disarm.
   const committed = await configureAll(armed.value, earliestDeadline);

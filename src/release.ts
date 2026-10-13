@@ -46,3 +46,22 @@ export const compareReleases = (a: string, b: string) => {
   }
   return 0;
 };
+
+/** "25.12.5" → "25.12": the series a release belongs to (its fixes, never its changes). */
+export const seriesOf = (version: string) => /^(\d+\.\d+)/.exec(version)?.[1];
+
+/** A series as the firmware settings name one ("25.12": its newest release). */
+export const isSeries = (version: string) => /^\d+\.\d+$/.test(version);
+
+/** One stable release ("25.12.5"): not a series, a candidate or a snapshot. */
+export const isStableRelease = (version: string) => /^\d+\.\d+\.\d+$/.test(version);
+
+/**
+ * The newest series this app has been checked against: an upgrade into a
+ * newer one carries the settings over unchecked, so it is acknowledged first.
+ * Raised once a series has been through the rig and the patches' ranges.
+ */
+export const newestCheckedSeries = "25.12";
+
+/** Whether a release is of a series newer than this app has been checked against. */
+export const uncheckedSeries = (version: string) => (compareReleases(seriesOf(version) ?? version, newestCheckedSeries) ?? 0) > 0;

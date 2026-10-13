@@ -1,12 +1,12 @@
-// What each device is (facts) and what an apply would change on it. Facts
+// What each device is (facts) and what an apply would change on it (the plan). Facts
 // keep themselves fresh: a page that shows them asks, as it opens, for the
 // stale ones to be read; the server decides which and how often (rests after
 // a failure, one read at a time). Never polled.
 import { QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
-import { loadApplyDiff, loadDevices, refreshDevices } from "./api";
+import { loadApplyPlan, loadDevices, refreshDevices } from "./api";
 
 const devicesKey = ["devices"] as const;
-const diffKey = ["apply-diff"] as const;
+export const planKey = ["apply-plan"] as const;
 
 /** The facts as last read, without reading anything. */
 export const useDevices = () => useQuery({ queryKey: devicesKey, queryFn: loadDevices });
@@ -30,7 +30,7 @@ export const useFreshDevices = () => {
     queryFn: async () => {
       const fresh = await refreshDevices();
       queryClient.setQueryData(devicesKey, fresh);
-      void queryClient.invalidateQueries({ queryKey: diffKey });
+      void queryClient.invalidateQueries({ queryKey: planKey });
       return fresh;
     },
   });
@@ -38,17 +38,18 @@ export const useFreshDevices = () => {
 };
 
 /**
- * Read the diff now, in the background: as the app opens and after each save,
- * so the Apply page has it before it is opened. Never throws.
+ * Read the change plan now, in the background: as the app opens and after
+ * each save, so the Apply sheet has it before it is opened. Never throws.
  */
-export const prefetchApplyDiff = (queryClient: QueryClient) =>
-  queryClient.prefetchQuery({ queryKey: diffKey, queryFn: loadApplyDiff, staleTime: 0 });
+export const prefetchApplyPlan = (queryClient: QueryClient) =>
+  queryClient.prefetchQuery({ queryKey: planKey, queryFn: loadApplyPlan, staleTime: 0 });
 
 /**
- * Read from the devices afresh on each visit to the Apply page, so it follows
- * saves and runs; not while an apply is running, when they hold half of it.
- * What was read before shows meanwhile.
+ * The change plan (src/applyPlan.ts), read from the devices afresh as the
+ * Apply sheet opens, so it follows saves and runs; not while an apply is
+ * running, when they hold half of it. What was read before shows meanwhile,
+ * with its age.
  */
-export const useApplyDiff = (enabled = true) =>
+export const useApplyPlan = (enabled = true) =>
   // Fresh for half a minute: opening Apply just after a save (which read it) reads it once.
-  useQuery({ queryKey: diffKey, queryFn: loadApplyDiff, enabled, refetchOnWindowFocus: false, staleTime: 30_000 });
+  useQuery({ queryKey: planKey, queryFn: loadApplyPlan, enabled, refetchOnWindowFocus: false, staleTime: 30_000 });

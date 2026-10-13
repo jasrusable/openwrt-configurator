@@ -1,10 +1,10 @@
 import test from "ava";
-import { sampleIntent } from "../helpers/fixtures";
+import { sampleIntent, sampleIntentText } from "../helpers/fixtures";
 import { tempDir } from "../helpers/tempDir";
-import { writeFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { DeviceFacts } from "../../deviceFacts";
-import { discoverCandidates, inspect, suggestName, suggestRole } from "../../discover";
+import { DeviceFacts, readFacts, writeFacts } from "../../deviceFacts";
+import { discoverCandidates, inspect, inspectReset, readopt, suggestName, suggestRole } from "../../discover";
 import { Intent } from "../../intent/schema";
 import { Platform, Session, SshTarget } from "../../platform";
 import { nodePlatform } from "../../platforms/node";
@@ -125,4 +125,37 @@ test("a device that takes this app's key is not open", async (t) => {
   intent.system = { ...intent.system, app_login: { key: "/tmp/id_test" } };
   const read = await inspect({ address: "10.0.0.143", intent, platform: stock({ key: true }).platform });
   t.like(read, { ok: true, value: { openLogin: false } });
+});
+
+test("a device that was reset is read again with its address's old key forgotten, and taken back only if it is the same box", async (t) => {
+  const { platform: stockPlatform } = stock({ key: false });
+  const knownHosts = stockPlatform.env("ONC_KNOWN_HOSTS")!;
+  // Its old key on record, and another host's, which stays.
+  writeFileSync(knownHosts, `10.0.0.143 ssh-ed25519 AAAAoldkey\n10.0.0.1 ssh-ed25519 AAAArouter\n`);
+  // What the file held as each connection was made: the old key refuses it.
+  let atConnect = "";
+  const platform: Platform = {
+    ...stockPlatform,
+    connect: async (target) => {
+      atConnect = readFileSync(knownHosts, "utf8");
+      if (atConnect.includes("10.0.0.143 ssh-ed25519 AAAAoldkey")) throw new Error("host key changed");
+      return stockPlatform.connect(target);
+    },
+  };
+  const intentPath = join(tempDir("reset"), "intent.json");
+  writeFileSync(intentPath, sampleIntentText(), { mode: 0o600 });
+  const facts = (macs: string[]) =>
+    writeFacts(platform, intentPath, { hostname: "home-ap-1", readAt: 1, schema: { name: "zyxel,nwa50ax-pro", version: "25.12.5" }, address: "10.0.0.143", macs, hostKey: { type: "ssh-ed25519", key: "AAAAoldkey" } });
+
+  t.is((await inspectReset({ intentPath, platform, address: "10.0.0.143", name: "nobody" })).ok, false);
+  const read = await inspectReset({ intentPath, platform, address: "10.0.0.143", name: "home-ap-1" });
+  t.true(read.ok);
+  t.is(atConnect, "10.0.0.1 ssh-ed25519 AAAArouter\n", "only that address's key is forgotten");
+
+  facts(["aa:00:00:00:00:99"]);
+  const another = await readopt({ intentPath, platform, address: "10.0.0.143", name: "home-ap-1" });
+  t.regex(!another.ok ? another.error.message : "", /This is not home-ap-1/);
+  facts(["aa:00:00:00:00:43"]);
+  t.true((await readopt({ intentPath, platform, address: "10.0.0.143", name: "home-ap-1", now: () => 9 })).ok);
+  t.is(readFacts(platform, intentPath, ["home-ap-1"])["home-ap-1"]?.hostKey?.key, stockKey, "its new key pinned, under its own name");
 });

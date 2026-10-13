@@ -4,7 +4,7 @@
 // whichever it came from. Every command takes either. A failure is a
 // Problem of the kind it is, decided where it happens: no file, a file that
 // cannot be read, a secret that cannot be, or settings that are not valid.
-import { findPlaintextSecrets, defaultSecretSource, resolveSecrets, SecretLookup } from "./secrets";
+import { findPlaintextSecrets, defaultSecretSource, resolveSecrets, secretRefNames, SecretLookup } from "./secrets";
 import { Platform } from "./platform";
 import { parseConfigJson } from "./parseJson";
 import { compileIntent, isIntent } from "./intent/compile";
@@ -86,6 +86,7 @@ export const loadConfig = async ({
     return fail("invalid", messageOf(thrown));
   }
   if (isIntent(json)) {
+    if (holdsSecretRefs(json)) return fail("invalid", intentRefsRefused);
     // An intent file keeps its passwords, so only its owner may read it.
     const mode = platform.fileMode(configPath);
     if (mode !== undefined && (mode & 0o077) !== 0) {
@@ -101,6 +102,15 @@ export const loadConfig = async ({
   if (!resolved.ok) return resolved;
   const read = planOfJson(resolved.value.value);
   return read.ok ? ok({ ...read.value, secrets: resolved.value.secrets }) : read;
+};
+
+/** Intents hold plain values (the file owner-only); `$secret` refs are for hand-written low-level files. */
+export const intentRefsRefused = "$secret refs are only supported in low-level config files: an intent holds its values as they are.";
+
+/** Whether a config holds any `$secret` ref, a malformed one included. */
+export const holdsSecretRefs = (json: unknown) => {
+  const names = secretRefNames(json);
+  return !names.ok || names.value.length > 0;
 };
 
 /** loadConfig for the CLI and tests: its failure thrown, in its own words. */

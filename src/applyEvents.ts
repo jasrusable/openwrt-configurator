@@ -20,12 +20,27 @@ export const deviceSteps = [
 ] as const;
 export type DeviceStep = (typeof deviceSteps)[number];
 
-export const applyOutcomes = ["applied", "applied-with-problems", "rolled-back", "failed"] as const;
+export const applyOutcomes = ["applied", "applied-with-problems", "rolled-back", "failed", "plan-stale"] as const;
 export type ApplyOutcome = (typeof applyOutcomes)[number];
+
+/**
+ * The run's safety window, once every device is armed: confirming must be
+ * done by `confirmBy` (the earliest watchdog's deadline), and by `restoredBy`
+ * every device not confirmed has put its previous settings back on its own
+ * (the latest deadline, plus the time its watchdog waits to hear the old
+ * config works before it reboots onto it).
+ */
+export type ApplyWindow = { confirmBy: number; restoredBy: number };
+
+/** A device's firmware upgrade, before the apply that follows it (src/firmware/upgrade.ts). */
+export const firmwareSteps = ["building", "downloading", "checking", "flashing", "rebooting", "upgraded", "failed"] as const;
+export type FirmwareStep = (typeof firmwareSteps)[number];
 
 export type ApplyEvent =
   | { at: number; device: string; step: DeviceStep }
-  | { at: number; outcome: ApplyOutcome };
+  | { at: number; device: string; firmware: FirmwareStep }
+  | { at: number; outcome: ApplyOutcome }
+  | { at: number; window: ApplyWindow };
 
 export type Reporter = (event: ApplyEvent) => void;
 
@@ -36,18 +51,45 @@ export type ApplyProgress = {
   /** Each device's latest step. */
   devices: Record<string, DeviceStep>;
   outcome?: ApplyOutcome;
+  window?: ApplyWindow;
+  /** When the run reported first, and when it said how it ended. */
+  startedAt?: number;
+  endedAt?: number;
+  /** Each device's first and latest report: how long it took. */
+  times?: Record<string, { from: number; to: number }>;
+  /** Each upgraded device's firmware step, when the run upgrades first. */
+  firmware?: Record<string, FirmwareStep>;
 };
 
 /** The events, as where things stand. Unknown lines (another version's) are skipped. */
+const isWindow = (value: unknown): value is ApplyWindow =>
+  !!value &&
+  typeof value === "object" &&
+  typeof (value as ApplyWindow).confirmBy === "number" &&
+  typeof (value as ApplyWindow).restoredBy === "number";
+
 export const progressOf = (events: unknown[]): ApplyProgress =>
   events.reduce<ApplyProgress>((progress, event) => {
     if (!event || typeof event !== "object") return progress;
     const e = event as Record<string, unknown>;
+    const at = typeof e.at === "number" ? e.at : undefined;
+    const seen = at === undefined || progress.startedAt !== undefined ? progress : { ...progress, startedAt: at };
     if (typeof e.device === "string" && deviceSteps.includes(e.step as DeviceStep)) {
-      return { ...progress, devices: { ...progress.devices, [e.device]: e.step as DeviceStep } };
+      const was = seen.times?.[e.device];
+      return {
+        ...seen,
+        devices: { ...seen.devices, [e.device]: e.step as DeviceStep },
+        ...(at === undefined ? {} : { times: { ...seen.times, [e.device]: { from: was?.from ?? at, to: at } } }),
+      };
     }
-    if (applyOutcomes.includes(e.outcome as ApplyOutcome)) return { ...progress, outcome: e.outcome as ApplyOutcome };
-    return progress;
+    if (applyOutcomes.includes(e.outcome as ApplyOutcome)) {
+      return { ...seen, outcome: e.outcome as ApplyOutcome, ...(at === undefined ? {} : { endedAt: at }) };
+    }
+    if (isWindow(e.window)) return { ...seen, window: e.window };
+    if (typeof e.device === "string" && firmwareSteps.includes(e.firmware as FirmwareStep)) {
+      return { ...seen, firmware: { ...seen.firmware, [e.device]: e.firmware as FirmwareStep } };
+    }
+    return seen;
   }, { devices: {} });
 
 /** JSON lines, one event each; a line cut off mid-write is skipped. */

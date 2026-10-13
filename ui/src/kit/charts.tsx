@@ -1,7 +1,8 @@
 // Small, quiet visuals for the Status pages, in plain SVG and Mantine's own
 // rings: an area chart, signal bars, a stat tile, a port faceplate. Colours
 // come from Mantine's palette variables, so dark mode holds.
-import { Box, Group, RingProgress, SegmentedControl, Stack, Text, Tooltip } from "@mantine/core";
+import { Box, Group, RingProgress, SegmentedControl, Stack, Text } from "@mantine/core";
+import { Hint } from "./Hint";
 import { ReactNode, useId } from "react";
 import { linkWords } from "./format";
 
@@ -95,7 +96,7 @@ export const SignalBars = ({ dbm }: { dbm?: number }) => {
   const level = dbm >= -55 ? 4 : dbm >= -65 ? 3 : dbm >= -75 ? 2 : 1;
   const color = level >= 3 ? "green" : level === 2 ? "yellow" : "red";
   return (
-    <Tooltip label={`${dbm} dBm`} withArrow>
+    <Hint label={`${dbm} dBm`}>
       <svg width={18} height={14} viewBox="0 0 18 14" aria-label={`signal ${dbm} dBm`}>
         {[0, 1, 2, 3].map((i) => (
           <rect
@@ -109,7 +110,7 @@ export const SignalBars = ({ dbm }: { dbm?: number }) => {
           />
         ))}
       </svg>
-    </Tooltip>
+    </Hint>
   );
 };
 
@@ -234,7 +235,7 @@ export const PortFace = ({ ports }: { ports: { name: string; up: boolean; speed?
   <Group gap={8}>
     {ports.map((p) => (
       <Stack key={p.name} gap={3} align="center">
-        <Tooltip label={p.up ? `${p.name}: connected${p.speed ? ` at ${linkWords(p.speed)}` : ""}` : `${p.name}: nothing connected`} withArrow>
+        <Hint label={p.up ? `${p.name}: connected${p.speed ? ` at ${linkWords(p.speed)}` : ""}` : `${p.name}: nothing connected`}>
           <Box
             w={34}
             h={26}
@@ -245,7 +246,7 @@ export const PortFace = ({ ports }: { ports: { name: string; up: boolean; speed?
               boxShadow: "inset 0 -5px 0 var(--onc-separator)",
             }}
           />
-        </Tooltip>
+        </Hint>
         <Text size="10px" c="dimmed">
           {p.name}
         </Text>

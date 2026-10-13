@@ -2,6 +2,8 @@
 // device (read from the device, as an apply would): `compile` and
 // `print-uci-commands`. Both hide secrets unless asked (src/secretOptions.ts).
 import { CommandSpec } from "../args";
+import { readApplyPlan } from "../applyDiff";
+import { planText } from "../applyPlanText";
 import { installedPackages, managedFiles, runProbes, uciConfigs } from "../deviceProbes";
 import { getDeviceSchema } from "../getDeviceSchema";
 import { getDeviceScript, managedFilesManifest } from "../getDeviceScript";
@@ -83,6 +85,12 @@ export const printUciCommand = ({ platform }: CliContext): CommandSpec => ({
       : { plan: loaded.plan, hostKeys: {} as Record<string, { type: string; key: string }> };
     const { ready: deviceConfigs, skipped } = provisionableDevices(plan);
     reportSkipped(skipped);
+    // What it all comes to, as `provision --plan` says it, above the scripts.
+    if (loaded.intent) {
+      const summary = await readApplyPlan({ intentPath: configPath, platform, now: Date.now });
+      const header = summary.ok ? planText(summary.value, { lines: false }) : `The change plan could not be read: ${summary.error.message}`;
+      console.log(`${header.split("\n").map((line) => `# ${line}`.trimEnd()).join("\n")}\n`);
+    }
 
     // Each device keeps its own schema. Looking it up by model_id meant two
     // devices of the same model shared one schema, so the second was built

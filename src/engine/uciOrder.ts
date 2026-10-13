@@ -7,6 +7,12 @@
 
 const configs = ["system", "network", "firewall", "dhcp", "wireless"];
 
+/** Configs in the order devices are given them: those listed, then the rest by name (the Apply page's groups). */
+export const byConfigOrder = (a: string, b: string) => {
+  const at = (config: string) => (configs.includes(config) ? configs.indexOf(config) : configs.length);
+  return at(a) - at(b) || a.localeCompare(b);
+};
+
 const types: Record<string, string[]> = {
   system: ["system"],
   network: ["switch", "switch_vlan", "device", "bridge-vlan", "interface", "rule", "route", "globals"],

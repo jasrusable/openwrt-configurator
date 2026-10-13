@@ -18,13 +18,17 @@
 //
 // The job provisions a snapshot of the intent taken when it starts, so edits
 // made meanwhile are not half-applied. Only a run that applied promotes that
-// snapshot to `live.json`: the UI compares the draft with it.
+// snapshot to `live.json`: the UI compares the draft with it. The live one it
+// replaces is kept (`live.previous.json`), with when each was applied, so the
+// last apply can be undone by applying the previous one again.
 import { z } from "zod";
 import { ApplyProgress, parseEvents, progressOf } from "../applyEvents";
 import { appliedExits, appliedWithProblemsExit } from "../apply/outcome";
 import { holderOf, LockFiles, releaseLock, takeLock } from "../lock";
 import { Platform } from "../platform";
 import { canonical } from "../json";
+import { Change, diffIntent } from "../intent/diff";
+import { intentFileOrNothing } from "../settings";
 import { keepStatePrivate, read, stateLayout, StoreFiles, StoreKey, tryWrite, write } from "../store";
 
 type JobFiles = StoreFiles & LockFiles & Pick<Platform, "commandLineOf">;
@@ -49,6 +53,10 @@ export type ProvisionStatus = {
   progress: ApplyProgress;
   /** Whether the saved draft is what was last provisioned. */
   live: "none" | "matches" | "differs";
+  /** When the live settings, and the ones before them, were applied. */
+  applied: Applied;
+  /** The run's own changes, as they stood when it started; and whether it was an undo. */
+  run?: { changes: Change[]; undo: boolean };
 };
 
 /** A job's files, in its directory (beside the intent: `<intent>.state`). */
@@ -63,11 +71,34 @@ export const jobFiles = (dir: string) => ({
   events: `${dir}/provision.events`,
   record: `${dir}/provision.json`,
   outcome: `${dir}/provision.outcome.json`,
+  /** The live settings an apply replaced: what undoing it applies again. */
+  previous: `${dir}/live.previous.json`,
+  /** The reviewed plan's state hashes, which the run checks before arming (`provision --verify`). */
+  verify: `${dir}/provision.verify.json`,
+  applied: `${dir}/provision.applied.json`,
 });
 
 export const jobPaths = (intentPath: string) => jobFiles(stateLayout(intentPath).root);
 
-const recordSchema = z.object({ runId: z.string(), startedAt: z.number(), pid: z.number().int().optional() });
+const changeSchema = z.object({
+  path: z.string(),
+  label: z.array(z.string()),
+  kind: z.enum(["added", "removed", "changed"]),
+  before: z.string().optional(),
+  after: z.string().optional(),
+  description: z.string().optional(),
+});
+const recordSchema = z.object({
+  runId: z.string(),
+  startedAt: z.number(),
+  pid: z.number().int().optional(),
+  /** What this run changes, against what was live as it started. */
+  changes: z.array(changeSchema).optional(),
+  /** It applies the previous settings again. */
+  undo: z.boolean().optional(),
+});
+const appliedSchema = z.object({ live: z.number().optional(), previous: z.number().optional() });
+export type Applied = z.infer<typeof appliedSchema>;
 const outcomeSchema = z.object({
   runId: z.string(),
   at: z.number(),
@@ -81,6 +112,11 @@ type JobOutcome = z.infer<typeof outcomeSchema>;
 
 export const jobRecordKey = (dir: string): StoreKey<JobRecord> => ({ path: jobFiles(dir).record, schema: recordSchema, format: 1 });
 const outcomeKey = (dir: string): StoreKey<JobOutcome> => ({ path: jobFiles(dir).outcome, schema: outcomeSchema, format: 1 });
+const appliedKey = (dir: string): StoreKey<Applied> => ({ path: jobFiles(dir).applied, schema: appliedSchema, format: 1 });
+
+/** When the live settings and the ones before them were applied. */
+export const appliedTimes = (files: Pick<Platform, "readTextFile">, intentPath: string): Applied =>
+  read(files, appliedKey(jobPaths(intentPath).dir)) ?? {};
 
 /** A run started this recently with no pid yet is still being started. */
 const startingMs = 60_000;
@@ -172,11 +208,14 @@ export const provisionStatus = async ({
   now?: () => number;
 }): Promise<ProvisionStatus> => {
   const job = await jobState({ intentPath, files, now });
+  const record = job.state === "idle" ? undefined : read(files, jobRecordKey(jobPaths(intentPath).dir));
   return {
     ...job,
     log: (readText(files, jobPaths(intentPath).log) ?? "").split("\n").slice(-400).join("\n"),
     progress: job.state === "idle" ? { devices: {} } : jobProgress(intentPath, files),
     live: liveState(intentPath, files),
+    applied: appliedTimes(files, intentPath),
+    ...(record ? { run: { changes: record.changes ?? [], undo: record.undo ?? false } } : {}),
   };
 };
 
@@ -194,15 +233,34 @@ const holderGone = async (files: JobFiles, dir: string, holder: string | undefin
 
 const busy = { started: false as const, reason: "Settings are already being applied." };
 
-/** Start a provision of the saved intent, unless one is already running. */
+/**
+ * Start a provision of the saved intent (or, undoing, of `source`: the
+ * previous live settings), unless one is already running.
+ */
 export const startProvision = async ({
   intentPath,
   files,
   now,
+  source = intentPath,
+  undo = false,
+  verify,
+  upgrade,
+  acceptNewSeries,
+  acceptDowngrade,
 }: {
   intentPath: string;
   files: JobFiles & Pick<Platform, "selfCommand" | "spawnDetached">;
   now: () => number;
+  source?: string;
+  undo?: boolean;
+  /** Per device, the state hash its reviewed plan was read from (src/applyPlan.ts); none, as from the CLI: not checked. */
+  verify?: Record<string, string>;
+  /** Upgrade these devices' firmware first (src/firmware/run.ts), or every one behind ("all"). */
+  upgrade?: string[] | "all";
+  /** The upgrade may move into a series this app has not been checked against: acknowledged. */
+  acceptNewSeries?: boolean;
+  /** The upgrade may move a device back: acknowledged. */
+  acceptDowngrade?: boolean;
 }) => {
   const paths = jobPaths(intentPath);
   // Owner-only: it holds snapshots of the intent.
@@ -212,14 +270,22 @@ export const startProvision = async ({
     return busy;
   }
   // A fresh run: nothing of the last one's progress, outcome or output.
-  [paths.events, paths.outcome, paths.log].forEach((path) => files.removeFile(path));
-  files.writeFileAtomic(paths.snapshot, files.readTextFile(intentPath), 0o600);
+  [paths.events, paths.outcome, paths.log, paths.verify].forEach((path) => files.removeFile(path));
+  if (verify) files.writeFileAtomic(paths.verify, JSON.stringify(verify), 0o600);
+  files.writeFileAtomic(paths.snapshot, files.readTextFile(source), 0o600);
   const startedAt = now();
-  write(files, jobRecordKey(paths.dir), { runId, startedAt });
+  // What it changes, in the user's terms, kept for the summary once it ends.
+  const live = intentFileOrNothing(files, paths.live);
+  const changes = live ? diffIntent(live, intentFileOrNothing(files, paths.snapshot)) : [];
+  write(files, jobRecordKey(paths.dir), { runId, startedAt, changes, undo });
   // It refreshes the device facts as it reads the devices (deviceFacts.ts).
   const argv = [
     ...files.selfCommand(),
     ...["provision", paths.snapshot, "--facts-for", intentPath, "--events", paths.events, "--job", paths.dir, runIdFlag, runId],
+    ...(verify ? ["--verify", paths.verify] : []),
+    ...(upgrade ? ["--upgrade", upgrade === "all" ? "all" : upgrade.join(",")] : []),
+    ...(upgrade && acceptNewSeries ? ["--accept-new-series"] : []),
+    ...(upgrade && acceptDowngrade ? ["--accept-downgrade"] : []),
   ];
   let pid: number;
   try {
@@ -231,7 +297,7 @@ export const startProvision = async ({
   }
   // Started whatever this says: a record that could not take its pid (a full
   // disk) only makes the run look interrupted a minute on.
-  tryWrite(files, jobRecordKey(paths.dir), { runId, startedAt, pid });
+  tryWrite(files, jobRecordKey(paths.dir), { runId, startedAt, pid, changes, undo });
   return { started: true as const, runId };
 };
 
@@ -249,8 +315,19 @@ export const jobEnding = (files: JobFiles, dir: string, runId: string, now: () =
     tryWrite(files, outcomeKey(dir), { runId, at: now(), ...end });
     if ("exitCode" in end && appliedExits.includes(end.exitCode) && holderOf(files, paths.lock) === runId) {
       try {
+        // What was live becomes the one an undo puts back.
+        const was = (() => {
+          try {
+            return files.readTextFile(paths.live);
+          } catch {
+            return undefined;
+          }
+        })();
+        if (was !== undefined) files.writeFileAtomic(paths.previous, was, 0o600);
         files.writeFileAtomic(paths.live, files.readTextFile(paths.snapshot), 0o600);
         files.removeFile(paths.snapshot);
+        const times = read(files, appliedKey(dir)) ?? {};
+        tryWrite(files, appliedKey(dir), { live: now(), ...(was !== undefined && times.live !== undefined ? { previous: times.live } : {}) });
       } catch {
         // Applied, but not recorded as live: the UI then offers to apply again.
       }

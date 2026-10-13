@@ -104,6 +104,16 @@ const substituteSecrets = (
   );
 };
 
+/** The names a config's `$secret` refs use, each once; a malformed ref is the file's mistake. */
+export const secretRefNames = (value: unknown): Result<string[], Problem> => {
+  const names = new Set<string>();
+  const errors: string[] = [];
+  collectSecretRefs(value, "", names, errors);
+  return errors.length > 0
+    ? fail("invalid", `Invalid $secret references:\n${errors.map((e) => `  - ${e}`).join("\n")}`)
+    : ok([...names]);
+};
+
 /** Where `$secret` refs are looked up, and what to tell the user when some are missing. */
 export type SecretSource = {
   lookup: SecretLookup;
@@ -120,17 +130,13 @@ export const resolveSecrets = async (
   lookup: SecretLookup,
   describeMissing: (names: string[]) => string = keychainMissing
 ): Promise<Result<{ value: unknown; secrets: Map<string, string> }, Problem>> => {
-  const names = new Set<string>();
-  const errors: string[] = [];
-  collectSecretRefs(value, "", names, errors);
-  if (errors.length > 0) {
-    return fail("invalid", `Invalid $secret references:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
-  }
+  const names = secretRefNames(value);
+  if (!names.ok) return names;
 
   const secrets = new Map<string, string>();
   const missing: string[] = [];
   // Sequential so a Keychain GUI prompt cannot stack per secret.
-  for (const name of names) {
+  for (const name of names.value) {
     let resolved: string | undefined;
     try {
       resolved = await lookup(name);

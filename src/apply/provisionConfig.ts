@@ -183,7 +183,10 @@ export const provisionConfig = async ({
   onDeviceSchema,
   hostKeys = {},
   report,
+  verify = {},
 }: {
+  /** Per hostname: the state hash its reviewed plan was read from (src/applyPlan.ts); a device that differs stops the run before anything is armed. */
+  verify?: Record<string, string>;
   /** Where each device is, and how the run ended, as data (applyEvents.ts). */
   report?: Reporter;
   plan: Plan;
@@ -271,6 +274,7 @@ export const provisionConfig = async ({
       now: Date.now,
       timing: timing ?? confirmTiming(),
       report,
+      ...(verify[deviceConfig.hostname] ? { verify: { hash: verify[deviceConfig.hostname], sha256: platform.sha256 } } : {}),
     })),
     await defaultGateway(platform),
     await accessPointsOf(platform, planned)

@@ -7,8 +7,10 @@ import { IconAccessPoint, IconRouter } from "@tabler/icons-react";
 import type { Intent } from "../../../../src/intent/schema";
 import type { DeviceView } from "../../../../src/status/views";
 import { compareReleases } from "../../../../src/release";
+import { targetOf } from "../../../../src/firmware/target";
 import { useSeries } from "../../data/history";
-import { useLatestRelease, useNetworkStatus } from "../../data/status";
+import { useReleases } from "../../data/firmware";
+import { useNetworkStatus } from "../../data/status";
 import { duration } from "../../facts";
 import { useDraftValue } from "../../form/draft";
 import { AreaChart, PortFace, Ring } from "../../kit/charts";
@@ -18,10 +20,19 @@ import { liveLine, unread } from "./shared";
 
 const heat = (c: number) => (c >= 85 ? "red" : c >= 70 ? "orange" : c >= 55 ? "yellow" : "teal");
 
-const DeviceCard = ({ device: d, latest }: { device: DeviceView; latest?: string }) => {
+/** The release a device should run (System › Firmware), when it runs an older one. */
+const useUpdate = (device: DeviceView) => {
+  const intent: Intent = useDraftValue();
+  const target = targetOf(intent, device.name, useReleases().data?.releases);
+  return target.kind === "release" && !!device.version && (compareReleases(device.version, target.version) ?? 0) < 0
+    ? target.version
+    : undefined;
+};
+
+const DeviceCard = ({ device: d }: { device: DeviceView }) => {
   const load = useSeries(`load:${d.name}`);
   const temperature = useSeries(`temperature:${d.name}`);
-  const behind = !!latest && !!d.version && (compareReleases(d.version, latest) ?? 0) < 0;
+  const update = useUpdate(d);
   const cpu = d.load !== undefined ? d.load / (d.cores ?? 1) : undefined;
   return (
     <Box className="onc-card" p="md">
@@ -39,9 +50,9 @@ const DeviceCard = ({ device: d, latest }: { device: DeviceView; latest?: string
             </Stack>
           </Group>
           <Group gap={8} wrap="nowrap">
-            {behind && (
+            {update && (
               <Badge variant="light" color="blue" radius="sm" style={{ textTransform: "none" }}>
-                {latest} is out
+                {update} is out
               </Badge>
             )}
             <StatusDot color={d.rebooting ? "orange" : d.reachable ? "green" : "red"} />
@@ -99,7 +110,6 @@ const DeviceCard = ({ device: d, latest }: { device: DeviceView; latest?: string
 export const DevicesPage = () => {
   const intent: Intent = useDraftValue();
   const status = useNetworkStatus();
-  const latest = useLatestRelease().data?.version;
   const devices = status.data?.deviceViews ?? [];
   return (
     <SettingsPage title="Devices" description={liveLine(intent.system.name, status)}>
@@ -109,13 +119,8 @@ export const DevicesPage = () => {
         </Section>
       )}
       {devices.map((d) => (
-        <DeviceCard key={d.name} device={d} latest={latest} />
+        <DeviceCard key={d.name} device={d} />
       ))}
-      {latest && (
-        <Text size="xs" c="dimmed" px={4}>
-          OpenWrt's latest release: {latest}.
-        </Text>
-      )}
     </SettingsPage>
   );
 };

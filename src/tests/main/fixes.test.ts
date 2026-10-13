@@ -9,7 +9,7 @@ import { tempDir } from "../helpers/tempDir";
 import { join } from "path";
 import { deviceSchemaSchema } from "../../deviceSchema";
 import { compileIntent } from "../../intent/compile";
-import { droppableFixes, patchStatus } from "../../intent/patches/status";
+import { droppableFixes, patchStatus, shownPatches } from "../../intent/patches/status";
 import { deviceDiff, fixSources } from "../../applyDiff";
 import { getOpenWrtState } from "../../engine/getOpenWrtState";
 import { sampleIntent } from "../helpers/fixtures";
@@ -51,6 +51,15 @@ test("each fix, device by device: active, not for this device and why, turned of
   const ft = views.find((v) => v.id === "ft-key-race")!;
   t.like(ft, { title: "Fast roaming held off on WPA3 SSIDs on OpenWrt 25.12", required: false, kind: "fix", where: "where it has Wi-Fi, from OpenWrt 25.12.0" });
   t.true(ft.effects.length > 0 && ft.references.length > 0);
+});
+
+test("the pages list a patch only when it overrides a setting, and still when it is turned off", (t) => {
+  const i = intent();
+  t.deepEqual(shownPatches(i), ["ft-key-race"]);
+  i.system.patches = { off: ["ft-key-race"] };
+  t.deepEqual(shownPatches(i), ["ft-key-race"], "turned off, it still has a row to turn back on");
+  i.wifi.roaming.steering = "nudge";
+  t.deepEqual(shownPatches(i), ["ft-key-race", "usteer-nudge-requests"]);
 });
 
 test("a fix every device has moved past is one to drop; one still active or not yet known is not", (t) => {

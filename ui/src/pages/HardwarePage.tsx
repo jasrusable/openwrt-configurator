@@ -13,9 +13,12 @@ import { defineList, ListPage } from "../form/ListPage";
 import { IconAccessPoint, IconRouter } from "@tabler/icons-react";
 import { useDraftValue } from "../form/draft";
 import { useDevices, useFreshDevices } from "../data/devices";
+import { useFirmwareRows } from "../data/firmware";
+import { DeviceFirmwareField } from "../firmware/DeviceFirmware";
 import { Intent } from "../../../src/intent/schema";
 import { rescueAddress, rescueAfterMinutes, rescueSsid } from "../../../src/intent/mesh";
 import { AddHardwarePage } from "./AddHardwarePage";
+import { keyRefused, ResetDevice } from "./ResetDevice";
 import { useNetworkStatus } from "../data/status";
 import { ago, bandsOf, duration, meshAbility, modelOf, portsOf } from "../facts";
 import { ItemIcon, ItemName, Section, SettingRow, StatusDot } from "../kit/layout";
@@ -104,9 +107,9 @@ const ModelCell = ({ index }: { index: number }) => {
 
 /** What the device is, read from it: nothing here is set by you. */
 /**
- * The fixes on this device (src/intent/patches): those on, turned off, or
- * not known until its facts are read; the rest (not for it, not needed) are
- * under System › Patches.
+ * Patches that change a setting on this device: on, turned off, or not
+ * known until its facts are read. Ones that only adjust the device are
+ * left off this list.
  */
 const DeviceFixes = ({ index }: { index: number }) => {
   const name = useDraftValue(`hardware.${index}.name`);
@@ -115,7 +118,7 @@ const DeviceFixes = ({ index }: { index: number }) => {
     .filter(({ on }) => on && ["active", "off", "unknown", "fixed"].includes(on.state));
   if (!fixes.length) return null;
   return (
-    <Section title="Patches on this device" description={`What this app layers over OpenWrt here; every patch is under ${where("patches")}.`}>
+    <Section title="Patches on this device" description={`What this app changes a setting for here. Each is under ${where("patches")}.`}>
       {fixes.map(({ fix, on }) => (
         <SettingRow key={fix.id} label={<Anchor component={Link} to="/system/patches" size="sm">{fix.title}</Anchor>} description={on!.why}>
           <FixStateBadge state={on!.state} why={on!.why} />
@@ -125,7 +128,44 @@ const DeviceFixes = ({ index }: { index: number }) => {
   );
 };
 
+/**
+ * Its firmware: the same setting as its row in System › Firmware (follow the
+ * network's release, hold, or pin one), where it stands, and the way to upgrade.
+ */
+const FirmwareSection = ({ index }: { index: number }) => {
+  const name = useDraftValue(`hardware.${index}.name`);
+  const row = useFirmwareRows().find((r) => r.device === name);
+  return (
+    <Section
+      title="Firmware"
+      description={
+        <>
+          {row?.state === "update" ? "An update is available: " : "Upgrades are run from "}
+          <Anchor component={Link} to="/system/firmware" size="xs">
+            {where("firmware")}
+          </Anchor>
+          .
+        </>
+      }
+    >
+      <DeviceFirmwareField index={index} />
+    </Section>
+  );
+};
+
+/** The device's facts; and, when its key is not the one on record, the way to take it back after a reset. */
 const DeviceFacts = ({ index }: { index: number }) => {
+  const name = useDraftValue(`hardware.${index}.name`);
+  const { known, unreached } = useFactsOf(index);
+  return (
+    <>
+      <DeviceRead index={index} />
+      {name && unreached && keyRefused(unreached.error) && <ResetDevice name={name} address={known?.address} />}
+    </>
+  );
+};
+
+const DeviceRead = ({ index }: { index: number }) => {
   const { known, unreached, reading } = useFactsOf(index);
   // Read from the device by itself; said in words, never a button.
   const note = reading
@@ -294,6 +334,7 @@ const hardware = defineList({
           />
         </Section>
       </When>
+      <FirmwareSection index={i} />
       <DeviceFacts index={i} />
       <DeviceFixes index={i} />
     </>

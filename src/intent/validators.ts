@@ -1,7 +1,8 @@
 // Values several settings share the rules of: names, addresses, Wi-Fi
-// passwords. A rule only one feature uses lives in that feature's schema.
+// passwords, firmware releases. A rule only one feature uses lives in that feature's schema.
 import { z } from "zod";
 import { isIpAddress, parseIpv4 } from "./addresses";
+import { supportedRelease } from "../release";
 
 /** A device's or network's name: a hostname's rules. */
 export const namePattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
@@ -36,3 +37,7 @@ export const ipv4 = z
 
 /** A DNS server: IPv4 or IPv6. */
 export const dnsServer = z.string().refine(isIpAddress, "an IP address, like 9.9.9.9");
+
+/** An OpenWrt release the devices may be moved to, as `pattern` allows: 25.12 or later (apk). */
+export const firmwareRelease = (pattern: RegExp, example: string) =>
+  z.string().regex(pattern, example).refine(supportedRelease, "25.12 or later: this app installs packages with apk");

@@ -11,6 +11,8 @@ export const places = {
   system: ["System"],
   general: ["System", "General"],
   patches: ["System", "Patches"],
+  firmware: ["System", "Firmware"],
+  backup: ["System", "Backup"],
   internet: ["Internet"],
   networks: ["Networks"],
   wifi: ["Wi-Fi"],

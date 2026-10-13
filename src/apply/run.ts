@@ -37,6 +37,8 @@ export type DeviceRunOptions = {
   timing: ConfirmTiming;
   /** Where the device is, as data (applyEvents.ts); the log says it in words. */
   report?: Reporter;
+  /** The state hash the reviewed plan was read from (src/deviceState.ts): planning refuses a device that differs. */
+  verify?: { hash: string; sha256: (text: string) => string };
 };
 
 export type DeviceRun = DeviceRunOptions & {

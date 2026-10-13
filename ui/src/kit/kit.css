@@ -88,6 +88,16 @@ body {
   flex-wrap: nowrap;
 }
 
+/* A device row in the apply sheet: the whole row opens its uci lines. */
+button.onc-device-row:hover {
+  background: var(--onc-hover);
+}
+
+button.onc-device-row:focus-visible {
+  outline: 2px solid var(--mantine-color-blue-filled);
+  outline-offset: -2px;
+}
+
 .onc-row-control {
   flex-shrink: 0;
   max-width: 60%;

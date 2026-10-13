@@ -9,14 +9,14 @@ import { Intent, intentSchema } from "../../intent/schema";
 import { HttpRequest, HttpResponse, Platform } from "../../platform";
 import { renameFacts } from "../../deviceFacts";
 import { problem } from "../../problem";
-import { intentFileOrNothing, readIntentFile } from "../../settings";
+import { intentFileOrNothing, readIntentFile, writeIntentFile } from "../../settings";
 import { ApiContext, json, problemResponse, refuse, respond, Route, withBody } from "../router";
 
 type Files = Pick<Platform, "readTextFile" | "sha256">;
 
 const versionHeader = "x-onc-version";
 
-const versionOf = (files: Files, path: string) => {
+export const versionOf = (files: Files, path: string) => {
   try {
     return files.sha256(files.readTextFile(path));
   } catch {
@@ -24,7 +24,7 @@ const versionOf = (files: Files, path: string) => {
   }
 };
 
-const withVersion = (response: HttpResponse, version: string): HttpResponse => ({
+export const withVersion = (response: HttpResponse, version: string): HttpResponse => ({
   ...response,
   headers: { ...response.headers, [versionHeader]: version },
 });
@@ -72,8 +72,7 @@ export const intentRoutes = ({ intentPath, platform }: ApiContext): Route[] => [
       // Valid settings that do not make a valid plan: the compiler's fault.
       if (!compiled.ok) return refuse("internal", "The intent is valid but did not compile.", compiled.error.details);
       if (before.success) keepRenamedFacts(platform, intentPath, before.data, intent);
-      // The file holds passwords: only its owner may read it.
-      platform.writeFileAtomic(intentPath, JSON.stringify(intent, null, 2) + "\n", 0o600);
+      writeIntentFile(platform, intentPath, intent, { keepOld: "older-format" });
       return withVersion(json(200, intent), versionOf(platform, intentPath));
     }),
   },

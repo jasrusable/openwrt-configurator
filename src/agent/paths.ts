@@ -25,3 +25,12 @@ export const watchdogPidGlob = `${deviceTmp}/${runDirName}*/${watchdogPidFile}`;
  * device until it is over (`done`, or its watchdog's own clean-up).
  */
 export const agentGlob = `${deviceTmp}/${agentName}*.sh`;
+
+/**
+ * On a device an apply has confirmed: its settings are this app's, so an
+ * image's first-boot script (src/firmware/firstBoot.ts) leaves them alone
+ * after an upgrade that kept them. Kept through upgrades by its keep.d list.
+ */
+export const appliedMarker = "/etc/onc/applied";
+/** What sysupgrade keeps for the marker (one list per package or purpose in keep.d). */
+export const appliedKeepList = "/lib/upgrade/keep.d/onc-applied";
