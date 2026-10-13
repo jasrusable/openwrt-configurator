@@ -55,7 +55,14 @@ export const reconnectUntil = async ({
   let lastError: unknown;
   while (now() < deadline) {
     try {
-      return await connect();
+      const session = await connect();
+      // A connection that took past the deadline proves nothing in time:
+      // the watchdog may already be restoring.
+      if (now() >= deadline) {
+        session.dispose();
+        throw new Error("Connected only after the deadline");
+      }
+      return session;
     } catch (e) {
       lastError = e;
       if (now() + reconnectIntervalMs >= deadline) break;
@@ -115,6 +122,9 @@ export const reconnectSettled = async ({
   try {
     await beforeSettle?.(first);
     if (budget >= 3) await runProbe(first, servicesSettled(budget));
+  } catch {
+    // The first session dropped (services restarting the network): skipped
+    // quietly, as the confirming reconnect below is the real test.
   } finally {
     first.dispose();
   }

@@ -45,9 +45,10 @@ const Summary = ({ info }: { info: ProvisionInfo }) => {
 const Changes = ({ info }: { info: ProvisionInfo }) =>
   info.live !== "differs" || info.changes.length === 0 ? null : (
     <Section title="What will change">
-      {info.changes.map((change) => (
+      {info.changes.map((change, i) => (
         <SettingRow
-          key={change.path}
+          // A path can come twice (one item removed and another added where it was).
+          key={`${change.kind}:${change.path}:${i}`}
           label={change.label.join(" › ")}
           description={change.description}
         >

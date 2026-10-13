@@ -22,6 +22,19 @@ export const radios: { band: Band; name: string; width: string }[] = [
   { band: "6g", name: "radio2", width: "160" },
 ];
 
+/**
+ * The widest a band's radio is set to (MHz): its setting, else the band's
+ * usual; the mesh's band at most 80 MHz on 5 GHz, as wider reaches radar
+ * channels. One rule for every node's radio, the router's mesh one included,
+ * or the mesh's links would differ by node.
+ */
+export const radioWidth = (intent: Intent, band: Band) => {
+  const settings = intent.radios[band];
+  const usual = radios.find((r) => r.band === band)!.width;
+  const width = settings.width === "auto" ? usual : settings.width;
+  return intent.mesh.enabled && intent.mesh.band === band && band === "5g" ? String(Math.min(80, Number(width))) : width;
+};
+
 /** dBm. The driver still caps it at what the country allows. */
 const txpower = { low: 10, medium: 15, high: 20 } as const;
 const cellDensity = { off: 0, normal: 1, high: 2, very_high: 3 } as const;
@@ -86,7 +99,7 @@ export const wifi: Feature = (intent) => {
             ...(settings.enabled ? {} : { disabled: true }),
             // The best the radio can do at this width: Wi-Fi 7, 6, 5 or 4.
             // The mesh's band at most 80 MHz: wider reaches radar channels.
-            htmode: `@best/${meshBand === "5g" && band === "5g" ? Math.min(80, Number(settings.width === "auto" ? width : settings.width)) : settings.width === "auto" ? width : settings.width}`,
+            htmode: `@best/${radioWidth(intent, band)}`,
             // The mesh's band: every node on its channel, pinned or not.
             channel: meshBand === band ? intent.mesh.channel : "auto",
             cell_density: cellDensity[settings.cell_density],

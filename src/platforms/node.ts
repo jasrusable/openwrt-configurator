@@ -2,6 +2,7 @@ import { spawn } from "child_process";
 import { createHash } from "crypto";
 import {
   appendFileSync,
+  chmodSync,
   closeSync,
   existsSync,
   createReadStream,
@@ -263,7 +264,11 @@ export const nodePlatform: Platform = {
   writeFileAtomic: (path, data, mode) =>
     withPath(path, () => {
       const temporary = `${path}.onc-tmp`;
-      writeFileSync(temporary, data, { mode });
+      // New, with its mode from the start: a leftover from a crash would
+      // otherwise keep its own (writeFileSync sets a mode only on creation).
+      rmSync(temporary, { force: true });
+      writeFileSync(temporary, data, { mode, flag: "wx" });
+      chmodSync(temporary, mode);
       renameSync(temporary, path);
     }),
   readStdin: () => readFileSync(0, "utf8"),
@@ -309,6 +314,7 @@ export const nodePlatform: Platform = {
             headers: Object.fromEntries(
               Object.entries(req.headers).map(([k, v]) => [k, String(v)])
             ),
+            ...(req.socket.remoteAddress ? { remoteAddress: req.socket.remoteAddress } : {}),
           }).catch((e) => ({
             status: 500,
             headers: { "content-type": "text/plain" },

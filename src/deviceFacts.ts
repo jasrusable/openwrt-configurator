@@ -71,6 +71,36 @@ export const writeFacts = (
   }
 };
 
+/**
+ * A device renamed in Hardware keeps what is known of it under its new name:
+ * its pinned host key above all, without which it could only be found at the
+ * address its settings give (src/locate.ts) and never be re-adopted. Nothing
+ * moves onto a name that has facts of its own.
+ */
+export const renameFacts = (
+  files: Pick<Platform, "readTextFile" | "writeTextFile" | "removeFile" | "mkdirp">,
+  intentPath: string,
+  from: string,
+  to: string
+) => {
+  let stored: Record<string, unknown>;
+  try {
+    stored = parseJson(files.readTextFile(file(intentPath, from)), file(intentPath, from)) as Record<string, unknown>;
+  } catch {
+    return;
+  }
+  try {
+    files.readTextFile(file(intentPath, to));
+    return;
+  } catch {
+    // Free.
+  }
+  files.writeTextFile(file(intentPath, to), JSON.stringify({ ...stored, hostname: to }, null, 2) + "\n");
+  files.removeFile(file(intentPath, from));
+  files.removeFile(attemptFile(intentPath, from));
+  files.writeTextFile(seenFile(intentPath), JSON.stringify(listSeen(files, intentPath).map((h) => (h === from ? to : h))));
+};
+
 /** The facts last read for each of `hostnames`; a device never read has none. */
 export const readFacts = (
   files: Pick<Platform, "readTextFile">,
@@ -261,8 +291,14 @@ export const withLocatedAddresses = async (oncConfig: ONCConfig, intentPath: str
   const found = await Promise.all(locateEach({ devices: ready, facts, platform }));
   const addresses = new Map<string, string>();
   const hostKeys: Record<string, { type: string; key: string }> = {};
+  // Not found (or not trusted where it was): never connected to anyway at
+  // its configured name, which anyone on the network can claim in DHCP.
+  const unreached: { hostname: string; error: string }[] = [];
   for (const f of found) {
-    if (!("session" in f)) continue;
+    if (!("session" in f)) {
+      unreached.push({ hostname: f.hostname, error: f.error });
+      continue;
+    }
     f.session.dispose();
     rememberLocated(platform, intentPath, f, Date.now());
     const configured = ready.find((d) => d.hostname === f.hostname)?.ipaddr;
@@ -281,5 +317,6 @@ export const withLocatedAddresses = async (oncConfig: ONCConfig, intentPath: str
       ),
     },
     hostKeys,
+    unreached,
   };
 };

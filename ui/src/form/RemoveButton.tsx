@@ -104,7 +104,7 @@ export const RemoveButton = ({
               </div>
             )}
             <Text size="xs" c="dimmed">
-              Nothing changes on your devices until you save and provision.
+              Nothing changes on your devices until you save and apply.
             </Text>
             <Stack gap={6} align="flex-end">
               <Button.Group>

@@ -104,7 +104,6 @@ const clients = defineList({
   title: "Clients",
   addLabel: "Add client",
   newPage: <NewClientPage />,
-  newItem: () => ({ id: "", name: "", public_key: "", host: 2, route: "home" as const }),
   itemTitle: (i) => <Value name={`vpn.clients.${i}.name`} fallback="Client" />,
   empty: "No clients yet.",
   columns: [

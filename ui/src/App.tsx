@@ -12,6 +12,7 @@ import {
   Stack,
   Text,
   ThemeIcon,
+  Tooltip,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { IconTopologyStar3 } from "@tabler/icons-react";
@@ -50,9 +51,17 @@ const SaveBar = () => {
     <Group gap="xs" wrap="nowrap">
       <ProblemsButton />
       {error ? (
-        <Text size="sm" c="red" visibleFrom="sm" maw={260} truncate title={error}>
-          Not saved: {error}
-        </Text>
+        <>
+          <Text size="sm" c="red" visibleFrom="sm" maw={260} truncate title={error}>
+            Not saved: {error}
+          </Text>
+          {/* On a phone, too little room for the reason: the word, the reason on a tap. */}
+          <Tooltip label={error} multiline w={260} withArrow events={{ hover: true, focus: true, touch: true }}>
+            <Text size="sm" c="red" hiddenFrom="sm" tabIndex={0} aria-label={`Not saved: ${error}`}>
+              Not saved
+            </Text>
+          </Tooltip>
+        </>
       ) : (
         dirty &&
         valid && (
@@ -318,11 +327,10 @@ export const App = () => {
     );
   }
   return (
-    // Keyed by the saved file, so a save or a reload restarts the form from it.
     <>
-      {/* Once per load, outside the form, which starts again on every save. */}
+      {/* Once per load, outside the form. */}
       <Warmup />
-      <IntentForm key={JSON.stringify(intent.data)} intent={intent.data}>
+      <IntentForm intent={intent.data}>
         <RouterProvider router={router} />
       </IntentForm>
     </>

@@ -70,8 +70,9 @@ export const sectionSchema = <T extends ZodRawShape>(
 export const nameValidation = z
   .string()
   .regex(
-    /^[0-9a-zA-Z_-]+$/,
-    "must contain only letters, digits, underscores or hyphens"
+    /^[0-9a-zA-Z_]+$/,
+    // uci refuses a hyphen in a section name (verified on 25.12.5).
+    "must contain only letters, digits or underscores"
   );
 
 export const oncSectionSchema = <T extends ZodRawShape>(

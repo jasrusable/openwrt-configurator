@@ -166,6 +166,18 @@ export class Draft {
     this.emit();
   };
 
+  /**
+   * The saved file changed elsewhere (another tab, the CLI, a login read it
+   * again): follow it when there are no edits; with edits, keep them, now
+   * compared with the new file.
+   */
+  rebase = (saved: Intent) => {
+    if (saved === this.saved) return;
+    if (canonical(this.value) === canonical(this.saved)) return this.reset(saved);
+    this.saved = saved;
+    this.emit();
+  };
+
   reveal = () => {
     this.revealAll = true;
     this.emit();

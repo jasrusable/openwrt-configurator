@@ -152,7 +152,6 @@ const providers = defineList({
   title: "Providers",
   addLabel: "Add provider",
   newPage: <NewProviderPage />,
-  newItem: () => ({ id: "tun1", name: "", type: "openvpn" as const, config: "" }),
   // Networks out through it go back to their usual line.
   onRemove: (intent, index) => {
     const gone = intent.tunnels[index];

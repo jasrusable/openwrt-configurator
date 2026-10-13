@@ -167,7 +167,6 @@ const useField = (name: IntentField) => {
       if (swap) draft.replace(swap.apply(draft.get()));
       else draft.set(name, next);
     },
-    onBlur: () => {},
     error: useFieldError(name),
     /**
      * Why it cannot be changed now. A refused value already set stays
@@ -201,7 +200,6 @@ export const TextField = ({
           const value = chars ? [...typed].filter((c) => chars.test(c)).join("") : typed;
           field.onChange(value || undefined);
         }}
-        onBlur={field.onBlur}
         placeholder={placeholder}
         error={!!field.error}
         spellCheck={false}
@@ -220,7 +218,6 @@ export const PasswordField = (row: RowProps) => {
         value={field.value ?? ""}
         // Cleared is unset: "" would fail a pattern an optional field allows.
         onChange={(e) => field.onChange(e.currentTarget.value || undefined)}
-        onBlur={field.onBlur}
         error={!!field.error}
         style={control.wide}
       />
@@ -252,12 +249,12 @@ export const NumberField = ({
         value={typing ?? field.value ?? ""}
         onChange={(value) => {
           setTyping(value);
-          if (value !== "" || !required) field.onChange(value === "" ? undefined : Number(value));
+          // Half-typed ("-", "1."): not a number yet, so the draft keeps what it had.
+          if (value === "") {
+            if (!required) field.onChange(undefined);
+          } else if (Number.isFinite(Number(value))) field.onChange(Number(value));
         }}
-        onBlur={() => {
-          setTyping(undefined);
-          field.onBlur();
-        }}
+        onBlur={() => setTyping(undefined)}
         min={min}
         max={max}
         allowDecimal={!integer}
@@ -548,7 +545,6 @@ export const SubnetField = (row: RowProps) => {
           const candidate = m && `${m[1]}.${m[2]}.${m[3]}.0/24`;
           field.onChange(candidate && parseSubnet(candidate) ? candidate : typed);
         }}
-        onBlur={field.onBlur}
         placeholder="10.0.20.1"
         rightSection={<Text size="sm" c="dimmed">/24</Text>}
         rightSectionWidth={44}

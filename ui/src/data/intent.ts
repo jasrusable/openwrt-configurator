@@ -1,6 +1,6 @@
 // Server state for the intent file, through React Query.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { loadIntent, saveIntent } from "./api";
+import { loadIntent, SaveError, saveIntent } from "./api";
 import { prefetchApplyDiff } from "./devices";
 import { provisionKey } from "./provision";
 
@@ -13,6 +13,10 @@ export const useSaveIntent = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: saveIntent,
+    // Saved elsewhere since: read it again; the draft keeps its edits over it.
+    onError: (error) => {
+      if (error instanceof SaveError && error.changedElsewhere) void queryClient.invalidateQueries({ queryKey: intentKey });
+    },
     // What the server saved, defaults applied, is the new truth.
     onSuccess: (saved) => {
       queryClient.setQueryData(intentKey, saved);

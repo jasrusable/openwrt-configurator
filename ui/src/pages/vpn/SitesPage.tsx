@@ -93,7 +93,6 @@ const sitesList = defineList({
   title: "Linked sites",
   addLabel: "Add site",
   newPage: <NewSitePage />,
-  newItem: () => ({ id: "s1", name: "", public_key: "", subnets: [] }),
   itemTitle: (i) => <Value name={`sites.peers.${i}.name`} fallback="Site" />,
   empty: "No sites linked yet.",
   columns: [

@@ -12,6 +12,8 @@ export const dhcpDhcpSchema = z
     // `default from PREFIX`, which odhcpd does not treat as a default route.
     ra_default: z.union([z.literal(0), z.literal(1), z.literal(2)]).optional(),
     ra_flags: z.array(z.enum(["managed-config", "other-config"])).optional(),
+    /** odhcpd announcing the router as the IPv6 DNS server (default on). */
+    dns_service: z.boolean().optional(),
     force: z.boolean().optional(),
     leasetime: z.string().optional(),
   })

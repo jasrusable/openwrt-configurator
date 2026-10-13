@@ -15,13 +15,17 @@ import { Intent, lineTypes, netmask } from "../schema";
 const lineOverhead = (
   line: (typeof lineTypes)[number],
   tagged: boolean,
-): Record<string, unknown> =>
-  ({
-    fibre: { linklayer: "ethernet", overhead: tagged ? "42" : "38", tcMPU: 84 },
-    cable: { linklayer: "ethernet", overhead: "18", tcMPU: 64 },
+  pppoe: boolean,
+): Record<string, unknown> => {
+  // PPPoE's own 8 bytes on an Ethernet line (VDSL's 34 counts them already).
+  const extra = pppoe && (line === "fibre" || line === "cable") ? 8 : 0;
+  return {
+    fibre: { linklayer: "ethernet", overhead: String((tagged ? 42 : 38) + extra), tcMPU: 84 },
+    cable: { linklayer: "ethernet", overhead: String(18 + extra), tcMPU: 64 },
     vdsl: { linklayer: "ethernet", overhead: "34" },
     adsl: { linklayer: "atm", overhead: "44" },
-  })[line];
+  }[line];
+};
 
 /**
  * The router's UPnP identity. miniupnpd writes a random one back to UCI when
@@ -149,7 +153,7 @@ export const internet: Feature = (intent) => {
           qdisc: "cake",
           script: "piece_of_cake.qos",
           linklayer_advanced: "1",
-          ...lineOverhead(speed.line, vlan !== undefined),
+          ...lineOverhead(speed.line, vlan !== undefined, c.connection.type === "pppoe"),
           // Fair per device behind the NAT; "ingress" counts what cake
           // drops too, so the download rate holds. VDSL2's 64/65
           // encoding is "ptm". The flags only make LuCI show them.
@@ -259,7 +263,33 @@ export const internet: Feature = (intent) => {
         rule: [],
       };
 
+  // Several lines, IPv6 from the main one only: while mwan3 has the main
+  // line offline (IPv4 to another), its IPv6 interface is taken down, so the
+  // networks' prefix and IPv6 default route go and clients use IPv4 over the
+  // backup, rather than keep sending IPv6 into the dead line (the router
+  // advertises itself on the prefix alone, ra_default 1). Back with the line.
+  const mainLine = primaryConnection(intent);
+  const ipv6Failover = several && !!mainLine.ipv6;
   return {
+    ...(ipv6Failover
+      ? {
+          files: [
+            {
+              ".if": onRouter,
+              path: "/etc/hotplug.d/iface/17-onc-ipv6-follows-line",
+              mode: "0644",
+              // mwan3track sends connected/disconnected to every iface hotplug script.
+              content: `[ "$INTERFACE" = "${mainLine.id}" ] || exit 0
+case "$ACTION" in
+  disconnected) logger -t onc-ipv6 "${mainLine.id} is offline: IPv6 withdrawn until it is back"; ifdown ${ipv6Interface(mainLine)} ;;
+  # Only if it is down: ifup restarts an interface that is up.
+  connected) [ "$(ubus call network.interface.${ipv6Interface(mainLine)} status 2>/dev/null | jsonfilter -e '@.up')" = "true" ] || ifup ${ipv6Interface(mainLine)} ;;
+esac
+`,
+            },
+          ],
+        }
+      : {}),
     package_profiles: [
       {
         ".if": onRouter,

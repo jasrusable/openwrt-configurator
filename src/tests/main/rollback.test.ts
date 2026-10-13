@@ -183,8 +183,9 @@ test("paths containing quotes are escaped", (t) => {
 test("nothing file- or package-related is emitted when there is nothing to do", (t) => {
   const commands = arm();
   const watchdog = watchdogOf(commands);
-  t.false(commands.some((c) => c.startsWith("tar -cf")));
-  t.false(watchdog.includes("tar -xf"));
+  // The managed files' archive; the boot links (rc.d) are always kept.
+  t.false(commands.some((c) => c.includes("files.tar")));
+  t.false(watchdog.includes("files.tar"));
   t.false(watchdog.includes("apk del"));
 });
 
@@ -232,4 +233,18 @@ test("a rollback restarts what a reload would leave on its old devices, after th
   const restart = watchdog.indexOf(`for s in 'odhcpd'; do`);
   t.true(reload >= 0 && restart > reload, "restarted once the restored config is reloaded");
   t.false(armWatchdogCommands({ runId: "r1", timeoutSeconds: 90, filesToRestore: [], filesToDelete: [], packagesToUninstallOnRollback: [] }).join("\n").includes("for s in"));
+});
+
+test("a condition's values compare by text, and a mistyped name fails even where OR would skip it", (t) => {
+  const { evaluateCondition } = require("../../condition");
+  const lookup = (name: string) => {
+    if (name === "device.sw_config") return { value: true };
+    if (name === "device.tag.floor") return { value: "2" };
+    if (name === "device.tag.role") return { value: "ap" };
+    if (name.startsWith("device.tag.")) return {};
+    throw new Error(`unknown name ${name}`);
+  };
+  t.true(evaluateCondition("device.sw_config == 'true'", lookup));
+  t.true(evaluateCondition("device.tag.floor == 2", lookup));
+  t.throws(() => evaluateCondition("device.tag.role == 'ap' OR device.modle_id == 'x'", lookup), { message: /modle_id/ });
 });

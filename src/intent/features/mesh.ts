@@ -8,7 +8,7 @@
 // the mesh link carries 1532 bytes and nothing is fragmented.
 import { Feature, onAccessPoints, onDevice, onRouter } from "../fragment";
 import { fnv } from "./network";
-import { radios } from "./wifi";
+import { radios, radioWidth } from "./wifi";
 import { meshWiredVlan } from "../choices";
 import type { Intent } from "../schema";
 
@@ -240,7 +240,7 @@ start_service() {
                   ".name": radio.name,
                   band,
                   channel,
-                  htmode: `@best/${band === "2g" ? 20 : 80}`,
+                  htmode: `@best/${radioWidth(intent, band)}`,
                   country: intent.site.country,
                 },
               ],
@@ -275,6 +275,19 @@ start_service() {
                   disabled: true,
                 })),
               ],
+            },
+            // SSH on the rescue network too: the main one's address goes with
+            // the mesh, and this app (and a person) logs in over SSH. Same
+            // rules as the main instance (features/system.ts).
+            dropbear: {
+              dropbear: repeaters.map((d) => ({
+                ".if": onDevice(d.name),
+                ".name": "rescue",
+                PasswordAuth: intent.admin.password_login ? "on" : "off",
+                RootPasswordAuth: intent.admin.password_login ? "on" : "off",
+                Port: 22,
+                Interface: "rescue",
+              })),
             },
           },
         }

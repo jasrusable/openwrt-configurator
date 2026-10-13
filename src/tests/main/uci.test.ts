@@ -250,3 +250,18 @@ test("an optional keep (?config.*) keeps a config if present and is never report
   t.true(wipeOperations(configs, []).length > 0, "without the keep it would be wiped");
   t.deepEqual(unmatchedKeeps(["?ubihealthd.*", "typo.*"], {}), ["typo.*"]);
 });
+
+test("a section name uci refuses (a hyphen) stops the run before anything is sent", (t) => {
+  const { getUciCommands } = require("../../getUciCommands");
+  const config = (name: string) => ({ network: { interface: [{ ".name": name, proto: "none" }] } });
+  t.throws(() => getUciCommands({ openWrtConfig: config("my-lan") }), { message: /section name "my-lan"/ });
+  t.notThrows(() => getUciCommands({ openWrtConfig: config("my_lan") }));
+});
+
+test("an unset value is no option at all, never the text undefined", (t) => {
+  const { getUciCommands } = require("../../getUciCommands");
+  const commands: string[] = getUciCommands({
+    openWrtConfig: { wireless: { "wifi-device": [{ ".name": "radio0", type: "mac80211", htmode: undefined, channel: null }] } },
+  });
+  t.false(commands.some((c) => /undefined|null|htmode|channel/.test(c)), commands.join("\n"));
+});

@@ -13,6 +13,8 @@ import {
 import { CommandSpec, runCli } from "./args";
 import { join } from "./paths";
 import { Platform } from "./platform";
+import type { ONCConfig } from "./oncConfigSchema";
+import { where } from "./intent/places";
 import {
   connectToDevice,
   provisionableDevices,
@@ -45,6 +47,22 @@ import {
 
 /** The largest request body the CGI program reads. */
 const maxCgiBody = 2 * 1024 * 1024;
+
+/**
+ * Every device located (src/locate.ts) before any is touched; one that cannot
+ * be (never pinned and only at a name, or not where it should be) stops the
+ * run here, by name.
+ */
+const locatedOrRefused = async (oncConfig: ONCConfig, intentPath: string, platform: Platform) => {
+  const located = await withLocatedAddresses(oncConfig, intentPath, platform);
+  if (located.unreached.length) {
+    throw new Error(
+      `Not applied: ${located.unreached.map((u) => `${u.hostname} could not be found safely (${u.error})`).join("; ")}. ` +
+        `Nothing was changed. A device never adopted can be added in the web UI (${where("hardware", "Add")}).`
+    );
+  }
+  return located;
+};
 
 export const main = async ({
   argv,
@@ -128,10 +146,13 @@ export const main = async ({
       // Refused before any device is touched: it would lock this app out.
       const lockout = loaded.intent && (await lockoutReason(loaded.intent, platform));
       if (lockout) throw new Error(lockout);
-      // From the UI: each device is found where it is (src/locate.ts), its
-      // identity checked, before anything is applied to it.
-      const { oncConfig, hostKeys } = options.factsFor
-        ? await withLocatedAddresses(loaded.oncConfig, options.factsFor, platform)
+      // Each device is found where it is (src/locate.ts), its identity
+      // checked, before anything is applied to it: always for an intent file
+      // (its own facts beside it), from the UI or not. A low-level config's
+      // addresses are the user's own, used as written.
+      const factsFor = options.factsFor ?? (loaded.intent ? configPath : undefined);
+      const { oncConfig, hostKeys } = factsFor
+        ? await locatedOrRefused(loaded.oncConfig, factsFor, platform)
         : { oncConfig: loaded.oncConfig, hostKeys: {} };
       // Appended a line at a time: read by the UI while the run goes.
       const report = options.events
@@ -145,10 +166,10 @@ export const main = async ({
         oncConfig,
         hostKeys,
         report,
-        ...(options.factsFor
+        ...(factsFor
           ? {
               onDeviceSchema: (hostname: string, schema: DeviceSchema) =>
-                writeFacts(platform, options.factsFor, { hostname, readAt: Date.now(), schema }),
+                writeFacts(platform, factsFor, { hostname, readAt: Date.now(), schema }),
             }
           : {}),
         confirm: options.confirm,
@@ -255,12 +276,19 @@ export const main = async ({
         platform,
         // On a router, reachable from the network: log in with its root password.
         auth: rpcdAuth(platform),
+        // Counted in RAM, not flash: every attempt is a file.
+        loginAttemptsDir: "/tmp/onc-login-attempts",
       })({
         method: platform.env("REQUEST_METHOD") || "GET",
         path: platform.env("PATH_INFO") || "/",
         body: length > 0 ? platform.readStdin() : "",
+        ...(platform.env("REMOTE_ADDR") ? { remoteAddress: platform.env("REMOTE_ADDR")! } : {}),
         // CGI passes request headers as HTTP_<NAME> variables.
-        headers: { "x-onc": platform.env("HTTP_X_ONC") ?? "", cookie: platform.env("HTTP_COOKIE") ?? "" },
+        headers: {
+          "x-onc": platform.env("HTTP_X_ONC") ?? "",
+          cookie: platform.env("HTTP_COOKIE") ?? "",
+          ...(platform.env("HTTP_X_ONC_VERSION") ? { "x-onc-version": platform.env("HTTP_X_ONC_VERSION")! } : {}),
+        },
       });
       console.log(cgiResponse(response));
       // Answered: a timer still pending (a device read's time limit) must not
@@ -291,10 +319,15 @@ export const main = async ({
       },
     ],
     action: async ([configPath], options) => {
-      const { oncConfig, secrets } = await loadOncConfig({
+      const loaded = await loadOncConfig({
         path: configPath,
         platform,
       });
+      const { secrets } = loaded;
+      // Found and held to their keys as an apply would (see provision).
+      const { oncConfig, hostKeys } = loaded.intent
+        ? await locatedOrRefused(loaded.oncConfig, configPath, platform)
+        : { oncConfig: loaded.oncConfig, hostKeys: {} as Record<string, { type: string; key: string }> };
       const { ready: deviceConfigs, skipped } = provisionableDevices(oncConfig);
       reportSkipped(skipped);
 
@@ -306,6 +339,7 @@ export const main = async ({
           const ssh = await connectToDevice({
             deviceConfig,
             identityPath: options.identity,
+            hostKey: hostKeys[deviceConfig.hostname],
             platform,
           });
           try {

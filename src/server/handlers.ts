@@ -6,20 +6,40 @@ import { Auth, sessionSetCookie } from "./auth";
 import { readApplyDiff } from "../applyDiff";
 import { measureLink } from "../meshSpeed";
 import { adopt, discover, Inspected, inspect } from "../discover";
-import { readFacts, readFailures, refreshStale, staleDevices } from "../deviceFacts";
+import { readFacts, readFailures, refreshStale, renameFacts, staleDevices } from "../deviceFacts";
 import { compileIntent } from "../intent/compile";
 import { lockoutReason, ownPublicKey } from "../loginAccess";
 import { readNetworkStatus, StatusView, statusViews } from "../status/read";
 import { latestRelease, restartService, speedTest, wifiSurvey } from "../status/actions";
 import { diffIntent } from "../intent/diff";
 import { migrateIntent } from "../intent/migrations";
-import { intentSchema } from "../intent/schema";
+import { intentSchema, namePattern } from "../intent/schema";
 import { oncConfigSchema } from "../oncConfigSchema";
 import { parseConfigJson } from "../parseJson";
-import { HttpHandler, HttpResponse, Platform } from "../platform";
+import { HttpHandler, HttpRequest, HttpResponse, Platform } from "../platform";
 import { jobPaths, provisionStatus, startProvision } from "./provisionJob";
 
-type Files = Pick<Platform, "readTextFile" | "writeFileAtomic">;
+type Files = Pick<Platform, "readTextFile" | "writeFileAtomic" | "sha256">;
+
+/**
+ * The saved file's version: what a page read is what it may overwrite or
+ * apply. A save or an apply naming another version (the file changed in
+ * another tab, or by the CLI, since) is refused rather than undoing it.
+ */
+const versionHeader = "x-onc-version";
+const versionOf = (files: Pick<Platform, "readTextFile" | "sha256">, path: string) => {
+  try {
+    return files.sha256(files.readTextFile(path));
+  } catch {
+    return "";
+  }
+};
+const withVersion = (response: HttpResponse, version: string): HttpResponse => ({
+  ...response,
+  headers: { ...response.headers, [versionHeader]: version },
+});
+const changedElsewhere = (files: Pick<Platform, "readTextFile" | "sha256">, path: string, headers: Record<string, string>) =>
+  headers[versionHeader] !== undefined && headers[versionHeader] !== versionOf(files, path);
 
 const json = (status: number, body: unknown): HttpResponse => ({
   status,
@@ -35,8 +55,14 @@ const issues = (error: { issues: { path: (string | number)[]; message: string }[
 
 /** GET and PUT the intent file. */
 export const intentApi =
-  ({ intentPath, files }: { intentPath: string; files: Files }): HttpHandler =>
-  async ({ method, body }) => {
+  ({
+    intentPath,
+    files,
+  }: {
+    intentPath: string;
+    files: Files & Pick<Platform, "writeTextFile" | "removeFile" | "mkdirp">;
+  }): HttpHandler =>
+  async ({ method, body, headers }) => {
     if (method === "GET") {
       try {
         // In the current format, the only one the UI knows, and with the
@@ -47,7 +73,7 @@ export const intentApi =
           parseConfigJson(files.readTextFile(intentPath), intentPath)
         );
         const parsed = intentSchema.safeParse(intent);
-        return json(200, parsed.success ? parsed.data : intent);
+        return withVersion(json(200, parsed.success ? parsed.data : intent), versionOf(files, intentPath));
       } catch (e) {
         return json(404, { error: (e as Error).message });
       }
@@ -58,6 +84,12 @@ export const intentApi =
         input = JSON.parse(body);
       } catch {
         return json(400, { error: "The body is not JSON." });
+      }
+      if (changedElsewhere(files, intentPath, headers)) {
+        return json(409, {
+          error: "The settings were changed elsewhere since this page read them: yours are kept, check them, then save again.",
+          changedElsewhere: true,
+        });
       }
       const intent = intentSchema.safeParse(input);
       if (!intent.success) return json(400, { issues: issues(intent.error) });
@@ -70,13 +102,26 @@ export const intentApi =
           issues: issues(compiled.error),
         });
       }
+      // A device renamed in place (same position in Hardware, its old name
+      // gone, its new one new) keeps its facts, pinned host key and all.
+      const before = intentSchema.safeParse(readIntent(files, intentPath));
+      if (before.success) {
+        const oldNames = before.data.hardware.map((d) => d.name);
+        const newNames = intent.data.hardware.map((d) => d.name);
+        intent.data.hardware.forEach((d, i) => {
+          const was = oldNames[i];
+          if (was && was !== d.name && !newNames.includes(was) && !oldNames.includes(d.name)) {
+            renameFacts(files, intentPath, was, d.name);
+          }
+        });
+      }
       // The file holds passwords: only its owner may read it.
       files.writeFileAtomic(
         intentPath,
         JSON.stringify(intent.data, null, 2) + "\n",
         0o600
       );
-      return json(200, intent.data);
+      return withVersion(json(200, intent.data), versionOf(files, intentPath));
     }
     return json(405, { error: `${method} is not supported.` });
   };
@@ -145,7 +190,7 @@ export const provisionApi =
     intentPath: string;
     platform: JobPlatform;
   }): HttpHandler =>
-  async ({ method }) => {
+  async ({ method, headers }) => {
     if (method === "GET") {
       const status = await provisionStatus({ intentPath, files: platform });
       const draft = readIntent(platform, intentPath);
@@ -158,6 +203,11 @@ export const provisionApi =
       });
     }
     if (method === "POST") {
+      // What the page showed is what gets applied: not a file saved since
+      // in another tab or by the CLI.
+      if (changedElsewhere(platform, intentPath, headers)) {
+        return json(409, { error: "The settings were changed elsewhere since this page read them: reload, check, then apply." });
+      }
       // Never provision what would not have been saved: a file edited by
       // hand, or saved under older rules, is refused here, not mid-run.
       const draft = intentSchema.safeParse(readIntent(platform, intentPath));
@@ -251,7 +301,7 @@ export const discoverApi =
     }
     if (path === "/api/discover/adopt") {
       const name = typeof input.name === "string" ? input.name.trim() : "";
-      if (!/^[a-z0-9][a-z0-9-]{0,30}$/.test(name)) return json(400, { error: "A name like ap-2." });
+      if (!namePattern.test(name) || name.length > 31) return json(400, { error: "A name like ap-2." });
       // Adopting writes the facts locating trusts (address, host key): under a
       // name already in Hardware it would re-pin that device to this one.
       const saved = intentSchema.safeParse(readIntent(platform, intentPath));
@@ -381,7 +431,7 @@ const withCookie = (response: HttpResponse, sid: string | undefined): HttpRespon
 });
 
 /** POST {password}: a session (cookie) for the router's root password; or ends it. */
-/** Wrong passwords allowed within the window, from anywhere, before logins pause. */
+/** Wrong passwords allowed within the window, from one client, before its logins pause. */
 const loginAttempts = 5;
 const loginWindowMs = 60_000;
 
@@ -390,11 +440,14 @@ const sessionApi =
     auth,
     platform,
     intentPath,
+    attemptsDir,
     now = Date.now,
   }: {
     auth: Auth;
     platform: Pick<Platform, "sleep" | "writeTextFile" | "mkdirp" | "removeFile" | "run">;
     intentPath: string;
+    /** Where attempts are counted: RAM on a router (/tmp), as each one is a file written. */
+    attemptsDir?: string;
     now?: () => number;
   }): HttpHandler =>
   async (request) => {
@@ -414,9 +467,12 @@ const sessionApi =
     // each request is its own process, and attempts sent side by side must
     // see each other (making a file is atomic; reading and rewriting a count
     // is not). A success removes its own; failures stay until they age out.
-    const dir = `${intentPath}.state/login-attempts`;
+    // Counted per client, so one on the network guessing cannot keep the
+    // owner out; named "<time>-<client>-<random>".
+    const dir = attemptsDir ?? `${intentPath}.state/login-attempts`;
     platform.mkdirp(dir);
-    const mine = `${now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const client = (request.remoteAddress ?? "any").replace(/[^A-Za-z0-9]/g, "_");
+    const mine = `${now()}-${client}-${Math.random().toString(36).slice(2, 10)}`;
     platform.writeTextFile(`${dir}/${mine}`, "");
     const listed = await platform.run(["ls", dir]).catch(() => ({ stdout: "" }));
     const recent = listed.stdout
@@ -429,9 +485,10 @@ const sessionApi =
           platform.removeFile(`${dir}/${name}`);
           return false;
         }
-        return true;
+        return name.split("-")[1] === client;
       });
     if (recent.length > loginAttempts) {
+      // Kept: a client hammering stays paused (only itself: counted per client).
       return json(429, { error: "Too many wrong passwords: wait a minute and try again." });
     }
     const sid = typeof password === "string" && password ? await auth.login(password) : undefined;
@@ -448,10 +505,13 @@ export const uiHandler = ({
   uiRoot,
   platform,
   auth,
+  loginAttemptsDir,
 }: {
   intentPath: string;
   uiRoot: string;
   platform: Platform;
+  /** Where wrong passwords are counted (see sessionApi). */
+  loginAttemptsDir?: string;
   /** On a router: every API request must carry a session (src/server/auth.ts). None on the Mac's loopback server. */
   auth?: Auth;
 }): HttpHandler => {
@@ -473,8 +533,15 @@ export const uiHandler = ({
     ...Object.fromEntries(statusViews.map((v) => [`/api/status/${v}`, statusApi({ intentPath, platform })])),
   };
   const ui = staticFiles({ root: uiRoot, files: platform });
-  const session = auth && sessionApi({ auth, platform, intentPath });
-  return async (request) => {
+  const session = auth && sessionApi({ auth, platform, intentPath, attemptsDir: loginAttemptsDir });
+  // Never inside another page's frame: there its own clicks (same origin,
+  // header and all) could be lured into a Save or an Apply.
+  const unframed = (response: HttpResponse): HttpResponse => ({
+    ...response,
+    headers: { ...response.headers, "x-frame-options": "DENY", "content-security-policy": "frame-ancestors 'none'" },
+  });
+  return async (request) => unframed(await answer(request));
+  async function answer(request: HttpRequest): Promise<HttpResponse> {
     const api = request.path.startsWith("/api/");
     // Every API request must carry a header a cross-site page cannot send
     // without a CORS preflight, which is never granted: no CSRF on any
@@ -485,7 +552,7 @@ export const uiHandler = ({
     // On a router, logged in: the UI's own files are no secret, the API is.
     if (api && auth && !(await auth.check(request))) return json(401, { error: "Log in first.", login: true });
     return (routes[request.path] ?? ui)(request);
-  };
+  }
 };
 
 /** A response in CGI's format: a Status header, the headers, then the body. */

@@ -46,6 +46,11 @@ interface QuickJsOs {
   mkdir(path: string, mode?: number): number;
   remove(path: string): number;
   rename(oldPath: string, newPath: string): number;
+  O_WRONLY: number;
+  O_CREAT: number;
+  O_EXCL: number;
+  open(path: string, flags: number, mode?: number): number;
+  close(fd: number): number;
 }
 
 type QuickJsExecOptions = {

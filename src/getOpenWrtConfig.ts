@@ -69,23 +69,33 @@ export const getOpenWrtConfig = ({
   // swconfig: each line port's VLANs: its tagged ones, else a free one untagged.
   const networkSwitchVlans = resolvedConditions.network?.switch_vlan || [];
   const networkVlans = networkSwitchVlans.map((v) => Number(v.vlan));
+  // Every tagged line first: on a switch one VLAN is one CPU device, so a
+  // VLAN on two ports would join two lines (two providers) into one, and an
+  // untagged line must not take a VLAN a tagged one has.
+  const linePorts = [...new Set(lineRefs.map((r) => r.port))];
+  const taggedLines = useSwConfig
+    ? linePorts.flatMap((port) =>
+        [...new Set(lineRefs.filter((r) => r.port === port && r.vlan).map((r) => r.vlan!))].map((vlan) => ({ port, vlan, tagged: true }))
+      )
+    : [];
+  taggedLines.forEach(({ port, vlan }) => {
+    if (networkVlans.includes(vlan)) {
+      throw new Error(`${deviceConfig.hostname}: VLAN ${vlan} is both a network's and the line's on ${port}.`);
+    }
+    const other = taggedLines.find((l) => l.vlan === vlan && l.port !== port);
+    if (other) {
+      throw new Error(`${deviceConfig.hostname}: VLAN ${vlan} is on both ${port} and ${other.port}; on this switch that would join the two lines.`);
+    }
+  });
   const switchLines = useSwConfig
-    ? [...new Set(lineRefs.map((r) => r.port))].reduce<{ port: string; vlan: number; tagged: boolean }[]>(
-        (acc, port) => {
-          const tagged = [...new Set(lineRefs.filter((r) => r.port === port && r.vlan).map((r) => r.vlan!))];
-          tagged.forEach((vlan) => {
-            if (networkVlans.includes(vlan)) {
-              throw new Error(`${deviceConfig.hostname}: VLAN ${vlan} is both a network's and the line's on ${port}.`);
-            }
-          });
-          if (tagged.length) return [...acc, ...tagged.map((vlan) => ({ port, vlan, tagged: true }))];
+    ? linePorts
+        .filter((port) => !taggedLines.some((l) => l.port === port))
+        .reduce<{ port: string; vlan: number; tagged: boolean }[]>((acc, port) => {
           const taken = [...networkVlans, ...acc.map((l) => l.vlan)];
           let vlan = 2;
           while (taken.includes(vlan)) vlan++;
           return [...acc, { port, vlan, tagged: false }];
-        },
-        []
-      )
+        }, taggedLines)
     : [];
   const lineDevice = (port: string, vlan?: number) => {
     if (!useSwConfig) return vlan ? `${port}.${vlan}` : port;
@@ -323,11 +333,12 @@ export const getOpenWrtConfig = ({
       return { ...config, [configKey]: resolvedConfig };
     }, {}) as OpenWrtConfig;
 
+  // A channel of each band (6 GHz: its first preferred-scan channel; 60 GHz: 802.11ad's 2).
   const defaultChannels = {
     "2g": 11,
     "5g": 36,
-    "6g": 36,
-    "60g": 36,
+    "6g": 37,
+    "60g": 2,
   };
 
   const radios = deviceSchema.radios || [];

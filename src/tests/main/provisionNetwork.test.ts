@@ -71,6 +71,40 @@ test.serial("a staged config that does not verify is never committed", async (t)
   t.is(device.committed().system[0].options.hostname, "OpenWrt");
 });
 
+test.serial("a failed configure after new packages is rolled back, never disarmed: only the watchdog undoes packages", async (t) => {
+  const device = fakeDevice({
+    hostname: "ap",
+    newPackages: ["nlbwmon"],
+    afterStage: (staged) => {
+      staged.system[0].options.hostname = "someone-else";
+    },
+  });
+  const error = await t.throwsAsync(run([device]));
+  t.regex(error!.message, /No device keeps a change/);
+  t.false(device.events.includes("commit"));
+  t.true(device.events.includes("rollback-now"));
+  t.false(device.events.includes("disarm"));
+});
+
+test.serial("confirming runs to the earliest watchdog's deadline: a slow device never outlasts another's window", async (t) => {
+  const first = fakeDevice({ hostname: "router" });
+  const slow = fakeDevice({ hostname: "far-ap", slowReconnectMs: 70_000 });
+  const error = await t.throwsAsync(run([first, slow]));
+  t.regex(error!.message, /no device keeps a change|rolled itself back/i);
+  // Neither device keeps the change, and none was reported confirmed while rolled back.
+  t.false(first.changed);
+  t.false(slow.changed);
+  t.false(first.events.includes("disarm") && first.events.includes("watchdog-fired"));
+});
+
+test.serial("a commit the link dropped partway through is rolled back now, never confirmed", async (t) => {
+  const device = fakeDevice({ hostname: "ap", commitIncomplete: true });
+  const error = await t.throwsAsync(run([device]));
+  t.regex(error!.message, /did not complete/);
+  t.true(device.events.includes("rollback-now"));
+  t.false(device.events.includes("disarm"));
+});
+
 test.serial("services start before the settle and the confirming reconnect: inside the rollback", async (t) => {
   const device = fakeDevice({ hostname: "ap", services: [{ name: "firewall", running: false }] });
   await run([device]);
@@ -185,7 +219,7 @@ test.serial("a run says where each device is, and how it ended, as data", async 
   );
   const cut = progressOf(await reported([fakeDevice({ hostname: "a" }), fakeDevice({ hostname: "b", lockedOutAfterCommit: true })]));
   t.is(cut.outcome, "rolled-back");
-  t.is(cut.devices.b, "recovering", "unreachable: it rolls itself back");
+  t.is(cut.devices.b, "rolled-back", "unreachable, it rolled itself back and came back");
   t.is(cut.devices.a, "rolled-back");
 });
 
@@ -197,4 +231,12 @@ test("events read back as progress: the latest step each, the outcome, a torn li
     '{"at": 4, "devi',
   ].join("\n");
   t.deepEqual(progressOf(parseEvents(text)), { devices: { ap: "confirmed" }, outcome: "applied" });
+});
+
+test("a failing command is logged by its first words only: never a batch's values or a file's content", (t) => {
+  const { commandLabel } = require("../../devicePhases");
+  t.is(commandLabel("uci batch <<'ONC'\nset wireless.x.key='secret'\nONC"), "uci batch");
+  t.is(commandLabel("umask 077; cat > '/etc/x' <<'D'\nprivate\nD"), "umask 077; cat >");
+  t.is(commandLabel("uci set wireless.wifinet0.key='secret\nmore'"), "uci set wireless.wifinet0.key");
+  t.is(commandLabel("apk add --update-cache nlbwmon"), "apk add --update-cache nlbwmon");
 });

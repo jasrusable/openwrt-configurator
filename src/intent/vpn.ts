@@ -53,15 +53,24 @@ export const vpnEndpoint = (intent: Pick<Intent, "vpn" | "internet">) => intent.
 /** host:port, an IPv6 address in brackets. */
 export const withPort = (host: string, port: number) => (host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`);
 
-/** What a client sends through the tunnel: everything, or only home's ranges. */
-const clientRoutes = (intent: Pick<Intent, "vpn" | "networks" | "site">, client: Pick<VpnClient, "route">) =>
+/** Remote access may reach the linked sites: its clients route to them, and they route back. */
+const vpnReachesSites = (intent: Pick<Intent, "vpn" | "sites">) =>
+  intent.vpn.enabled && intent.sites.peers.length > 0 && intent.vpn.access.networks.includes("sites");
+
+/** What a client sends through the tunnel: everything, or only home's ranges (and the linked sites', when it may reach them). */
+const clientRoutes = (intent: Pick<Intent, "vpn" | "networks" | "site" | "sites">, client: Pick<VpnClient, "route">) =>
   client.route === "all"
     ? ["0.0.0.0/0", "::/0"]
-    : [...intent.networks.map((n) => n.subnet), intent.vpn.subnet, ulaPrefix(intent.site.name)];
+    : [
+        ...intent.networks.map((n) => n.subnet),
+        intent.vpn.subnet,
+        ulaPrefix(intent.site.name),
+        ...(vpnReachesSites(intent) ? intent.sites.peers.flatMap((p) => p.subnets) : []),
+      ];
 
 /** A client's .conf (and QR code), with its private key, which only the page that made it has. */
 export const clientConf = (
-  intent: Pick<Intent, "vpn" | "networks" | "site" | "internet">,
+  intent: Pick<Intent, "vpn" | "networks" | "site" | "internet" | "sites">,
   client: Pick<VpnClient, "host" | "route">,
   privateKey: string
 ) => {
@@ -89,7 +98,9 @@ export const inviteOf = (intent: Pick<Intent, "site" | "sites" | "networks" | "v
         name: intent.site.name,
         public_key: publicKeyOf(intent.sites.private_key),
         ...(vpnEndpoint(intent) ? { endpoint: withPort(vpnEndpoint(intent)!, intent.sites.port) } : {}),
-        subnets: intent.networks.map((n) => n.subnet),
+        // Remote access's range too when its clients may reach the other
+        // site: that site then routes their replies back here.
+        subnets: [...intent.networks.map((n) => n.subnet), ...(vpnReachesSites(intent) ? [intent.vpn.subnet] : [])],
       }
     : undefined;
 

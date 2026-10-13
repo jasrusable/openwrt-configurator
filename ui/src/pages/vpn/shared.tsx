@@ -56,7 +56,8 @@ export const KeyPanel = ({ name, conf, onDone }: { name: string; conf: string; o
     const url = URL.createObjectURL(new Blob([conf], { type: "text/plain" }));
     const a = Object.assign(document.createElement("a"), { href: url, download: `${name || "client"}.conf` });
     a.click();
-    URL.revokeObjectURL(url);
+    // Not at once: Safari starts the download after this returns.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   return (
     <Section title="Set it up now" description="Scan it with the WireGuard app, or save the file. It is shown only now.">

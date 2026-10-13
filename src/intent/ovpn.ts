@@ -5,6 +5,7 @@
 // or a quoted spelling), each line read as OpenVPN reads it; anything else is
 // refused, not edited, so the user sees why. ovpnFile also drops what is not
 // allowed and ends with script-security 1, in case one slips past.
+import { utf8ByteLength } from "../utf8";
 
 /** What a provider's client config may set. Routes and the device are the router's (features/vpn.ts). */
 const allowed = new Set([
@@ -90,6 +91,10 @@ const dataLine = (line: string) =>
 const judged = (config: string) => {
   let block: string | undefined;
   return config.split(/\r?\n/).map((line) => {
+    // OpenVPN reads a line 256 bytes at a time: a longer one's rest would be
+    // read as an option of its own, which nothing here judged. A NUL ends a
+    // line early the same way.
+    if (utf8ByteLength(line) > 255 || line.includes("\0")) return { line, option: "a line over 255 bytes", ok: false };
     if (block) {
       if (line === `</${block}>`) {
         block = undefined;

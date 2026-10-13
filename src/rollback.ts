@@ -24,7 +24,45 @@ export const runPaths = (runId: string) => ({
   /** Touched once the tool gets back in *after* a rollback, so the device
    *  knows the revert restored access and it need not reboot. */
   recoveredFlag: `/tmp/onc-recovered-${runId}`,
+  /**
+   * The config snapshot again, on flash: /tmp, and the watchdog with it, is
+   * gone if the device restarts (a locked-out user pulling the plug), so a
+   * boot script restores this one if the run was never confirmed.
+   */
+  bootDir: `${bootRollbackRoot}/${runId}`,
+  /** Written once every `uci commit` succeeded: a commit the link dropped during is told from a whole one. */
+  committedFlag: `/tmp/onc-committed-${runId}`,
 });
+
+const bootRollbackRoot = "/etc/onc/rollback";
+
+/** Whether procd runs service $s: what the apply's own start step goes by. */
+const procdKnows = `ubus call service list '{"name":"'"$s"'"}' 2>/dev/null | grep -q "^[[:space:]]*\\"$s\\""`;
+
+/**
+ * Run early at boot (before the network): restore the config of an apply that
+ * was never confirmed, the oldest if several, then drop them all. Copied
+ * first and swapped after, as the watchdog does, so a full overlay never
+ * leaves the device without /etc/config.
+ */
+const bootRollbackScript = `#!/bin/sh /etc/rc.common
+# openwrt-configurator: the device restarted inside an apply's rollback window.
+START=11
+start() { return 0; }
+boot() {
+  for d in $(ls -dtr ${bootRollbackRoot}/*/ 2>/dev/null); do
+    [ -d "$d/config" ] || continue
+    rm -rf /etc/config.onc-new /etc/config.onc-failed
+    if cp -a "$d/config" /etc/config.onc-new; then
+      mv /etc/config /etc/config.onc-failed && mv /etc/config.onc-new /etc/config
+      # The system log is not running this early: the kernel's is.
+      echo "onc: restarted inside an unconfirmed apply's rollback window: its config restored" > /dev/kmsg
+    fi
+    break
+  done
+  rm -rf ${bootRollbackRoot}
+}
+`;
 
 /** How the device recovers if a provision is never confirmed. */
 export type RollbackMode = "reload" | "reboot" | "reload-then-reboot";
@@ -75,7 +113,14 @@ export const armWatchdogCommands = ({
   recoverSeconds = 60,
   reloadWireless = false,
   restartAfterRestore = [],
+  services = [],
 }: {
+  /**
+   * The services this run enables, disables, starts or stops: put back as
+   * they were (enabled at boot, and running or not), as /etc/config holds
+   * neither.
+   */
+  services?: string[];
   /**
    * Services restarted once the restored config is reloaded: a reload keeps
    * the devices a service had (odhcpd went on sending to a LAN device the
@@ -107,6 +152,8 @@ export const armWatchdogCommands = ({
     pidFile,
     sleepPidFile,
     recoveredFlag,
+    bootDir,
+    committedFlag,
   } = runPaths(runId);
   const filesArchive = `${rollbackDir}/files.tar`;
   // Derived rather than hardcoded, for the same reason the file writer derives
@@ -116,8 +163,22 @@ export const armWatchdogCommands = ({
     "ONC_WATCHDOG"
   );
 
+  const bootDelimiter = heredocDelimiter(bootRollbackScript, "ONC_BOOT_ROLLBACK");
   return [
     `cp -a /etc/config ${rollbackDir}/config`,
+    // On flash too, with the boot script that restores it (see bootDir). A
+    // flash too full for it only loses this extra: the watchdog still covers
+    // every run that does not restart the device.
+    `cat > /etc/init.d/onc-rollback <<'${bootDelimiter}'\n${bootRollbackScript}${bootDelimiter}`,
+    `chmod 0755 /etc/init.d/onc-rollback && /etc/init.d/onc-rollback enable`,
+    `{ mkdir -p ${bootDir} && cp -a /etc/config ${bootDir}/config; } || { rm -rf ${bootDir}; logger -t onc "no room on flash for a boot-time rollback copy"; }`,
+    // Which services start at boot, and which of this run's are running.
+    `tar -cf ${rollbackDir}/rc.d.tar -C /etc/rc.d . 2>/dev/null || true`,
+    ...(services.length
+      ? [
+          `for s in ${services.map(shellQuote).join(" ")}; do ${procdKnows} && echo "$s"; done > ${rollbackDir}/running; true`,
+        ]
+      : []),
     // A file listed in the manifest may have been removed by hand, so a
     // partial archive is fine — better than aborting the whole provision.
     ...(filesToRestore.length > 0
@@ -137,7 +198,10 @@ export const armWatchdogCommands = ({
       // run can end the wait early (rollBackNowCommand) and have the rollback
       // below start immediately rather than when the window runs out.
       `sleep ${timeoutSeconds} & echo $! > ${sleepPidFile}; wait $!`,
-      `if [ -f ${confirmFlag} ]; then rm -rf ${rollbackDir} ${confirmFlag} ${recoveredFlag} ${watchdogPath} ${pidFile} ${sleepPidFile}; exit 0; fi`,
+      `if [ -f ${confirmFlag} ]; then rm -rf ${rollbackDir} ${bootDir} ${confirmFlag} ${recoveredFlag} ${committedFlag} ${watchdogPath} ${pidFile} ${sleepPidFile}; exit 0; fi`,
+      // Past the point of no return: a disarm from now on must not kill this
+      // (half a restore is worse than either config), and must say it fired.
+      `touch ${rollbackDir}/restoring`,
       `logger -t onc "provision not confirmed within ${timeoutSeconds}s, rolling back [${mode}]"`,
       // Stage the restored copy first, then swap. Doing `mv` before `cp`
       // meant a failed copy — an overlay full from `apk add`, which is exactly
@@ -145,6 +209,8 @@ export const armWatchdogCommands = ({
       // the one failure needing physical recovery.
       `rm -rf /etc/config.onc-new /etc/config.onc-failed`,
       `if cp -a ${rollbackDir}/config /etc/config.onc-new; then mv /etc/config /etc/config.onc-failed && mv /etc/config.onc-new /etc/config; else logger -t onc "rollback: could not stage the config snapshot, leaving current config in place"; fi`,
+      // Restored: a restart from here on boots the old config anyway.
+      `rm -rf ${bootDir}`,
       // Files this run created did not exist before, so remove them.
       ...filesToDelete.map((path) => `rm -f ${shellQuote(path)}`),
       // Files that existed before are put back as they were.
@@ -181,6 +247,15 @@ export const armWatchdogCommands = ({
             // fires the triggers for every package whose config changed.
             `reload_config`,
             ...(reloadWireless ? [`wifi reload`] : []),
+            // Boot links back as they were, and this run's services running
+            // (or not) as they were: /etc/config holds neither.
+            // Extracted beside it and swapped, so a failed extract never leaves the device without one.
+            `if [ -f ${rollbackDir}/rc.d.tar ] && rm -rf /etc/rc.d.onc-new && mkdir /etc/rc.d.onc-new && tar -xf ${rollbackDir}/rc.d.tar -C /etc/rc.d.onc-new; then rm -rf /etc/rc.d.onc-old; mv /etc/rc.d /etc/rc.d.onc-old && mv /etc/rc.d.onc-new /etc/rc.d && rm -rf /etc/rc.d.onc-old; fi`,
+            ...(services.length
+              ? [
+                  `for s in ${services.map(shellQuote).join(" ")}; do [ -x "/etc/init.d/$s" ] || continue; if grep -qx "$s" ${rollbackDir}/running 2>/dev/null; then ${procdKnows} || "/etc/init.d/$s" start; else ! ${procdKnows} || "/etc/init.d/$s" stop; fi; done >/dev/null 2>&1; true`,
+                ]
+              : []),
             // Once the network has settled on the restored devices.
             ...(restartAfterRestore.length
               ? [
@@ -196,7 +271,7 @@ export const armWatchdogCommands = ({
             `while [ $i -lt ${recoverSeconds} ]; do`,
             `  if [ -f ${recoveredFlag} ]; then`,
             `    logger -t onc "revert restored access, no reboot needed"`,
-            `    rm -rf ${rollbackDir} ${confirmFlag} ${recoveredFlag} ${watchdogPath} ${pidFile} ${sleepPidFile}`,
+            `    rm -rf ${rollbackDir} ${confirmFlag} ${recoveredFlag} ${committedFlag} ${watchdogPath} ${pidFile} ${sleepPidFile}`,
             `    exit 0`,
             `  fi`,
             `  sleep 5`,
@@ -268,4 +343,5 @@ export const stagePackagesForRollback = async ({
  * this one's committed change must be undone too.
  */
 export const rollBackNowCommand = (runId: string) =>
-  `kill "$(cat ${runPaths(runId).sleepPidFile} 2>/dev/null)" 2>/dev/null; true`;
+  // Its saved pid, if it is still a sleep: a pid is reused once its process ends.
+  `s=$(cat ${runPaths(runId).sleepPidFile} 2>/dev/null); [ -n "$s" ] && [ "$(cat /proc/$s/comm 2>/dev/null)" = sleep ] && kill "$s" 2>/dev/null; true`;

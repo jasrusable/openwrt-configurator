@@ -50,28 +50,42 @@ export const logIn = async (password: string) => {
 };
 
 export class SaveError extends Error {
-  constructor(message: string, readonly issues: Issue[] = []) {
+  constructor(
+    message: string,
+    readonly issues: Issue[] = [],
+    /** The file was saved elsewhere (another tab, the CLI) since this page read it. */
+    readonly changedElsewhere = false
+  ) {
     super(message);
   }
 }
+
+/**
+ * The saved file's version as this page last read or wrote it: sent with a
+ * save and an apply, which the server refuses if the file has changed since.
+ */
+let intentVersion: string | undefined;
+const versionHeaders = (): Record<string, string> => (intentVersion ? { "x-onc-version": intentVersion } : {});
 
 export const loadIntent = async (): Promise<Intent> => {
   const response = await call("api/intent", { headers: writeHeaders });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not load the configuration.");
+  intentVersion = response.headers.get("x-onc-version") ?? undefined;
   return body;
 };
 
 export const saveIntent = async (intent: Intent): Promise<Intent> => {
   const response = await call("api/intent", {
     method: "PUT",
-    headers: { "content-type": "application/json", ...writeHeaders },
+    headers: { "content-type": "application/json", ...writeHeaders, ...versionHeaders() },
     body: JSON.stringify(intent),
   });
   const body = await response.json();
   if (!response.ok) {
-    throw new SaveError(body.error ?? "Some settings need fixing.", body.issues);
+    throw new SaveError(body.error ?? "Some settings need fixing.", body.issues, !!body.changedElsewhere);
   }
+  intentVersion = response.headers.get("x-onc-version") ?? undefined;
   return body;
 };
 
@@ -91,7 +105,7 @@ export const loadProvision = async (): Promise<ProvisionInfo> => {
 export const startProvision = async () => {
   const response = await call("api/provision", {
     method: "POST",
-    headers: writeHeaders,
+    headers: { ...writeHeaders, ...versionHeaders() },
   });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? "Could not start applying.");

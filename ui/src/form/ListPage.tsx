@@ -34,8 +34,8 @@ export type ListSpec<N extends ListName> = {
   addLabel: string;
   /** Add's page, when the generic one will not do (Hardware's is guided). */
   newPage?: ReactNode;
-  /** What Add creates, given the items already there and the whole draft. */
-  newItem: (items: Item<N>[], intent: Intent) => Item<N>;
+  /** What Add creates, given the items already there and the whole draft (the generic Add page's; not with newPage). */
+  newItem?: (items: Item<N>[], intent: Intent) => Item<N>;
   /** Or, when it needs what only a hook can read (the router's ports), a hook giving it. */
   useNewItem?: () => (items: Item<N>[], intent: Intent) => Item<N>;
   /** Whether an item may be removed (the main network may not; the only connection may not). */
@@ -197,7 +197,7 @@ const NewItemPage = <N extends ListName>({
   const navigate = useNavigate();
   const main = useDraft();
   // A list's spec never changes, so this hook is called on every render or on none.
-  const newItem = list.useNewItem ? list.useNewItem() : list.newItem;
+  const newItem = list.useNewItem ? list.useNewItem() : list.newItem!;
   // Its own draft, over a copy with the item appended. Problems show only
   // once a field is edited, or Add is pressed: not on a blank form.
   const [{ copy, index, openedOn }] = useState(() => {

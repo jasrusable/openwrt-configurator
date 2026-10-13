@@ -8,6 +8,7 @@ import { useApplyDiff } from "../data/devices";
 import type { DeviceStep } from "../../../src/applyEvents";
 import { Progress, progressOf } from "./progress";
 import { Section, SettingRow } from "../kit/layout";
+import { ago } from "../facts";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -122,7 +123,12 @@ export const DeviceChangesSection = ({
       description={
         diff.isFetching && diff.data
           ? "What applying writes on each, as uci shows it; checking the devices again…"
-          : "What applying writes on each, as uci shows it. Passwords and keys are hidden."
+          : diff.isError
+            ? `What each holds now could not be read: ${(diff.error as Error).message}`
+            : `What applying writes on each, as uci shows it${
+                // Possibly kept in this browser from an earlier read (data/persist.ts).
+                diff.data ? `, read from the devices ${ago(diff.dataUpdatedAt)}` : ""
+              }. Passwords and keys are hidden.`
       }
     >
       {devices.map((name) => {
@@ -130,7 +136,19 @@ export const DeviceChangesSection = ({
         return d ? (
           <DeviceChanges key={name} diff={d} progress={progress[name]} />
         ) : (
-          <SettingRow key={name} label={name} description={running ? "Being applied" : diff.isFetching ? "Reading what it has now…" : "Will be reconfigured"}>
+          <SettingRow
+            key={name}
+            label={name}
+            description={
+              running
+                ? "Being applied"
+                : diff.isFetching
+                  ? "Reading what it has now…"
+                  : diff.isError
+                    ? "What it holds now could not be read, so neither can what changes"
+                    : "Will be reconfigured"
+            }
+          >
             <ProgressBadge progress={progress[name]} />
           </SettingRow>
         );

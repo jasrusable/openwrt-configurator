@@ -177,4 +177,55 @@ test("wrong passwords sent side by side are counted together: after five in a mi
   const statuses = (await Promise.all([1, 2, 3, 4, 5, 6, 7].map(guess))).map((r) => r.status);
   t.true(statuses.includes(429), JSON.stringify(statuses));
   t.is((await guess()).status, 429, "and the next too, until the minute passes");
+  // Counted per client: another one on the network is not paused by it.
+  const other = await handle({ method: "POST", path: "/api/login", body: JSON.stringify({ password: "nope" }), headers: { "x-onc": "1" }, remoteAddress: "10.0.0.77" });
+  t.is(other.status, 401);
+});
+
+test("renaming a device keeps what is known of it, its pinned host key above all", async (t) => {
+  await withServer(async (handle, intentPath) => {
+    const { readFacts } = require("../../deviceFacts");
+    writeFacts(nodePlatform, intentPath, {
+      hostname: "home-ap-1",
+      readAt: 1,
+      schema: { name: "ap", version: "25.12.5" },
+      address: "10.0.0.5",
+      hostKey: { type: "ssh-ed25519", key: "AAAA" },
+    } as any);
+    const intent = JSON.parse(readFileSync(intentPath, "utf8"));
+    intent.hardware[1].name = "hall-ap";
+    t.is((await handle(request("PUT", "/api/intent", JSON.stringify(intent)))).status, 200);
+    const facts = readFacts(nodePlatform, intentPath, ["home-ap-1", "hall-ap"]);
+    t.is(facts["home-ap-1"], undefined);
+    t.like(facts["hall-ap"], { hostname: "hall-ap", address: "10.0.0.5", hostKey: { key: "AAAA" } });
+  });
+});
+
+test("a save or an apply of a version older than the file is refused: another tab's save is never undone", async (t) => {
+  await withServer(async (handle, intentPath) => {
+    const read = await handle(request("GET", "/api/intent"));
+    const version = read.headers["x-onc-version"];
+    t.truthy(version);
+    const mine = JSON.parse(read.body);
+    // Another tab saves first.
+    const theirs = { ...mine, site: { ...mine.site, name: "Theirs" } };
+    const saved = await handle(request("PUT", "/api/intent", JSON.stringify(theirs), { "x-onc": "1", "x-onc-version": version }));
+    t.is(saved.status, 200);
+    t.not(saved.headers["x-onc-version"], version);
+    // This one, still on the old version, is refused, and nothing is overwritten.
+    const stale = await handle(request("PUT", "/api/intent", JSON.stringify({ ...mine, site: { ...mine.site, name: "Mine" } }), { "x-onc": "1", "x-onc-version": version }));
+    t.is(stale.status, 409);
+    t.true(JSON.parse(stale.body).changedElsewhere);
+    t.is(JSON.parse(readFileSync(intentPath, "utf8")).site.name, "Theirs");
+    t.is((await handle(request("POST", "/api/provision", "", { "x-onc": "1", "x-onc-version": version }))).status, 409);
+  });
+});
+
+test("no page can frame the app: every answer says so", async (t) => {
+  await withServer(async (handle) => {
+    for (const r of [await handle(request("GET", "/")), await handle(request("GET", "/api/intent"))]) {
+      t.is(r.headers["x-frame-options"], "DENY");
+      t.is(r.headers["content-security-policy"], "frame-ancestors 'none'");
+    }
+  });
 });

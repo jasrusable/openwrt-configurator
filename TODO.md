@@ -118,3 +118,17 @@ and the React UI in `ui/`.
 - Wi-Fi survey and usteer roaming: run on the user's AP only once usteer and the survey are exercised there (verified in Docker).
 - mwan3track's log line ("Interface wan (eth1) is offline") is from its source, not recorded: record one on a router with two lines.
 - Every status read compiles each device's settings again (`getOpenWrtState`, for the services that must run): cheap on a Mac, to measure under QuickJS on a router.
+
+## From the settings and apply review (2026-10-13)
+
+- swconfig boards whose WAN is outside the switch (a separate ethN): `@wan_port` throws; facts should add that device as a port.
+- A second radio in one band (tri-band) gets no SSID or mesh: SSIDs and the mesh pick radios by band name.
+- Ordering: the access point the workstation is on (by Wi-Fi) is not put last, only the gateway and a local device.
+- Adopting (Hardware › Add): show the host key's fingerprint and the MAC before adopting, and take addresses only, not names.
+- One root password is sent to every device: prefer keys only, the password only with password login on and no key.
+- `<intent>.state` is made 0755 and only tightened to 0700 when an apply starts; make it 0700 when first made.
+- `ports: "*t"` (string) means every bridge port, `["*t"]` only the free physical ones: one bracket changes what a VLAN carries.
+- Access points get `dhcp` sections though dnsmasq and odhcpd are removed there; harmless, but noise in the apply diff.
+- 18 section schemas are `.passthrough()`, so a mistyped option reaches the device (verify then compares against the declaration).
+- The IPv6-follows-the-line hook (mwan3 `disconnected`/`connected`) is from mwan3's source: watch a real failover.
+- The SSH transports have no connect time limit: a login that stalls before authentication (seen once in the rig, dbclient path) holds an apply until the watchdog. Give each connect one, as locate's 4 s handshake does.

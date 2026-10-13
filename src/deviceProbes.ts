@@ -267,22 +267,48 @@ export const notRunning = (names: string[]): Probe<{ name: string; missing: bool
  * removed by the run that executes it, but a run cut short by the commit
  * severing the connection leaves it behind, and it embeds config values.
  */
+/** Whether a run's commit finished: its marker, written after every `uci commit` (rollback.ts). */
+export const commitFinished = (committedFlag: string): Probe<boolean> => ({
+  command: `[ -f ${committedFlag} ] && echo ONC_COMMITTED`,
+  parse: ({ stdout }) => stdout.includes("ONC_COMMITTED"),
+});
+
+/**
+ * Stand the watchdog down: set its confirm flag and end its sleep, so it wakes,
+ * sees the flag and cleans up after itself. Never kill the watchdog itself:
+ * once it has started restoring (it marks that), half a restore is worse than
+ * either config, so a disarm that comes too late says it "fired" instead. One
+ * not running at all (the restore done, or a reboot that cleared /tmp) fired
+ * too.
+ */
 export const disarmWatchdog = ({
   confirmFlag,
   pidFile,
   sleepPidFile,
+  rollbackDir,
+  bootDir,
 }: {
   confirmFlag: string;
   pidFile: string;
   sleepPidFile: string;
-}): Probe<boolean> => {
+  rollbackDir: string;
+  /** The boot-time copy (rollback.ts): gone with the disarm, or a restart would restore it. */
+  bootDir: string;
+}): Probe<"disarmed" | "fired"> => {
+  const gone = 'i=0; while kill -0 "$p" 2>/dev/null && [ $i -lt 5 ]; do sleep 1; i=$((i+1)); done';
   return {
     command: [
-      `touch ${confirmFlag}`,
-      `kill "$(cat ${pidFile} 2>/dev/null)" "$(cat ${sleepPidFile} 2>/dev/null)" 2>/dev/null`,
       `rm -f ${stagedScriptPath}`,
-      `if [ -f ${pidFile} ] && kill -0 "$(cat ${pidFile})" 2>/dev/null; then echo ONC_ARMED; else echo ONC_DISARMED; fi`,
-    ].join("; "),
-    parse: ({ stdout }) => stdout.includes("ONC_DISARMED"),
+      // Saved pids, checked to still be what they were (a pid is reused once its process ends).
+      `p=$(cat ${pidFile} 2>/dev/null); s=$(cat ${sleepPidFile} 2>/dev/null)`,
+      `if [ -z "$p" ] || ! grep -q onc-watchdog /proc/$p/cmdline 2>/dev/null; then echo ONC_FIRED`,
+      `else touch ${confirmFlag}`,
+      `  if [ -n "$s" ] && [ "$(cat /proc/$s/comm 2>/dev/null)" = sleep ] && kill "$s" 2>/dev/null; then ${gone}; rm -rf ${bootDir}; echo ONC_DISARMED`,
+      // Its sleep had just ended: it either saw the flag (and exits) or is restoring.
+      `  else sleep 1; if [ -f ${rollbackDir}/restoring ]; then echo ONC_FIRED; else ${gone}; rm -rf ${bootDir}; echo ONC_DISARMED; fi`,
+      `  fi`,
+      `fi`,
+    ].join("\n"),
+    parse: ({ stdout }) => (stdout.includes("ONC_DISARMED") ? "disarmed" : "fired"),
   };
 };

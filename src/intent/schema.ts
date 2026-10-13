@@ -20,14 +20,18 @@ import {
 import { timezones } from "./timezones";
 import { wireguardKey } from "../wireguard";
 
-const name = z
-  .string()
-  .regex(
-    /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/,
-    "lowercase letters, digits and -, like a hostname"
-  );
+/** A device's or network's name: a hostname's rules. */
+export const namePattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+
+const name = z.string().regex(namePattern, "lowercase letters, digits and -, like a hostname");
 
 const channel = z.union([z.literal("auto"), z.number().int().positive()]);
+
+/** Each band's channel numbers (hostapd will not start on another band's). */
+const channelsOf = {
+  "2g": (c: number) => c >= 1 && c <= 14,
+  "5g": (c: number) => c >= 32 && c <= 177 && c % 2 === 0,
+} as const;
 
 const wifiPassword = z
   .string()
@@ -263,6 +267,15 @@ export const sshPublicKey = z
     "an SSH public key, like ssh-ed25519 AAAA… you@computer"
   );
 
+/**
+ * The names the compiler gives sections of its own: a network named so would
+ * share a section with one (the engine refuses two of one name), so refused here.
+ */
+const fixedSectionNames = [
+  "vpn", "sites", "loopback", "globals", "bat0", "batmesh", "batwired", "rescue", "odhcpd", "mesh", "meshport",
+  "meshwired", "client", "config", "default", "defaults", "global", "https", "main", "nlbwmon", "ntp", "usteer",
+];
+
 const network = z
   .object({
     /**
@@ -275,7 +288,7 @@ const network = z
       // Not "wan…", "tun…", "vpn" or "sites": the internet connections' and
       // the VPN's interfaces are named so.
       .refine(
-        (id) => !reservedIds.includes(id) && !/^(wan|tun\d)/.test(id) && !["vpn", "sites"].includes(id),
+        (id) => !reservedIds.includes(id) && !/^(wan|tun\d)/.test(id) && !fixedSectionNames.includes(id),
         "reserved"
       ),
     name: z.string().min(1, "required").max(32),
@@ -372,7 +385,10 @@ export const intentSchema = z
               .object({
                 /** Pin a channel per band; "auto" (the default) lets it choose. */
                 channel: z
-                  .object({ "2g": channel.optional(), "5g": channel.optional() })
+                  .object({
+                    "2g": channel.optional().refine((c) => c === undefined || c === "auto" || channelsOf["2g"](c), "a 2.4 GHz channel is 1 to 14"),
+                    "5g": channel.optional().refine((c) => c === undefined || c === "auto" || channelsOf["5g"](c), "a 5 GHz channel, like 36 or 149"),
+                  })
                   .strict()
                   .optional(),
               })
@@ -735,6 +751,10 @@ export const intentSchema = z
       }
     });
     const ids = intent.networks.map((n) => n.id);
+    // A network's IPv6 interface is its id and 6 (lan6): no other network may be named so.
+    intent.networks.forEach((n, i) => {
+      if (ids.some((other) => `${other}6` === n.id)) issue(["networks", i, "id"], "reserved");
+    });
     // The VPN's zones, as targets of an access: its clients, the linked sites.
     // Remote access and sites stay valid targets while off: access to them
     // is kept for when they are back, and compiles to nothing meanwhile.
@@ -852,6 +872,16 @@ export const intentSchema = z
     port_forwards.forEach((forward, i) => {
       if (!inANetwork(forward.internal_address)) {
         issue(["firewall", "port_forwards", i, "internal_address"], "not on any of your networks");
+      }
+      // Into a network that goes out through a VPN provider's tunnel: its
+      // replies would take the tunnel (policy routing by source), never
+      // reaching whoever called in over the line.
+      const target = intent.networks.find((n) => overlaps(n.subnet, `${forward.internal_address}/32`));
+      if (target?.line && intent.tunnels.some((t) => t.id === target.line!.connection)) {
+        issue(
+          ["firewall", "port_forwards", i, "internal_address"],
+          `on ${target.name}, which goes out through a VPN provider: replies would leave through the tunnel, so the forward could never work`
+        );
       }
       // A port forward is IPv4's (fw4 redirect, NAT): an IPv6 source would never match.
       if ((forward.source_addresses ?? []).some(isIpv6)) {

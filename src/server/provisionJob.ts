@@ -80,8 +80,24 @@ const canonical = (json: string) => {
   return JSON.stringify(sort(JSON.parse(json)));
 };
 
-const isRunning = async (files: Files, pid: string | undefined) =>
-  !!pid && (await files.run(["kill", "-0", pid.trim()])).code === 0;
+/**
+ * Shell functions over a job's files: whether its pid is alive in this boot
+ * (the pid file says which boot it was written in, so a reboot, which can
+ * hand the pid to another process, never looks like a live job), and whether
+ * a lock was left by a job that died: its pid not alive, or, with no pid yet,
+ * the lock older than a minute (taken, then killed before it spawned).
+ * File times are not compared: the lock and the pid are written in the same
+ * second, and `-nt` cannot tell them apart.
+ */
+const jobChecks = (paths: ReturnType<typeof jobPaths>) => {
+  const q = shellQuote;
+  return [
+    "boot() { cat /proc/sys/kernel/random/boot_id 2>/dev/null || sysctl -n kern.boottime 2>/dev/null; }",
+    `alive() { [ -f ${q(paths.pid)} ] && read -r p b < ${q(paths.pid)} && [ "$b" = "$(boot)" ] && kill -0 "$p" 2>/dev/null; }`,
+    `starting() { [ -d ${q(paths.lock)} ] && ! [ -f ${q(paths.pid)} ] && ! find ${q(paths.lock)} -prune -mmin +1 | grep -q .; }`,
+    `stale() { [ -d ${q(paths.lock)} ] && ! alive && ! starting; }`,
+  ].join("\n");
+};
 
 export const provisionStatus = async ({
   intentPath,
@@ -96,8 +112,7 @@ export const provisionStatus = async ({
   // so one seen dead has either recorded its exit or was really interrupted.
   // The other order calls a job that ends between the two reads interrupted.
   // Or just starting: the lock taken, its pid not yet written.
-  const starting = async () => (await files.run(["sh", "-c", `[ -d ${shellQuote(paths.lock)} ] && ! [ ${shellQuote(paths.pid)} -nt ${shellQuote(paths.lock)} ]`])).code === 0;
-  const running = !!started && ((await isRunning(files, read(files, paths.pid))) || (await starting()));
+  const running = !!started && (await files.run(["sh", "-c", `${jobChecks(paths)}\nalive || starting`])).code === 0;
   const exit = running ? undefined : read(files, paths.exit);
   const draft = read(files, intentPath);
   const live = read(files, paths.live);
@@ -157,15 +172,23 @@ export const startProvision = async ({
   // is no longer running.
   const script = [
     `mkdir -p ${q(paths.dir)} && chmod 700 ${q(paths.dir)}`,
-    `mkdir ${q(paths.lock)} 2>/dev/null || { [ ${q(paths.pid)} -nt ${q(paths.lock)} ] && ! kill -0 "$(cat ${q(paths.pid)})" 2>/dev/null && touch ${q(paths.lock)}; } || exit ${alreadyRunning}`,
+    jobChecks(paths),
+    `mkdir ${q(paths.lock)} 2>/dev/null || { stale && touch ${q(paths.lock)}; } || exit ${alreadyRunning}`,
+    // Its pid is written once spawned: until then there is none, which reads as starting.
+    `rm -f ${q(paths.pid)}`,
     `echo ${now()} > ${q(paths.started)}`,
     `rm -f ${q(paths.exit)} ${q(paths.log)} ${q(paths.events)}`,
     `cp ${q(intentPath)} ${q(paths.snapshot)}`,
-    `( ${command} > ${q(paths.log)} 2>&1; code=$?;` +
-      ` if [ $code -eq 0 ] || [ $code -eq ${appliedWithProblemsExit} ]; then mv ${q(paths.snapshot)} ${q(paths.live)}; fi;` +
-      ` echo $code > ${q(paths.exit)}.tmp; mv ${q(paths.exit)}.tmp ${q(paths.exit)}; rmdir ${q(paths.lock)}` +
-      ` ) < /dev/null > /dev/null 2>&1 &`,
-    `echo $! > ${q(paths.pid)}.tmp; mv ${q(paths.pid)}.tmp ${q(paths.pid)}`,
+    // In a session of its own where there is setsid (OpenWrt; not macOS):
+    // a web server ending the request that started it (uhttpd and its CGI
+    // timeout) must not end it too, mid-apply.
+    `run=$(command -v setsid || true)`,
+    `$run sh -c ${q(
+      `${command} > ${q(paths.log)} 2>&1; code=$?;` +
+        ` if [ $code -eq 0 ] || [ $code -eq ${appliedWithProblemsExit} ]; then mv ${q(paths.snapshot)} ${q(paths.live)}; fi;` +
+        ` echo $code > ${q(paths.exit)}.tmp; mv ${q(paths.exit)}.tmp ${q(paths.exit)}; rmdir ${q(paths.lock)}`
+    )} < /dev/null > /dev/null 2>&1 &`,
+    `echo "$! $(boot)" > ${q(paths.pid)}.tmp; mv ${q(paths.pid)}.tmp ${q(paths.pid)}`,
   ].join("\n");
   const result = await files.run(["sh", "-c", script]);
   if (result.code === alreadyRunning) return { started: false as const, reason: "Settings are already being applied." };

@@ -356,7 +356,11 @@ export const getPrepareCommands = ({
   const packages = packageCommands({ state, installedPackages });
   return [
     ...revertPendingCommands,
-    ...(packages.length ? [...seedCommands({ state, redact }), ...packages, ...stockConfigCleanup(state)] : []),
+    // Seeded every run, not only with packages to install: a declared config
+    // whose file is missing (deleted by hand) is otherwise never made, and
+    // `uci set` has nothing to set into. Each is written only if missing.
+    ...seedCommands({ state, redact }),
+    ...(packages.length ? [...packages, ...stockConfigCleanup(state)] : []),
     ...baselineRefreshCommands,
   ];
 };

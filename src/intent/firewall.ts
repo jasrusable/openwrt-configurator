@@ -11,17 +11,24 @@ const port = z
   .regex(/^\d{1,5}(-\d{1,5})?$/, "a port or a range like 8000-8100")
   .refine((value) => value.split("-").every((p) => +p >= 1 && +p <= 65535), "ports are 1 to 65535");
 
-/** For rules, several too: "80 443". */
+/** For rules, several too: "80 443", "80, 443". */
 const ports = z
   .string()
   .regex(
-    /^\d{1,5}(-\d{1,5})?([ ,]\d{1,5}(-\d{1,5})?)*$/,
+    /^\d{1,5}(-\d{1,5})?(\s*[\s,]\s*\d{1,5}(-\d{1,5})?)*$/,
     "a port, a range like 8000-8100, or several like 80 443"
   )
   .refine(
-    (value) => value.split(/[ ,-]/).every((p) => +p >= 1 && +p <= 65535),
+    (value) => value.split(/[\s,-]+/).every((p) => +p >= 1 && +p <= 65535),
     "ports are 1 to 65535"
   );
+
+/**
+ * Several ports as fw4 takes them: separated by spaces only. A comma makes it
+ * call the value invalid and skip the whole rule (verified on 25.12.5), so a
+ * block rule would block nothing.
+ */
+export const fw4Ports = (value: string) => value.trim().split(/[\s,]+/).join(" ");
 
 const address = z
   .string()

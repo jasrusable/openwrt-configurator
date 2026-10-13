@@ -5,6 +5,7 @@
 // leaves a run going.
 import { Alert, Button, Group, Modal, Stack, Text } from "@mantine/core";
 import { useSearchParams } from "react-router";
+import { useEffect } from "react";
 import { useProvision, useStartProvision } from "../data/provision";
 import { useDraftChanged } from "../form/IntentForm";
 import { ProvisionPanel } from "./ProvisionPanel";
@@ -32,6 +33,12 @@ export const ApplyModal = () => {
   const unsaved = useDraftChanged();
   const info = provision.data;
   const running = info?.state === "running";
+  // Always mounted: read again as it opens, or what will change could be a
+  // save in another tab (or a CLI run) behind.
+  const { refetch } = provision;
+  useEffect(() => {
+    if (sheet.opened) void refetch();
+  }, [sheet.opened, refetch]);
   return (
     <Modal
       opened={sheet.opened}

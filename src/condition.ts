@@ -209,19 +209,41 @@ const evaluate = (node: Node, lookup: Lookup): boolean => {
       const { value } = lookup(node.name);
       const wanted = node.kind === "in" ? node.values : [node.value];
       // An absent value (a tag this device does not set) matches nothing.
+      // By text: `device.sw_config == 'true'` and `device.tag.floor == 2`
+      // mean what they say, though one side is a boolean or a number.
+      const same = (a: Value, b: Value) => String(a) === String(b);
       const matches =
         value !== undefined &&
         wanted.some((w) =>
-          Array.isArray(value) ? value.includes(w) : value === w
+          Array.isArray(value) ? value.some((v) => same(v, w)) : same(value, w)
         );
       return node.kind === "compare" && node.op === "!=" ? !matches : matches;
     }
   }
 };
 
+/** Every name a condition mentions, in branches evaluation may skip too. */
+const namesIn = (node: Node): string[] => {
+  switch (node.kind) {
+    case "or":
+    case "and":
+      return [...namesIn(node.left), ...namesIn(node.right)];
+    case "not":
+      return namesIn(node.operand);
+    case "always":
+      return [];
+    default:
+      return [node.name];
+  }
+};
+
 export const evaluateCondition = (condition: string, lookup: Lookup) => {
   try {
-    return evaluate(parse(condition), lookup);
+    const tree = parse(condition);
+    // Each looked up first: a mistyped name fails here even in a branch an
+    // OR or AND would not reach on this device.
+    namesIn(tree).forEach((name) => lookup(name));
+    return evaluate(tree, lookup);
   } catch (e) {
     throw new Error(
       `Invalid condition "${condition}": ${(e as Error).message}`

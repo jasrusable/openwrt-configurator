@@ -124,8 +124,17 @@ export const fakeDevice = ({
   afterStage,
   afterPackages,
   services,
+  newPackages,
+  slowReconnectMs,
+  commitIncomplete = false,
 }: {
+  /** The link drops partway through the commits: the marker is never written. */
+  commitIncomplete?: boolean;
+  /** After its commit, each new connection takes this long (a slow device or link). */
+  slowReconnectMs?: number;
   hostname: string;
+  /** Packages the config installs that the device does not have yet. */
+  newPackages?: string[];
   /** Services the config declares (started over the first reconnect). */
   services?: { name: string; running: boolean }[];
   ipAddress?: string;
@@ -175,6 +184,7 @@ export const fakeDevice = ({
         hostname,
         ssh: session(),
         connect: async () => {
+          if (slowReconnectMs && device.events.includes("commit")) await c.sleep(slowReconnectMs);
           watchdogTick();
           if (!device.reachable) throw new Error(`${hostname} unreachable`);
           return session();
@@ -182,6 +192,7 @@ export const fakeDevice = ({
         state: {
           config: { system: { system: [{ ".name": "s", hostname }] } } as any,
           ...(services ? { services } : {}),
+          ...(newPackages ? { packagesToInstall: newPackages.map((packageName) => ({ packageName })) } : {}),
         },
         rollbackMode: "reload-then-reboot",
         recoverSeconds: 30,
@@ -272,12 +283,14 @@ export const fakeDevice = ({
         command.includes("onc-confirmed-") &&
         command.includes("ONC_DISARMED")
       ) {
+        // Too late: the watchdog already restored the old config.
+        if (device.events.includes("watchdog-fired")) return ok("ONC_FIRED\n");
         record("disarm");
         fireAt = undefined;
         return ok("ONC_DISARMED\n");
       }
       // Exactly rollBackNowCommand; the disarm cleanup also names the .sleep file.
-      if (/^kill "\$\(cat \/tmp\/onc-watchdog-\w+\.sleep/.test(command)) {
+      if (/^s=\$\(cat \/tmp\/onc-watchdog-\w+\.sleep/.test(command)) {
         // rollBackNow: the watchdog restores the snapshot and access returns.
         record("rollback-now");
         committed = clone(initialConfig);
@@ -286,6 +299,10 @@ export const fakeDevice = ({
         device.changed = false;
         device.reachable = true;
         return ok();
+      }
+      // The commit's marker (rollback.ts committedFlag): there once a commit ran whole.
+      if (command.startsWith("[ -f /tmp/onc-committed-")) {
+        return device.events.includes("commit") && !commitIncomplete ? ok("ONC_COMMITTED\n") : { stdout: "", stderr: "", code: 1 };
       }
       if (command.startsWith("touch /tmp/onc-recovered-")) {
         record("recovered");

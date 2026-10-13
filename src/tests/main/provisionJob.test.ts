@@ -92,3 +92,42 @@ test.serial("only one run at a time", async (t) => {
     await settle(intentPath, files);
   });
 });
+
+test.serial("a lock left by a job that died is taken over: a dead pid, a pid from another boot", async (t) => {
+  await withJob("echo ran", async (intentPath, files) => {
+    const paths = jobPaths(intentPath);
+    const left = (pidLine: string) => {
+      rmSync(paths.lock, { recursive: true, force: true });
+      require("fs").mkdirSync(paths.dir, { recursive: true });
+      require("fs").mkdirSync(paths.lock);
+      writeFileSync(paths.started, "1");
+      writeFileSync(paths.pid, pidLine);
+      rmSync(paths.exit, { force: true });
+    };
+    // A pid that is not running (written in the same second as the lock).
+    left("999999 whatever-boot\n");
+    t.is((await provisionStatus({ intentPath, files })).state, "interrupted");
+    t.true((await startProvision({ intentPath, files, now: () => 2 })).started);
+    t.is((await settle(intentPath, files)).state, "succeeded");
+    // This very process's pid, but from another boot: after a reboot it may be anyone's.
+    left(`${process.pid} another-boot\n`);
+    t.is((await provisionStatus({ intentPath, files })).state, "interrupted");
+    t.true((await startProvision({ intentPath, files, now: () => 3 })).started);
+    t.is((await settle(intentPath, files)).state, "succeeded");
+  });
+});
+
+test.serial("a lock with no pid yet is a job starting, for a minute; then it is stale", async (t) => {
+  await withJob("echo ran", async (intentPath, files) => {
+    const paths = jobPaths(intentPath);
+    require("fs").mkdirSync(paths.lock, { recursive: true });
+    writeFileSync(paths.started, "1");
+    t.is((await provisionStatus({ intentPath, files })).state, "running");
+    t.false((await startProvision({ intentPath, files, now: () => 2 })).started);
+    const old = new Date(Date.now() - 5 * 60_000);
+    require("fs").utimesSync(paths.lock, old, old);
+    t.is((await provisionStatus({ intentPath, files })).state, "interrupted");
+    t.true((await startProvision({ intentPath, files, now: () => 3 })).started);
+    t.is((await settle(intentPath, files)).state, "succeeded");
+  });
+});

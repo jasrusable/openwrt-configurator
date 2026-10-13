@@ -21,6 +21,7 @@ import {
 } from "./confirm";
 import {
   boardJson as boardJsonProbe,
+  commitFinished,
   disarmWatchdog,
   installedPackages as installedPackagesProbe,
   managedFiles as managedFilesProbe,
@@ -102,8 +103,31 @@ export type DeviceRun = DeviceRunOptions & {
 };
 
 /** A phase failed. `committed`: whether this device's change had been committed. */
+/**
+ * A failing command, as the log says it: its first line, before any heredoc
+ * (a uci batch's values, a file's content: Wi-Fi keys, VPN keys) and short.
+ * The log is kept and shown in the UI, so a command's body never goes there.
+ */
+export const commandLabel = (command: string) => {
+  // Before a heredoc, a quoted value or an assignment: `uci set a.b.key='…'`
+  // keeps its option's name and loses its value.
+  const first = command.split("\n")[0].split(/<<|'|=/)[0].trim();
+  return first.length > 120 ? `${first.slice(0, 117)}...` : first;
+};
+
 export class ProvisionFailure extends Error {
-  constructor(message: string, readonly committed: boolean) {
+  constructor(
+    message: string,
+    readonly committed: boolean,
+    /**
+     * Nothing committed, but packages or files already changed: its watchdog
+     * was left armed, as only it can undo those, so the run must roll it back
+     * rather than disarm it.
+     */
+    readonly leftArmed = false,
+    /** Reached, but its change cannot stand: roll it back now, not at its deadline. */
+    readonly rollBackNow = false
+  ) {
     super(message);
   }
 }
@@ -193,9 +217,10 @@ export const planDevice = async (
     // `uci revert` undoes staged UCI changes and nothing else. Package
     // removals and written files are already on disk, and only the watchdog
     // can undo those.
+    // Only packages not installed yet count: the rest are not touched.
     hasIrreversibleSteps:
       packagesToRemove.length > 0 ||
-      (state.packagesToInstall || []).length > 0 ||
+      (state.packagesToInstall || []).some((p) => !installedPackages.includes(p.packageName)) ||
       (state.files || []).length > 0,
   };
 };
@@ -230,7 +255,7 @@ export const armRollback = async (
   if (!prepared.ok) {
     throw new ProvisionFailure(
       `Failed to prepare the rollback directory on ${hostname}. ` +
-        `Command: ${prepared.command}\n${prepared.stderr}`,
+        `Command: ${commandLabel(prepared.command)}\n${prepared.stderr}`,
       false
     );
   }
@@ -248,10 +273,13 @@ export const armRollback = async (
       packages: run.removalCascade,
     });
     console.log(`Staged ${staged}/${total} package(s).`);
+    // Removing what a rollback could not put back is not a change this run
+    // can take back: refused, before anything is changed.
     if (staged < total) {
-      console.warn(
-        `  !! ${total - staged} package(s) could not be staged; ` +
-          `a rollback will not be able to reinstall those.`
+      throw new ProvisionFailure(
+        `${hostname}: ${total - staged} of the ${total} package(s) this run removes could not be kept for a rollback ` +
+          `(no room in /tmp, or the package feed unreachable), so they are not removed. Nothing was changed.`,
+        false
       );
     }
   }
@@ -292,11 +320,12 @@ export const armRollback = async (
       // From this run's declarations, so it holds even where the files it
       // restores are older ones (an earlier fix-up hook that did not cover it).
       restartAfterRestore: (state.services || []).filter((s) => s.restart_after_rollback).map((s) => s.name),
+      services: (state.services || []).map((s) => s.name),
     }),
   });
   if (!armed.ok) {
     throw new ProvisionFailure(
-      `Failed to arm rollback on ${hostname}. Command: ${armed.command}\n${armed.stderr}`,
+      `Failed to arm rollback on ${hostname}. Command: ${commandLabel(armed.command)}\n${armed.stderr}`,
       false
     );
   }
@@ -327,7 +356,7 @@ export const revertStaged = async (
     console.error(`Reverting ${hostname}...`);
     const reverted = await execScript({ ssh, commands: revertPendingCommands });
     if (!reverted.ok) {
-      console.error(`Failed to revert with command: ${reverted.command}`);
+      console.error(`Failed to revert with command: ${commandLabel(reverted.command)}`);
       console.error(reverted.stderr);
     }
     if (!run.armedAt) return;
@@ -368,7 +397,7 @@ const runOrRevert = async (run: DeviceRun, commands: string[]) => {
   if (!result.ok) {
     console.error(
       `Command ${result.failedIndex + 1}/${commands.length} failed: ${
-        result.command
+        commandLabel(result.command)
       }`
     );
     console.error(result.stderr);
@@ -381,7 +410,7 @@ const failConfigure = async (
   message: string
 ): Promise<never> => {
   await revertStaged(run, { disarm: !run.hasIrreversibleSteps });
-  throw new ProvisionFailure(message, false);
+  throw new ProvisionFailure(message, false, run.hasIrreversibleSteps);
 };
 
 /** The device's config, staged changes included; unreadable configs refused. */
@@ -451,7 +480,11 @@ export const configureDevice = async (run: DeviceRun): Promise<DeviceRun> => {
   console.log("Configuration set and verified.");
   return {
     ...run,
-    finaliseCommands: getFinaliseCommands({ state, current }),
+    // The marker between the commits and the reload: confirming checks it,
+    // as a dropped connection looks the same whether the commit finished or not.
+    finaliseCommands: ((commands) => [...commands.slice(0, -1), `touch ${runPaths(run.runId).committedFlag}`, ...commands.slice(-1)])(
+      getFinaliseCommands({ state, current })
+    ),
   };
 };
 
@@ -461,12 +494,18 @@ export const configureDevice = async (run: DeviceRun): Promise<DeviceRun> => {
  * let the watchdog fire mid-reconnect and roll back a good provision. Call
  * before committing: aborting then is still safe.
  */
+/**
+ * Commit only with time left to confirm every device committed so far and this
+ * one, before the earliest watchdog fires: none is disarmed until all are
+ * confirmed, so that one sets the deadline for them all.
+ */
 export const ensureTimeToConfirm = async (
   run: DeviceRun,
-  earliestDeadline: number
+  earliestDeadline: number,
+  confirmsLeft = 1
 ) => {
   const { minimumConfirmWindowMs } = run.timing;
-  if (earliestDeadline - run.now() >= minimumConfirmWindowMs) return;
+  if (earliestDeadline - run.now() >= minimumConfirmWindowMs * confirmsLeft) return;
   await revertStaged(run, { disarm: !run.hasIrreversibleSteps });
   throw new ProvisionFailure(
     `Too little of the rollback window is left to confirm ${run.hostname} ` +
@@ -474,7 +513,8 @@ export const ensureTimeToConfirm = async (
         minimumConfirmWindowMs / 1000
       }s). Nothing was committed on it. ` +
       `Re-run with a larger --confirm-timeout.`,
-    false
+    false,
+    run.hasIrreversibleSteps
   );
 };
 
@@ -503,7 +543,7 @@ export const commitDevice = async (run: DeviceRun) => {
           `Connection dropped during commit (expected when network config changes).`
         );
       } else {
-        commitFailed = `${finalised.command}\n${finalised.stderr}`;
+        commitFailed = `${commandLabel(finalised.command)}\n${finalised.stderr}`;
       }
     }
   } catch {
@@ -540,8 +580,9 @@ export const confirmDevice = async (run: DeviceRun): Promise<Session> => {
       ? `Confirming that ${ipAddress} still answers SSH...`
       : `Reconnecting to ${hostname} to confirm...`
   );
+  let session: Session;
   try {
-    return await reconnectSettled({
+    session = await reconnectSettled({
       connect,
       // Started before the settle and the confirming reconnect: what they
       // change (a stopped firewall's rules) is then inside the rollback.
@@ -566,28 +607,36 @@ export const confirmDevice = async (run: DeviceRun): Promise<Session> => {
       true
     );
   }
+  // Reached: but did the commit finish? The link can drop before or during
+  // the uci commits as well as during the reload after them.
+  const committed = await runProbe(session, commitFinished(runPaths(run.runId).committedFlag)).catch(() => false);
+  if (!committed) {
+    session.dispose();
+    throw new ProvisionFailure(`The commit on ${hostname} did not complete before its connection dropped.`, true, false, true);
+  }
+  return session;
 };
 
 /** Cancel the rollback: the device is reachable and its config stays. */
-export const disarmDevice = async (run: DeviceRun, session: Session) => {
-  const { confirmFlag, pidFile, sleepPidFile, rollbackDir, watchdogPath } =
-    runPaths(run.runId);
-  const stopped = await runProbe(session, disarmWatchdog(runPaths(run.runId)));
-  if (stopped) {
-    // Killing the watchdog means it never reaches its own cleanup branch, so
-    // everything it would have removed has to be removed here instead.
-    await session.execCommand(
-      `rm -rf ${rollbackDir} ${pidFile} ${sleepPidFile} ${confirmFlag} ${watchdogPath}`
-    );
-    console.log(`Confirmed ${run.hostname}.`);
-    step(run, "confirmed");
-  } else {
-    console.warn(
-      `Confirmed ${run.hostname}, but could not verify its rollback watchdog stopped. ` +
-        `The confirm flag is set, so it should exit on its own — check that the ` +
-        `device does not reboot.`
-    );
+/**
+ * Cancel the rollback: the device is reachable and its config stays. False
+ * when it came too late: the watchdog had already started restoring the old
+ * config (or finished), so the device is not keeping this run's change.
+ */
+export const disarmDevice = async (run: DeviceRun, session: Session, { untouched = false } = {}) => {
+  const result = await runProbe(session, disarmWatchdog(runPaths(run.runId)));
+  if (untouched) {
+    step(run, "reverted");
+    return result === "disarmed";
   }
+  if (result === "fired") {
+    console.error(`${run.hostname} rolled itself back before it could be confirmed.`);
+    step(run, "rolling-back");
+    return false;
+  }
+  console.log(`Confirmed ${run.hostname}.`);
+  step(run, "confirmed");
+  return true;
 };
 
 /**
@@ -611,7 +660,7 @@ export const runPostReloadHooks = async (run: DeviceRun, session: Session) => {
   if (!hooked.ok) {
     throw new Error(
       `${hostname} was provisioned and its configuration is live, but a ` +
-        `run_after_reload hook failed: ${hooked.command}\n${hooked.stderr}`
+        `run_after_reload hook failed: ${commandLabel(hooked.command)}\n${hooked.stderr}`
     );
   }
   console.log("Post-reload hooks completed.");
@@ -651,7 +700,10 @@ export const waitForRecovery = async (run: DeviceRun) => {
       connect: reachableSession({ connect, host: ipAddress }),
       sleep,
       now: run.now,
-      deadline: run.now() + recoverSeconds * 1000,
+      // Its own wait starts only after its restore (a package reinstall can
+      // take a while) and reload: allow for those, or this gives up on a
+      // device that comes back.
+      deadline: run.now() + recoverSeconds * 1000 + 60_000,
     });
     await session.execCommand(`touch ${runPaths(run.runId).recoveredFlag}`);
     session.dispose();

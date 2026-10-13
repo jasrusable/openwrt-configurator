@@ -45,7 +45,8 @@ export type DeviceDiff =
  * a harmless one only costs showing "(hidden)".
  */
 export const isSecret = (option: string) =>
-  /key|secret|pass|psk|token|credential|r[01]kh|priv|auth(?!oritative)/i.test(option);
+  // username: a PPPoE or VPN login is half the credential.
+  /key|secret|pass|psk|token|credential|r[01]kh|priv|auth(?!oritative)|user(name)?$/i.test(option);
 
 /** What the device holds after the apply: kept sections as they are, declared ones merged in or added. */
 export const configsAfter = ({

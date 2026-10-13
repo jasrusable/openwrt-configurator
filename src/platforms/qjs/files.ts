@@ -31,8 +31,15 @@ export const writeTextFile = (path: string, data: string) => {
 
 export const writeFileAtomic = (path: string, data: string, mode: number) => {
   const temporary = `${path}.onc-tmp`;
+  // Made new, with its mode, before anything is written to it: the data (a
+  // Wi-Fi password) is never in a file others can read, even for a moment,
+  // and a leftover from a crash cannot lend it its own.
+  os.remove(temporary);
+  const fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode);
+  if (fd < 0) throw new Error(`${path}: could not write it`);
+  os.close(fd);
   writeTextFile(temporary, data);
-  // QuickJS's os has no chmod.
+  // Exactly the mode asked for, whatever the umask took off. QuickJS's os has no chmod.
   os.exec(["chmod", mode.toString(8), temporary], { block: true });
   if (os.rename(temporary, path) !== 0) {
     throw new Error(`${path}: could not replace it`);

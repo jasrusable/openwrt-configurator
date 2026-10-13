@@ -6,6 +6,9 @@ import { shellQuote } from "./shell";
 // (dropbear, sqm, ...) reaches here unchecked.
 const packageName = /^[A-Za-z0-9_-]+$/;
 const optionName = /^[A-Za-z0-9_]+$/;
+// uci refuses a section name with a hyphen ("Invalid argument", verified on
+// 25.12.5) while `uci batch` still exits 0: caught here, not after packages.
+const sectionNamePattern = /^[A-Za-z0-9_]+$/;
 const checkName = (name: string, pattern: RegExp, what: string) => {
   if (!pattern.test(name)) {
     throw new Error(
@@ -40,13 +43,17 @@ export const getUciCommands = ({
       const sections = (openWrtConfig as any)[configKey][sectionKey] as any[];
       const sectionCommands = sections.reduce((acc, section, sectionIndex) => {
         const sectionName = section[".name"];
+        // An unset value (a radio mode no width fits, say) is no option at
+        // all, OpenWrt's default, as declaredConfigs reads it: never the text
+        // "undefined", which verify would then refuse.
         const resolvedSection = Object.fromEntries(
           Object.entries({ ...section }).filter(
-            (e) => ![".name"].includes(e[0])
+            ([key, value]) => key !== ".name" && value !== undefined && value !== null
           )
         );
         checkName(configKey, packageName, "package");
         checkName(sectionKey, packageName, "section type");
+        if (sectionName !== undefined) checkName(sectionName, sectionNamePattern, "section");
         Object.keys(resolvedSection).forEach((key) =>
           checkName(key, optionName, "option")
         );
@@ -58,12 +65,18 @@ export const getUciCommands = ({
             return [
               ...acc,
               ...(Array.isArray(value)
-                ? value.map(
-                    (item) =>
-                      `uci add_list ${identifier}.${key}=${shellQuote(
-                        render(item)
-                      )}`
-                  )
+                ? [
+                    // Cleared first: a section of a kept type is not wiped,
+                    // and add_list would append to what it already holds on
+                    // every run. Silent when there is none (verified on 25.12.5).
+                    `uci set ${identifier}.${key}=''`,
+                    ...value.map(
+                      (item) =>
+                        `uci add_list ${identifier}.${key}=${shellQuote(
+                          render(item)
+                        )}`
+                    ),
+                  ]
                 : [
                     `uci set ${identifier}.${key}=${shellQuote(render(value))}`,
                   ]),

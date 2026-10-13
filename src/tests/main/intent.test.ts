@@ -448,7 +448,8 @@ test("DNS: where names are looked up, rebind protection, own names, DHCP's DNS",
   t.like(custom.dnsmasq, { noresolv: true, server: ["9.9.9.9", "2620:fe::fe"] });
   t.is(custom.wan.peerdns, false);
 
-  t.false("rebind_protection" in dns((i) => (i.dns.rebind_protection = false)).dnsmasq);
+  // Off is written off: dnsmasq turns it on when unset.
+  t.is(dns((i) => (i.dns.rebind_protection = false)).dnsmasq.rebind_protection, false);
 
   const named = dns((i) => (i.dns.records = [{ name: "printer", address: "10.0.0.30" }])).config;
   t.like(named.dhcp.domain[0], { name: "printer", ip: "10.0.0.30" });
@@ -1162,4 +1163,86 @@ test("odhcpd is re-bound when a network comes up, and restarted after a rollback
   run("somethingelse");
   spawnSync("sleep", ["0.3"]);
   t.is(readFileSync(join(dir, "log"), "utf8").trim().split("\n").length, 1, "down, or not ours: nothing");
+});
+
+test("on an access point, a network only carried has no IPv6, link-local included; the main one keeps it", (t) => {
+  for (const model of ["zyxel,nwa50ax-pro", "tplink,archer-c50-v4"]) {
+    const config = onDevice("home-ap-1", model);
+    const devices = config.network.device.filter((d: any) => /^br-lan\.\d+$/.test(d.name));
+    const guest = devices.find((d: any) => d.name !== "br-lan.1");
+    t.is(guest?.ipv6, false, `${model}: the guests' VLAN device`);
+    t.not(devices.find((d: any) => d.name === "br-lan.1")?.ipv6, false, `${model}: the main network's`);
+  }
+  // The router has addresses on every network (and its firewall): unchanged.
+  const router = onDevice("home-router", "friendlyarm,nanopi-r6s");
+  t.false(router.network.device.some((d: any) => d.ipv6 === false));
+});
+
+test("a rule's ports reach fw4 separated by spaces, however they were typed", (t) => {
+  for (const typed of ["631,9100", "631, 9100", "631  9100"]) {
+    const intent = sample();
+    intent.firewall.rules[0].destination_port = typed;
+    const rule = (compile(intent).config as any).firewall.rule.find((r: any) => r.name === "Guests may print");
+    t.is(rule.dest_port, "631 9100", typed);
+  }
+  const bad = sample();
+  bad.firewall.rules[0].destination_port = "631,,";
+  t.false(intentSchema.safeParse(bad).success);
+});
+
+
+test("IPv6 follows the main line with several: a hook withdraws it while mwan3 has the line offline", (t) => {
+  const intent = sample();
+  intent.internet.connections[0].ipv6 = true;
+  t.false((compile(intent).files ?? []).some((f: any) => f.path.includes("ipv6-follows-line")), "one line: no hook");
+  intent.internet.connections.push({ id: "wanb", name: "LTE", port: "eth2", connection: { type: "dhcp" }, ipv6: false });
+  const hook = (compile(intent).files ?? []).find((f: any) => f.path === "/etc/hotplug.d/iface/17-onc-ipv6-follows-line") as any;
+  t.truthy(hook);
+  t.regex(hook.content, /disconnected\) .*ifdown wan6/);
+  t.regex(hook.content, /connected\) .*\|\| ifup wan6/);
+});
+
+test("a network with its own DNS servers: odhcpd does not announce the router as IPv6 DNS", (t) => {
+  const intent = sample();
+  intent.internet.connections[0].ipv6 = true;
+  intent.networks[0].dhcp.dns_servers = ["10.0.0.53"];
+  const dhcp = (compile(intent).config as any).dhcp.dhcp.find((d: any) => d[".name"] === intent.networks[0].id);
+  const onRouter = dhcp[".overrides"].find((o: any) => /router/.test(o[".if"])).override;
+  t.is(onRouter.dns_service, false);
+  t.deepEqual(onRouter.dhcp_option.filter((o: string) => o.startsWith("6,")), ["6,10.0.0.53"]);
+});
+
+test("a port forward into a network that goes out through a VPN provider is refused: its replies would take the tunnel", async (t) => {
+  const { newPrivateKey, publicKeyOf } = await import("../../wireguard");
+  const intent = sample();
+  intent.tunnels = [
+    {
+      id: "tun1",
+      name: "Mullvad",
+      private_key: newPrivateKey(),
+      address: "10.64.12.34/32",
+      dns: ["10.64.0.1"],
+      peer: { public_key: publicKeyOf(newPrivateKey()), endpoint: "203.0.113.5:51820" },
+    },
+  ];
+  const forwardTo = (n: number) => {
+    const net = intent.networks[n];
+    return { ...intent, firewall: { ...intent.firewall, port_forwards: [{ ...intent.firewall.port_forwards[0], internal_address: net.subnet.replace(/\.0\/24$/, ".9") }] } };
+  };
+  t.true(intentSchema.safeParse(forwardTo(1)).success, "out the plain line: fine");
+  intent.networks[1].line = { connection: "tun1", fallback: false };
+  const refused = intentSchema.safeParse(forwardTo(1));
+  t.false(refused.success);
+  t.regex(JSON.stringify(refused.error?.issues), /goes out through a VPN provider/);
+});
+
+test("the router's mesh radio is as wide as the access points' in the mesh's band", (t) => {
+  for (const [band, channel] of [["6g", 37], ["5g", 36]] as const) {
+    const intent = sample();
+    intent.radios = { ...(intent.radios ?? {}), "6g": { enabled: true } };
+    intent.mesh = { enabled: true, band, channel, key: "mesh-key-123456", dedicated: false, wired: false, jumbo: true };
+    const devices = (compile(intent).config as any).wireless["wifi-device"].filter((d: any) => d.band === band);
+    const widths = new Set(devices.map((d: any) => d.htmode));
+    t.is(widths.size, 1, `${band}: ${[...widths].join(", ")}`);
+  }
 });

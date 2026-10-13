@@ -58,6 +58,8 @@ export type HttpRequest = {
   body: string;
   /** Lower-case names. */
   headers: Record<string, string>;
+  /** The client's address, where the server knows it: for limits per client. */
+  remoteAddress?: string;
 };
 
 /** How a request is answered: a server, or CGI on the router. */

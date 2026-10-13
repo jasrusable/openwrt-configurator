@@ -4,7 +4,7 @@
 // networks that get only those, then the user's rules in their order, and
 // port forwards (DNAT) into the zone of their target's network.
 import { portsApply } from "../choices";
-import { anywhere, internet, isIpv6, router, Rule } from "../firewall";
+import { anywhere, fw4Ports, internet, isIpv6, router, Rule } from "../firewall";
 import { ipv6Interface } from "../connections";
 import { Feature, onRouter } from "../fragment";
 import { named } from "../names";
@@ -81,7 +81,7 @@ const userRule = (rule: Rule): Section => {
     ...(rule.source_addresses?.length ? { src_ip: rule.source_addresses } : {}),
     ...(rule.destination_addresses?.length ? { dest_ip: rule.destination_addresses } : {}),
     // Kept in the intent for when the protocol is TCP or UDP again.
-    ...(rule.destination_port && portsApply(protocol) ? { dest_port: rule.destination_port } : {}),
+    ...(rule.destination_port && portsApply(protocol) ? { dest_port: fw4Ports(rule.destination_port) } : {}),
     proto: protocol === "tcp+udp" ? ["tcp", "udp"] : protocol === "any" ? ["all"] : [protocol],
     ...(family ? { family } : {}),
     // Blocked from the internet: dropped, so a scan learns nothing. From

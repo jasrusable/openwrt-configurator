@@ -164,3 +164,26 @@ test("an .ovpn may not read a file of the router's, nor blur where its key block
   t.is(file.match(/auth-user-pass/g)?.length, 1);
   t.regex(file, /auth-user-pass \/etc\/openvpn\/tun1\.auth/);
 });
+
+test("remote access that may reach the linked sites: clients route to them, and the invitation asks them to route back", (t) => {
+  const intent = sample();
+  intent.vpn = { ...intent.vpn, enabled: true, private_key: newPrivateKey(), access: { ...intent.vpn.access, networks: ["sites"] } };
+  intent.sites = {
+    ...intent.sites,
+    private_key: newPrivateKey(),
+    peers: [{ id: "s1", name: "Cabin", public_key: publicKeyOf(newPrivateKey()), subnets: ["192.168.50.0/24"] }],
+  };
+  const allowed = parseWgConf(clientConf(intent, { host: 2, route: "home" }, newPrivateKey())).peer.allowedIps;
+  t.true(allowed.includes("192.168.50.0/24"));
+  t.true(inviteOf(intent)!.subnets.includes(intent.vpn.subnet));
+  // Not when remote access may not reach them.
+  intent.vpn.access.networks = [];
+  t.false(parseWgConf(clientConf(intent, { host: 2, route: "home" }, newPrivateKey())).peer.allowedIps.includes("192.168.50.0/24"));
+  t.false(inviteOf(intent)!.subnets.includes(intent.vpn.subnet));
+});
+
+test("an .ovpn line over 255 bytes is refused: OpenVPN would read its rest as another option", (t) => {
+  const long = `remote vpn.example.com 1194 ${"x".repeat(240)}script-security 3`;
+  t.deepEqual(ovpnUnsafe(`client\n${long}\n`), ["a line over 255 bytes"]);
+  t.deepEqual(ovpnUnsafe("client\nremote vpn.example.com 1194\n"), []);
+});

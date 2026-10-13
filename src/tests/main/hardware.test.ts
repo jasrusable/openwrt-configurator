@@ -328,3 +328,38 @@ test('in a bridge VLAN\'s list, "*t" is the free physical ports alone, not the b
   );
   t.deepEqual(config.network["bridge-vlan"][0].ports, ["eth1:t", "eth2:t"]);
 });
+
+test("swconfig: an untagged line never takes a VLAN another line has tagged; one VLAN on two ports is refused", (t) => {
+  const config = build(
+    {
+      network: {
+        interface: [
+          { ".name": "wan", device: "@port:eth1", proto: "dhcp" },
+          { ".name": "wanb", device: "@port:eth2.2", proto: "dhcp" },
+        ],
+      },
+    },
+    swconfig
+  );
+  const lines = config.network.switch_vlan.map((v: any) => [v.vlan, v.ports]);
+  t.deepEqual(new Set(lines.map((l: any) => l[0])).size, lines.length, "every line its own VLAN");
+  const wan = config.network.interface.find((i: any) => i[".name"] === "wan").device;
+  const wanb = config.network.interface.find((i: any) => i[".name"] === "wanb").device;
+  t.not(wan, wanb);
+  t.is(wanb, "eth0.2");
+  t.throws(
+    () =>
+      build(
+        {
+          network: {
+            interface: [
+              { ".name": "wan", device: "@port:eth1.7", proto: "dhcp" },
+              { ".name": "wanb", device: "@port:eth2.7", proto: "dhcp" },
+            ],
+          },
+        },
+        swconfig
+      ),
+    { message: /VLAN 7 is on both eth1 and eth2/ }
+  );
+});

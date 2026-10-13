@@ -71,6 +71,10 @@ const dhcpServer = (network: Network, ipv6: boolean, tunnelDns: string[] = []) =
         ra_default: 1,
         ra_slaac: true,
         ra_flags: ["managed-config", "other-config"],
+        // The network's own DNS servers (a Pi-hole): odhcpd must not also
+        // announce the router as an IPv6 one, or clients that prefer it go
+        // around them. None announced: they use the network's (IPv4) ones.
+        ...(network.dhcp.dns_servers?.length ? { dns_service: false } : {}),
       }
     : { dhcpv6: "disabled", ra: "disabled" }),
   // Option 42: the router is the network's time server. Option 6: other DNS
@@ -105,6 +109,13 @@ export const network: Feature = (intent) => {
   const wiredMesh = intent.mesh.enabled && intent.mesh.wired && intent.mesh.jumbo;
   const onMeshNode = (override: Record<string, unknown>) =>
     intent.mesh.enabled ? { ".overrides": [{ ".if": meshNode(intent), override }] } : {};
+  // An access point only carries the networks other than the main one, for
+  // its Wi-Fi to join: it has no address on them, and must not have IPv6's
+  // link-local one either, or its own services (LuCI, on every address)
+  // would answer guests there (verified on 25.12.5: a carried VLAN device
+  // gets one unless its device says ipv6 0).
+  const carried = (n: Network): { ".overrides"?: { ".if": string; override: Record<string, unknown> }[] } =>
+    isMain(n) ? {} : { ".overrides": [{ ".if": onAccessPoints, override: { ipv6: false } }] };
   return {
     services: [
       { ".if": everyDevice, name: "network", running: true },
@@ -138,19 +149,37 @@ export const network: Feature = (intent) => {
         // (not an override's list), so other features' devices (the mesh's)
         // are kept beside them.
         device: [
-          ...(wiredMesh
-            ? networks.map((n) => ({ ".if": "device.sw_config == false", ".name": `mtu_${vlanOf(n)}`, name: deviceOf(n), mtu: 1500 }))
-            : []),
-          ...networks.map((n) => ({
-            ".if": "device.sw_config == true",
-            ".name": `bridge_${vlanOf(n)}`,
-            name: deviceOf(n),
-            type: "bridge",
-            ports: [`@cpu_port.${vlanOf(n)}`],
+          // Each network's own VLAN device (DSA), where something is set on
+          // it: held to 1500 under the wired mesh's larger frames, and, on
+          // access points, no IPv6 on a network only carried (see carried).
+          ...networks.flatMap((n) =>
+            wiredMesh || !isMain(n)
+              ? [
+                  {
+                    ".if": wiredMesh ? "device.sw_config == false" : `device.sw_config == false AND ${onAccessPoints}`,
+                    ".name": `vlandev_${vlanOf(n)}`,
+                    name: deviceOf(n),
+                    ...(wiredMesh ? { mtu: 1500 } : {}),
+                    ...carried(n),
+                  },
+                ]
+              : []
+          ),
+          ...networks.map((n) => {
             // A mesh node: the mesh in each network's bridge, the main one
             // untagged, as on DSA.
-            ...onMeshNode({ ports: [`@cpu_port.${vlanOf(n)}`, isMain(n) ? "bat0" : `bat0.${vlanOf(n)}`] }),
-          })),
+            const meshPorts = intent.mesh.enabled
+              ? [{ ".if": meshNode(intent), override: { ports: [`@cpu_port.${vlanOf(n)}`, isMain(n) ? "bat0" : `bat0.${vlanOf(n)}`] } }]
+              : [];
+            return {
+              ".if": "device.sw_config == true",
+              ".name": `bridge_${vlanOf(n)}`,
+              name: deviceOf(n),
+              type: "bridge",
+              ports: [`@cpu_port.${vlanOf(n)}`],
+              ".overrides": [...meshPorts, ...(carried(n)[".overrides"] ?? [])],
+            };
+          }),
           {
             ".if": "device.sw_config == false",
             name: "br-lan",

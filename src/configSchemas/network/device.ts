@@ -7,8 +7,10 @@ export const networkDeviceSchema = z.object({
   type: z.union([z.enum(["bridge"]), z.string()]).optional(),
   ports: z.array(z.string()).optional(),
   mtu: z.number().int().optional(),
+  /** Off: no IPv6 on it at all, not even a link-local address. */
+  ipv6: z.boolean().optional(),
 });
 
 export const oncNetworkDeviceSchema = networkDeviceSchema.extend({
-  ports: z.union([z.enum(["*", "&*"]), z.array(z.string())]).optional(),
+  ports: z.union([z.literal("*"), z.array(z.string())]).optional(),
 });

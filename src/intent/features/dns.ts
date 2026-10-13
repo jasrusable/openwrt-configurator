@@ -58,8 +58,9 @@ export const dns: Feature = (intent) => {
             filterwin2k: false,
             localise_queries: true,
             // Answers from outside may not point inside (DNS rebinding);
-            // the router itself (127.0.0.0/8) stays allowed.
-            ...(intent.dns.rebind_protection ? { rebind_protection: true, rebind_localhost: true } : {}),
+            // the router itself (127.0.0.0/8) stays allowed. Off is written
+            // out: dnsmasq's init script defaults it to on (verified on 25.12.5).
+            ...(intent.dns.rebind_protection ? { rebind_protection: true, rebind_localhost: true } : { rebind_protection: false }),
             local: `/${domain}/`,
             domain,
             expandhosts: true,
