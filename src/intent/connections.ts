@@ -10,6 +10,16 @@ export const primaryConnection = (intent: Pick<Intent, "internet">) => intent.in
 /** Whether the networks can have IPv6: the main connection brings it. */
 export const internetIpv6 = (intent: Pick<Intent, "internet">) => !!primaryConnection(intent)?.ipv6;
 
+/**
+ * Whether a network has IPv6 as compiled: the internet brings it, the network
+ * wants it, and it goes out the main line (IPv6 has only the main's, so a
+ * network kept to another line or a provider's tunnel has none).
+ */
+export const networkHasIpv6 = (
+  intent: Pick<Intent, "internet">,
+  network: Pick<Intent["networks"][number], "ipv6" | "line">
+) => internetIpv6(intent) && !!network.ipv6 && !(network.line && network.line.connection !== primaryConnection(intent).id);
+
 /** Its IPv6 interface's name: wan6 for wan, wanb6 for wanb. */
 export const ipv6Interface = (connection: Pick<Connection, "id">) => `${connection.id}6`;
 

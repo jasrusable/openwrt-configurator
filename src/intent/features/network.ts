@@ -12,8 +12,7 @@ import {
   onAccessPoints,
   onRouter,
 } from "../fragment";
-import { networkIpv6Applies } from "../choices";
-import { internetIpv6, ipv6Interface, primaryConnection } from "../connections";
+import { ipv6Interface, networkHasIpv6, primaryConnection } from "../connections";
 import { named } from "../names";
 import { meshMtu, meshNode } from "./mesh";
 
@@ -96,8 +95,7 @@ export const network: Feature = (intent) => {
   const tunnelOf = (n: Network) => intent.tunnels.find((t) => t.id === n.line?.connection);
   // Not a network out through a provider's tunnel, or kept to a line other
   // than the main one: its IPv6 would go around it, as IPv6 only has the main's.
-  const offMainLine = (n: Network) => !!n.line && n.line.connection !== primaryConnection(intent).id;
-  const ipv6 = (n: Network) => networkIpv6Applies(internetIpv6(intent)) && n.ipv6 && !offMainLine(n);
+  const ipv6 = (n: Network) => networkHasIpv6(intent, n);
   // Prefixes from the main connection's IPv6 interface (wan6 for wan).
   const ipv6Upstream = ipv6Interface(primaryConnection(intent));
   // What a section changes on a mesh node (features/mesh.ts), when the mesh is on.

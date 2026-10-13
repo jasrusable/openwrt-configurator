@@ -84,6 +84,7 @@ const device = (hostname: string, parts: Partial<DeviceStatus>): DeviceStatus =>
   neighbours: [],
   ipv6Leases: [],
   notRunning: [],
+  unread: [],
   counters: {},
   traffic: {},
   heardBy: [],

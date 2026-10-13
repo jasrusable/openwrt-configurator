@@ -2,8 +2,11 @@
 // 25.12.5 in Docker (src/tests/helpers/status/; the public address replaced),
 // or written to their documented layout where Docker has none (ports, adverts).
 import test from "ava";
-import { readFileSync } from "fs";
+import { spawnSync } from "child_process";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
+import type { Session } from "../../platform";
 import {
   parseAdverts,
   parseInternetCheck,
@@ -13,6 +16,7 @@ import {
   parseNeighbourTable,
   parseStorage,
   parseTemperature,
+  readDeviceStatus,
 } from "../../status/device";
 
 const recorded = (name: string) => readFileSync(join(__dirname, "../helpers/status", name), "utf8");
@@ -78,6 +82,43 @@ test("ports, adverts and temperature, as the kernel prints them", (t) => {
     { device: "br-lan", sent: 0, solicits: 84 },
     { device: "br-lan.20", sent: 120, solicits: 30 },
   ]);
+  // With the counts kept from a read two minutes before; a counter that went back (a restart) has none.
+  t.deepEqual(parseAdverts("br-lan 3 90\nbr-lan.20 5 30\nbefore 130\nbr-lan 3 84\nbr-lan.20 120 30"), [
+    { device: "br-lan", sent: 3, solicits: 90, before: { sent: 3, solicits: 84, seconds: 130 } },
+    { device: "br-lan.20", sent: 5, solicits: 30 },
+  ]);
   t.is(parseTemperature("48000\n61500\n"), 61.5);
   t.is(parseTemperature(""), undefined);
+});
+
+/** A session running the real batched probes in a local sh, with stub commands first on PATH. */
+const stubbedSession = (stubs: Record<string, string>): Session => {
+  const dir = mkdtempSync(join(tmpdir(), "onc-status-"));
+  Object.entries(stubs).forEach(([name, body]) => {
+    writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`);
+    chmodSync(join(dir, name), 0o755);
+  });
+  return {
+    execCommand: async (command) => {
+      const r = spawnSync("sh", ["-c", command], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}` }, encoding: "utf8" });
+      return { stdout: r.stdout, stderr: r.stderr, code: r.status };
+    },
+    dispose: () => {},
+  };
+};
+
+test("status: an answer that cannot be read is left out and named, not the whole device", async (t) => {
+  const session = stubbedSession({
+    ubus: `case "$1 $2 $3" in
+  "call system info") echo '{"uptime":60,"load":[65536,0,0],"memory":{"total":1000,"available":500}}' ;;
+  "call mwan3 status") echo '{not json' ;;
+  *) exit 1 ;;
+esac`,
+    nlbw: "echo '{\"columns\": ['",
+  });
+  const status = await readDeviceStatus("ap", session, () => 0, [], { traffic: true });
+  t.is(status.uptime, 60);
+  t.deepEqual([...status.unread].sort(), ["mwan3", "traffic (nlbwmon)"]);
+  t.deepEqual(status.lines, []);
+  t.deepEqual(status.traffic, {});
 });

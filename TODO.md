@@ -116,3 +116,5 @@ and the React UI in `ui/`.
 
 - Clients: names learnt from mDNS; a client's type is guessed from its name only (icons).
 - Wi-Fi survey and usteer roaming: run on the user's AP only once usteer and the survey are exercised there (verified in Docker).
+- mwan3track's log line ("Interface wan (eth1) is offline") is from its source, not recorded: record one on a router with two lines.
+- Every status read compiles each device's settings again (`getOpenWrtState`, for the services that must run): cheap on a Mac, to measure under QuickJS on a router.

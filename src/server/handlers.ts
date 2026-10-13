@@ -324,7 +324,7 @@ export const internetSpeedApi =
   async ({ method }) => {
     if (method !== "POST") return json(405, { error: "POST" });
     const result = await speedTest({ intentPath, platform });
-    return json("error" in result ? 502 : 200, result);
+    return json("error" in result ? 409 : 200, result);
   };
 
 /** POST: each access point's Wi-Fi survey (neighbouring networks, how busy each channel is); on request. */
@@ -332,7 +332,8 @@ export const surveyApi =
   ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
   async ({ method }) => {
     if (method !== "POST") return json(405, { error: "POST" });
-    return json(200, await wifiSurvey({ intentPath, platform }));
+    const result = await wifiSurvey({ intentPath, platform });
+    return json("error" in result ? 409 : 200, result);
   };
 
 export const firmwareApi =

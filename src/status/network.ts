@@ -66,15 +66,15 @@ export type NetworkStatus = {
   };
   /** On the devices but not in your settings: shown, so a mismatch is never hidden. */
   unexpected: { interfaces: string[]; ssids: string[] };
-  // The Status tabs (views.ts), added by readNetworkStatus.
+  // The Status pages' views (views.ts), added by readNetworkStatus.
   attention?: Attention[];
   clientList?: ClientView[];
   deviceViews?: DeviceView[];
   radios?: RadioView[];
   internetCheck?: InternetCheck;
   activity?: ActivityView[];
-  /** The internet lines' byte counters, and when: two reads give the throughput. */
-  internetCounters?: { rx: number; tx: number; at: number };
+  /** Each internet line's byte counters, and when: two reads give the throughput. */
+  internetCounters?: { lines: Record<string, { rx: number; tx: number }>; at: number };
 };
 
 const reached = (r: Reachability | undefined): r is DeviceStatus => !!r && !("error" in r);

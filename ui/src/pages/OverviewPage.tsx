@@ -14,15 +14,16 @@ import { internetIpv6 } from "../../../src/intent/connections";
 import { templateOf } from "../../../src/intent/networkTemplates";
 import { useFreshDevices } from "../data/devices";
 import { useProvision } from "../data/provision";
-import { bitsWords, useSeries } from "../data/history";
+import { latest, useSeries } from "../data/history";
+import { bitsWords } from "../kit/format";
 import { useNetworkStatus } from "../data/status";
 import { useMeasureLink } from "../data/mesh";
-import { ago, duration, portsOf, routerFacts } from "../facts";
+import { duration, portsOf, routerFacts } from "../facts";
 import { useDraftValue } from "../form/draft";
 import { AreaChart, Tile } from "../kit/charts";
 import { ItemIcon, Section, SettingRow, SettingsPage, StatusDot } from "../kit/layout";
 import { applyStatus } from "../provision/status";
-import { AttentionSection } from "./status/shared";
+import { AttentionSection, lineState, liveLine } from "./status/shared";
 
 const connections: Record<string, string> = { dhcp: "DHCP", pppoe: "PPPoE", static: "Static IP" };
 const providers: Record<string, string> = { cloudflare: "Cloudflare", google: "Google", quad9: "Quad9" };
@@ -103,7 +104,6 @@ const Topology = ({ intent }: { intent: Intent }) => {
   const router = intent.hardware.find((d) => d.role === "router");
   const aps = intent.hardware.filter((d) => d.role !== "router");
   const routerWifi = router ? onWifi(router.name) : 0;
-  const wired = clients.filter((c) => c.connection.kind === "wired").length;
   return (
     <Box className="onc-card" p="md">
       <Stack gap={0} align="center">
@@ -111,7 +111,7 @@ const Topology = ({ intent }: { intent: Intent }) => {
           icon={IconWorld}
           name="Internet"
           up={live?.internet?.up}
-          sub={down.length ? `↓ ${bitsWords(down[down.length - 1][1])} · ↑ ${bitsWords(up[up.length - 1]?.[1])}` : undefined}
+          sub={latest(down) !== undefined ? `↓ ${bitsWords(latest(down))} · ↑ ${bitsWords(latest(up))}` : undefined}
         />
         {router && (
           <>
@@ -120,7 +120,7 @@ const Topology = ({ intent }: { intent: Intent }) => {
               icon={IconRouter}
               name={router.name}
               up={reached(router.name)}
-              sub={[`${wired} by cable`, routerWifi ? `${routerWifi} on Wi-Fi` : undefined].filter(Boolean).join(" · ")}
+              sub={routerWifi ? `${routerWifi} on Wi-Fi` : "Router"}
             />
           </>
         )}
@@ -173,7 +173,7 @@ const Tiles = ({ intent }: { intent: Intent }) => {
         label="Internet"
         value={!live ? "—" : live.internet?.up ? "Online" : "Down"}
         color={!live ? undefined : live.internet?.up ? "green" : "red"}
-        sub={down.length ? `↓ ${bitsWords(down[down.length - 1][1])} · ↑ ${bitsWords(up[up.length - 1]?.[1])}` : "Throughput after two reads"}
+        sub={latest(down) !== undefined ? `↓ ${bitsWords(latest(down))} · ↑ ${bitsWords(latest(up))}` : "Throughput after two reads"}
       >
         <AreaChart series={[down, up]} colors={["blue", "teal"]} height={28} />
       </Tile>
@@ -182,13 +182,13 @@ const Tiles = ({ intent }: { intent: Intent }) => {
       </Tile>
       <Tile
         label="Devices"
-        value={live ? `${reachedCount} of ${intent.hardware.length}` : "—"}
-        color={live ? (reachedCount === intent.hardware.length ? "green" : "red") : undefined}
+        value={live ? `${reachedCount} of ${views.length}` : "—"}
+        color={live ? (reachedCount === views.length ? "green" : "red") : undefined}
         sub={Number.isFinite(hottest) ? `Warmest ${Math.round(hottest)} °C` : live ? "answering" : undefined}
       />
       <Tile
         label="Wi-Fi"
-        value={live ? `${onAir} on air` : "—"}
+        value={live ? `${onAir} network${onAir === 1 ? "" : "s"}` : "—"}
         color="blue"
         sub={bands.map(([b, n]) => `${n} on ${b}`).join(" · ") || (live ? "No one on Wi-Fi" : undefined)}
       />
@@ -219,13 +219,7 @@ export const OverviewPage = () => {
   return (
     <SettingsPage
       title="Overview"
-      description={
-        live
-          ? `${intent.site.name} · live, read from the devices ${ago(status.dataUpdatedAt)}`
-          : status.isFetching
-          ? `${intent.site.name} · reading the devices…`
-          : intent.site.name
-      }
+      description={liveLine(intent.site.name, status.dataUpdatedAt, status.isFetching, !!live)}
     >
       <AttentionSection items={live?.attention} />
       {/* Saved but not applied is in Needs attention; up to date says nothing. */}
@@ -244,9 +238,7 @@ export const OverviewPage = () => {
         {intent.internet.connections.map((c) => {
           const now = live?.connections.find((x) => x.id === c.id);
           const port = c.port ?? wan;
-          // With several, mwan3 says whether the line works; else its interface.
-          const works = now?.line ? ["online", "disconnecting"].includes(now.line.state) : now?.up;
-          const since = now?.line?.since ?? (now?.up ? now.uptime : undefined);
+          const { works, since, word, dot } = lineState(now, several);
           return (
             <SettingRow
               key={c.id}
@@ -261,17 +253,7 @@ export const OverviewPage = () => {
                   .join(" · ") || undefined
               }
             >
-              <State up={now ? (now.inUse ? true : works ? undefined : false) : undefined}>
-                {!now
-                  ? connections[c.connection.type]
-                  : now.inUse
-                    ? several ? "In use" : "Connected"
-                    : works
-                      ? "Standby"
-                      : now.line?.state === "connecting"
-                        ? "Coming back"
-                        : "Down"}
-              </State>
+              <State up={dot}>{word ?? connections[c.connection.type]}</State>
             </SettingRow>
           );
         })}

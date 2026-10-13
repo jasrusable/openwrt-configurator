@@ -151,10 +151,11 @@ const postJson = async <T,>(path: string, input: unknown, failed: string): Promi
 export const restartService = (device: string, service: string) =>
   postJson<{ ok: true }>("api/fix", { device, service }, "Could not restart it.");
 
-/** The router's download speed now. */
+/** Each access point's survey of the air around it, and those that could not be surveyed. */
 export const runWifiSurvey = () =>
-  postJson<{ surveys: Survey[] }>("api/wifi/survey", {}, "The survey did not finish.");
+  postJson<{ surveys: Survey[]; failed: { accessPoint: string; error: string }[] }>("api/wifi/survey", {}, "The survey did not finish.");
 
+/** The router's download speed now. */
 export const runSpeedTest = () => postJson<{ downMbps: number }>("api/internet/speed", {}, "The speed test did not finish.");
 
 /** OpenWrt's latest stable release. */

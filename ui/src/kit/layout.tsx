@@ -158,7 +158,10 @@ export const SettingRow = ({
   <Group justify="space-between" gap="md" px="md" py={10} mih={52} className="onc-row">
     <Box style={{ flex: 1, minWidth: 0 }}>
       <Group gap={4} wrap="nowrap">
-        <Text size="sm">{label}</Text>
+        {/* A div: a label may be an icon and a name, which a paragraph cannot hold. */}
+        <Text component="div" size="sm">
+          {label}
+        </Text>
         {(explain || openwrt) && (
           <Tooltip
             label={

@@ -47,7 +47,12 @@ export type WifiInterface = {
 export type PortLink = { name: string; up: boolean; speed?: number };
 
 /** Router advertisements sent and solicitations heard, per device, since it came up. */
-export type Adverts = { device: string; sent: number; solicits: number };
+/**
+ * Router adverts sent and solicitations heard on a device since it came up,
+ * and the counts a little while before (`before`, `seconds` ago), so silence
+ * can be told now rather than since boot.
+ */
+export type Adverts = { device: string; sent: number; solicits: number; before?: { sent: number; solicits: number; seconds: number } };
 
 /** The kernel's neighbour table: who answered on which address lately. */
 /** One entry of the router's neighbour table, with the interface it was seen on. */
@@ -113,6 +118,8 @@ export type DeviceStatus = {
   ipv6Leases: Ipv6Lease[];
   /** Of the services the settings say must run, those that are not (or are not installed). */
   notRunning: { name: string; missing: boolean }[];
+  /** What it answered that could not be read (hostapd, mwan3, …): left out, rather than the whole device. */
+  unread: string[];
   internet?: InternetCheck;
   log?: LogLine[];
   /** Bytes received and sent on each network device since it came up: rates come from two reads. */
@@ -258,14 +265,16 @@ const interfaces: Probe<unknown> = {
 
 // One JSON array, built by the shell, so no output needs splitting: an
 // access point's hostapd interfaces with their status and clients; none on a
-// device without Wi-Fi. A call that fails gives null.
+// device without Wi-Fi. A call that fails, or says nothing, gives null: each
+// is captured first, so one failing partway cannot leave half its JSON.
 const wifi: Probe<unknown> = {
   command: [
+    'call() { r=$(ubus call "$@" 2>/dev/null) && [ -n "$r" ] && printf \'%s\' "$r" || printf null; }',
     "printf '['; sep=''",
     "for o in $(ubus list 'hostapd.*' 2>/dev/null); do",
-    `  printf '%s{"object":"%s","status":' "$sep" "$o"; ubus call "$o" get_status 2>/dev/null || printf 'null'`,
-    `  printf ',"clients":'; ubus call "$o" get_clients 2>/dev/null || printf 'null'`,
-  `  printf ',"info":'; ubus call iwinfo info "{\\"device\\":\\"\${o#hostapd.}\\"}" 2>/dev/null || printf 'null'`,
+    `  printf '%s{"object":"%s","status":' "$sep" "$o"; call "$o" get_status`,
+    `  printf ',"clients":'; call "$o" get_clients`,
+    `  printf ',"info":'; call iwinfo info "{\\"device\\":\\"\${o#hostapd.}\\"}"`,
     "  printf '}'; sep=','",
     "done; printf ']'",
   ].join("\n"),
@@ -391,11 +400,23 @@ export const parseLinks = (text: string): PortLink[] =>
   });
 
 /** "<device> <adverts sent> <solicits heard>" per line. */
-export const parseAdverts = (text: string): Adverts[] =>
-  text.split("\n").flatMap((line) => {
-    const [device, sent, solicits] = line.trim().split(/\s+/);
-    return device && sent !== undefined ? [{ device, sent: Number(sent) || 0, solicits: Number(solicits) || 0 }] : [];
+export const parseAdverts = (text: string): Adverts[] => {
+  // "<dev> <sent> <solicits>" lines, then "before <seconds>" and the earlier lines.
+  const [now, earlier = ""] = text.split(/^before\s+/m);
+  const lines = (block: string) =>
+    block.split("\n").flatMap((line) => {
+      const [device, sent, solicits] = line.trim().split(/\s+/);
+      return device && sent !== undefined ? [{ device, sent: Number(sent) || 0, solicits: Number(solicits) || 0 }] : [];
+    });
+  const seconds = Number(earlier.split("\n")[0]);
+  const before = lines(earlier.split("\n").slice(1).join("\n"));
+  return lines(now).map((a) => {
+    const b = before.find((x) => x.device === a.device);
+    return b && seconds > 0 && a.sent >= b.sent && a.solicits >= b.solicits
+      ? { ...a, before: { sent: b.sent, solicits: b.solicits, seconds } }
+      : a;
   });
+};
 
 /** `ip neigh show`: "<address> dev <dev> lladdr <mac> [router] <STATE>"; entries without a MAC skipped. */
 export const parseNeighbourTable = (text: string): NeighbourEntry[] =>
@@ -517,8 +538,16 @@ const temperature = raw("cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null |
 const links = raw(
   'for d in /sys/class/net/*; do [ -e "$d/device" ] || [ -e "$d/phys_port_name" ] || continue; echo "${d##*/} $(cat "$d/carrier" 2>/dev/null || echo 0) $(cat "$d/speed" 2>/dev/null || echo -1)"; done'
 );
+// The counts now, then those kept in the router's RAM from a read at least
+// two minutes ago (renewed once they are older than that), as "before <age>".
 const adverts = raw(
-  'for f in /proc/net/dev_snmp6/*; do awk -v n="${f##*/}" \'$1=="Icmp6OutRouterAdvertisements"{o=$2} $1=="Icmp6InRouterSolicits"{i=$2} END{if (o + i > 0) print n, o + 0, i + 0}\' "$f"; done'
+  [
+    'p=/tmp/onc-adverts; t=$(cut -d. -f1 /proc/uptime)',
+    'for f in /proc/net/dev_snmp6/*; do awk -v n="${f##*/}" \'$1=="Icmp6OutRouterAdvertisements"{o=$2} $1=="Icmp6InRouterSolicits"{i=$2} END{if (o + i > 0) print n, o + 0, i + 0}\' "$f"; done > $p.now',
+    'cat $p.now',
+    'a=$(cat $p.at 2>/dev/null); [ -n "$a" ] && [ "$a" -le "$t" ] && { echo "before $((t - a))"; cat $p 2>/dev/null; }',
+    '{ [ -z "$a" ] || [ "$a" -gt "$t" ] || [ $((t - a)) -ge 120 ]; } && mv $p.now $p && echo $t > $p.at || rm -f $p.now',
+  ].join("; ")
 );
 const neighbourTable = raw("ip neigh show 2>/dev/null || true");
 const ipv6Leases: Probe<unknown> = {
@@ -526,13 +555,31 @@ const ipv6Leases: Probe<unknown> = {
   parse: ({ stdout }) => json(stdout || "{}", "dhcp ipv6leases"),
 };
 
-/** The Performance view's checks, from the router (see parseInternetCheck). */
+/**
+ * The Performance view's checks, from the router (see parseInternetCheck):
+ * at once, and given up after a few seconds, so a dead line reads as "no
+ * answer" rather than a router that did not answer in time. Each runs as a
+ * plain command in the background so its pid is its own, and is killed when
+ * the time is up.
+ */
+export const internetCheckSeconds = 6;
 const internetCheck = (shaped: string[]) =>
   raw(
     [
-      `echo "ping $(ping -c 3 -W 2 1.1.1.1 2>/dev/null | sed -n 's/.*= [0-9.]*\\/\\([0-9.]*\\)\\/.*/\\1/p')"`,
-      `echo "ip $(uclient-fetch -q -T 4 -O - https://api.ipify.org 2>/dev/null | head -c 15)"`,
-      `nslookup openwrt.org 127.0.0.1 >/dev/null 2>&1 && echo "dns ok" || echo "dns fail"`,
+      "d=/tmp/onc-check.$$; mkdir -p $d",
+      "ping -c 3 -W 2 1.1.1.1 >$d/ping 2>/dev/null & p1=$!",
+      // The public address, asked of ipify at most every 5 minutes (kept in the router's RAM), not every read.
+      "f=/tmp/onc-public-ip; p2=; fetched=",
+      "if [ -s $f ] && find $f -mmin -5 2>/dev/null | grep -q .; then cp $f $d/ip; else fetched=1; uclient-fetch -q -T 4 -O $d/ip https://api.ipify.org >/dev/null 2>&1 & p2=$!; fi",
+      "nslookup openwrt.org 127.0.0.1 >$d/dns 2>/dev/null & p3=$!",
+      // busybox's sleep takes whole seconds only.
+      `i=0; while [ $i -lt ${internetCheckSeconds} ]; do kill -0 $p1 2>/dev/null || kill -0 $p2 2>/dev/null || kill -0 $p3 2>/dev/null || break; sleep 1; i=$((i+1)); done`,
+      "kill $p1 $p2 $p3 2>/dev/null",
+      `echo "ping $(sed -n 's/.*= [0-9.]*\\/\\([0-9.]*\\)\\/.*/\\1/p' $d/ping)"`,
+      'echo "ip $(head -c 15 $d/ip 2>/dev/null)"',
+      "[ -n \"$fetched\" ] && grep -qE '^[0-9.]+$' $d/ip 2>/dev/null && cp $d/ip $f",
+      "grep -q '^Name:' $d/dns && echo 'dns ok' || echo 'dns fail'",
+      "rm -rf $d",
       ...shaped.map(
         (device) =>
           `tc -s qdisc show dev ${device} 2>/dev/null | awk '/Sent/ {print "qdisc ${device}", $2, $7 + 0; exit}' | tr -d ','`
@@ -545,8 +592,15 @@ const logProbe = raw(
   "logread -l 400 2>/dev/null | grep -E 'onc|netifd: Interface|link is (up|down)|odhcpd.*(Failed|error)|AP-ENABLED|AP-DISABLED|init complete|mwan3.*(online|offline)' | tail -n 120"
 );
 
-/** What only some views read: the Performance view's checks, the Activity view's log. */
-export type StatusExtras = { internet?: { shaped: string[] }; log?: boolean };
+/**
+ * What only some views read: the Performance view's checks, the Activity
+ * view's log, and the costlier reads only the pages showing them make (the
+ * wired mesh's pings, nlbwmon's counts, usteer's view). Absent: not read.
+ */
+export type StatusExtras = { internet?: { shaped: string[] }; log?: boolean; meshWired?: boolean; traffic?: boolean; heardBy?: boolean };
+
+/** A probe not made this time: its answer is the given value. */
+const skipped = <T>(value: T): Probe<T> => ({ command: "true", parse: () => value });
 
 /** Read what `hostname` is doing, over an open session. */
 export const readDeviceStatus = async (
@@ -557,26 +611,41 @@ export const readDeviceStatus = async (
   mustRun: string[] = [],
   extras: StatusExtras = {}
 ): Promise<DeviceStatus> => {
+  // Only the system's own answer is required: anything else that cannot be
+  // read is left out and named, so one odd answer does not make the device
+  // look unreachable.
+  const unread: string[] = [];
+  const tolerant = <T>(name: string, probe: Probe<T>, fallback: T): Probe<T> => ({
+    ...probe,
+    parse: (result) => {
+      try {
+        return probe.parse(result);
+      } catch {
+        unread.push(name);
+        return fallback;
+      }
+    },
+  });
   const read = await runProbes(session, {
     systemInfo,
-    interfaces,
-    wifi,
+    interfaces: tolerant("network interfaces", interfaces, undefined),
+    wifi: tolerant("Wi-Fi", wifi, undefined),
     leases,
-    mwan3,
+    mwan3: tolerant("mwan3", mwan3, undefined),
     originators,
     handshakes,
-    meshWired,
+    meshWired: extras.meshWired ? tolerant("the wired mesh", meshWired, undefined) : skipped(undefined),
     storage,
     temperature,
     links,
     adverts,
     neighbourTable,
-    ipv6Leases,
-    notRunning: notRunning(mustRun),
+    ipv6Leases: tolerant("IPv6 leases", ipv6Leases, undefined),
+    notRunning: tolerant("services", notRunning(mustRun), []),
     counters,
     cores,
-    traffic,
-    heardBy,
+    traffic: extras.traffic ? tolerant("traffic (nlbwmon)", traffic, undefined) : skipped(undefined),
+    heardBy: extras.heardBy ? tolerant("roaming (usteer)", heardBy, undefined) : skipped(undefined),
     // Device names only (eth1, pppoe-wan): they go inside an awk program, unquoted.
     internetCheck: extras.internet
       ? internetCheck(extras.internet.shaped.filter((d) => /^[A-Za-z0-9._@-]+$/.test(d)))
@@ -605,6 +674,7 @@ export const readDeviceStatus = async (
     neighbours: parseNeighbourTable(read.neighbourTable),
     ipv6Leases: parseIpv6Leases(read.ipv6Leases),
     notRunning: read.notRunning,
+    unread,
     counters: parseCounters(read.counters),
     ...(Number(read.cores) > 0 ? { cores: Number(read.cores) } : {}),
     traffic: parseTraffic(read.traffic),
@@ -616,6 +686,7 @@ export const readDeviceStatus = async (
 
 /** The probes' commands, to record their output on a real image (src/tests/helpers/status/). */
 export const statusCommands = {
+  wifi: wifi.command,
   storage: storage.command,
   temperature: temperature.command,
   links: links.command,

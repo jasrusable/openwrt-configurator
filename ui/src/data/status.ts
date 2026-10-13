@@ -1,6 +1,6 @@
 // What the network is doing now, read from the devices: polled only while a
-// Status tab that shows it is open (React Query stops when it unmounts, and
-// when the browser tab is in the background), each tab at its own pace and
+// Status page that shows it is open (React Query stops when it unmounts, and
+// when the browser tab is in the background), each page at its own pace and
 // with its own reads (the Internet checks, the log).
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { StatusView } from "../../../src/status/read";
@@ -8,7 +8,7 @@ import { loadLatestRelease, loadNetworkStatus, restartService, runSpeedTest, run
 
 export const statusKey = (view: StatusView = "overview") => ["network-status", view] as const;
 
-/** How often each tab reads: Performance's latency and throughput move, the devices' health less so. */
+/** How often each page reads: Performance's latency and throughput move, the devices' health less so. */
 const every: Record<StatusView, number> = {
   overview: 30_000,
   clients: 15_000,
@@ -26,7 +26,7 @@ export const useNetworkStatus = (view: StatusView = "overview") =>
     queryKey: statusKey(view),
     queryFn: () => loadNetworkStatus(view),
     refetchInterval: every[view],
-    // Read as the app opened: the tab opens on it rather than reading again at once.
+    // Read as the app opened: the page opens on it rather than reading again at once.
     staleTime: 15_000,
     // A slow device should not make the page flicker between states.
     placeholderData: (previous) => previous,

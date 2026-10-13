@@ -1,8 +1,10 @@
 // What the Status tabs share: when the devices were last read, what needs
 // attention (with its fix or where to change it), and small readings.
-import { Button, Group, Stack, Text, ThemeIcon } from "@mantine/core";
+import { Badge, Button, Group, Text, ThemeIcon } from "@mantine/core";
 import { IconAlertTriangle, IconCircleCheck, IconInfoCircle } from "@tabler/icons-react";
+import { useEffect } from "react";
 import { useNavigate } from "react-router";
+import type { NetworkStatus } from "../../../../src/status/network";
 import type { Attention } from "../../../../src/status/views";
 import { useRestartService } from "../../data/status";
 import { ago } from "../../facts";
@@ -18,6 +20,9 @@ const icon = { problem: IconAlertTriangle, warning: IconAlertTriangle, info: Ico
 const AttentionRow = ({ item }: { item: Attention }) => {
   const navigate = useNavigate();
   const restart = useRestartService();
+  // Each read brings the item anew: "Done" lasts until then, and if it is
+  // still there the button is offered again.
+  useEffect(() => restart.reset(), [item]); // eslint-disable-line react-hooks/exhaustive-deps
   const Icon = icon[item.severity];
   return (
     <SettingRow
@@ -72,17 +77,41 @@ export const AttentionSection = ({ items }: { items?: Attention[] }) =>
     </Section>
   );
 
-/** Wi-Fi signal in words: what dBm means to a person. */
-export const signalWords = (dbm?: number) =>
-  dbm === undefined ? undefined : dbm >= -55 ? "excellent" : dbm >= -65 ? "good" : dbm >= -75 ? "fair" : "weak";
+type LiveConnection = NetworkStatus["connections"][number];
 
-export const bytes = (n: number) =>
-  n >= 1e12 ? `${(n / 1e12).toFixed(1)} TB` : n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.round(n / 1e3)} kB`;
+/**
+ * An internet line as the pages say it: whether it works (mwan3's view with
+ * several lines, else its interface), for how long, and in a word.
+ */
+export const lineState = (now: LiveConnection | undefined, several: boolean) => {
+  const works = now?.line ? ["online", "disconnecting"].includes(now.line.state) : now?.up;
+  const since = now?.line?.since ?? (now?.up ? now.uptime : undefined);
+  const word = !now
+    ? undefined
+    : now.inUse
+      ? several
+        ? "In use"
+        : "Connected"
+      : works
+        ? "Standby"
+        : now.line?.state === "connecting"
+          ? "Coming back"
+          : "Down";
+  return { works, since, word, dot: now ? (now.inUse ? true : works ? undefined : false) : undefined };
+};
+
+/** Each band's own colour, the same on every page. */
+export const bandColor = (band?: string) => (band === "6 GHz" ? "grape" : band === "5 GHz" ? "blue" : "teal");
+
+export const BandBadge = ({ band }: { band?: string }) =>
+  band ? (
+    <Badge variant="light" color={bandColor(band)} radius="sm" size="sm" style={{ textTransform: "none" }}>
+      {band}
+    </Badge>
+  ) : null;
 
 export const Muted = ({ children }: { children: React.ReactNode }) => (
   <Text size="sm" c="dimmed" ta="right">
     {children}
   </Text>
 );
-
-export const Stacked = Stack;

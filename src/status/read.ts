@@ -1,7 +1,8 @@
 // Read every device's status now, all at once, and interpret it against the
-// saved settings. Only while someone is looking: the Overview polls it while
-// it is open. Nothing is stored but what locating learnt about where a device
-// is (src/locate.ts), kept with its facts.
+// saved settings. Only while someone is looking: each Status page polls its
+// view while it is open. Nothing is stored but what locating learnt about
+// where a device is (src/locate.ts), kept with its facts, and the events
+// Activity keeps (written only when new ones came).
 import { readFacts } from "../deviceFacts";
 import { loadOncConfig } from "../loadConfig";
 import { Platform } from "../platform";
@@ -41,16 +42,20 @@ const keptActivity = (intentPath: string, platform: Platform, fresh: ActivityVie
     // None kept yet.
   }
   const all = keepActivity(kept, [...fresh, ...applies]);
-  try {
-    platform.mkdirp(`${intentPath}.state`);
-    platform.writeTextFile(file, JSON.stringify(all));
-  } catch {
-    // Kept next time.
+  // Written only when something new came, and whole (a router keeps it in
+  // flash, and two readers may overlap): a read that learnt nothing writes nothing.
+  if (JSON.stringify(all) !== JSON.stringify(kept)) {
+    try {
+      platform.mkdirp(`${intentPath}.state`);
+      platform.writeFileAtomic(file, JSON.stringify(all), 0o600);
+    } catch {
+      // Kept next time.
+    }
   }
   return all.slice(0, 300);
 };
 
-/** A Status tab: each reads what all read, and some a little more (the Internet checks, the log). */
+/** A Status page's view: each reads what all read, and some a little more (see StatusExtras). */
 export const statusViews = ["overview", "clients", "performance", "devices", "activity"] as const;
 export type StatusView = (typeof statusViews)[number];
 
@@ -91,7 +96,7 @@ export const readNetworkStatus = async ({
     intentPath,
     platform,
     devices: ready,
-    facts: readFacts(platform, intentPath, ready.map((d) => d.hostname)),
+    facts: known,
     timeoutMs,
     now,
     read: (f) => {
@@ -104,11 +109,17 @@ export const readNetworkStatus = async ({
       return readDeviceStatus(f.hostname, f.session, now, mustRun, {
         ...(view === "performance" && router ? { internet: { shaped } } : {}),
         ...(view === "activity" ? { log: true } : {}),
+        meshWired: view === "overview",
+        traffic: view === "clients",
+        heardBy: view === "clients" || view === "performance",
       });
     },
     failed: (hostname, error) => ({ hostname, error }),
   });
+  // Again: locating may have learnt where a device is now.
   const facts = readFacts(platform, intentPath, ready.map((d) => d.hostname));
+  const counters = internetCountersOf(intent, read);
+  const check = view === "performance" ? internetOf(intent, read) : undefined;
   const applied = (await provisionStatus({ intentPath, files: platform }).catch(() => undefined))?.live;
   return {
     ...networkStatus(intent, read, Object.fromEntries(Object.entries(facts).map(([name, f]) => [name, f?.macs]))),
@@ -116,8 +127,8 @@ export const readNetworkStatus = async ({
     clientList: clientsOf(intent, read, facts),
     deviceViews: devicesOf(intent, read, facts),
     radios: radiosOf(read),
-    ...(internetCountersOf(intent, read) ? { internetCounters: internetCountersOf(intent, read) } : {}),
-    ...(view === "performance" && internetOf(intent, read) ? { internetCheck: internetOf(intent, read) } : {}),
+    ...(counters ? { internetCounters: counters } : {}),
+    ...(check ? { internetCheck: check } : {}),
     ...(view === "activity" ? { activity: keptActivity(intentPath, platform, activityOf(intent, read), await appliesOf(intentPath, platform)) } : {}),
   };
 };

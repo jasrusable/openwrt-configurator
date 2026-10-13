@@ -3,17 +3,18 @@
 // measures of it now, a speed test on request; each access point's radios,
 // a survey of the air around them on request, and which access points hear
 // each client (roaming).
-import { Badge, Button, Group, Progress, SimpleGrid, Stack, Text } from "@mantine/core";
+import { Button, Group, Progress, SimpleGrid, Stack, Text } from "@mantine/core";
 import { where } from "../../../../src/intent/places";
 import type { Intent } from "../../../../src/intent/schema";
 import type { Survey } from "../../../../src/status/actions";
-import { bitsWords, useSeries } from "../../data/history";
+import { latest, useSeries } from "../../data/history";
+import { bitsWords, bytes } from "../../kit/format";
 import { useNetworkStatus, useSpeedTest, useWifiSurvey } from "../../data/status";
 import { duration } from "../../facts";
 import { useDraftValue } from "../../form/draft";
 import { AreaChart, ChartCard, SignalBars, Tile } from "../../kit/charts";
 import { EmptyState, Section, SettingRow, SettingsPage, StatusDot } from "../../kit/layout";
-import { bytes, liveLine, Muted } from "./shared";
+import { BandBadge, bandColor, lineState, liveLine, Muted } from "./shared";
 
 /** "HE80" as people say it: Wi-Fi 6, 80 MHz. */
 const modeWords = (htmode?: string) => {
@@ -22,17 +23,6 @@ const modeWords = (htmode?: string) => {
   const generation = { EHT: "Wi-Fi 7", HE: "Wi-Fi 6", VHT: "Wi-Fi 5", HT: "Wi-Fi 4" }[m[1]];
   return `${generation} · ${m[2]} MHz`;
 };
-
-const bandColor = (band?: string) => (band === "6 GHz" ? "grape" : band === "5 GHz" ? "blue" : "teal");
-
-const BandBadge = ({ band }: { band?: string }) =>
-  band ? (
-    <Badge variant="light" color={bandColor(band)} radius="sm" size="sm" style={{ textTransform: "none" }}>
-      {band}
-    </Badge>
-  ) : null;
-
-const last = (series: [number, number][]) => series[series.length - 1]?.[1];
 
 const Internet = ({ intent }: { intent: Intent }) => {
   const status = useNetworkStatus("performance");
@@ -45,8 +35,8 @@ const Internet = ({ intent }: { intent: Intent }) => {
   return (
     <>
       <SimpleGrid cols={{ base: 1, xs: 3 }} spacing="sm">
-        <Tile label="Downloading now" value={bitsWords(last(down))} color="blue" sub={peak ? `Peak ${bitsWords(peak)}` : "Measured between reads"} />
-        <Tile label="Uploading now" value={bitsWords(last(up))} color="teal" sub="All devices together" />
+        <Tile label="Downloading now" value={bitsWords(latest(down))} color="blue" sub={peak ? `Peak ${bitsWords(peak)}` : "Measured between reads"} />
+        <Tile label="Uploading now" value={bitsWords(latest(up))} color="teal" sub="All devices together" />
         <Tile
           label="Latency"
           value={check?.latencyMs !== undefined ? `${Math.round(check.latencyMs)} ms` : check ? "No answer" : "—"}
@@ -61,24 +51,28 @@ const Internet = ({ intent }: { intent: Intent }) => {
         <AreaChart series={[latency]} colors={["violet"]} height={70} />
       </ChartCard>
       <Section title="Connections">
-        {(status.data?.connections ?? intent.internet.connections.map((c) => ({ id: c.id, name: c.name, ipv4: [], ipv6: [] }))).map((c) => (
-          <SettingRow
-            key={c.id}
-            label={c.name || c.id}
-            description={[
-              c.ipv4.join(", ") || undefined,
-              c.ipv6.length ? `IPv6 ${c.ipv6[0]}` : undefined,
-              "line" in c && c.line ? `${c.line.state} ${duration(c.line.since)}` : "uptime" in c && c.uptime !== undefined ? `up ${duration(c.uptime)}` : undefined,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          >
-            <Group gap={6} wrap="nowrap">
-              {"up" in c && c.up !== undefined && <StatusDot color={c.up ? "green" : "red"} />}
-              <Muted>{"inUse" in c && c.inUse ? "In use" : "up" in c && c.up ? "Ready" : "up" in c && c.up === false ? "Down" : "—"}</Muted>
-            </Group>
-          </SettingRow>
-        ))}
+        {intent.internet.connections.map((c) => {
+          const now = status.data?.connections.find((x) => x.id === c.id);
+          const { works, since, word, dot } = lineState(now, intent.internet.connections.length > 1);
+          return (
+            <SettingRow
+              key={c.id}
+              label={c.name || c.id}
+              description={[
+                now?.ipv4.join(", ") || undefined,
+                now?.ipv6.length ? `IPv6 ${now.ipv6[0]}` : undefined,
+                since !== undefined ? `${works ? "up" : "down"} ${duration(since)}` : undefined,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            >
+              <Group gap={6} wrap="nowrap">
+                {dot !== undefined && <StatusDot color={dot ? "green" : "red"} />}
+                <Muted>{word ?? "—"}</Muted>
+              </Group>
+            </SettingRow>
+          );
+        })}
       </Section>
       <Section title="From the router">
         <SettingRow label="Address on the internet" description="What websites see; another router may sit before yours.">
@@ -156,13 +150,14 @@ const SurveyCard = ({ survey }: { survey: Survey }) => {
         {survey.neighbours.length > 0 && (
           <Stack gap={4}>
             <Text size="xs" c="dimmed">
-              Strongest networks around, not yours
+              Strongest networks around, not yours (one using your network's name first)
             </Text>
             {survey.neighbours.slice(0, 8).map((n, i) => (
               <Group key={i} gap="sm" wrap="nowrap">
                 <SignalBars dbm={n.signal} />
-                <Text size="sm" style={{ flex: 1 }} truncate>
+                <Text size="sm" style={{ flex: 1 }} truncate c={n.impostor ? "red" : undefined}>
                   {n.ssid ?? <Text span c="dimmed">Hidden</Text>}
+                  {n.impostor && " · not one of your access points"}
                 </Text>
                 <Text size="xs" c="dimmed">
                   {n.band} · channel {n.channel}
@@ -199,8 +194,10 @@ const Wifi = () => {
               <ChartCard
                 key={`${ap}-${r.ifname}`}
                 title={
-                  <Group gap={8} wrap="nowrap">
-                    <span>{r.ssid ?? r.ifname}</span>
+                  <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+                    <Text size="sm" fw={600} truncate>
+                      {r.ssid ?? r.ifname}
+                    </Text>
                     <BandBadge band={r.band} />
                   </Group>
                 }
@@ -244,10 +241,13 @@ const Wifi = () => {
             survey.isError
               ? (survey.error as Error).message
               : survey.data
-                ? survey.data.surveys.length
-                  ? `Pick a quieter channel in ${where("radios")} if yours is busy.`
-                  : "The access points did not report a survey."
-                : "Each access point listens around it for a few seconds: its clients may notice a short pause."
+                ? [
+                    survey.data.surveys.length
+                      ? `Pick a quieter channel in ${where("radios")} if yours is busy.`
+                      : "The access points did not report a survey.",
+                    ...survey.data.failed.map((f) => `${f.accessPoint} was not surveyed: ${f.error}`),
+                  ].join(" ")
+                : "Each access point in turn listens around it for a few seconds: its clients may notice a short pause."
           }
         />
       </Section>
@@ -268,7 +268,7 @@ const Wifi = () => {
                 label={c.name ?? c.mac}
                 description={better ? `${best.accessPoint} hears it better` : on ? `On ${on.accessPoint}` : undefined}
               >
-                <Group gap="md" wrap="nowrap">
+                <Group gap="md" justify="flex-end">
                   {c.heardBy.map((h) => (
                     <Group key={`${h.accessPoint}-${h.band}`} gap={4} wrap="nowrap">
                       <SignalBars dbm={h.signal} />

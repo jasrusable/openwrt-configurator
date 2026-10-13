@@ -5,12 +5,27 @@
 // "(hidden)" for them, and facts and status hold none. Dropped when a router
 // session ends (a 401), so a logged-out browser keeps nothing of the network.
 import { QueryClient } from "@tanstack/react-query";
+import { clearHistory } from "./history";
 
 /** The queries worth keeping: device reads, slow to make again. */
 const kept = ["devices", "network-status", "apply-diff"];
 
-/** Per place the app is served (the Mac's server, or a router's /cgi-bin/onc/). */
-const storageKey = () => `onc-cache:${location.pathname}`;
+/**
+ * The shape of what is kept: raised when a kept read's shape changes, so a
+ * read kept by an older build is dropped rather than shown to code that
+ * expects the new one.
+ */
+const format = 2;
+
+/** Per place the app is served (the Mac's server, or a router's /cgi-bin/onc/), and per format. */
+const storageKey = () => `onc-cache:${format}:${location.pathname}`;
+
+// What older formats kept, gone.
+try {
+  for (let f = 1; f < format; f++) localStorage.removeItem(f === 1 ? `onc-cache:${location.pathname}` : `onc-cache:${f}:${location.pathname}`);
+} catch {
+  // Storage blocked.
+}
 
 /** Older than this is not worth showing, even as a placeholder. */
 const maxAgeMs = 24 * 60 * 60 * 1000;
@@ -36,7 +51,7 @@ const write = (saved: Saved) => {
 /** Put back what was kept, as of when it was read; then keep each new read. */
 export const persistDeviceReads = (queryClient: QueryClient) => {
   const now = Date.now();
-  // Kept by the whole query key ("network-status:clients"), so each Status tab has its own.
+  // Kept by the whole query key ("network-status:clients"), so each Status page has its own.
   Object.entries(read()).forEach(([key, { data, updatedAt }]) => {
     if (kept.includes(key.split(":")[0]) && now - updatedAt < maxAgeMs) {
       queryClient.setQueryData(key.split(":"), data, { updatedAt });
@@ -47,15 +62,17 @@ export const persistDeviceReads = (queryClient: QueryClient) => {
     if (event.type !== "updated" || typeof queryKey[0] !== "string" || !kept.includes(queryKey[0])) return;
     const { data, dataUpdatedAt, status } = event.query.state;
     if (status !== "success" || data === undefined) return;
-    write({ ...read(), [queryKey.join(":")]: { data, updatedAt: dataUpdatedAt } });
+    // Older reads are dropped, not only skipped: nothing of the network lingers past a day.
+    const fresh = Object.fromEntries(Object.entries(read()).filter(([, v]) => Date.now() - v.updatedAt < maxAgeMs));
+    write({ ...fresh, [queryKey.join(":")]: { data, updatedAt: dataUpdatedAt } });
   });
 };
 
 /** Forget everything kept, the Status graphs' history too: a router session ended. */
 export const forgetDeviceReads = () => {
+  clearHistory();
   try {
     localStorage.removeItem(storageKey());
-    localStorage.removeItem(`onc-history:${location.pathname}`);
   } catch {
     // Nothing was kept.
   }

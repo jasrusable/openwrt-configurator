@@ -40,8 +40,33 @@ const parseHeaders = (raw: string) => {
   return headers;
 };
 
+/**
+ * A plain GET with OpenWrt's own client, where curl is not installed (a stock
+ * 25.12 has none): enough for asking openwrt.org a question. It gives no
+ * status or headers: a failure, an HTTP error included, is its exit code.
+ */
+const fetchWithUclient = async (url: string) => {
+  const bodyPath = tmpPath("body");
+  try {
+    const result = await spawn(["uclient-fetch", "-q", "-T", "15", "-O", bodyPath, url]);
+    if (result.code !== 0) {
+      const error: NetworkError = Object.assign(
+        new Error(`${url}: ${result.stderr.trim() || `uclient-fetch exited ${result.code}`}`),
+        { transient: true }
+      );
+      throw error;
+    }
+    return { status: 200, headers: {}, body: fileExists(bodyPath) ? readTextFile(bodyPath) : "" };
+  } finally {
+    removeFile(bodyPath);
+  }
+};
+
 export const http: Platform["http"] = {
   request: async ({ method, url, json }) => {
+    if (!which("curl") && method === "GET" && json === undefined && which("uclient-fetch")) {
+      return fetchWithUclient(url);
+    }
     const headersPath = tmpPath("headers");
     const bodyPath = tmpPath("body");
     try {

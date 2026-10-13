@@ -287,7 +287,15 @@ const Warmup = () => {
 export const App = () => {
   const queryClient = useQueryClient();
   const [loggedOut, setLoggedOut] = useState(false);
-  useEffect(() => onLoginNeeded(() => setLoggedOut(true)), []);
+  useEffect(
+    () =>
+      onLoginNeeded(() => {
+        // Logged out: nothing of the network stays, in memory either.
+        queryClient.clear();
+        setLoggedOut(true);
+      }),
+    [queryClient]
+  );
   const intent = useIntent();
   if (loggedOut) {
     return (

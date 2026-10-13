@@ -3,10 +3,22 @@
 // come from Mantine's palette variables, so dark mode holds.
 import { Box, Group, RingProgress, Stack, Text, Tooltip } from "@mantine/core";
 import { ReactNode, useId } from "react";
+import { linkWords } from "./format";
 
 type Point = [number, number];
 
-/** One or two series over time, filled below; the newest at the right. */
+/** Readings further apart than this were not taken in between (no page was reading): the line breaks there. */
+const gapMs = 3 * 60_000;
+
+/** A series as its unbroken runs. */
+const runs = (points: Point[]) =>
+  points.reduce<Point[][]>((out, p, i) => {
+    if (i > 0 && p[0] - points[i - 1][0] > gapMs) out.push([]);
+    out[out.length - 1].push(p);
+    return out;
+  }, [[]]);
+
+/** One or two series over time, filled below; the newest at the right; broken where no readings were taken. */
 export const AreaChart = ({
   series,
   colors = ["blue", "teal"],
@@ -23,7 +35,7 @@ export const AreaChart = ({
 }) => {
   const id = useId();
   const all = series.flat();
-  if (series.every((points) => points.length < 2)) {
+  if (series.every((points) => runs(points).every((run) => run.length < 2))) {
     // A small chart in a tile just waits; a full one says why it is empty.
     return height < 60 ? (
       <Box h={height} />
@@ -42,9 +54,7 @@ export const AreaChart = ({
   return (
     <svg width="100%" height={height} viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden>
       {series.map((points, i) => {
-        if (points.length < 2) return null;
         const color = `var(--mantine-color-${colors[i % colors.length]}-5)`;
-        const line = points.map(([t, v]) => `${x(t)},${y(v)}`).join(" ");
         return (
           <g key={i}>
             <defs>
@@ -53,8 +63,17 @@ export const AreaChart = ({
                 <stop offset="100%" stopColor={color} stopOpacity={0} />
               </linearGradient>
             </defs>
-            <polygon points={`${x(points[0][0])},40 ${line} ${x(points[points.length - 1][0])},40`} fill={`url(#${id}-${i})`} />
-            <polyline points={line} fill="none" stroke={color} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />
+            {runs(points)
+              .filter((run) => run.length >= 2)
+              .map((run, j) => {
+                const line = run.map(([t, v]) => `${x(t)},${y(v)}`).join(" ");
+                return (
+                  <g key={j}>
+                    <polygon points={`${x(run[0][0])},40 ${line} ${x(run[run.length - 1][0])},40`} fill={`url(#${id}-${i})`} />
+                    <polyline points={line} fill="none" stroke={color} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />
+                  </g>
+                );
+              })}
           </g>
         );
       })}
@@ -101,7 +120,7 @@ export const ChartCard = ({
 }) => (
   <Box className="onc-card" p="md">
     <Group justify="space-between" mb={8} wrap="nowrap">
-      <Text size="sm" fw={600}>
+      <Text component="div" size="sm" fw={600} style={{ minWidth: 0 }}>
         {title}
       </Text>
       <Group gap="md" wrap="nowrap">
@@ -146,7 +165,7 @@ export const Tile = ({
       <Text size="xs" c="dimmed" fw={500}>
         {label}
       </Text>
-      <Text fz={26} fw={600} lh={1.15} c={color ? `${color}.6` : undefined}>
+      <Text component="div" fz={26} fw={600} lh={1.15} c={color ? `${color}.6` : undefined}>
         {value}
       </Text>
       {sub && (
@@ -187,7 +206,7 @@ export const PortFace = ({ ports }: { ports: { name: string; up: boolean; speed?
   <Group gap={8}>
     {ports.map((p) => (
       <Stack key={p.name} gap={3} align="center">
-        <Tooltip label={p.up ? `${p.name}: connected${p.speed ? ` at ${speedWords(p.speed)}` : ""}` : `${p.name}: nothing connected`} withArrow>
+        <Tooltip label={p.up ? `${p.name}: connected${p.speed ? ` at ${linkWords(p.speed)}` : ""}` : `${p.name}: nothing connected`} withArrow>
           <Box
             w={34}
             h={26}
@@ -195,7 +214,7 @@ export const PortFace = ({ ports }: { ports: { name: string; up: boolean; speed?
               borderRadius: 5,
               border: "1.5px solid var(--onc-separator)",
               background: p.up ? `var(--mantine-color-${p.speed && p.speed >= 2500 ? "teal" : p.speed && p.speed >= 1000 ? "green" : "yellow"}-6)` : "var(--onc-page)",
-              boxShadow: "inset 0 -5px 0 rgba(0,0,0,0.12)",
+              boxShadow: "inset 0 -5px 0 var(--onc-separator)",
             }}
           />
         </Tooltip>
@@ -203,11 +222,10 @@ export const PortFace = ({ ports }: { ports: { name: string; up: boolean; speed?
           {p.name}
         </Text>
         <Text size="10px" c={p.up ? undefined : "dimmed"} fw={500}>
-          {p.up ? (p.speed ? speedWords(p.speed) : "up") : "—"}
+          {p.up ? (p.speed ? linkWords(p.speed) : "up") : "—"}
         </Text>
       </Stack>
     ))}
   </Group>
 );
 
-export const speedWords = (mbps: number) => (mbps >= 1000 ? `${mbps / 1000} G` : `${mbps} M`);

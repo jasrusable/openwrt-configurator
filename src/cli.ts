@@ -43,6 +43,9 @@ import {
   verifyImageFile,
 } from "./buildImage";
 
+/** The largest request body the CGI program reads. */
+const maxCgiBody = 2 * 1024 * 1024;
+
 export const main = async ({
   argv,
   platform,
@@ -237,6 +240,15 @@ export const main = async ({
     options: uiOptions,
     action: async ([intentPath], options) => {
       const length = Number(platform.env("CONTENT_LENGTH") || 0);
+      // Read before any login is checked, so bounded: an intent, VPN files
+      // and all, is far smaller; more is refused unread.
+      if (length > maxCgiBody) {
+        console.log(
+          cgiResponse({ status: 413, headers: { "content-type": "application/json; charset=utf-8" }, body: JSON.stringify({ error: "Too large." }) })
+        );
+        platform.exit(0);
+        return;
+      }
       const response = await uiHandler({
         intentPath,
         uiRoot: options.uiDir,

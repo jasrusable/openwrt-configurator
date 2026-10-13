@@ -44,7 +44,7 @@ const DeviceCard = ({ device: d, latest }: { device: DeviceView; latest?: string
             )}
             <StatusDot color={d.reachable ? "green" : "red"} />
             <Text size="sm" c="dimmed" style={{ whiteSpace: "nowrap" }}>
-              {d.reachable ? `Up ${duration(d.uptime ?? 0)}` : "Not reached"}
+              {d.reachable ? (d.uptime ? `Up ${duration(d.uptime)}` : "Up") : "Not reached"}
             </Text>
           </Group>
         </Group>
@@ -53,7 +53,7 @@ const DeviceCard = ({ device: d, latest }: { device: DeviceView; latest?: string
             <Group justify="space-around" wrap="wrap" gap="md">
               {cpu !== undefined && <Ring share={Math.min(cpu, 1)} label={`Processor${d.cores ? ` · ${d.cores} cores` : ""}`} />}
               {d.memoryUsed !== undefined && <Ring share={d.memoryUsed} label="Memory" />}
-              {d.storage && <Ring share={1 - d.storage.availableKb / d.storage.totalKb} label={`Storage · ${Math.round(d.storage.availableKb / 1024)} MiB free`} />}
+              {d.storage && d.storage.totalKb > 0 && <Ring share={1 - d.storage.availableKb / d.storage.totalKb} label={`Storage · ${Math.round(d.storage.availableKb / 1024)} MiB free`} />}
               {d.temperature !== undefined && (
                 <Stack gap={2} align="center" justify="center" h={100}>
                   <Text fz={28} fw={600} c={`${heat(d.temperature)}.6`} lh={1}>

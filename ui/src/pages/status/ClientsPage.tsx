@@ -28,7 +28,8 @@ import { duration } from "../../facts";
 import { useDraft, useDraftValue } from "../../form/draft";
 import { AreaChart, SignalBars, Tile } from "../../kit/charts";
 import { EmptyState, ItemIcon, Section, SettingRow, SettingsPage } from "../../kit/layout";
-import { bytes, liveLine } from "./shared";
+import { bytes } from "../../kit/format";
+import { BandBadge, liveLine } from "./shared";
 
 /** What a device probably is, from the name it gives: only for its icon. */
 const kinds: [RegExp, typeof IconDevices, string][] = [
@@ -40,12 +41,13 @@ const kinds: [RegExp, typeof IconDevices, string][] = [
   [/\btv\b|-tv|appletv|apple-tv|chromecast|roku|firetv|fire-tv|shield|bravia|webos|tizen/i, IconDeviceTv, "violet"],
   [/sonos|echo|homepod|speaker|beoplay|bose|marshall|nest-?(audio|mini)|google-?home/i, IconDeviceSpeaker, "violet"],
   // Brother printers name themselves BRW/BRN and their MAC.
-  [/printer|epson|^br[wn][0-9a-f]{6}|canon|hp[a-f0-9]{6}|laserjet|officejet/i, IconPrinter, "gray"],
+  [/printer|epson|^br[wn][0-9a-f]{6}|canon|hp[a-f0-9]{6}|laserjet|officejet/i, IconPrinter, "teal"],
   [/cam|ring|doorbell|arlo|wyze/i, IconCamera, "orange"],
   [/playstation|ps[45]|xbox|switch|steam/i, IconDeviceGamepad2, "pink"],
   [/esp|tasmota|shelly|tuya|hue|wiz_|bulb|plug|light|lifx|tado|sensor|thermostat|roborock|vacuum|purifier|levoit|litter|robot|dyson/i, IconBulb, "yellow"],
 ];
-const kindOf = (c: ClientView) => kinds.find(([re]) => re.test(c.name ?? "")) ?? ([undefined, IconDevices, "gray"] as const);
+// Unknown: a colour of its own, as grey is how a client that is not online is drawn.
+const kindOf = (c: ClientView) => kinds.find(([re]) => re.test(c.name ?? "")) ?? ([undefined, IconDevices, "cyan"] as const);
 
 const how = (c: ClientView) =>
   c.connection.kind === "wifi"
@@ -59,8 +61,6 @@ const how = (c: ClientView) =>
     : c.connection.kind === "wired"
       ? "Cable"
       : "Not seen lately";
-
-const bandColor = (band?: string) => (band === "6 GHz" ? "grape" : band === "5 GHz" ? "blue" : "teal");
 
 const Chip = ({ color, children }: { color: string; children: React.ReactNode }) => (
   <Badge variant="light" color={color} radius="sm" size="sm" style={{ textTransform: "none" }}>
@@ -98,13 +98,13 @@ const ClientRow = ({ client }: { client: ClientView }) => {
         </Group>
       }
     >
-      <Group gap="sm" wrap="nowrap">
+      <Group gap="sm" justify="flex-end">
         {client.traffic && (
           <Text size="xs" c="dimmed" ta="right" style={{ whiteSpace: "nowrap" }}>
             ↓ {bytes(client.traffic.down)} · ↑ {bytes(client.traffic.up)}
           </Text>
         )}
-        {wifi?.band && <Chip color={bandColor(wifi.band)}>{wifi.band}</Chip>}
+        <BandBadge band={wifi?.band} />
         {wifi && <SignalBars dbm={wifi.signal} />}
         {client.connection.kind === "wired" && <Chip color="gray">Cable</Chip>}
         {client.reserved ? (
@@ -124,7 +124,7 @@ const ClientRow = ({ client }: { client: ClientView }) => {
 };
 
 const sorts: Record<string, (a: ClientView, b: ClientView) => number> = {
-  name: () => 0,
+  name: (a, b) => (a.name ?? a.mac).localeCompare(b.name ?? b.mac),
   traffic: (a, b) => (b.traffic ? b.traffic.down + b.traffic.up : -1) - (a.traffic ? a.traffic.down + a.traffic.up : -1),
   signal: (a, b) =>
     (b.connection.kind === "wifi" ? (b.connection.signal ?? -200) : -300) - (a.connection.kind === "wifi" ? (a.connection.signal ?? -200) : -300),
@@ -144,7 +144,10 @@ export const ClientsPage = () => {
   const bands = ["2.4 GHz", "5 GHz", "6 GHz"]
     .map((b) => [b, wifi.filter((c) => c.connection.kind === "wifi" && c.connection.band === b).length] as const)
     .filter(([, n]) => n);
-  const top = [...all].sort(sorts.traffic)[0];
+  // Like with like: the router's monthly counts where it keeps them, else the access points'.
+  const counted = online.filter((c) => c.traffic);
+  const pool = counted.some((c) => c.traffic?.over === "month") ? counted.filter((c) => c.traffic?.over === "month") : counted;
+  const top = [...pool].sort(sorts.traffic)[0];
   const term = search.trim().toLowerCase();
   const shown = all
     .filter(
@@ -164,8 +167,14 @@ export const ClientsPage = () => {
         <Tile label="By cable" value={status.data ? online.filter((c) => c.connection.kind === "wired").length : "—"} sub={status.data ? "Or not on Wi-Fi" : undefined} />
         <Tile
           label="Most traffic"
-          value={<Text fz={18} fw={600} truncate>{top?.traffic ? (top.name ?? top.mac) : "—"}</Text>}
-          sub={top?.traffic ? `↓ ${bytes(top.traffic.down)} · ↑ ${bytes(top.traffic.up)}` : "Counted by the router"}
+          value={<Text component="span" fz={18} fw={600} truncate display="block">{top?.traffic ? (top.name ?? top.mac) : "—"}</Text>}
+          sub={
+            top?.traffic
+              ? `↓ ${bytes(top.traffic.down)} · ↑ ${bytes(top.traffic.up)} ${top.traffic.over === "month" ? "this month" : "since it joined"}`
+              : status.data
+                ? "Not counted yet"
+                : undefined
+          }
         />
       </SimpleGrid>
       <Group gap="sm">

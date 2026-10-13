@@ -1,11 +1,11 @@
-// What the Status tabs show, worked out from what the devices said
+// What the Status pages show, worked out from what the devices said
 // (device.ts) and the saved settings: what needs attention, who is on the
 // network, each device's health and ports, each access point's radios, the
 // internet line as the router sees it, and what happened lately in words.
 // Pure, like networkStatus: tested against recorded output.
 import type { DeviceFacts } from "../deviceFacts";
-import { primaryConnection } from "../intent/connections";
-import type { Intent } from "../intent/schema";
+import { networkHasIpv6 } from "../intent/connections";
+import { bands, type Intent } from "../intent/schema";
 import type { DeviceStatus, InternetCheck, PortLink } from "./device";
 
 type Reached = DeviceStatus;
@@ -39,8 +39,11 @@ export type ClientView = {
   state: "online" | "recent" | "away";
   /** A fixed address in your settings. */
   reserved: boolean;
-  /** Bytes it downloaded and uploaded: the router's count (nlbwmon), else its access point's. */
-  traffic?: { down: number; up: number };
+  /**
+   * Bytes it downloaded and uploaded, and over what: the router's count
+   * (nlbwmon, this month so far), else its access point's (since it joined).
+   */
+  traffic?: { down: number; up: number; over: "month" | "connection" };
   /** Every access point that hears it, how well, and which it is on (usteer): for roaming. */
   heardBy: { accessPoint: string; band?: string; signal?: number; connected: boolean }[];
 };
@@ -77,6 +80,14 @@ export type RadioView = {
 /** What kind of event: for its icon and the page's filter. Absent on events kept before kinds were. */
 export type ActivityKind = "up" | "down" | "start" | "apply" | "problem" | "note";
 export type ActivityView = { at: number; device: string; text: string; kind?: ActivityKind };
+
+/**
+ * A service Status may offer to restart: one the settings need running, and
+ * not one the link to the device depends on (restarting those has no
+ * rollback behind it: applying is the way).
+ */
+export const restartable = (s: { name: string; running?: boolean; enabled?: boolean }) =>
+  !!s.running && s.enabled !== false && !["network", "firewall", "dropbear"].includes(s.name);
 
 /** The band a frequency is in. */
 export const bandOf = (freq?: number) =>
@@ -163,9 +174,9 @@ export const clientsOf = (
         state: air || active ? ("online" as const) : seen.length ? ("recent" as const) : ("away" as const),
         reserved: !!reservation,
         ...(counted
-          ? { traffic: { down: counted.rx, up: counted.tx } }
+          ? { traffic: { down: counted.rx, up: counted.tx, over: "month" as const } }
           : air?.rxBytes !== undefined && air.txBytes !== undefined
-            ? { traffic: { down: air.txBytes, up: air.rxBytes } }
+            ? { traffic: { down: air.txBytes, up: air.rxBytes, over: "connection" as const } }
             : {}),
         heardBy,
       };
@@ -234,9 +245,13 @@ export const activityOf = (intent: Intent, devices: Reachability[]): ActivityVie
     if ((m = /netifd: Network device '([^']+)' link is (up|down)/.exec(text))) return upDown(m[2] === "up", `Port ${m[1]} ${m[2] === "up" ? "connected" : "disconnected"}`);
     if (/procd: - init complete -/.test(text)) return { text: "Started up", kind: "start" };
     if ((m = /hostapd: (\S+): AP-(ENABLED|DISABLED)/.exec(text))) return upDown(m[2] === "ENABLED", `Wi-Fi ${m[1]} ${m[2] === "ENABLED" ? "on" : "off"}`);
-    if ((m = /mwan3\S*: .*interface (\S+) is (online|offline)/i.exec(text))) return upDown(m[2].toLowerCase() === "online", `${nameOf(m[1])} is ${m[2]}`);
+    // mwan3track: "Interface wan (eth1) is offline".
+    if ((m = /mwan3\S*: .*interface (\S+)(?: \([^)]*\))? is (online|offline)/i.exec(text)))
+      return upDown(m[2].toLowerCase() === "online", `${nameOf(m[1])} is ${m[2].toLowerCase()}`);
     if (/odhcpd.*Failed to send/.test(text)) return { text: "IPv6 announcements are failing", kind: "problem" };
-    if ((m = /onc[\w-]*(?:\[\d+\])?: (.*)/.exec(text))) return { text: m[1].charAt(0).toUpperCase() + m[1].slice(1), kind: "note" };
+    // This app's own marks, by their syslog tag only (parseLog leaves the
+    // tag first): other lines may carry any text, a client's name included.
+    if ((m = /^onc(?:-[\w-]+)?(?:\[\d+\])?: (.*)/.exec(text))) return { text: m[1].charAt(0).toUpperCase() + m[1].slice(1), kind: "note" };
     return undefined;
   };
   return devices
@@ -286,7 +301,17 @@ export const attentionOf = ({
         severity: "warning",
         title: `${s.name} is ${s.missing ? "not installed" : "not running"} on ${d.name}`,
         detail: s.missing ? "Your settings need it there: applying installs it." : "Your settings need it running.",
-        ...(s.missing ? { link: "?apply" } : { fix: { device: d.name, service: s.name, label: `Restart ${s.name}` } }),
+        ...(s.missing
+          ? { link: "?apply" }
+          : restartable({ name: s.name, running: true }) ? { fix: { device: d.name, service: s.name, label: `Restart ${s.name}` } } : {}),
+      });
+    }
+    if (status.unread.length) {
+      out.push({
+        id: `unread:${d.name}`,
+        severity: "info",
+        title: `Part of ${d.name}'s status could not be read`,
+        detail: `${status.unread.join(", ")}: shown as empty meanwhile.`,
       });
     }
     if (status.storage && (status.storage.availableKb < 2048 || status.storage.availableKb / status.storage.totalKb < 0.1)) {
@@ -303,10 +328,14 @@ export const attentionOf = ({
     if (status.memory.total && status.memory.available / status.memory.total < 0.1) {
       out.push({ id: `memory:${d.name}`, severity: "warning", title: `${d.name} is nearly out of memory`, detail: "Under 10% free." });
     }
-    // An SSID of yours that this access point does not broadcast.
+    // An SSID of yours that this access point does not broadcast: only where
+    // it has a radio in one of the SSID's bands (when its radios are known).
     if (d.role === "access-point") {
       const here = new Set(status.wifi.map((w) => w.ssid));
-      for (const w of intent.wifi.filter((w) => w.enabled !== false && !here.has(w.ssid))) {
+      const radios = facts[d.name]?.schema.radios;
+      const canCarry = (w: Intent["wifi"][number]) =>
+        !radios || (w.bands ?? bands.filter((b) => intent.radios[b].enabled)).some((b) => radios.some((r) => r.band === b));
+      for (const w of intent.wifi.filter((w) => w.enabled !== false && !here.has(w.ssid) && canCarry(w))) {
         out.push({
           id: `ssid:${d.name}:${w.ssid}`,
           severity: "warning",
@@ -336,14 +365,21 @@ export const attentionOf = ({
         });
       }
     }
-    // The router stopped announcing IPv6 on a network: clients ask (solicits
-    // climb) and get no answer (adverts flat). Seen twice on the user's router.
-    const main = primaryConnection(intent);
-    if (main?.ipv6) {
+    // The router stopped announcing IPv6 on a network: clients ask and get
+    // no answer. Seen twice on the user's router. Judged over the last few
+    // minutes where an earlier count is kept (asked 3 times, nothing sent),
+    // else since the interface came up (asked, never once answered), so it
+    // clears once fixed. Only networks the compiler gives IPv6.
+    {
       const silent = intent.networks.flatMap((n) => {
+        if (!networkHasIpv6(intent, n)) return [];
         const device = router.interfaces.find((i) => i.id === n.id)?.device;
         const a = router.adverts.find((x) => x.device === device);
-        return a && n.ipv6 !== false && a.solicits >= 5 && a.sent * 2 < a.solicits ? [n.name] : [];
+        if (!a) return [];
+        const quiet = a.before
+          ? a.solicits - a.before.solicits >= 3 && a.sent === a.before.sent
+          : a.solicits >= 5 && a.sent === 0;
+        return quiet ? [n.name] : [];
       });
       if (silent.length) {
         out.push({
@@ -363,18 +399,18 @@ export const attentionOf = ({
   return out.sort((a, b) => order[a.severity] - order[b.severity]);
 };
 
-/** The internet lines' byte counters now, on the router: throughput comes from two reads. */
+/** Each internet line's byte counters now, on the router, and when (the server's clock): throughput comes from two reads. */
 export const internetCountersOf = (intent: Intent, devices: Reachability[]) => {
   const routerName = intent.hardware.find((d) => d.role === "router")?.name;
   const router = devices.find((d) => d.hostname === routerName);
   if (!reached(router)) return undefined;
-  const lines = intent.internet.connections.flatMap((c) => {
-    const device = router.interfaces.find((i) => i.id === c.id)?.device;
-    return device && router.counters[device] ? [router.counters[device]] : [];
-  });
-  return lines.length
-    ? { rx: lines.reduce((n, l) => n + l.rx, 0), tx: lines.reduce((n, l) => n + l.tx, 0), at: router.readAt }
-    : undefined;
+  const lines = Object.fromEntries(
+    intent.internet.connections.flatMap((c) => {
+      const device = router.interfaces.find((i) => i.id === c.id)?.device;
+      return device && router.counters[device] ? [[c.id, router.counters[device]] as const] : [];
+    })
+  );
+  return Object.keys(lines).length ? { lines, at: router.readAt } : undefined;
 };
 
 /** What was kept from earlier reads, newer first; the same event twice kept once. Logs roll over: this does not. */
