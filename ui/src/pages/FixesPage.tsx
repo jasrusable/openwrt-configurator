@@ -96,8 +96,8 @@ export const FixesPage = () => {
   const fixes = useFixes();
   return (
     <SettingsPage
-      title={placeName("fixes")}
-      description="What this app layers over OpenWrt for known problems, with the reason and sources for each. Fixes never change your settings: one a fix overrides keeps your value, which applies again once the fix goes."
+      title={placeName("patches")}
+      description="What this app layers over OpenWrt for known problems, with the reason and sources for each. A patch never changes your settings: one it overrides keeps your value, which applies again once the patch goes."
     >
       {fixes.map((fix) => (
         <Fix key={fix.id} fix={fix} />

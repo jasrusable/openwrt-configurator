@@ -6,6 +6,7 @@ import { describeKey, keyIdentity } from "../../../src/sshKeys";
 import { useOwnKey } from "../data/admin";
 import { useDraftList, useFieldError } from "../form/draft";
 import { PasswordField, SelectField, SwitchField, TextField } from "../form/fields";
+import { placeName } from "../../../src/intent/places";
 import { Section, SettingRow, SettingsPage } from "../kit/layout";
 
 const timezoneOptions = Object.keys(timezones).map((zone) => ({
@@ -86,7 +87,7 @@ const KeyRow = ({ index, line, onRemove }: { index: number; line: string; onRemo
 
 export const SystemPage = () => (
   <SettingsPage
-    title="System"
+    title={placeName("general")}
     description="Name, time and administration."
   >
     <Section>

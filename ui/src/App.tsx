@@ -202,6 +202,9 @@ const router = createHashRouter([
           // Apply was a page: it is the sheet over the Overview now.
           { path: "apply", element: <Navigate to="/overview?apply" replace /> },
           { path: "general/*", element: <MovedTo base="/system" /> },
+          // The catalog was its own page, named Fixes.
+          { path: "fixes", element: <Navigate to="/system/patches" replace /> },
+          { path: "fixes/*", element: <Navigate to="/system/patches" replace /> },
           // Old addresses: General is System, SSIDs and Radios are Wi-Fi's tabs.
           { path: "ssids/*", element: <MovedTo base="/wifi" /> },
           { path: "radios/*", element: <MovedTo base="/wifi/radios" /> },

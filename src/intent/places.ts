@@ -9,6 +9,8 @@ export const places = {
   performance: ["Performance"],
   activity: ["Activity"],
   system: ["System"],
+  general: ["System", "General"],
+  patches: ["System", "Patches"],
   internet: ["Internet"],
   networks: ["Networks"],
   wifi: ["Wi-Fi"],
@@ -25,7 +27,6 @@ export const places = {
   rules: ["Firewall", "Rules"],
   dns: ["DNS & DHCP"],
   hardware: ["Hardware"],
-  fixes: ["Fixes"],
 } as const;
 
 export type Place = keyof typeof places;

@@ -4,8 +4,9 @@
  * Which page shows each setting, by the start of its path; for a list, the
  * URL of one item's page. The problems list and the sidebar's marks use it.
  */
-export const settingPages: { path: string; page: string; item?: (index: string) => string }[] = [
-  { path: "system.patches", page: "fixes" },
+export const settingPages: { path: string; page: string; url?: string; item?: (index: string) => string }[] = [
+  // The catalog is a tab of System, for the list and for one entry in it.
+  { path: "system.patches", page: "system", url: "/system/patches" },
   { path: "system", page: "system" },
   { path: "internet.lines", page: "internet", item: (i) => `/internet/${i}` },
   { path: "internet", page: "internet" },
@@ -36,7 +37,7 @@ export const whereIs = (path: string) => {
   const index = path.slice(home.path.length + 1).split(".")[0];
   return {
     page: home.page,
-    // A list item by its index; a radio by its band.
-    url: home.item && index ? home.item(index) : `/${home.page}`,
+    // A fixed address (a tab), else a list item by its index, else the page.
+    url: home.url ?? (home.item && index ? home.item(index) : `/${home.page}`),
   };
 };

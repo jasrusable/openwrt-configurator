@@ -361,8 +361,8 @@ than wait. A stalled dbclient once held a rig run forever
     control is greyed out only when the override holds on every device the
     setting reaches, per facts (`overridesAt`). The stored value is never
     touched, so it applies again once the patch drops.
-  - **Turned off** by the user in System › Fixes (`system.patches.off`;
-    unknown and required ids refused): compile skips them. The Fixes page
+  - **Turned off** by the user in System › Patches (`system.patches.off`;
+    unknown and required ids refused): compile skips them. System › Patches
     shows each patch with its state per device from stored facts
     (`patchStatus`, `GET /api/patches`: active, off, not needed, not for this
     device and why, fixed in its release, not read); Hardware lists a

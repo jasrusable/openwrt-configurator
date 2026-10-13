@@ -1,6 +1,6 @@
 import { Anchor, Group, Text } from "@mantine/core";
 import { Link } from "react-router";
-import { placeName } from "../../../src/intent/places";
+import { where } from "../../../src/intent/places";
 import { FixStateBadge, useFixes } from "../fixes";
 import {
   SegmentedField,
@@ -106,7 +106,7 @@ const ModelCell = ({ index }: { index: number }) => {
 /**
  * The fixes on this device (src/intent/patches): those on, turned off, or
  * not known until its facts are read; the rest (not for it, not needed) are
- * on the Fixes page.
+ * under System › Patches.
  */
 const DeviceFixes = ({ index }: { index: number }) => {
   const name = useDraftValue(`hardware.${index}.name`);
@@ -115,9 +115,9 @@ const DeviceFixes = ({ index }: { index: number }) => {
     .filter(({ on }) => on && ["active", "off", "unknown", "fixed"].includes(on.state));
   if (!fixes.length) return null;
   return (
-    <Section title="Fixes on this device" description={`What this app layers over OpenWrt here; every fix is under ${placeName("fixes")}.`}>
+    <Section title="Patches on this device" description={`What this app layers over OpenWrt here; every patch is under ${where("patches")}.`}>
       {fixes.map(({ fix, on }) => (
-        <SettingRow key={fix.id} label={<Anchor component={Link} to="/fixes" size="sm">{fix.title}</Anchor>} description={on!.why}>
+        <SettingRow key={fix.id} label={<Anchor component={Link} to="/system/patches" size="sm">{fix.title}</Anchor>} description={on!.why}>
           <FixStateBadge state={on!.state} why={on!.why} />
         </SettingRow>
       ))}

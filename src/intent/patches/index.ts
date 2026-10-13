@@ -42,12 +42,12 @@ export const patchesFeature: FeatureModule = {
   compile: [{ order: 1000, compile: applyPatches(patches) }],
   check: checkOff,
   fields: [
-    { path: "system.patches", label: "Fixes" },
+    { path: "system.patches", label: "Patches" },
     {
       path: "system.patches.off",
-      label: "Fixes turned off",
+      label: "Patches turned off",
       explain:
-        "Fixes this app layers over OpenWrt for known problems, each with its reason and where it was reported; one turned off is left as OpenWrt ships it. Fixes whose absence breaks something silently cannot be turned off.",
+        "Patches this app layers over OpenWrt for known problems, each with its reason and where it was reported; one turned off is left as OpenWrt ships it. A patch whose absence breaks something silently cannot be turned off.",
     },
   ],
 };

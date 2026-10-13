@@ -1,6 +1,6 @@
 // Where each fix applies, device by device: the intent decides its role and
 // whether the settings need it at all; each device's facts (model, target,
-// release, radios) decide the rest. Pure, so the Fixes page (with the draft),
+// release, radios) decide the rest. Pure, so System › Patches (with the draft),
 // the API and Status say the same.
 import type { DeviceSchema } from "../../deviceSchema";
 import { deviceLookup } from "../../plan/device";

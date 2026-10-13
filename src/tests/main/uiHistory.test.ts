@@ -60,6 +60,8 @@ test("a list item's setting leads to that item's page", (t) => {
   t.deepEqual(whereIs("wifi.radios.5g.width"), { page: "wifi", url: "/wifi/radios/5g" });
   t.deepEqual(whereIs("vpn.remote_access.clients.0.name"), { page: "vpn", url: "/vpn/0" });
   t.deepEqual(whereIs("dns.upstream"), { page: "dns", url: "/dns" });
+  t.deepEqual(whereIs("system.patches"), { page: "system", url: "/system/patches" });
+  t.deepEqual(whereIs("system.patches.off.0"), { page: "system", url: "/system/patches" });
   t.is(whereIs("nowhere.at.all"), undefined);
 });
 

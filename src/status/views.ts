@@ -459,7 +459,7 @@ export const attentionOf = ({
         severity: "info",
         title: `“${fix.title}” is no longer needed`,
         detail: `Every device it applies to runs a release with the fix (${fix.devices.find((d) => d.state === "fixed")?.why}). It does nothing now; the app can drop it (${fix.dropWhen}).`,
-        link: "/fixes",
+        link: "/system/patches",
       })
     )
   );
