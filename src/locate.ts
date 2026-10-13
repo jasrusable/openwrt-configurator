@@ -15,6 +15,7 @@
 // other machine there is refused before credentials are sent (dbclient,
 // on a router, from a home of its own holding only that key). Once in, the
 // board must be the one recorded.
+import { messageOf } from "./result";
 import { leasesCommand } from "./status/device";
 import type { DeviceFacts } from "./deviceFacts";
 import { Probe, runProbes } from "./deviceProbes";
@@ -22,9 +23,9 @@ import { DeviceSchema } from "./deviceSchema";
 import { deviceSchemaOf, deviceSchemaProbes } from "./getDeviceSchema";
 import { where } from "./intent/places";
 import { parseKnownHosts } from "./knownHosts";
-import { ONCDeviceConfig } from "./oncConfigSchema";
+import { PlanDevice } from "./plan/types";
 import { Platform, Session } from "./platform";
-import { ProvisionableDevice, sshConnectOptions } from "./provisionConfig";
+import { ProvisionableDevice, sshConnectOptions } from "./apply/provisionConfig";
 import { Lease, parseLeases } from "./status/device";
 
 export type Neighbour = { address: string; mac: string };
@@ -175,7 +176,7 @@ const tryAddress = async (
   platform: Platform,
   withTables: boolean
 ): Promise<Located> => {
-  const at = { ...deviceConfig, ipaddr: address } as ONCDeviceConfig;
+  const at = { ...deviceConfig, ipaddr: address } as PlanDevice;
   const file = sshConnectOptions({ deviceConfig: at, platform }).knownHostsFile!;
   // A shorter handshake than an apply's: a wrong guess should give way quickly.
   // A known device is held to its recorded key, by the SSH client itself:
@@ -235,7 +236,7 @@ const locate = async (
     const pin =
       facts?.hostKey ??
       (configured && !isAddress(address)
-        ? knownKey(platform, sshConnectOptions({ deviceConfig: deviceConfig as ONCDeviceConfig, platform }).knownHostsFile!, address)
+        ? knownKey(platform, sshConnectOptions({ deviceConfig: deviceConfig as PlanDevice, platform }).knownHostsFile!, address)
         : undefined);
     if (!pin && !(configured && isAddress(address))) {
       failures.push(
@@ -246,7 +247,7 @@ const locate = async (
     try {
       return await tryAddress(deviceConfig, address, facts, pin, platform, withTables);
     } catch (e) {
-      failures.push(`${address} (${why}): ${(e as Error).message}`);
+      failures.push(`${address} (${why}): ${messageOf(e)}`);
     }
   }
   return { hostname: deviceConfig.hostname, error: failures.join("; ") || "nowhere to look" };

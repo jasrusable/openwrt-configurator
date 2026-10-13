@@ -166,5 +166,5 @@ qjsTest("session layer over the local transport", (t) => {
     lines.filter((line) => !line.startsWith("PASS")),
     []
   );
-  t.is(lines.length, 8);
+  t.is(lines.length, 14);
 });

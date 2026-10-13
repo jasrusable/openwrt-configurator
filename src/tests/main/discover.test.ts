@@ -99,7 +99,9 @@ test("a stock device is read with OpenWrt's default, never the admin password, a
   const intent = sample();
   intent.system = { ...intent.system, app_login: { key: "/tmp/id_test", password: "the-admin-secret" } };
   const { platform, targets } = stock({ key: false });
-  const read = await inspect({ address: "10.0.0.143", intent, platform });
+  const inspected = await inspect({ address: "10.0.0.143", intent, platform });
+  t.true(inspected.ok);
+  const read = inspected.ok ? inspected.value : undefined!;
   t.like(read, {
     address: "10.0.0.143",
     hostname: "OpenWrt",
@@ -117,5 +119,5 @@ test("a device that takes this app's key is not open", async (t) => {
   const intent = sample();
   intent.system = { ...intent.system, app_login: { key: "/tmp/id_test" } };
   const read = await inspect({ address: "10.0.0.143", intent, platform: stock({ key: true }).platform });
-  t.false(read.openLogin);
+  t.like(read, { ok: true, value: { openLogin: false } });
 });

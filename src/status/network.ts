@@ -3,16 +3,19 @@
 // never assumes it does: what lines up is matched (interface lan is network
 // lan, an SSID with your SSID's name is that SSID), and what does not is
 // listed as unexpected, never hidden. Pure: tested against recorded output.
-import { meshMtu } from "../intent/features/mesh";
+import { meshMtu } from "../intent/mesh";
 import { failoverOrder, ipv6Interface } from "../intent/connections";
 import type { Intent } from "../intent/schema";
+import type { DeviceFailure } from "../readEach";
+import type { Result } from "../result";
 import { DeviceStatus, InternetCheck } from "./device";
 import type { ActivityView, Attention, ClientView, DeviceView, RadioView } from "./views";
 
 
 /** A mesh link slower than this (BATMAN_V's estimate) shows as weak: below it, a cable or a nearer node would help. */
 export const weakMeshLinkMbps = 20;
-export type Reachability = DeviceStatus | { hostname: string; error: string };
+/** A device's read: what it said, or why it could not be read. */
+export type Reachability = Result<DeviceStatus, DeviceFailure>;
 
 export type NetworkStatus = {
   /** Up when any connection is; its addresses the first working one's. Absent when the router was not reached. */
@@ -79,15 +82,26 @@ export type NetworkStatus = {
   throughput?: { down?: number; up?: number };
   /** When this was read, by the server's clock. */
   readAt?: number;
+  /** Read before an apply that is running now: the devices are not read meanwhile. */
+  applying?: boolean;
 };
 
-export const reached = (r: Reachability | undefined): r is DeviceStatus => !!r && !("error" in r);
+/** What a device said, if it was read. */
+export const reached = (r: Reachability | undefined): DeviceStatus | undefined => (r?.ok ? r.value : undefined);
+
+/** Why a device was not read: what it said when it failed, or that it was not read at all. */
+export const whyUnread = (r: Reachability | undefined) => (r && !r.ok ? r.error.message : undefined);
+
+/** Every device that was read. */
+export const readDevices = (devices: Reachability[]): DeviceStatus[] => devices.flatMap((r) => (r.ok ? [r.value] : []));
+
+/** The read of the device of that name. */
+export const readOf = (devices: Reachability[], name: string | undefined) =>
+  devices.find((r) => (r.ok ? r.value.hostname : r.error.hostname) === name);
 
 /** What the router said (or why not), as the settings name it. */
-export const routerOf = (intent: Intent, devices: Reachability[]) => {
-  const name = intent.hardware.find((d) => d.role === "router")?.name;
-  return devices.find((d) => d.hostname === name);
-};
+export const routerOf = (intent: Intent, devices: Reachability[]) =>
+  readOf(devices, intent.hardware.find((d) => d.role === "router")?.name);
 
 /** The network an IPv4 address is in: each hands out its /24 ("10.0.20." for 10.0.20.0/24). */
 export const networkOfAddress = (intent: Intent, address: string) =>
@@ -99,9 +113,8 @@ export const networkStatus = (
   /** Each device's MACs (from its facts): who a mesh neighbour is. */
   macs: Record<string, string[] | undefined> = {}
 ): NetworkStatus => {
-  const byName = new Map(devices.map((d) => [d.hostname, d]));
-  const router = routerOf(intent, devices);
-  const routerUp = reached(router) ? router : undefined;
+  const statusOf = (name: string) => reached(readOf(devices, name));
+  const routerUp = reached(routerOf(intent, devices));
   const iface = (id: string) => routerUp?.interfaces.find((i) => i.id === id);
   const lineOf = (id: string) => routerUp?.lines.find((l) => l.id === id);
   // A line works when mwan3 says so (still, while it is only failing); with
@@ -140,11 +153,10 @@ export const networkStatus = (
   const leases = (routerUp?.leases ?? []).filter((l) => !ours.has(l.mac));
   const accessPoints = intent.hardware.filter((d) => d.role === "access-point");
   const radios = accessPoints.flatMap((ap) => {
-    const status = byName.get(ap.name);
-    return reached(status) ? status.wifi.map((w) => ({ ap: ap.name, ...w })) : [];
+    return (statusOf(ap.name)?.wifi ?? []).map((w) => ({ ap: ap.name, ...w }));
   });
   // Every interface the compiler writes on the router: its lines, networks,
-  // VPN (features/vpn.ts) and mesh (features/mesh.ts).
+  // VPN (intent/vpn) and mesh (intent/mesh).
   const known = new Set([
     ...intent.internet.lines.flatMap((c) => [c.id, ipv6Interface(c)]),
     ...intent.networks.map((n) => n.id),
@@ -188,8 +200,8 @@ export const networkStatus = (
     ...(intent.wifi.mesh?.enabled
       ? {
           mesh: intent.hardware.flatMap((d) => {
-            const status = byName.get(d.name);
-            if (!reached(status)) return [];
+            const status = statusOf(d.name);
+            if (!status) return [];
             const nameOf = (mac: string) =>
               Object.entries(macs).find(([, list]) => list?.includes(mac))?.[0] ?? mac;
             // Direct: the next hop is the node itself, by any of its MACs.
@@ -211,11 +223,12 @@ export const networkStatus = (
         }
       : {}),
     devices: intent.hardware.map((d) => {
-      const status = byName.get(d.name);
+      const read = readOf(devices, d.name);
+      const status = reached(read);
       return {
         name: d.name,
         role: d.role,
-        ...(reached(status)
+        ...(status
           ? {
               health: {
                 uptime: status.uptime,
@@ -225,7 +238,7 @@ export const networkStatus = (
                   : 0,
               },
             }
-          : { error: status && "error" in status ? status.error : "not read" }),
+          : { error: whyUnread(read) ?? "not read" }),
       };
     }),
     networks: intent.networks.map((n) => ({

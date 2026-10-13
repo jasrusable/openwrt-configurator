@@ -5,8 +5,8 @@ commit that does it is the record.
 
 ## Services without a reload trigger
 
-Each feature declares its services, enabled and started on every apply
-(`servicesCommands`). A service whose init script has no `service_triggers`
+Each feature declares its services, enabled and started on every apply (the
+agent's `services` verb, `servicesRecords` in `src/getDeviceScript.ts`). A service whose init script has no `service_triggers`
 still ignores a config change until restarted: ubihealthd has a patch that
 restarts it; find which others in use are in the same position (`ubus call
 service list '{"name":"<svc>","verbose":true}'` shows triggers) and restart
@@ -21,13 +21,13 @@ version. Packages, services, DSA vs swconfig and model quirks never show in
 the UI or the intent file. There is no escape hatch; the scope is one home
 network; the source of truth is a JSON file, not a database.
 
-A first slice is in: `src/intent/` (schema, one compiler module per
-feature), `onc compile`, `onc ui`/`onc cgi` over `src/server/handlers.ts`,
-and the React UI in `ui/`.
+In: `src/intent/` (one folder per feature), `onc compile`, `onc ui`/`onc cgi`
+over `src/server/`, and the React UI in `ui/`.
 
 - [ ] **No invalid configuration, by construction.** Started: cross-setting
-      rules live in the schema's superRefine (one main network, unique VLANs
-      and ranges, Wi-Fi on an existing network) and inputs are constrained.
+      rules live in each feature's `checks.ts` and `rules.ts` (one main
+      network, unique VLANs and ranges, Wi-Fi on an existing network) and
+      inputs are constrained.
       Still to do: channels legal in the chosen country, and the LAN not
       overlapping the WAN's range. Device-only facts (a missing 5 GHz radio) fail at plan
       time, before any change.
@@ -43,13 +43,14 @@ and the React UI in `ui/`.
       leases by name and MAC; pinned host key and board). Done also:
       guided Add hardware (`src/discover.ts`) and login access from the
       intent (authorized keys, password login off), and the Status pages
-      (Overview, Clients, Devices, Performance, Activity; graphs kept only in
-      the browser; restart a service, speed test, Wi-Fi survey). Next, in
+      (Overview, Clients, Devices, Performance, Activity; read by the server's
+      collector, graphs a day long; restart a service, speed test, Wi-Fi
+      survey). Next, in
       order: a read-only rpcd "monitor" login compiled onto every device
       (status objects only, never UCI; its own reviewed step: hashed
       password with a stable salt); actions (reboot, restart Wi-Fi, ping)
       with a confirmation; then LuCI off the devices (uhttpd and rpcd stay;
-      `rpcd-mod-iwinfo` explicit); long-term history last.
+      `rpcd-mod-iwinfo` explicit); longer history (a month at 15-minute points) last.
 - [ ] Per-port network assignment (today every LAN port carries every
       network: the main one untagged, the others tagged). Also a security
       fix: a wired device can tag its frames into any network's VLAN, which
@@ -66,7 +67,7 @@ and the React UI in `ui/`.
       difference is deliberate (rebind protection on, DHCP
       pool .5-.254, ra_default 1, LuCI's cgi_prefix, DirectInterface, the
       off states of UPnP/avahi, ubihealthd kept from the device, stock
-      uhttpd limits, the ULA prefix derived from the site name, no
+      uhttpd limits, the ULA prefix derived from the site's seed, no
       conloglevel, no curl: https-dns-proxy's HTTP/2 is libcurl's). The intent's Wi-Fi passwords
       must be the real ones before a provision (the hand config takes them
       from the keychain).
@@ -95,17 +96,27 @@ and the React UI in `ui/`.
 - Clients: names learnt from mDNS; a client's type is guessed from its name only (icons).
 - Wi-Fi survey and usteer roaming: run on the user's AP only once usteer and the survey are exercised there (verified in Docker).
 - mwan3track's log line ("Interface wan (eth1) is offline") is from its source, not recorded: record one on a router with two lines.
-- Every status read compiles each device's settings again (`getOpenWrtState`, for the services that must run): cheap on a Mac, to measure under QuickJS on a router.
+- Every status read compiles each device's settings again (`getOpenWrtState`, for the services that must run and the shaped interfaces), and the collector reads every 10 s while someone looks: cheap on a Mac, to measure under QuickJS on a router.
 
 ## From the settings and apply review (2026-10-13)
 
 - Ordering: the access point the workstation is on (by Wi-Fi) is not put last, only the gateway and a local device.
 - Adopting (Hardware › Add): show the host key's fingerprint and the MAC before adopting, and take addresses only, not names.
 - One root password is sent to every device: prefer keys only, the password only with password login on and no key.
-- `<intent>.state` is made 0755 and only tightened to 0700 when an apply starts; make it 0700 when first made.
-- `ports: "*t"` (string) means every bridge port, `["*t"]` only the free physical ones: one bracket changes what a VLAN carries.
+- `<intent>.state` is made with the default mode (0755 under the usual umask; its files are 0600): make the directory 0700 when first made (`stateLayout`, the platforms' `mkdirp`).
 - Access points get `dhcp` sections though dnsmasq and odhcpd are removed there; harmless, but noise in the apply diff.
-- Section schemas leave options open (UCI has far more than they type), so a mistyped option reaches the device; section types are refused when unknown. A misspelled config (`firwall`) is not: `uci batch` fails on a config the device lacks, unless prepare seeds it (packages changing), and then the real one is wiped as undeclared. Check declared configs against the device's at plan.
+- A misspelled config in a hand-written file (`firwall`) is not caught: configs not in `src/plan/rules.ts`' table take any section type, and `uci batch` fails on a config the device lacks unless prepare seeds it (packages changing), when the real one is then wiped as undeclared. Check declared configs against the device's at plan. (Options stay open by design; a section's required options and unknown section types are refused.)
 - swconfig: the switch is `switch0` in the compiler and engine; facts drop board.json's switch name (a board whose switch is named otherwise, or with two, is wrong).
 - The IPv6-follows-the-line hook (mwan3 `disconnected`/`connected`) is from mwan3's source: watch a real failover.
 - The SSH transports have no connect time limit: a login that stalls before authentication (seen once in the rig, dbclient path) holds an apply until the watchdog. Give each connect one, as locate's 4 s handshake does.
+- SSH/agent calls have no time limit: a stalled dbclient session hung the rig once at the stage step (data on stdin never arrived).
+
+## Roadmap (2026-10-13)
+
+- **Compiler changes show in the apply diff, and devices carry a stamp.** An app upgrade that changes compiled output (a new default, a patch) is invisible today: the intent diff compares intents, and the device diff is only read on the Apply page. Stamp each device at apply with a hash of what produced its config (intent version, compiler version, the compiled per-device output), e.g. in `/etc/onc/applied.json`; status then says "settings not applied" when the stamp differs from what the current compiler would produce, and the Apply page names the cause ("compiler update: <changes>") as well as edits.
+- **Kept configs and sysupgrade.** `configs_to_not_reset` keeps (`luci.*`, `rpcd.*`, `ubihealthd`, LEDs, …) are never wiped, so they can drift or go stale, especially if a sysupgrade preserves `/etc/config`. Decide per keep: owned after all, regenerated, or explicitly unowned; and define what an upgrade with preserved config does (re-apply after first boot, reconcile, or flash without keeping config and let the failsafe defaults below bring it back).
+- **Onboarding.** A first-run wizard: find and add devices first (discover), read them, then either adopt their current setup (an intent suggested from what they run, with the coerced/unsupported parts named) or start fresh from a template, guided step by step, so nobody starts cold.
+- **Firmware updates.** Proper upgrade and flashing with a custom build (ASU, the packages each role needs), including a failsafe `uci-defaults` script so a device that is reset or freshly flashed still comes up on the network: an access point as a DHCP client of the main network, the router on the main network's address, SSH with the app's key, ready for the next apply.
+- **Status pages, simpler.** Rework the Status pages to be more intuitive and useful at a glance: fewer, clearer numbers, what changed and what needs doing first.
+- **More features.** Captive portal (guest network), ad blocking, scheduled firewall rules (block at times), people and device groups (James's iPhone and iPad off at 7 pm), more VPN options (servers, types), and a little more for OpenWrt power users.
+- **Simple by default, advanced on demand.** Keep the intent and UI simple, with advanced panels that expand: every advanced setting has a sane default that is shown (and marked recommended) even when collapsed, so simple users never need them and power users can see and change what the defaults are, in the same UI.

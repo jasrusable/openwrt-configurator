@@ -1,8 +1,8 @@
 // What the settings' values are called, for people: one place for the words
 // every page and the Overview use. Band names live with the bands (radios.ts).
-import type { NetworkTemplate } from "./networkTemplates";
+import type { NetworkTemplate } from "./networks";
 import type { Intent } from "./schema";
-import { remoteAccessZone, sitesZone } from "./firewall";
+import { remoteAccessZone, sitesZone } from "./access";
 
 export { bandLabels } from "./radios";
 
@@ -19,7 +19,7 @@ export const lineTypeLabels: Record<Intent["internet"]["lines"][number]["type"],
   static: "Static IP",
 };
 
-/** A network's type: the template it follows, or Custom (networkTemplates.ts). */
+/** A network's type: the template it follows, or Custom (networks/templates.ts). */
 export const networkTypeLabels: Record<NetworkTemplate | "custom", string> = {
   home: "Home",
   guest: "Guest",

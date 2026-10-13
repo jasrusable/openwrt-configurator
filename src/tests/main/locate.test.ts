@@ -3,11 +3,11 @@ import { readFileSync, writeFileSync } from "fs";
 import { DeviceFacts } from "../../deviceFacts";
 import { candidatesFor, isAddress, Located, locateEach, NotLocated, parseNeighbours } from "../../locate";
 import { formatKnownHost } from "../../knownHosts";
-import { ProvisionableDevice } from "../../provisionConfig";
+import { ProvisionableDevice } from "../../apply/provisionConfig";
 import { board, Machine, network } from "../helpers/fakeNetwork";
 
 const device = (hostname: string, ipaddr: string, role: string): ProvisionableDevice =>
-  ({ hostname, ipaddr, tags: { role }, provisioning_config: { ssh_auth: { username: "root" } } }) as ProvisionableDevice;
+  ({ hostname, ipaddr, tags: { role }, login: { username: "root" } });
 
 const router = device("home-router", "10.0.0.1", "router");
 const ap = device("home-ap-1", "home-ap-1.lan", "access-point");

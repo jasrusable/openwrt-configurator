@@ -3,13 +3,12 @@ import { sampleIntent } from "../helpers/fixtures";
 import { readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { deviceSchemaSchema } from "../../deviceSchema";
-import { getOpenWrtConfig } from "../../getOpenWrtConfig";
+import { getOpenWrtConfig } from "../../engine/getOpenWrtConfig";
 import { compileIntent } from "../../intent/compile";
 import { explainFor } from "../../intent/fields";
 import { places } from "../../intent/places";
-import { steeringLevels } from "../../intent/roaming";
+import { steeringLevels } from "../../intent/wifi";
 import { Intent } from "../../intent/schema";
-import { oncConfigSchema } from "../../oncConfigSchema";
 
 const root = join(__dirname, "..", "..", "..");
 const sample = (): Intent =>
@@ -17,12 +16,12 @@ const sample = (): Intent =>
 
 /** usteer as the access point gets it. */
 const usteerOn = (intent: Intent) => {
-  const oncConfig = oncConfigSchema.parse(compileIntent(intent));
+  const plan = compileIntent(intent);
   const deviceSchema = deviceSchemaSchema.parse(
     JSON.parse(readFileSync(join(root, "deviceSchemas", "zyxel,nwa50ax-pro.json"), "utf8"))
   );
-  const deviceConfig = oncConfig.devices.find((d) => d.hostname === "home-ap-1")!;
-  return (getOpenWrtConfig({ oncConfig, deviceConfig, deviceSchema }) as any).usteer.usteer[0];
+  const deviceConfig = plan.devices.find((d) => d.hostname === "home-ap-1")!;
+  return (getOpenWrtConfig({ plan, deviceConfig, deviceSchema }) as any).usteer.usteer[0];
 };
 
 test("the roaming explainers quote what the access points are given", (t) => {

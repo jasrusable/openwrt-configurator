@@ -174,7 +174,7 @@ export const loadOwnKey = async () =>
   (await getJson<{ publicKey: string | null }>("api/admin/key", "Could not read this app's key.")).publicKey;
 
 export const loadCandidates = () =>
-  getJson<{ candidates: Candidate[]; error?: string }>("api/discover", "Could not look at the network.");
+  getJson<{ candidates: Candidate[] }>("api/discover", "Could not look at the network.");
 
 /** Reads the device at `address` (read-only); the server keeps the read for adopting. */
 export const inspectDevice = (address: string) =>

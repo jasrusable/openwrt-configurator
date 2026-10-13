@@ -1,10 +1,12 @@
 // A device that speaks the tool's protocol well enough to drive the provision
 // phases without SSH or Docker, recording what happens to it. Not a test file
 // (ava skips helpers/).
-import { DeviceRunOptions } from "../../devicePhases";
+import { stateOf } from "./fixtures";
+import { AgentRecord, decodeRecords } from "../../agent/records";
+import { DeviceRunOptions } from "../../apply/run";
 import { ExecResult, Session } from "../../platform";
-import { confirmTiming } from "../../confirm";
-import { UciConfigs, UciSection } from "../../uci";
+import { confirmTiming } from "../../apply/reconnect";
+import { UciConfigs, UciSection } from "../../engine/uci";
 
 export type FakeDevice = {
   hostname: string;
@@ -33,24 +35,6 @@ export const virtualClock = (): Clock => {
     },
   };
 };
-
-const markersIn = (script: string) =>
-  (script.match(/__ONC_OK__\d+/g) || []).length;
-
-const kindOf = (script: string) =>
-  script.includes("setsid")
-    ? "arm"
-    : script.includes("uci batch")
-    ? "configure"
-    : script.includes("uci commit")
-    ? "commit"
-    : script.includes("/tmp/onc-rollback")
-    ? "prepare"
-    : script.includes("reload_config")
-    ? "packages"
-    : script.includes('/etc/init.d/$s')
-    ? "services"
-    : "revert";
 
 const clone = (configs: UciConfigs): UciConfigs =>
   JSON.parse(JSON.stringify(configs));
@@ -82,34 +66,34 @@ export const formatUciExport = (configs: UciConfigs) =>
     )
     .join("\n");
 
-/** Apply the operations of the script's `uci batch`es, as uci would. */
-const applyBatches = (configs: UciConfigs, script: string) => {
-  const batches = [...script.matchAll(/<<'(ONC_UCI_*)'\n([\s\S]*?)\n\1\n/g)];
-  for (const [, , body] of batches) {
-    for (const line of body.split("\n")) {
-      const [, op, path, value] =
-        /^(\w+) ([^=]+)(?:=(.*))?$/.exec(line) || [];
-      const [configKey, ref, option] = path.split(".");
-      const sections = (configs[configKey] ??= []);
-      const anon = /^@(\w+)\[0\]$/.exec(ref);
-      const index = anon
-        ? sections.findIndex((s) => s.type === anon[1])
-        : sections.findIndex((s) => s.name === ref);
-      if (op === "delete") {
-        if (index < 0) throw new Error(`uci: Entry not found (${path})`);
-        sections.splice(index, 1);
-      } else if (op === "set" && option === undefined) {
-        if (index < 0) sections.push({ type: value, name: ref, options: {} });
-      } else {
-        const section: UciSection = sections[index];
-        const item = unquote(value);
-        if (op === "add_list") {
-          const list = section.options[option];
-          section.options[option] = [...(Array.isArray(list) ? list : []), item];
-        } else if (item === "") delete section.options[option];
-        else section.options[option] = item;
-      }
-    }
+/** One uci operation (`set a.b.c='v'`, `add_list ...`, `delete a.b`), as uci would apply it. */
+const applyOperation = (configs: UciConfigs, line: string) => {
+  const [, op, path, value] = /^(\w+) ([^=]+)(?:=([\s\S]*))?$/.exec(line) || [];
+  const [configKey, ref, option] = path.split(".");
+  const sections = (configs[configKey] ??= []);
+  const anon = /^@(\w+)\[0\]$/.exec(ref);
+  const index = anon ? sections.findIndex((s) => s.type === anon[1]) : sections.findIndex((s) => s.name === ref);
+  if (op === "delete") {
+    if (index < 0) throw new Error(`uci: Entry not found (${path})`);
+    sections.splice(index, 1);
+  } else if (op === "set" && option === undefined) {
+    if (index < 0) sections.push({ type: value, name: ref, options: {} });
+  } else {
+    const section: UciSection = sections[index];
+    const item = unquote(value);
+    if (op === "add_list") {
+      const list = section.options[option];
+      section.options[option] = [...(Array.isArray(list) ? list : []), item];
+    } else if (item === "") delete section.options[option];
+    else section.options[option] = item;
+  }
+};
+
+/** Apply stage's uci records (its batches, and operations spanning lines), as uci would. */
+export const applyRecords = (configs: UciConfigs, records: AgentRecord[]) => {
+  for (const record of records) {
+    if (record.kind === "batch") record.operations.forEach((line) => applyOperation(configs, line));
+    if (record.kind === "set" || record.kind === "add_list") applyOperation(configs, `${record.kind} ${record.key}=${quote(record.value)}`);
   }
 };
 
@@ -132,7 +116,19 @@ export const fakeDevice = ({
   onEvent,
   removes,
   firesBeforeDisarm = false,
+  stagesShort = false,
+  arming = "arms",
+  dropsDuringConfigure = false,
 }: {
+  /** Staging the packages it removes keeps one fewer than asked (no room in /tmp). */
+  stagesShort?: boolean;
+  /**
+   * How its arm goes: "refused" (the agent says why, no watchdog) or
+   * "link-drops" (the watchdog starts, then the link drops before the answer).
+   */
+  arming?: "arms" | "refused" | "link-drops";
+  /** The link drops while the configure script runs: its result has no exit status. */
+  dropsDuringConfigure?: boolean;
   /** Told each event as it happens, to make something else happen then. */
   onEvent?: (event: string) => void;
   /** Packages the config removes (the device has them): staged for a rollback first. */
@@ -171,6 +167,8 @@ export const fakeDevice = ({
   let fireAt: number | undefined;
   let committed = clone(initialConfig);
   let staged = clone(initialConfig);
+  // The commit's marker, written by finalise once its commits are done.
+  let commitMarked = false;
   // The watchdog: once its window passes undisarmed, it restores the snapshot.
   const watchdogTick = () => {
     if (fireAt !== undefined && clock && clock.now() >= fireAt) {
@@ -205,12 +203,11 @@ export const fakeDevice = ({
           if (!device.reachable) throw new Error(`${hostname} unreachable`);
           return session();
         },
-        state: {
-          config: { system: { system: [{ ".name": "s", hostname }] } } as any,
-          ...(services ? { services } : {}),
-          ...(newPackages ? { packagesToInstall: newPackages.map((packageName) => ({ packageName })) } : {}),
-          ...(removes ? { packagesToUninstall: removes } : {}),
-        },
+        state: stateOf({
+          config: { system: { system: [{ ".name": "s", hostname }] } },
+          services: services ?? [],
+          packages: { add: newPackages ?? [], remove: removes ?? [] },
+        }),
         rollbackMode: "reload-then-reboot",
         recoverSeconds: 30,
         sleep: c.sleep,
@@ -220,24 +217,24 @@ export const fakeDevice = ({
   };
 
   const ok = (stdout = ""): ExecResult => ({ stdout, stderr: "", code: 0 });
-  let script = "";
+  /** A step verb that stopped: at its first step, with the device's words. */
+  const stopped = (step: string): ExecResult => ({ stdout: `ONC_STEP ${step}\n`, stderr: "boom", code: 1 });
 
-  const runScript = (): ExecResult => {
-    const kind = kindOf(script);
+  /** The agent's step verbs, by the event each was: what the device does with its records. */
+  const stepVerb = (kind: string, records: AgentRecord[]): ExecResult => {
     record(kind);
-    if (kind === "arm") {
-      const seconds = Number(/sleep (\d+) &/.exec(script)?.[1]);
-      fireAt = clock!.now() + seconds * 1000;
-    }
-    const count = markersIn(script);
-    if (failOn === kind) {
-      return { stdout: "__ONC_OK__0\n", stderr: "boom", code: 1 };
+    if (failOn === kind) return stopped(kind === "commit" ? "commit system" : "uci batch");
+    if (kind === "configure" && dropsDuringConfigure) {
+      device.dropSessions();
+      return { stdout: "ONC_STEP uci batch\n", stderr: "", code: null };
     }
     if (kind === "configure") {
-      applyBatches(staged, script);
+      applyRecords(staged, records);
       afterStage?.(staged);
     }
     if (kind === "commit") {
+      // Written by finalise once every commit is done: never, when the link drops partway.
+      commitMarked = !commitIncomplete;
       committed = clone(staged);
       device.changed = true;
       if (lockedOutAfterCommit) device.reachable = false;
@@ -245,10 +242,76 @@ export const fakeDevice = ({
     if (kind === "packages") afterPackages?.(committed);
     if (kind === "revert" || kind === "packages") staged = clone(committed);
     if (kind === "revert") device.changed = false;
-    return ok(
-      Array.from({ length: count }, (_, i) => `\n__ONC_OK__${i}`).join("") +
-        "\n"
-    );
+    return ok("ONC_OK\n");
+  };
+
+  const agentVerb = (verb: string, command: string, stdin = ""): ExecResult => {
+    switch (verb) {
+      case "begin":
+        record("prepare");
+        return ok("ONC_BEGUN\n");
+      case "revert":
+        return stepVerb("revert", []);
+      case "prepare":
+        return stepVerb("packages", decodeRecords(stdin));
+      case "stage":
+        return stepVerb("configure", decodeRecords(stdin));
+      case "finalise":
+        return stepVerb("commit", decodeRecords(stdin));
+      case "services":
+        return stepVerb("services", decodeRecords(stdin));
+      case "hooks":
+        return stepVerb("hooks", decodeRecords(stdin));
+      case "stage-packages":
+        record("stage");
+        return ok(`ONC_STAGED ${(removes ?? []).length - (stagesShort ? 1 : 0)}\n`);
+      case "arm":
+        if (arming === "refused") {
+          record("arm-refused");
+          return { stdout: "", stderr: "onc-agent: could not snapshot the device (no room in /tmp?)", code: 1 };
+        }
+        record("arm");
+        fireAt = clock!.now() + Number(/'--timeout' '(\d+)'/.exec(command)?.[1]) * 1000;
+        if (arming === "link-drops") {
+          device.dropSessions();
+          return { stdout: "", stderr: "", code: null };
+        }
+        return ok("ONC_ARMED\n");
+      case "disarm":
+        if (firesBeforeDisarm && fireAt !== undefined) {
+          fireAt = clock!.now();
+          watchdogTick();
+        }
+        // Too late: the watchdog already restored the old config.
+        if (device.events.includes("watchdog-fired")) return ok("ONC_FIRED\n");
+        record("disarm");
+        fireAt = undefined;
+        return ok("ONC_DISARMED\n");
+      case "rollback-now":
+        // The watchdog restores the snapshot and access returns.
+        record("rollback-now");
+        committed = clone(initialConfig);
+        staged = clone(initialConfig);
+        fireAt = undefined;
+        device.changed = false;
+        device.reachable = true;
+        return ok("ONC_WOKEN\n");
+      case "commit-finished":
+        return commitMarked ? ok("ONC_COMMITTED\n") : ok();
+      case "recovered":
+        // Only once the watchdog has restored the old config.
+        if (!device.events.some((e) => e === "watchdog-fired" || e === "rollback-now")) return ok();
+        record("recovered");
+        return ok("ONC_RECOVERED\n");
+      case "done":
+        return ok("ONC_DONE\n");
+      case "drop":
+        record("drop");
+        fireAt = undefined;
+        return ok("ONC_DROPPED\n");
+      default:
+        return { stdout: "", stderr: `unknown verb ${verb}`, code: 2 };
+    }
   };
 
   // runProbes sends several probes as one command; answer each in turn.
@@ -278,11 +341,9 @@ export const fakeDevice = ({
       }
       watchdogTick();
       if (!device.reachable) return { stdout: "", stderr: "", code: null };
-      if (command.startsWith("umask 077 && cat >")) {
-        script = options?.stdin ?? "";
-        return ok();
-      }
-      if (command.startsWith("sh /tmp/.onc-provision-")) return runScript();
+      // The agent (src/agent): written with its first verb, then called by verb.
+      const verb = /sh \/tmp\/onc-agent-\w+\.sh (\S+)/.exec(command)?.[1];
+      if (verb) return agentVerb(verb, command, options?.stdin);
       if (command.startsWith("cat /etc/board.json"))
         return ok(
           JSON.stringify({
@@ -292,55 +353,11 @@ export const fakeDevice = ({
         );
       if (command === "apk info") return ok("dnsmasq\n");
       if (command.startsWith("apk del --simulate")) return ok((removes ?? []).map((p, i) => `(${i + 1}/${removes!.length}) Purging ${p} (1.0)`).join("\n"));
-      if (command.startsWith("apk fetch")) {
-        record("stage");
-        return ok();
-      }
-      if (command.includes("*.apk 2>/dev/null | wc -l")) return ok(`${(removes ?? []).length}\n`);
       if (command.includes("uci export")) return ok(formatUciExport(staged));
       if (command === "uci changes" || command === "true") return ok();
       if (command.includes("ubus call service list")) {
         record("settle");
         return ok();
-      }
-      if (
-        command.includes("onc-confirmed-") &&
-        command.includes("ONC_DISARMED")
-      ) {
-        if (firesBeforeDisarm && fireAt !== undefined) {
-          fireAt = clock!.now();
-          watchdogTick();
-        }
-        // Too late: the watchdog already restored the old config.
-        if (device.events.includes("watchdog-fired")) return ok("ONC_FIRED\n");
-        record("disarm");
-        fireAt = undefined;
-        return ok("ONC_DISARMED\n");
-      }
-      // Exactly rollBackNowCommand; the disarm cleanup also names the .sleep file.
-      if (/^s=\$\(cat \/tmp\/onc-watchdog-\w+\.sleep/.test(command)) {
-        // rollBackNow: the watchdog restores the snapshot and access returns.
-        record("rollback-now");
-        committed = clone(initialConfig);
-        staged = clone(initialConfig);
-        fireAt = undefined;
-        device.changed = false;
-        device.reachable = true;
-        return ok();
-      }
-      // The commit's marker (rollback.ts committedFlag): there once a commit ran whole.
-      if (command.startsWith("[ -f /tmp/onc-committed-")) {
-        return device.events.includes("commit") && !commitIncomplete ? ok("ONC_COMMITTED\n") : { stdout: "", stderr: "", code: 1 };
-      }
-      if (command.startsWith("touch /tmp/onc-recovered-")) {
-        record("recovered");
-        return ok();
-      }
-      // markRecovered: only once the watchdog has restored the old config.
-      if (command.startsWith("[ -f /tmp/onc-restored-")) {
-        if (!device.events.some((e) => e === "watchdog-fired" || e === "rollback-now")) return { stdout: "", stderr: "", code: 1 };
-        record("recovered");
-        return ok("ONC_RECOVERED\n");
       }
       return { stdout: "", stderr: "", code: 1 };
     },

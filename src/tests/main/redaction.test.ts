@@ -4,12 +4,12 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { deviceSchemaSchema } from "../../deviceSchema";
 import { getDeviceScript } from "../../getDeviceScript";
-import { getOpenWrtState } from "../../getOpenWrtState";
+import { getOpenWrtState } from "../../engine/getOpenWrtState";
 import { availability } from "../../intent/choices";
+import { printPlan } from "../../lowLevel/print";
 import { compileIntent } from "../../intent/compile";
 import { intentSchema } from "../../intent/schema";
-import { oncConfigSchema } from "../../oncConfigSchema";
-import { redactSecretFields } from "../../resolveSecrets";
+import { redactSecretFields } from "../../secrets";
 import { redactor } from "../../secretOptions";
 
 const root = join(__dirname, "../../..");
@@ -41,18 +41,19 @@ const secretsOf = (intent: ReturnType<typeof secretIntent>) => [
 
 test("compile's output hides every secret an intent holds, by option and by owner-only file", (t) => {
   const intent = secretIntent();
-  const printed = JSON.stringify(redactSecretFields(compileIntent(intent)));
+  // As `compile` prints it: the plan as low-level JSON.
+  const printed = JSON.stringify(redactSecretFields(printPlan(compileIntent(intent))));
   for (const secret of secretsOf(intent)) t.false(printed.includes(secret), `${secret.slice(0, 4)}… printed`);
 });
 
 test("the dry run of an intent hides every secret, though none came from the keychain", (t) => {
   const intent = secretIntent();
-  const oncConfig = oncConfigSchema.parse(compileIntent(intent));
+  const plan = compileIntent(intent);
   const deviceSchema = deviceSchemaSchema.parse(
     JSON.parse(readFileSync(join(root, "deviceSchemas", "friendlyarm,nanopi-r6s.json"), "utf8"))
   );
-  const deviceConfig = { ...oncConfig.devices.find((d) => d.hostname === "home-router")!, model_id: "friendlyarm,nanopi-r6s" };
-  const state = getOpenWrtState({ oncConfig, deviceConfig, deviceSchema });
+  const deviceConfig = { ...plan.devices.find((d) => d.hostname === "home-router")!, model_id: "friendlyarm,nanopi-r6s" };
+  const state = getOpenWrtState({ plan, deviceConfig, deviceSchema });
   const script = getDeviceScript({ state, redact: redactor() }).join("\n");
   for (const secret of secretsOf(intent)) t.false(script.includes(secret), `${secret.slice(0, 4)}… printed`);
   t.regex(script, /<redacted>/);

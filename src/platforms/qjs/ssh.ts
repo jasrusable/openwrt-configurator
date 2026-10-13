@@ -1,6 +1,6 @@
 import * as std from "std";
 import { hostKeyAlgorithms, hostKeyChangedMessage, pinnedKeyChangedMessage } from "../../knownHosts";
-import { dirname } from "../../paths";
+import { dirname } from "../../posixPath";
 import { ExecResult, Session, SshTarget } from "../../platform";
 import { mkdirp, removeFile } from "./files";
 import { environment, spawn, spawnSync, tmpPath, which } from "./process";

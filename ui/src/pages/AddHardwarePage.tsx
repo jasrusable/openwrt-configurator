@@ -9,7 +9,8 @@ import { ReactNode, useState } from "react";
 import { useNavigate } from "react-router";
 import { availability } from "../../../src/intent/choices";
 import { where } from "../../../src/intent/places";
-import { Intent, namePattern } from "../../../src/intent/schema";
+import { Intent } from "../../../src/intent/schema";
+import { namePattern } from "../../../src/intent/validators";
 import type { Candidate, Inspected } from "../../../src/discover";
 import { useAdopt, useCandidates, useInspect } from "../data/discover";
 import { ago, bandsOf, modelOf, portsOf } from "../facts";
@@ -259,8 +260,8 @@ export const AddHardwarePage = () => {
           <Section title="On your network" description="From the router's list of connected devices; nothing is scanned.">
             {candidates.isPending ? (
               <Busy>Looking…</Busy>
-            ) : candidates.data?.error ? (
-              <SettingRow label="Could not look" description={candidates.data.error} />
+            ) : candidates.isError ? (
+              <SettingRow label="Could not look" description={(candidates.error as Error).message} />
             ) : (
               <CandidateList candidates={candidates.data?.candidates ?? []} pick={pick} />
             )}

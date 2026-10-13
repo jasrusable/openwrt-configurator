@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { adoptDevice, inspectDevice, loadCandidates } from "./api";
 
 export const useCandidates = () =>
-  useQuery({ queryKey: ["discover"], queryFn: loadCandidates, staleTime: 0, gcTime: 0 });
+  // Not retried: a router that cannot be asked says so at once, with why.
+  useQuery({ queryKey: ["discover"], queryFn: loadCandidates, staleTime: 0, gcTime: 0, retry: false });
 
 export const useInspect = () => useMutation({ mutationFn: inspectDevice });
 

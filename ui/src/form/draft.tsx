@@ -9,36 +9,14 @@ import {
   useContext,
   useSyncExternalStore,
 } from "react";
-import { canonical, merge3 } from "../../../src/intent/merge";
+import { merge3 } from "../../../src/intent/merge";
+import { canonical } from "../../../src/json";
+import type { PathsOf, ValueAt } from "../../../src/intent/paths";
 import { Intent, intentSchema } from "../../../src/intent/schema";
-
-/** Every dotted path into T: "networks", "networks.1", "networks.1.name"... */
-type PathsOf<T, Depth extends unknown[] = []> = Depth["length"] extends 8
-  ? never
-  : T extends readonly (infer U)[]
-    ? `${number}` | `${number}.${PathsOf<NonNullable<U>, [...Depth, 1]>}`
-    : T extends object
-      ? {
-          [K in keyof T & string]:
-            | K
-            | `${K}.${PathsOf<NonNullable<T[K]>, [...Depth, 1]>}`;
-        }[keyof T & string]
-      : never;
 
 export type IntentField = PathsOf<Intent>;
 
-/** The value at a path, as a type. */
-export type ValueAt<T, P extends string> = P extends `${infer K}.${infer R}`
-  ? T extends readonly (infer U)[]
-    ? ValueAt<NonNullable<U>, R>
-    : K extends keyof T
-      ? ValueAt<NonNullable<T[K]>, R>
-      : never
-  : T extends readonly (infer U)[]
-    ? U
-    : P extends keyof T
-      ? T[P]
-      : never;
+export type { ValueAt };
 
 /** The paths whose value is a list (networks, firewall.rules, ...). */
 export type ListPath = {
@@ -55,26 +33,35 @@ export type Issue = { path: string; message: string };
 
 const isIndex = (part: string) => /^\d+$/.test(part);
 
-export const getIn = (value: unknown, path?: string): any =>
+/** The value at a path known only at run time (a diff's, a list's own name): whatever it is. */
+export const getAt = (value: unknown, path?: string): unknown =>
   !path
     ? value
-    : path.split(".").reduce<any>((node, part) => node?.[part], value);
+    : path.split(".").reduce<unknown>((node, part) => (node === null || typeof node !== "object" ? undefined : (node as Record<string, unknown>)[part]), value);
+
+/** The value at a path of the intent, typed by the path. */
+export const getIn = <P extends IntentField>(intent: Intent, path: P) => getAt(intent, path) as ValueAt<Intent, P> | undefined;
 
 /**
  * A copy of `value` with `path` set, sharing everything else (so unchanged
  * parts keep their identity). Undefined removes the key: unset is absent.
+ * For a path known only at run time; setIn checks a known one's value.
  */
-export const setIn = <T,>(value: T, path: string, next: unknown): T => {
+export const setAt = <T,>(value: T, path: string, next: unknown): T => {
   const [head, ...rest] = path.split(".");
-  const child = rest.length ? setIn((value as any)?.[head], rest.join("."), next) : next;
-  if (Array.isArray(value) || (value === undefined && isIndex(head))) {
-    const copy = [...((value as unknown[]) ?? [])];
+  const node = value as Record<string, unknown> | unknown[] | undefined;
+  const child = rest.length ? setAt((node as Record<string, unknown> | undefined)?.[head], rest.join("."), next) : next;
+  if (Array.isArray(node) || (node === undefined && isIndex(head))) {
+    const copy = [...((node as unknown[] | undefined) ?? [])];
     copy[Number(head)] = child;
     return copy as T;
   }
-  const { [head]: _old, ...others } = (value ?? {}) as Record<string, unknown>;
+  const { [head]: _old, ...others } = (node ?? {}) as Record<string, unknown>;
   return (child === undefined ? others : { ...others, [head]: child }) as T;
 };
+
+/** The intent with one setting changed, its value checked against the path. */
+export const setIn = <P extends IntentField>(intent: Intent, path: P, next: ValueAt<Intent, P> | undefined): Intent => setAt(intent, path, next);
 
 /** The schema's problems with an intent, by dotted path. Cached per value. */
 const checked = new WeakMap<object, Issue[]>();
@@ -153,10 +140,18 @@ export class Draft {
     this.emit();
   }
 
-  get = (path?: string) => getIn(this.value, path);
+  /** The whole draft. */
+  get = () => this.value;
 
-  set = (path: string, next: unknown) => {
-    this.value = setIn(this.value, path, next);
+  /** One setting, typed by its path. */
+  set = <P extends IntentField>(path: P, next: ValueAt<Intent, P> | undefined) => this.setPath(path, next);
+
+  /**
+   * One setting by a path known only at run time (a bound field's): the
+   * control gives what it edits, and the schema checks the whole draft.
+   */
+  setPath = (path: string, next: unknown) => {
+    this.value = setAt(this.value, path, next);
     if (!this.touched.has(path)) this.touched = new Set([...this.touched, path]);
     this.serverIssues = [];
     this.emit();
@@ -260,14 +255,14 @@ export const useDerived = <T,>(read: (draft: Draft) => T): T => {
 export function useDraftValue(): Intent;
 export function useDraftValue<P extends IntentField>(path: P): ValueAt<Intent, P> | undefined;
 export function useDraftValue(path?: string): unknown {
-  return useDerived((d) => d.get(path));
+  return useDerived((d) => getAt(d.value, path));
 }
 
 /** A list in the draft and its edits: add an item, change or remove one by its place. */
 export const useDraftList = <N extends ListPath>(path: N) => {
   const draft = useDraft();
-  const items: ItemOf<N>[] = useDerived((d) => d.get(path)) ?? [];
-  const set = (next: ItemOf<N>[]) => draft.set(path, next);
+  const items = (useDerived((d) => getIn(d.value, path)) ?? []) as ItemOf<N>[];
+  const set = (next: ItemOf<N>[]) => draft.setPath(path, next);
   return {
     items,
     add: (item: ItemOf<N>) => set([...items, item]),

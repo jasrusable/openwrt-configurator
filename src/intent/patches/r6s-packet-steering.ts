@@ -38,7 +38,7 @@ set_rps eth2 10 # LAN: IRQ on CPU6, RPS to CPU4
 set_rps eth0 0  # unused 1G port: stay on its IRQ core
 `,
         // When the file changed: packet_steering runs it on every interface event anyway.
-        run_after: "/etc/init.d/packet_steering reload",
+        runAfter: "/etc/init.d/packet_steering reload",
       },
     ],
   }),

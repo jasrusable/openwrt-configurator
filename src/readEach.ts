@@ -1,6 +1,8 @@
 // Every device located (src/locate.ts) and read at once, each within a time
 // limit, so one slow device cannot hold up the rest. Where a device was found
 // is remembered with its facts; nothing it says is stored.
+import { problem, Problem, ProblemKind } from "./problem";
+import { stateLayout } from "./store";
 import {
   clearFailure,
   DeviceFacts,
@@ -11,11 +13,15 @@ import {
   rememberLocated,
   staleDevices,
 } from "./deviceFacts";
-import { loadOncConfig } from "./loadConfig";
+import { loadSettings } from "./settings";
 import { Located, locateEach } from "./locate";
 import { withLock } from "./lock";
 import { Platform } from "./platform";
-import { ProvisionableDevice, provisionableDevices } from "./provisionConfig";
+import { ProvisionableDevice, provisionableDevices } from "./apply/provisionConfig";
+import { err, messageOf, ok, Result } from "./result";
+
+/** A device that could not be read, and why: not found or not answering (unreachable), or its read went wrong (failed). */
+export type DeviceFailure = Problem<{ hostname: string }>;
 
 export const readEach = <T>({
   intentPath,
@@ -25,7 +31,6 @@ export const readEach = <T>({
   timeoutMs,
   now = Date.now,
   read,
-  failed,
 }: {
   intentPath: string;
   platform: Platform;
@@ -34,19 +39,19 @@ export const readEach = <T>({
   timeoutMs: number;
   now?: () => number;
   read: (found: Located) => Promise<T>;
-  failed: (hostname: string, error: string) => T;
-}): Promise<T[]> =>
+}): Promise<Result<T, DeviceFailure>[]> =>
   Promise.all(
     locateEach({ devices, facts, platform }).map((found, i) => {
       const { hostname } = devices[i];
+      const failed = (message: string, kind: ProblemKind = "unreachable") => err(problem(kind, message, { hostname }));
       // Both settle to a result, never a rejection: the loser of the race
       // settles later with no one listening, which must not crash the server.
       // The session is closed however late the device answers, and if it
       // answers then hangs, when the time is up.
       let session: Located["session"] | undefined;
       const attempt = found
-        .then(async (f): Promise<T> => {
-          if (!("session" in f)) return failed(hostname, f.error);
+        .then(async (f): Promise<Result<T, DeviceFailure>> => {
+          if (!("session" in f)) return failed(f.error);
           session = f.session;
           try {
             const known = facts[hostname];
@@ -54,19 +59,19 @@ export const readEach = <T>({
               rememberLocated(platform, intentPath, f, now());
               clearFailure(platform, intentPath, hostname);
             }
-            return await read(f);
+            return ok(await read(f));
           } finally {
             f.session.dispose();
           }
         })
-        .catch((e) => failed(hostname, (e as Error).message));
+        .catch((e) => failed(messageOf(e), "failed"));
       const late = platform.sleep(timeoutMs).then(() => {
         try {
           session?.dispose();
         } catch {
           // Already closed.
         }
-        return failed(hostname, "did not answer in time");
+        return failed("did not answer in time");
       });
       return Promise.race([attempt, late]);
     })
@@ -91,28 +96,22 @@ export const refreshStale = async ({
   platform: Platform;
   now?: () => number;
 }) => {
-  const { oncConfig } = await loadOncConfig({ path: intentPath, platform });
-  const { ready } = provisionableDevices(oncConfig);
+  // Settings that will not load name no devices to read: the page says why.
+  const loaded = await loadSettings(intentPath, platform);
+  if (!loaded.ok) return;
+  const { ready } = provisionableDevices(loaded.value.plan);
   const hostnames = ready.map((d) => d.hostname);
   const facts = readFacts(platform, intentPath, hostnames);
   const stale = staleDevices({ facts, failures: readFailures(platform, intentPath, hostnames), now: now() });
   if (stale.length === 0) return;
-  await withLock(platform, `${intentPath}.state/devices/.reading`, 1, async () => {
+  await withLock(platform, stateLayout(intentPath).readingLock, 1, async () => {
     const devices = ready.filter((d) => stale.includes(d.hostname) || d.tags?.role === "router");
     // Finding a device whose facts are stale keeps them (above).
-    const results = await readEach<string | undefined>({
-      intentPath,
-      platform,
-      devices,
-      facts,
-      timeoutMs: refreshTimeoutMs,
-      now,
-      read: async () => undefined,
-      failed: (_, error) => error,
-    });
-    results.forEach((error, i) => {
-      const { hostname } = devices[i];
-      if (error !== undefined && stale.includes(hostname)) recordFailure(platform, intentPath, hostname, { at: now(), error });
+    const results = await readEach({ intentPath, platform, devices, facts, timeoutMs: refreshTimeoutMs, now, read: async () => undefined });
+    results.forEach((result) => {
+      if (!result.ok && stale.includes(result.error.hostname)) {
+        recordFailure(platform, intentPath, result.error.hostname, { at: now(), error: result.error.message });
+      }
     });
   });
 };

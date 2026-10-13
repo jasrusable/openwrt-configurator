@@ -5,19 +5,22 @@
 // managed files. Read only while the Apply page is open, held in memory,
 // never stored. Secret options (Wi-Fi keys, passwords) are compared but their
 // values never leave this module.
+import { KeepEntry } from "./plan/types";
 import { getPackagesToRemove, packagesToAdd } from "./getDeviceScript";
 import { isSecretOption } from "./secretOptions";
 import { readFacts } from "./deviceFacts";
 import { installedPackages, managedFiles, Probe, runProbes, uciConfigs } from "./deviceProbes";
 import { managedFilesManifest } from "./getDeviceScript";
-import { getOpenWrtState } from "./getOpenWrtState";
-import { loadOncConfig } from "./loadConfig";
-import { OpenWrtState } from "./openWrtConfigSchema";
+import { getOpenWrtState } from "./engine/getOpenWrtState";
+import { OpenWrtState } from "./engine/openWrtState";
 import { Platform } from "./platform";
-import { provisionableDevices } from "./provisionConfig";
-import { readEach } from "./readEach";
+import { provisionableDevices } from "./apply/provisionConfig";
+import { DeviceFailure, readEach } from "./readEach";
+import { ok, Result } from "./result";
+import { Problem } from "./problem";
+import { loadSettings } from "./settings";
 import { shellQuote } from "./shell";
-import { declaredConfigs, isKept, UciConfigs, UciSection } from "./uci";
+import { declaredConfigs, isKept, sameValue, UciConfigs, UciSection } from "./engine/uci";
 
 export type UciChange = {
   /** As `uci show` prints it: network.lan, or network.lan.ipaddr. */
@@ -30,15 +33,21 @@ export type UciChange = {
 
 export type FileChange = { path: string; change: "added" | "removed" | "changed" };
 
-export type DeviceDiff =
-  | {
-      hostname: string;
-      config: UciChange[];
-      packages: { added: string[]; removed: string[] };
-      files: FileChange[];
-    }
-  /** Not reached: what it holds now is not known, so neither is the change. */
-  | { hostname: string; error: string };
+export type DeviceChanges = {
+  hostname: string;
+  config: UciChange[];
+  packages: { added: string[]; removed: string[] };
+  files: FileChange[];
+};
+
+/** As the page gets it: each device's changes, or why it was not reached (what it holds is then not known, nor the change). */
+/** A device whose changes could not be read, as the page gets it. */
+export type DeviceUnread = { hostname: string; error: string };
+export type DeviceDiff = DeviceChanges | DeviceUnread;
+
+/** Each device's read as the page gets it: its changes, or why it was not read. */
+export const diffOf = (read: Result<DeviceChanges, DeviceFailure>): DeviceDiff =>
+  read.ok ? read.value : { hostname: read.error.hostname, error: read.error.message };
 
 /** What the device holds after the apply: kept sections as they are, declared ones merged in or added. */
 export const configsAfter = ({
@@ -48,7 +57,7 @@ export const configsAfter = ({
 }: {
   current: UciConfigs;
   declared: UciConfigs;
-  keep: string[];
+  keep: KeepEntry[];
 }): UciConfigs =>
   Object.fromEntries(
     [...new Set([...Object.keys(current), ...Object.keys(declared)])].flatMap((configKey) => {
@@ -94,13 +103,12 @@ export const uciLines = (configs: UciConfigs) => {
   return lines;
 };
 
-const sameValue = (a?: string | string[], b?: string | string[]) =>
-  a !== undefined && b !== undefined && show(a) === show(b);
+const bothSame = (a?: string | string[], b?: string | string[]) => a !== undefined && b !== undefined && sameValue(a, b);
 
 /** How alike two sections' options are: the share with equal values, of all either has. */
 const likeness = (a: UciSection, b: UciSection) => {
   const options = [...new Set([...Object.keys(a.options), ...Object.keys(b.options)])];
-  return options.length === 0 ? 1 : options.filter((o) => sameValue(a.options[o], b.options[o])).length / options.length;
+  return options.length === 0 ? 1 : options.filter((o) => bothSame(a.options[o], b.options[o])).length / options.length;
 };
 
 /**
@@ -172,15 +180,15 @@ export const deviceDiff = ({
   state: OpenWrtState;
   now: DeviceNow;
   sha256: (text: string) => string;
-}): DeviceDiff => {
+}): DeviceChanges => {
   const after = configsAfter({
     current: now.config,
     declared: declaredConfigs(state.config),
-    keep: state.configsToNotReset ?? [],
+    keep: state.keep,
   });
   // As the apply writes it: a final newline added where there is none.
   const written = (content: string) => sha256(content.endsWith("\n") ? content : `${content}\n`);
-  const files = state.files ?? [];
+  const files = state.files;
   const pairs = renames(now.config, after);
   return {
     hostname,
@@ -189,7 +197,7 @@ export const deviceDiff = ({
       ...diffLines(renamed(uciLines(now.config), pairs), uciLines(after)),
     ].sort((a, b) => a.key.localeCompare(b.key) || (a.renamedFrom ? -1 : 1)),
     packages: {
-      added: packagesToAdd({ state, installedPackages: now.installed }).map((p) => p.packageName),
+      added: packagesToAdd({ state, installedPackages: now.installed }),
       removed: getPackagesToRemove({ state, installedPackages: now.installed }),
     },
     files: [
@@ -231,10 +239,12 @@ export const readApplyDiff = async ({
 }: {
   intentPath: string;
   platform: Platform;
-}): Promise<DeviceDiff[]> => {
-  const { oncConfig } = await loadOncConfig({ path: intentPath, platform });
-  const { ready } = provisionableDevices(oncConfig);
-  return readEach<DeviceDiff>({
+}): Promise<Result<Result<DeviceChanges, DeviceFailure>[], Problem>> => {
+  const loaded = await loadSettings(intentPath, platform);
+  if (!loaded.ok) return loaded;
+  const { plan } = loaded.value;
+  const { ready } = provisionableDevices(plan);
+  const reads = await readEach({
     intentPath,
     platform,
     devices: ready,
@@ -242,7 +252,7 @@ export const readApplyDiff = async ({
     timeoutMs,
     read: async (found) => {
       const deviceConfig = ready.find((d) => d.hostname === found.hostname)!;
-      const state = getOpenWrtState({ oncConfig, deviceConfig, deviceSchema: found.schema });
+      const state = getOpenWrtState({ plan, deviceConfig, deviceSchema: found.schema });
       const first = await runProbes(found.session, {
         config: uciConfigs,
         installed: installedPackages,
@@ -257,6 +267,6 @@ export const readApplyDiff = async ({
         sha256: platform.sha256,
       });
     },
-    failed: (hostname, error) => ({ hostname, error }),
   });
+  return ok(reads);
 };

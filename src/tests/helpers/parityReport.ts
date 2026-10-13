@@ -3,11 +3,11 @@
 // Lives under helpers/ so ava does not run it as a test file.
 import { getDeviceBuildPlan } from "../../getBuildPlan";
 import { getDeviceSchema } from "../../getDeviceSchema";
-import { getDeviceScript, getFinaliseCommands } from "../../getDeviceScript";
-import { getOpenWrtState } from "../../getOpenWrtState";
-import { loadOncConfig } from "../../loadConfig";
+import { finaliseRecords, getDeviceScript } from "../../getDeviceScript";
+import { getOpenWrtState } from "../../engine/getOpenWrtState";
+import { loadConfigOrThrow } from "../../loadConfig";
 import { Platform } from "../../platform";
-import { parseUciExport } from "../../uci";
+import { parseUciExport } from "../../engine/uci";
 
 export const parityConfigs = [
   "src/tests/main/config.json",
@@ -65,12 +65,12 @@ const attempt = <T>(fn: () => T) => {
 export const parityReport = async ({ platform }: { platform: Platform }) => {
   const report: unknown[] = [deviceConfigs];
   for (const configPath of parityConfigs) {
-    const { oncConfig } = await loadOncConfig({
+    const { plan } = await loadConfigOrThrow({
       path: configPath,
       platform,
       lookup: async (name) => `placeholder-${name}`,
     });
-    for (const deviceConfig of oncConfig.devices.map(withCapturedModel)) {
+    for (const deviceConfig of plan.devices.map(withCapturedModel)) {
       const deviceSchema = await getDeviceSchema({
         deviceConfig,
         local: platform,
@@ -83,7 +83,7 @@ export const parityReport = async ({ platform }: { platform: Platform }) => {
             ? deviceSchema
             : attempt(() => {
                 const state = getOpenWrtState({
-                  oncConfig,
+                  plan,
                   deviceConfig,
                   deviceSchema,
                 });
@@ -94,21 +94,18 @@ export const parityReport = async ({ platform }: { platform: Platform }) => {
                     managedFiles: ["/etc/onc-parity-stale"],
                     current: deviceConfigs.configs,
                   }),
-                  commits: getFinaliseCommands({
+                  commits: finaliseRecords({
                     state,
                     current: deviceConfigs.configs,
                   }),
                 };
               }),
         buildPlan: attempt(() => {
-          const plan = getDeviceBuildPlan({
-            oncConfig: {
-              ...oncConfig,
-              version: oncConfig.version ?? "25.12.5",
-            },
+          const build = getDeviceBuildPlan({
+            plan: { ...plan, version: plan.version ?? { value: "25.12.5" } },
             deviceConfig,
           });
-          return { packages: plan.packages, uciDefaults: plan.uciDefaults };
+          return { packages: build.packages, uciDefaults: build.uciDefaults };
         }),
       };
       report.push(device);

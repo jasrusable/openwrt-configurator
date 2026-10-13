@@ -1,16 +1,16 @@
 import test from "ava";
 import { DeviceSchema, deviceSchemaSchema } from "../../deviceSchema";
-import { getOpenWrtConfig } from "../../getOpenWrtConfig";
-import { oncConfigSchema } from "../../oncConfigSchema";
+import { getOpenWrtConfig } from "../../engine/getOpenWrtConfig";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { parseDeviceFacts } from "../../facts/board";
+import { planOf } from "../helpers/fixtures";
 
 // The hardware abstraction, one rule at a time, against small made-up devices.
 const device = { model_id: "test,device", hostname: "box", tags: {} };
 const build = (config: object, schema: Partial<DeviceSchema>) =>
   getOpenWrtConfig({
-    oncConfig: oncConfigSchema.parse({ devices: [device], config }),
+    plan: planOf({ devices: [device], config }),
     deviceConfig: device as any,
     deviceSchema: deviceSchemaSchema.parse({
       name: "test,device",

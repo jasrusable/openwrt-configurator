@@ -20,9 +20,11 @@ const failure = (read: Read) =>
 export const liveLine = (site: string, read: Read) => {
   const failed = failure(read);
   // When the server read it (its collector may have read it a little before this page asked).
-  const at = (read.data as NetworkStatus | undefined)?.readAt ?? read.dataUpdatedAt;
+  const status = read.data as NetworkStatus | undefined;
+  const at = status?.readAt ?? read.dataUpdatedAt;
   const when = read.data ? `read from the devices ${ago(at)}` : undefined;
   if (failed) return `${site} · ${failed}${when ? `; showing what was ${when}` : ""}`;
+  if (status?.applying) return `${site} · settings are being applied; showing what was ${when}`;
   return when ? `${site} · live, ${when}` : read.isFetching ? `${site} · reading the devices…` : site;
 };
 

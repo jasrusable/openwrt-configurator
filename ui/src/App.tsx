@@ -33,7 +33,8 @@ import {
 } from "react-router";
 import { useIntent } from "./data/intent";
 import { useDraftValue } from "./form/draft";
-import { IntentForm, useDraftChanged, useSaveActions } from "./form/IntentForm";
+import { useDraftChanged } from "./form/draft";
+import { IntentForm, useSaveActions } from "./form/IntentForm";
 import { ProblemCount, ProblemsButton, usePageProblems } from "./form/Problems";
 import { AppIcon } from "./kit/layout";
 import { groups, pages } from "./pages";

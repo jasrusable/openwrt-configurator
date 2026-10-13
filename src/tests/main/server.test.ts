@@ -6,7 +6,10 @@ import { join } from "path";
 import { writeFacts } from "../../deviceFacts";
 import { nodePlatform } from "../../platforms/node";
 import { rpcdAuth } from "../../server/auth";
-import { clientOf, uiHandler } from "../../server/handlers";
+import { uiHandler } from "../../server/app";
+import { inspectedKey } from "../../discover";
+import { write } from "../../store";
+import { clientOf } from "../../server/api/session";
 
 
 const withServer = async (
@@ -112,10 +115,15 @@ test("adopting a box already in Hardware under another name is refused: its key 
     const schema = { name: "zyxel,nwa50ax-pro", version: "25.12.5", ports: [{ name: "lan1", default_role: "lan" as const }] };
     const hostKey = { type: "ssh-ed25519", key: "SAME-KEY" };
     writeFacts(nodePlatform, intentPath, { hostname: existing, readAt: 1, schema, hostKey, macs: ["aa:bb:cc:00:00:01"] });
-    writeFileSync(
-      `${intentPath}.state/devices/inspected-10.0.0.66.json`,
-      JSON.stringify({ address: "10.0.0.66", schema, macs: [], hostname: "OpenWrt", hostKey, openLogin: false, suggested: { name: "ap-2", role: "access-point" } })
-    );
+    write(nodePlatform, inspectedKey(intentPath, "10.0.0.66"), {
+      address: "10.0.0.66",
+      schema,
+      macs: [],
+      hostname: "OpenWrt",
+      hostKey,
+      openLogin: false,
+      suggested: { name: "ap-2", role: "access-point" },
+    });
     const post = await handle(request("POST", "/api/discover/adopt", JSON.stringify({ address: "10.0.0.66", name: "ap-9" })));
     t.is(post.status, 409);
     t.regex(JSON.parse(post.body).error, new RegExp(`This is ${existing}`));

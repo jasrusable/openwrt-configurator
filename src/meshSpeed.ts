@@ -3,6 +3,8 @@
 // traffic over the link; it changes nothing.
 import { Probe, runProbe } from "./deviceProbes";
 import { Platform } from "./platform";
+import { fail, Problem } from "./problem";
+import { ok, Result } from "./result";
 import { onDevice, oneAtATime } from "./status/actions";
 
 /** How long the meter sends for. */
@@ -52,13 +54,15 @@ export const measureLink = ({
   platform: Platform;
   from: string;
   to: string;
-}): Promise<{ mbps: number } | { error: string }> =>
+}): Promise<Result<{ mbps: number }, Problem>> =>
   oneAtATime(platform, intentPath, "mesh-speed", async () => {
-    const mac = await onDevice(intentPath, platform, to, 15_000, (session) => runProbe(session, meshAddress));
-    if (typeof mac === "object") return mac;
-    if (!mac) return { error: `${to} is not in the mesh.` };
-    const output = await onDevice(intentPath, platform, from, meterMs + 20_000, (session) => runProbe(session, meter(mac)));
-    if (typeof output === "object") return output;
-    const mbps = parseThroughput(output);
-    return mbps === undefined ? { error: "The meter gave no result (is batctl installed?)." } : { mbps };
+    const mac = await onDevice(intentPath, platform, to, 15_000, async (session) => {
+      const found = await runProbe(session, meshAddress);
+      return found ? ok(found) : fail("conflict", `${to} is not in the mesh.`);
+    });
+    if (!mac.ok) return mac;
+    return onDevice(intentPath, platform, from, meterMs + 20_000, async (session) => {
+      const mbps = parseThroughput(await runProbe(session, meter(mac.value)));
+      return mbps === undefined ? fail("failed", "The meter gave no result (is batctl installed?).") : ok({ mbps });
+    });
   });

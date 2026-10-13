@@ -2,7 +2,7 @@ import test from "ava";
 import { tempDir } from "../helpers/tempDir";
 import { writeFileSync } from "fs";
 import { join } from "path";
-import { loadOncConfig } from "../../loadConfig";
+import { loadConfigOrThrow } from "../../loadConfig";
 import {
   assertSecretName,
   findPlaintextSecrets,
@@ -12,10 +12,21 @@ import {
   resolveSecrets,
   SecretLookup,
   stripOneTrailingNewline,
-} from "../../resolveSecrets";
-import { getUciCommands } from "../../getUciCommands";
+} from "../../secrets";
+import { getUciCommands } from "../../engine/getUciCommands";
 import { getUciDefaultsScript } from "../../getBuildPlan";
 import { nodePlatform } from "../../platforms/node";
+import { Problem } from "../../problem";
+import { Result } from "../../result";
+
+const resolvedOrFail = <T>(result: Result<T, Problem>): T => {
+  if (!result.ok) throw new Error(result.error.message);
+  return result.value;
+};
+const failureOf = <T>(result: Result<T, Problem>): Problem => {
+  if (result.ok) throw new Error("resolved, though it should not have");
+  return result.error;
+};
 
 const lookupFrom = (store: Record<string, string>): SecretLookup => {
   const counts = new Map<string, number>();
@@ -34,13 +45,13 @@ test("replaces $secret refs via lookup", async (t) => {
     "wifi/home": "testpsk1",
     pppoe: "pppoe-pass",
   });
-  const { value, secrets } = await resolveSecrets(
+  const { value, secrets } = resolvedOrFail(await resolveSecrets(
     {
       key: { $secret: "wifi/home" },
       nested: { password: { $secret: "pppoe" } },
     },
     lookup
-  );
+  ));
   t.deepEqual(value, { key: "testpsk1", nested: { password: "pppoe-pass" } });
   t.is(secrets.get("wifi/home"), "testpsk1");
   t.is(secrets.get("pppoe"), "pppoe-pass");
@@ -61,7 +72,7 @@ test("looks up each name once", async (t) => {
 });
 
 test("walks .overrides", async (t) => {
-  const { value } = await resolveSecrets(
+  const { value } = resolvedOrFail(await resolveSecrets(
     {
       key: "plaintext",
       ".overrides": [
@@ -72,7 +83,7 @@ test("walks .overrides", async (t) => {
       ],
     },
     lookupFrom({ "wifi/guest": "guestpsk1" })
-  );
+  ));
   t.deepEqual(value, {
     key: "plaintext",
     ".overrides": [
@@ -85,8 +96,8 @@ test("walks .overrides", async (t) => {
 });
 
 test("collects every missing name before failing", async (t) => {
-  const error = await t.throwsAsync(
-    resolveSecrets(
+  const error = failureOf(
+    await resolveSecrets(
       {
         key: { $secret: "wifi/home" },
         password: { $secret: "pppoe" },
@@ -94,15 +105,16 @@ test("collects every missing name before failing", async (t) => {
       lookupFrom({})
     )
   );
-  t.true(error?.message.includes(`service ${KEYCHAIN_SERVICE}`));
-  t.true(error?.message.includes("  - pppoe"));
-  t.true(error?.message.includes("  - wifi/home"));
-  t.true(error?.message.includes("secrets set <name>"));
+  t.is(error.kind, "internal", "a secret this machine lacks");
+  t.true(error.message.includes(`service ${KEYCHAIN_SERVICE}`));
+  t.true(error.message.includes("  - pppoe"));
+  t.true(error.message.includes("  - wifi/home"));
+  t.true(error.message.includes("secrets set <name>"));
 });
 
 test("rejects malformed $secret objects", async (t) => {
-  const error = await t.throwsAsync(
-    resolveSecrets(
+  const error = failureOf(
+    await resolveSecrets(
       {
         a: { $secret: "wifi/home", extra: 1 },
         b: { $secret: 1 },
@@ -111,14 +123,15 @@ test("rejects malformed $secret objects", async (t) => {
       lookupFrom({})
     )
   );
-  t.true(error?.message.startsWith("Invalid $secret references:"));
+  t.is(error.kind, "invalid", "the file's own mistake");
+  t.true(error.message.startsWith("Invalid $secret references:"));
   t.true(
-    error?.message.includes(
+    error.message.includes(
       'a: $secret object must contain only { "$secret": "name" }'
     )
   );
-  t.true(error?.message.includes("b: $secret must be a string"));
-  t.true(error?.message.includes("c:"));
+  t.true(error.message.includes("b: $secret must be a string"));
+  t.true(error.message.includes("c:"));
 });
 
 test("leaves plaintext strings alone and does not look them up", async (t) => {
@@ -126,7 +139,7 @@ test("leaves plaintext strings alone and does not look them up", async (t) => {
     counts: Map<string, number>;
   };
   const input = { key: "test123456", list: ["a", 1, true, null] };
-  const { value, secrets } = await resolveSecrets(input, lookup);
+  const { value, secrets } = resolvedOrFail(await resolveSecrets(input, lookup));
   t.deepEqual(value, input);
   t.is(secrets.size, 0);
   t.is(lookup.counts.size, 0);
@@ -292,7 +305,7 @@ test("loadOncConfig resolves refs then validates the schema", async (t) => {
       },
     })
   );
-  const { oncConfig, secrets } = await loadOncConfig({
+  const { plan, secrets } = await loadConfigOrThrow({
     path,
     platform: nodePlatform,
     lookup: lookupFrom({
@@ -302,11 +315,11 @@ test("loadOncConfig resolves refs then validates the schema", async (t) => {
     }),
   });
   t.is(
-    oncConfig.devices[0].provisioning_config?.ssh_auth.password,
+    plan.devices[0].login?.password,
     "ssh-pass-ok"
   );
-  t.is((oncConfig.config as any).wireless["wifi-iface"][0].key, "testpsk1");
-  t.is((oncConfig.config as any).network.interface[0].password, "pppoe-pass");
+  t.is(plan.config.wireless["wifi-iface"][0].options.key, "testpsk1");
+  t.is(plan.config.network.interface[0].options.password, "pppoe-pass");
   t.is(secrets.get("wifi/home"), "testpsk1");
 });
 

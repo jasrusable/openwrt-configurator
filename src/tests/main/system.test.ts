@@ -1,10 +1,10 @@
 import test from "ava";
 import { fixtureConfig } from "../helpers/fixtures";
 import { getDeviceSchema } from "../../getDeviceSchema";
-import { getOpenWrtConfig } from "../../getOpenWrtConfig";
+import { getOpenWrtConfig } from "../../engine/getOpenWrtConfig";
 import { nodePlatform } from "../../platforms/node";
 
-const { oncConfig, deviceConfigs } = fixtureConfig("config.json");
+const { plan, deviceConfigs } = fixtureConfig("config.json");
 
 test("system", async (t) => {
   const deviceSchemas = await Promise.all(
@@ -20,7 +20,7 @@ test("system", async (t) => {
   const routerDeviceConfig = deviceConfigs[0];
   const routerDeviceSchema = deviceSchemas[0];
   const routerOpenWrtConfig = getOpenWrtConfig({
-    oncConfig,
+    plan,
     deviceConfig: routerDeviceConfig,
     deviceSchema: routerDeviceSchema,
   });
@@ -33,7 +33,7 @@ test("system", async (t) => {
   const apDeviceConfig = deviceConfigs[1];
   const apDeviceSchema = deviceSchemas[1];
   const apOpenWrtConfig = getOpenWrtConfig({
-    oncConfig,
+    plan,
     deviceConfig: apDeviceConfig,
     deviceSchema: apDeviceSchema,
   });

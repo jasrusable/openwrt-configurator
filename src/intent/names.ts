@@ -2,6 +2,7 @@
 // removing or reordering one item then renames no other, so the apply diff
 // shows only what changed. UCI names are letters, digits and underscores;
 // network ids have no underscore, so a prefixed name never meets one.
+import { Section } from "../plan/types";
 
 export const slug = (text: string) =>
   text
@@ -29,8 +30,8 @@ export const uniqueNames = <T>(prefix: string, items: T[], by: (item: T) => stri
   });
 };
 
-/** The sections, each given its `.name` from `by`. */
-export const named = <S extends object>(prefix: string, sections: S[], by: (section: S) => string): S[] => {
+/** The sections, each given its name from `by`. */
+export const named = (prefix: string, sections: Section[], by: (section: Section) => string): Section[] => {
   const names = uniqueNames(prefix, sections, by);
-  return sections.map((section, i) => ({ ...section, ".name": names[i] }));
+  return sections.map((section, i) => ({ ...section, name: names[i] }));
 };

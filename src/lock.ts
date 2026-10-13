@@ -1,54 +1,77 @@
 // One lock across processes (the Node server, CGI requests, a background
-// job): a directory, as mkdir is atomic. Taking over one left by a process
-// that died is check-then-act, so it is done holding a second, momentary
-// lock: two requests that both find it stale cannot both take it.
+// job): a directory, as making one is atomic, holding its owner's token.
+// Taking over one whose holder is gone is check-then-act, so it is done
+// holding a second, momentary lock: two requests that both find it stale
+// cannot both take it.
+import { dirname } from "./posixPath";
 import { Platform } from "./platform";
-import { shellQuote } from "./shell";
 
-/**
- * Shell that takes `lock`, or takes it over when `stale` (a shell condition)
- * holds; exits non-zero when it is held. A takeover lock older than a minute
- * was left by a process killed mid-takeover.
- */
-export const takeLockCommand = (lock: string, stale: string) => {
-  const l = shellQuote(lock);
-  const t = shellQuote(`${lock}.takeover`);
-  return [
-    `find ${t} -prune -mmin +1 2>/dev/null | grep -q . && rmdir ${t}`,
-    `mkdir ${l} 2>/dev/null || { mkdir ${t} 2>/dev/null && { { ${stale}; } && rm -rf ${l} && mkdir ${l}; r=$?; rmdir ${t}; [ $r -eq 0 ]; }; }`,
-  ].join("\n");
+export type LockFiles = Pick<Platform, "makeDir" | "removeDir" | "mkdirp" | "modifiedAt" | "readTextFile" | "writeTextFile">;
+
+/** A takeover lock older than this was left by a process killed mid-takeover. */
+const takeoverStaleMs = 60_000;
+
+const ownerFile = (lock: string) => `${lock}/owner`;
+
+/** Who holds `lock`: its owner's token, or undefined when it is not held or not yet written. */
+export const holderOf = (files: Pick<Platform, "readTextFile">, lock: string) => {
+  try {
+    return files.readTextFile(ownerFile(lock)).trim() || undefined;
+  } catch {
+    return undefined;
+  }
 };
 
-/** A shell condition: `path` was last changed more than `minutes` ago. */
-export const olderThan = (path: string, minutes: number) =>
-  `find ${shellQuote(path)} -prune -mmin +${minutes} | grep -q .`;
+/**
+ * Take `lock` as `owner`; or, when it is held, take it over if `stale` says
+ * its holder is gone (given the holder's token and when the lock was last
+ * changed). False when it is held.
+ */
+export const takeLock = async (
+  files: LockFiles,
+  lock: string,
+  owner: string,
+  stale: (holder: string | undefined, since: number | undefined) => boolean | Promise<boolean>,
+  now: () => number = Date.now
+): Promise<boolean> => {
+  files.mkdirp(dirname(lock));
+  const own = () => (files.writeTextFile(ownerFile(lock), owner), true);
+  if (files.makeDir(lock)) return own();
+  const takeover = `${lock}.takeover`;
+  const since = files.modifiedAt(takeover);
+  if (since !== undefined && now() - since > takeoverStaleMs) files.removeDir(takeover);
+  if (!files.makeDir(takeover)) return false;
+  try {
+    if (!(await stale(holderOf(files, lock), files.modifiedAt(lock)))) return false;
+    files.removeDir(lock);
+    return files.makeDir(lock) && own();
+  } finally {
+    files.removeDir(takeover);
+  }
+};
+
+/** Give `lock` back, only if `owner` still holds it: one that outlived a takeover frees nothing. */
+export const releaseLock = (files: Pick<Platform, "readTextFile" | "removeDir">, lock: string, owner: string) => {
+  if (holderOf(files, lock) === owner) files.removeDir(lock);
+};
 
 /**
  * Run `work` holding the lock at `path`; `busy` when another holds it. One
- * older than `staleMinutes` is taken over, so `work` must always take less.
- * It is given back only by its owner (a token inside): a holder that
- * outlived a takeover does not free the lock of the one that took it.
+ * not changed for `staleMinutes` is taken over, so `work` must always take less.
  */
 export const withLock = async <T>(
-  platform: Pick<Platform, "run" | "mkdirp">,
+  files: LockFiles,
   path: string,
   staleMinutes: number,
-  work: () => Promise<T>
+  work: () => Promise<T>,
+  now: () => number = Date.now
 ): Promise<T | "busy"> => {
-  platform.mkdirp(path.replace(/\/[^/]*$/, ""));
-  const owner = `${path}/owner`;
-  const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const taken = await platform.run([
-    "sh",
-    "-c",
-    `${takeLockCommand(path, olderThan(path, staleMinutes))} && echo ${token} > ${shellQuote(owner)}`,
-  ]);
-  if (taken.code !== 0) return "busy";
+  const token = `${now()}-${Math.random().toString(36).slice(2)}`;
+  const old = (_: string | undefined, since: number | undefined) => since === undefined || now() - since > staleMinutes * 60_000;
+  if (!(await takeLock(files, path, token, old, now))) return "busy";
   try {
     return await work();
   } finally {
-    await platform
-      .run(["sh", "-c", `[ "$(cat ${shellQuote(owner)} 2>/dev/null)" = ${token} ] && rm -rf ${shellQuote(path)}`])
-      .catch(() => undefined);
+    releaseLock(files, path, token);
   }
 };

@@ -1,187 +1,59 @@
+// What a rollback puts back, worked out before anything changes (the agent's
+// own behaviour is agent.test.ts, run for real), and the removal cascade it
+// stages packages for.
 import test from "ava";
-import { armWatchdogCommands } from "../../rollback";
+import { stateOf } from "../helpers/fixtures";
+import * as agent from "../../agent";
+import { armPlan } from "../../apply/arm";
+import { DeviceRun } from "../../apply/run";
 import { removalCascade } from "../../deviceProbes";
+import { managedFilesManifest } from "../../getDeviceScript";
 
-const arm = (
-  overrides: Partial<Parameters<typeof armWatchdogCommands>[0]> = {}
-) =>
-  armWatchdogCommands({
-    runId: "abc123",
-    timeoutSeconds: 90,
-    filesToRestore: [],
-    filesToDelete: [],
-    packagesToUninstallOnRollback: [],
+const run = (overrides: Partial<DeviceRun> = {}) =>
+  ({
+    runId: "r1",
+    rollbackMode: "reload-then-reboot",
+    recoverSeconds: 60,
+    managedFiles: ["/etc/hotplug.d/net/20-aql"],
+    installedPackages: ["dnsmasq"],
+    state: stateOf({
+      config: { wireless: {} },
+      files: [
+        { path: "/etc/hotplug.d/net/20-aql", content: "" },
+        { path: "/etc/hotplug.d/iface/99-new", content: "" },
+      ],
+      packages: { add: ["dnsmasq", "nlbwmon"], remove: [] },
+      services: [
+        { name: "odhcpd", running: false, restartAfterRollback: true },
+        { name: "firewall", running: true },
+      ],
+    }),
     ...overrides,
-  });
+  }) as unknown as DeviceRun;
 
-const watchdogOf = (commands: string[]) =>
-  commands.find((c) => c.includes("ONC_WATCHDOG"))!;
-
-test("the snapshot is taken before anything is changed", (t) => {
-  const commands = arm();
-  const snapshot = commands.findIndex((c) => c.startsWith("cp -a /etc/config"));
-  const start = commands.findIndex((c) => c.startsWith("setsid"));
-  t.true(snapshot > -1);
-  t.true(snapshot < start);
+test("a rollback restores the files a run touches, removes the ones it makes, and its new packages", (t) => {
+  const plan = armPlan(run(), 90);
+  t.deepEqual(plan.filesToRestore, ["/etc/hotplug.d/net/20-aql", "/etc/hotplug.d/iface/99-new", managedFilesManifest]);
+  t.deepEqual(plan.filesToDelete, ["/etc/hotplug.d/iface/99-new"]);
+  t.deepEqual(plan.newPackages, ["nlbwmon"], "only what the device did not have");
+  t.deepEqual(plan.services, ["odhcpd", "firewall"]);
+  t.deepEqual(plan.restartAfterRestore, ["odhcpd"]);
+  t.true(plan.reloadWireless);
+  t.is(plan.timeoutSeconds, 90);
 });
 
-// Paths are per-run: with fixed paths a second provision inside the confirm
-// window would clear the flag that had already disarmed an earlier watchdog,
-// which would then restore a stale snapshot over a healthy device.
-test("rollback paths are scoped to the run", (t) => {
-  const a = arm({ runId: "aaa" }).join("\n");
-  const b = arm({ runId: "bbb" }).join("\n");
-  t.true(a.includes("/tmp/onc-rollback-aaa"));
-  t.true(a.includes("/tmp/onc-confirmed-aaa"));
-  t.false(a.includes("bbb"));
-  t.false(b.includes("aaa"));
+test("what the agent is told: scalars as quoted arguments, lists a line each on stdin, a path with spaces or a quote whole", (t) => {
+  const plan = { ...armPlan(run(), 90), filesToDelete: ["/etc/other's file", " /etc/padded "] };
+  const { command, stdin } = agent.arm("r1", plan);
+  t.true(command.startsWith("sh /tmp/onc-agent-r1.sh arm '--timeout' '90' '--mode' 'reload-then-reboot'"));
+  t.false(command.includes("other"), "no list on the command line: dropbear refuses a long one");
+  t.true(stdin!.split("\n").includes("delete /etc/other's file"));
+  t.true(stdin!.split("\n").includes("delete  /etc/padded "), "kept exactly, spaces and all");
 });
 
-test("a confirmed run cleans up after itself instead of rolling back", (t) => {
-  const watchdog = watchdogOf(arm());
-  t.regex(watchdog, /if \[ -f \/tmp\/onc-confirmed-abc123 \]; then rm -rf [^\n]*\/tmp\/onc-rollback-abc123 [^\n]*touch \/tmp\/onc-disarmed-abc123; exit 0; fi/);
-});
-
-test("rollback restores config, files and newly installed packages", (t) => {
-  const commands = arm({
-    filesToRestore: ["/etc/hotplug.d/net/20-aql"],
-    filesToDelete: ["/etc/hotplug.d/iface/99-new"],
-    packagesToUninstallOnRollback: ["sqm-scripts", "luci-app-sqm"],
-  });
-  const watchdog = watchdogOf(commands);
-
-  // Pre-existing files are archived while they are still intact...
-  t.true(
-    commands.some(
-      (c) =>
-        c.startsWith("tar -cf /tmp/onc-rollback-abc123/files.tar") &&
-        c.includes("'/etc/hotplug.d/net/20-aql'")
-    )
-  );
-  // ...and put back on rollback.
-  t.true(watchdog.includes("tar -xf /tmp/onc-rollback-abc123/files.tar -C /"));
-  // Files this run creates did not exist before, so they are removed.
-  t.true(watchdog.includes("rm -f '/etc/hotplug.d/iface/99-new'"));
-  // Packages this run installs are removed again; this needs no network.
-  t.true(watchdog.includes("apk del 'sqm-scripts' 'luci-app-sqm'"));
-  t.true(
-    watchdog.includes("cp -a /tmp/onc-rollback-abc123/config /etc/config")
-  );
-});
-
-// Doing `mv /etc/config` before the copy meant a failed copy — an overlay full
-// from `apk add`, which is exactly when rollbacks fire — rebooted the device
-// with no /etc/config at all, the one failure needing physical recovery.
-test("the restored config is staged before the live one is moved aside", (t) => {
-  const watchdog = watchdogOf(arm());
-  const swap = watchdog.split("\n").find((l) => l.startsWith("if cp -a"))!;
-  t.truthy(swap);
-  t.true(swap.includes("/etc/config.onc-new"));
-  // the move only happens inside the success branch of the copy
-  t.true(swap.indexOf("cp -a") < swap.indexOf("mv /etc/config"));
-  t.true(swap.includes("else"));
-  // and no unguarded move survives
-  t.false(
-    watchdog
-      .split("\n")
-      .some((l) => l.trim().startsWith("mv /etc/config /etc/config.onc-failed"))
-  );
-});
-
-// Staging packages is network-bound, so it happens before the watchdog starts
-// counting; clearing the directory therefore cannot be part of arming.
-test("arming does not clear the rollback directory", (t) => {
-  const commands = arm();
-  t.false(
-    commands.some((c) => c.startsWith("rm -rf /tmp/onc-rollback-abc123 "))
-  );
-  t.false(
-    commands.some((c) => c.startsWith("mkdir -p /tmp/onc-rollback-abc123"))
-  );
-});
-
-// Recovery is graduated: a reload that restores access should not cost an
-// outage, but a reload is not proof the operator can reach the device, so the
-// reboot stays as the fallback.
-test("the default mode reverts, reloads, then reboots only if access does not return", (t) => {
-  const watchdog = watchdogOf(arm());
-  const reload = watchdog.indexOf("reload_config");
-  // The recovered flag is also named in the early cleanup line, so anchor on
-  // the wait loop itself rather than the first mention of the path.
-  const wait = watchdog.indexOf("while [ $i -lt");
-  const reboot = watchdog.lastIndexOf("\nreboot");
-
-  t.true(reload > -1, "reloads services");
-  t.true(wait > reload, "waits for the recovered flag after reloading");
-  t.true(reboot > wait, "reboots only after the wait");
-  // The wait exits early and cleanly when access comes back.
-  t.true(
-    watchdog.includes(
-      'logger -t onc "revert restored access, no reboot needed"'
-    )
-  );
-});
-
-// Restoring /etc/config is not enough on its own. Every UCI read applies the
-// deltas in /tmp/.uci on top of the files, so a run that died mid-configure
-// with changes staged would have the watchdog's own reload_config read the new
-// values straight back out and re-apply the config it just rolled back.
-test("the rollback discards staged uci changes before it reloads", (t) => {
-  const revertCommands = [
-    "if [ -f /etc/config/network ]; then uci revert network; fi",
-    "if [ -f /etc/config/wireless ]; then uci revert wireless; fi",
-  ];
-  const watchdog = watchdogOf(arm({ revertCommands }));
-
-  for (const command of revertCommands) {
-    t.true(watchdog.includes(command), `watchdog reverts: ${command}`);
-  }
-  // Ordering is the whole point: reverting after the reload would be useless.
-  t.true(
-    watchdog.indexOf(revertCommands[0]) < watchdog.indexOf("reload_config"),
-    "staged changes are dropped before the reload reads them"
-  );
-});
-
-test("mode=reboot skips the reload and reboots straight away", (t) => {
-  const watchdog = watchdogOf(arm({ mode: "reboot" }));
-  t.false(watchdog.includes("reload_config"));
-  t.false(watchdog.includes("while [ $i -lt"), "no wait loop");
-  // The element wraps the script in a heredoc, so the delimiter is last; the
-  // final actual command should be the reboot.
-  const body = watchdog.trimEnd().split("\n").slice(0, -1);
-  t.is(body[body.length - 1], "reboot");
-});
-
-test("mode=reload never reboots", (t) => {
-  const watchdog = watchdogOf(arm({ mode: "reload" }));
-  t.true(watchdog.includes("reload_config"));
-  t.true(watchdog.includes("while [ $i -lt"), "waits for the recovered flag");
-  // `reboot` must not appear as a command anywhere in this mode.
-  t.false(watchdog.split("\n").some((l) => l.trim() === "reboot"));
-  t.true(watchdog.includes("forbids rebooting"));
-});
-
-// Redundant with reload_config in practice — netifd triggers on `wireless` and
-// `wifi reload` is just `ubus call network reload` — but it keeps the rollback
-// path from depending on that trigger still being registered.
-test("wireless gets an explicit reload on top of reload_config", (t) => {
-  t.false(watchdogOf(arm()).includes("wifi reload"));
-  t.true(watchdogOf(arm({ reloadWireless: true })).includes("wifi reload"));
-});
-
-test("paths containing quotes are escaped", (t) => {
-  const watchdog = watchdogOf(arm({ filesToDelete: ["/etc/other's file"] }));
-  t.true(watchdog.includes(`rm -f '/etc/other'\\''s file'`));
-});
-
-test("nothing file- or package-related is emitted when there is nothing to do", (t) => {
-  const commands = arm();
-  const watchdog = watchdogOf(commands);
-  // The managed files' archive; the boot links (rc.d) are always kept.
-  t.false(commands.some((c) => c.includes("files.tar")));
-  t.false(watchdog.includes("files.tar"));
-  t.false(watchdog.includes("apk del"));
+test("a path with a line break cannot be armed: the agent reads a line each", (t) => {
+  t.is(agent.unarmable(armPlan(run(), 90)), undefined);
+  t.regex(agent.unarmable({ ...armPlan(run(), 90), filesToRestore: ["/etc/a\n/etc/passwd"] })!, /line break/);
 });
 
 // `--rdepends` removes dependents too, so the named packages understate it
@@ -194,88 +66,11 @@ test("the removal cascade reports everything apk would purge", (t) => {
     "( 2/3) Purging uhttpd (2026.06.16~7b1bec45-r1)",
     "( 3/3) Purging firewall4 (2025.03.17~b6e51575-r2)",
   ].join("\n");
-  t.deepEqual(probe.parse({ stdout, stderr: "", code: 0 }), [
-    "luci-ssl",
-    "uhttpd",
-    "firewall4",
-  ]);
+  t.deepEqual(probe.parse({ stdout, stderr: "", code: 0 }), ["luci-ssl", "uhttpd", "firewall4"]);
 });
 
 test("a removal cascade apk cannot simulate is an error, never the named packages alone", (t) => {
   // The cascade is what a rollback stages: a guess would let a removal through that it cannot undo.
   t.throws(() => removalCascade(["firewall4"]).parse({ stdout: "ERROR: unknown", stderr: "", code: 1 }));
   t.throws(() => removalCascade(["firewall4"]).parse({ stdout: "OK: 10 MiB in 126 packages", stderr: "", code: 0 }));
-});
-
-test("a rollback discards staged changes before any package step: a postinst's uci commit would commit them", (t) => {
-  const watchdog = watchdogOf(
-    armWatchdogCommands({
-      runId: "r1",
-      timeoutSeconds: 90,
-      filesToRestore: [],
-      filesToDelete: [],
-      packagesToUninstallOnRollback: ["nlbwmon"],
-      revertCommands: ["REVERT"],
-    })
-  );
-  const revert = watchdog.indexOf("REVERT");
-  t.true(revert > watchdog.indexOf("mv /etc/config.onc-new /etc/config"));
-  t.true(revert < watchdog.indexOf("apk del"));
-  t.true(revert < watchdog.indexOf("apk add"));
-});
-
-test("boot links are restored whether the rollback reloads or reboots", (t) => {
-  const watchdog = (mode: "reboot" | "reload") =>
-    watchdogOf(armWatchdogCommands({ runId: "r1", timeoutSeconds: 90, filesToRestore: [], filesToDelete: [], packagesToUninstallOnRollback: [], mode }));
-  for (const mode of ["reboot", "reload"] as const) {
-    const text = watchdog(mode);
-    t.true(text.includes("tar -xf /tmp/onc-rollback-r1/rc.d.tar"), mode);
-  }
-  const reboot = watchdog("reboot");
-  t.true(reboot.indexOf("rc.d.tar -C") < reboot.indexOf("\nreboot"));
-});
-
-test("the watchdog marks its restore done before it waits to hear access is back", (t) => {
-  const text = watchdogOf(armWatchdogCommands({ runId: "r1", timeoutSeconds: 90, filesToRestore: [], filesToDelete: [], packagesToUninstallOnRollback: [] }));
-  const restored = text.indexOf("touch /tmp/onc-restored-r1");
-  t.true(restored > text.indexOf("reload_config"));
-  t.true(restored < text.indexOf("if [ -f /tmp/onc-recovered-r1 ]"));
-});
-
-test("a failed arm takes its snapshots and staged packages with it, and stands its watchdog down", (t) => {
-  const { dropArmCommand } = require("../../rollback");
-  const command: string = dropArmCommand("r1");
-  t.true(command.includes("rm -rf /etc/onc/rollback/r1 /tmp/onc-rollback-r1"));
-  t.true(command.includes("[ -f /tmp/onc-watchdog-r1.pid ] && touch /tmp/onc-confirmed-r1"));
-  t.true(command.includes("/tmp/onc-watchdog-r1.sleep"));
-});
-
-test("a rollback restarts what a reload would leave on its old devices, after the reload", (t) => {
-  const commands = armWatchdogCommands({
-    runId: "r1",
-    timeoutSeconds: 90,
-    filesToRestore: [],
-    filesToDelete: [],
-    packagesToUninstallOnRollback: [],
-    restartAfterRestore: ["odhcpd"],
-  });
-  const watchdog = commands.join("\n");
-  const reload = watchdog.indexOf("reload_config");
-  const restart = watchdog.indexOf(`for s in 'odhcpd'; do`);
-  t.true(reload >= 0 && restart > reload, "restarted once the restored config is reloaded");
-  t.false(armWatchdogCommands({ runId: "r1", timeoutSeconds: 90, filesToRestore: [], filesToDelete: [], packagesToUninstallOnRollback: [] }).join("\n").includes("for s in"));
-});
-
-test("a condition's values compare by text, and a mistyped name fails even where OR would skip it", (t) => {
-  const { evaluateCondition } = require("../../condition");
-  const lookup = (name: string) => {
-    if (name === "device.sw_config") return { value: true };
-    if (name === "device.tag.floor") return { value: "2" };
-    if (name === "device.tag.role") return { value: "ap" };
-    if (name.startsWith("device.tag.")) return {};
-    throw new Error(`unknown name ${name}`);
-  };
-  t.true(evaluateCondition("device.sw_config == 'true'", lookup));
-  t.true(evaluateCondition("device.tag.floor == 2", lookup));
-  t.throws(() => evaluateCondition("device.tag.role == 'ap' OR device.modle_id == 'x'", lookup), { message: /modle_id/ });
 });

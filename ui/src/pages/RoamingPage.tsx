@@ -8,13 +8,13 @@ import {
   steeringLabels,
   steeringLevels,
   steeringSummary,
-} from "../../../src/intent/roaming";
+} from "../../../src/intent/wifi";
 import { Intent } from "../../../src/intent/schema";
 import { useDraftValue } from "../form/draft";
 import { SegmentedField, SwitchField } from "../form/fields";
 import { Section, SettingRow, SettingsPage } from "../kit/layout";
 
-// The levels and their names are the compiler's (roaming.ts).
+// The levels and their names are the compiler's (src/intent/wifi/roaming.ts).
 const steering = steeringLevels.map((value) => ({ value, label: steeringLabels[value] }));
 
 /** The SSIDs it applies to: those with roaming assistance on. */

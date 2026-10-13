@@ -3,13 +3,17 @@
 // test the internet line's download speed from the router, survey the air
 // around the access points, and look up OpenWrt's latest release. Nothing here
 // changes a setting.
+import { z } from "zod";
 import { readFacts } from "../deviceFacts";
 import { Probe, runProbe } from "../deviceProbes";
-import { getOpenWrtState } from "../getOpenWrtState";
-import { loadOncConfig } from "../loadConfig";
+import { getOpenWrtState } from "../engine/getOpenWrtState";
 import { parseJson } from "../parseJson";
 import { Platform } from "../platform";
-import { provisionableDevices } from "../provisionConfig";
+import { fail, Problem, problem } from "../problem";
+import { Result, attempt, messageOf, ok } from "../result";
+import { read, stateLayout, StoreKey, tryWrite } from "../store";
+import { loadSettings } from "../settings";
+import { provisionableDevices } from "../apply/provisionConfig";
 import { readEach } from "../readEach";
 import { jobState } from "../server/provisionJob";
 import { withLock } from "../lock";
@@ -27,28 +31,29 @@ export const onDevice = async <T>(
   platform: Platform,
   hostname: string,
   timeoutMs: number,
-  work: (session: Parameters<typeof runProbe>[0], state: () => ReturnType<typeof getOpenWrtState>) => Promise<T>
-): Promise<T | { error: string }> => {
+  work: (session: Parameters<typeof runProbe>[0], state: () => ReturnType<typeof getOpenWrtState>) => Promise<Result<T, Problem>>
+): Promise<Result<T, Problem>> => {
   if ((await jobState({ intentPath, files: platform }).catch(() => undefined))?.state === "running") {
-    return { error: "An apply is running: try again when it has finished." };
+    return fail("conflict", "An apply is running: try again when it has finished.");
   }
-  const { oncConfig } = await loadOncConfig({ path: intentPath, platform });
-  const { ready } = provisionableDevices(oncConfig);
+  const loaded = await loadSettings(intentPath, platform);
+  if (!loaded.ok) return loaded;
+  const { ready } = provisionableDevices(loaded.value.plan);
   const deviceConfig = ready.find((d) => d.hostname === hostname);
-  if (!deviceConfig) return { error: `${hostname} is not in Hardware.` };
+  if (!deviceConfig) return fail("not-found", `${hostname} is not in Hardware.`);
   const facts = readFacts(platform, intentPath, [hostname]);
   const schema = facts[hostname]?.schema;
-  if (!schema) return { error: `${hostname} has not been read yet.` };
-  const [result] = await readEach<T | { error: string }>({
+  if (!schema) return fail("conflict", `${hostname} has not been read yet.`);
+  const [result] = await readEach({
     intentPath,
     platform,
     devices: [deviceConfig],
     facts,
     timeoutMs,
-    read: (found) => work(found.session, () => getOpenWrtState({ oncConfig, deviceConfig, deviceSchema: schema })),
-    failed: (_, error) => ({ error: `${hostname}: ${error}` }),
+    read: (found) =>
+      work(found.session, () => getOpenWrtState({ plan: loaded.value.plan, deviceConfig, deviceSchema: schema })),
   });
-  return result;
+  return result.ok ? result.value : fail("unreachable", `${hostname}: ${result.error.message}`);
 };
 
 /**
@@ -61,10 +66,10 @@ export const oneAtATime = async <T>(
   platform: Platform,
   intentPath: string,
   name: string,
-  work: () => Promise<T | { error: string }>
-): Promise<T | { error: string }> => {
-  const result = await withLock(platform, `${intentPath}.state/${name}.lock`, 1, work);
-  return result === "busy" ? { error: "One is already running: wait for it to finish." } : result;
+  work: () => Promise<Result<T, Problem>>
+): Promise<Result<T, Problem>> => {
+  const result = await withLock(platform, stateLayout(intentPath).actionLock(name), 1, work);
+  return result === "busy" ? fail("busy", "One is already running: wait for it to finish.") : result;
 };
 
 /** What an action may take in all: uhttpd ends a CGI request at 60 s. */
@@ -84,13 +89,13 @@ export const restartService = ({
 }) =>
   onDevice(intentPath, platform, hostname, 20_000, async (session, state) => {
     if (!(state().services ?? []).some((s) => s.name === service && restartable(s))) {
-      return { error: `${service} is not a service this page restarts on ${hostname}.` };
+      return fail("invalid", `${service} is not a service this page restarts on ${hostname}.`);
     }
     const restarted = await runProbe(session, {
       command: `/etc/init.d/${shellQuote(service)} restart >/dev/null 2>&1; echo $?`,
       parse: ({ stdout }) => stdout.trim() === "0",
     } as Probe<boolean>);
-    return restarted ? { ok: true as const } : { error: `${service} did not restart on ${hostname}.` };
+    return restarted ? ok({ ok: true as const }) : fail("failed", `${service} did not restart on ${hostname}.`);
   });
 
 /** How long the router takes to download this much, from Cloudflare's speed test. */
@@ -105,9 +110,10 @@ export const parseSpeed = (stdout: string) => {
 /** The router's download speed now, Mbit/s: test traffic only (25 MB), a few seconds, one at a time. */
 export const speedTest = ({ intentPath, platform }: { intentPath: string; platform: Platform }) =>
   oneAtATime(platform, intentPath, "speed-test", async () => {
-    const { oncConfig } = await loadOncConfig({ path: intentPath, platform });
-    const router = provisionableDevices(oncConfig).ready.find((d) => d.tags?.role === "router");
-    if (!router) return { error: "There is no router in Hardware." };
+    const loaded = await loadSettings(intentPath, platform);
+    if (!loaded.ok) return loaded;
+    const router = provisionableDevices(loaded.value.plan).ready.find((d) => d.tags?.role === "router");
+    if (!router) return fail("conflict", "There is no router in Hardware.");
     return onDevice(intentPath, platform, router.hostname, 45_000, async (session) => {
       const mbps = await runProbe(session, {
         command: [
@@ -118,29 +124,45 @@ export const speedTest = ({ intentPath, platform }: { intentPath: string; platfo
         ].join("; "),
         parse: ({ stdout }) => parseSpeed(stdout),
       } as Probe<number | undefined>);
-      return mbps ? { downMbps: mbps } : { error: "The speed test did not finish." };
+      return mbps ? ok({ downMbps: mbps }) : fail("failed", "The speed test did not finish.");
     });
   });
 
+const latestReleaseKey = (intentPath: string): StoreKey<{ at: number; version: string }> => ({
+  path: stateLayout(intentPath).release,
+  schema: z.object({ at: z.number(), version: z.string() }),
+  format: 1,
+  mode: 0o644,
+});
+
 /** OpenWrt's latest stable release, from its own downloads site; kept a day beside the intent. */
-export const latestRelease = async ({ intentPath, platform }: { intentPath: string; platform: Platform }) => {
-  const file = `${intentPath}.state/openwrt-release.json`;
-  try {
-    const kept = parseJson(platform.readTextFile(file), file) as { at: number; version: string };
-    if (Date.now() - kept.at < 24 * 3600 * 1000 && typeof kept.version === "string") return { version: kept.version };
-  } catch {
-    // None kept yet.
-  }
-  try {
-    const response = await platform.http.request({ method: "GET", url: "https://downloads.openwrt.org/.versions.json" });
-    const version = (JSON.parse(response.body) as { stable_version?: unknown }).stable_version;
-    if (typeof version !== "string") return { error: "openwrt.org did not say." };
-    platform.mkdirp(`${intentPath}.state`);
-    platform.writeFileAtomic(file, JSON.stringify({ at: Date.now(), version }), 0o644);
-    return { version };
-  } catch (e) {
-    return { error: `Could not ask openwrt.org: ${(e as Error).message}` };
-  }
+export const latestRelease = async ({
+  intentPath,
+  platform,
+  now = Date.now,
+}: {
+  intentPath: string;
+  platform: Platform;
+  now?: () => number;
+}): Promise<Result<{ version: string }, Problem>> => {
+  const kept = read(platform, latestReleaseKey(intentPath));
+  if (kept && now() - kept.at < 24 * 3600 * 1000) return ok({ version: kept.version });
+  const asked = await attempt(
+    () => platform.http.request({ method: "GET", url: "https://downloads.openwrt.org/.versions.json" }),
+    (e) => problem("unreachable", `Could not ask openwrt.org: ${messageOf(e)}`)
+  );
+  if (!asked.ok) return asked;
+  const version = (() => {
+    try {
+      return (JSON.parse(asked.value.body) as { stable_version?: unknown }).stable_version;
+    } catch {
+      return undefined;
+    }
+  })();
+  if (typeof version !== "string") return fail("failed", "openwrt.org did not say.");
+  // Only so it is asked once a day: a write that fails asks again next time.
+  tryWrite(platform, latestReleaseKey(intentPath), { at: now(), version });
+  return ok({ version });
 };
 
 export type Survey = {
@@ -237,10 +259,12 @@ export const neighboursOf = (surveys: SurveyRead[], ssids: string[], complete: b
  */
 export const wifiSurvey = ({ intentPath, platform }: { intentPath: string; platform: Platform }) =>
   oneAtATime(platform, intentPath, "survey", async () => {
-    const { oncConfig, intent } = await loadOncConfig({ path: intentPath, platform });
+    const loaded = await loadSettings(intentPath, platform);
+    if (!loaded.ok) return loaded;
+    const { plan, intent } = loaded.value;
     const ssids = (intent?.wifi.networks ?? []).map((w) => w.ssid);
-    const hosts = provisionableDevices(oncConfig).ready.map((d) => d.hostname);
-    const read: SurveyRead[] = [];
+    const hosts = provisionableDevices(plan).ready.map((d) => d.hostname);
+    const surveyed: SurveyRead[] = [];
     const failed: { accessPoint: string; error: string }[] = [];
     const deadline = Date.now() + actionBudgetMs;
     for (const hostname of hosts) {
@@ -250,13 +274,20 @@ export const wifiSurvey = ({ intentPath, platform }: { intentPath: string; platf
         continue;
       }
       const result = await onDevice(intentPath, platform, hostname, Math.min(30_000, left), (session) =>
-        runProbe(session, { command: surveyCommand, parse: ({ stdout }) => parseSurvey(hostname, parseJson(stdout || "[]", "survey")) } as Probe<SurveyRead>)
-      ).catch((e: Error) => ({ error: e.message }));
-      if ("error" in result) failed.push({ accessPoint: hostname, error: result.error });
-      else read.push(result);
+        attempt(
+          () =>
+            runProbe(session, {
+              command: surveyCommand,
+              parse: ({ stdout }) => parseSurvey(hostname, parseJson(stdout || "[]", "survey")),
+            } as Probe<SurveyRead>),
+          (e) => problem("failed", messageOf(e))
+        )
+      );
+      if (result.ok) surveyed.push(result.value);
+      else failed.push({ accessPoint: hostname, error: result.error.message });
     }
-    return {
-      surveys: neighboursOf(read, ssids, failed.length === 0).filter((s) => s.channels.length > 0 || s.neighbours.length > 0),
+    return ok({
+      surveys: neighboursOf(surveyed, ssids, failed.length === 0).filter((s) => s.channels.length > 0 || s.neighbours.length > 0),
       failed,
-    };
+    });
   });

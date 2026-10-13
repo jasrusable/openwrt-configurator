@@ -1,145 +1,202 @@
+// The UI's apply job: started detached, alive while its process has its run
+// id, ended by the run itself saying how. Processes are faked (a pid and a
+// command line, or none); files are real.
 import test from "ava";
-import { tempDir } from "../helpers/tempDir";
-import { readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import { main } from "../../cli";
 import { nodePlatform } from "../../platforms/node";
-import {
-  jobPaths,
-  provisionStatus,
-  startProvision,
-} from "../../server/provisionJob";
+import { jobEnding, jobPaths, jobRecordKey, provisionStatus, startProvision } from "../../server/provisionJob";
+import { write } from "../../store";
+import { tempDir } from "../helpers/tempDir";
 
-// The job runs this program again; here, a stand-in that prints and exits.
-const withJob = async (
-  script: string,
-  run: (intentPath: string, files: typeof nodePlatform) => Promise<void>
-) => {
-  const dir = tempDir("job");
-  const intentPath = join(dir, "intent.json");
-  writeFileSync(intentPath, JSON.stringify({ schema: 1, system: { name: "A" } }));
-  const files = { ...nodePlatform, selfCommand: () => ["sh", "-c", script, "onc"] };
-  await run(intentPath, files);
-};
-
-const settle = async (intentPath: string, files: typeof nodePlatform) => {
-  for (let i = 0; i < 100; i++) {
-    const status = await provisionStatus({ intentPath, files });
-    if (status.state !== "running") return status;
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  throw new Error("the job never finished");
-};
-
-test.serial("a successful run makes the provisioned snapshot live", async (t) => {
-  await withJob('sleep 0.3; echo "ran $1 $2"', async (intentPath, files) => {
-    t.is((await provisionStatus({ intentPath, files })).state, "idle");
-    t.true((await startProvision({ intentPath, files, now: () => 42 })).started);
-    t.is((await provisionStatus({ intentPath, files })).state, "running");
-    // An edit during the run is not what gets provisioned.
-    writeFileSync(intentPath, JSON.stringify({ schema: 1, system: { name: "B" } }));
-
-    const status = await settle(intentPath, files);
-    t.is(status.state, "succeeded");
-    t.is(status.startedAt, 42);
-    t.regex(status.log, /ran provision .*provisioning\.json/);
-    t.is(
-      JSON.parse(readFileSync(jobPaths(intentPath).live, "utf8")).system.name,
-      "A"
-    );
-    t.is(status.live, "differs", "the draft moved on during the run");
-  });
-});
-
-test.serial("a run applied everywhere whose later step failed is live, and says so", async (t) => {
-  await withJob("echo hook failed >&2; exit 3", async (intentPath, files) => {
-    await startProvision({ intentPath, files, now: () => 1 });
-    const status = await settle(intentPath, files);
-    t.is(status.state, "applied-with-problems", JSON.stringify(status));
-    t.is(status.live, "matches");
-  });
-});
-
-test.serial("a failed run leaves what was live", async (t) => {
-  await withJob("echo boom >&2; exit 4", async (intentPath, files) => {
-    await startProvision({ intentPath, files, now: () => 1 });
-    const status = await settle(intentPath, files);
-    t.is(status.state, "failed", JSON.stringify(status));
-    t.is(status.exitCode, 4);
-    t.regex(status.log, /boom/);
-    t.is(status.live, "none");
-  });
-});
-
-test.serial("two requests at the same moment start one run", async (t) => {
-  await withJob("sleep 0.5", async (intentPath, files) => {
-    const both = await Promise.all([1, 2, 3].map((n) => startProvision({ intentPath, files, now: () => n })));
-    t.is(both.filter((r) => r.started).length, 1);
-    t.is((await settle(intentPath, files)).state, "succeeded");
-    t.true((await startProvision({ intentPath, files, now: () => 4 })).started, "the lock is given back");
-    await settle(intentPath, files);
-  });
-});
-
-test.serial("only one run at a time", async (t) => {
-  await withJob("sleep 0.5", async (intentPath, files) => {
-    t.true((await startProvision({ intentPath, files, now: () => 1 })).started);
-    const second = await startProvision({ intentPath, files, now: () => 2 });
-    t.false(second.started);
-    await settle(intentPath, files);
-  });
-});
-
-test.serial("a lock left by a job that died is taken over: a dead pid, a pid from another boot", async (t) => {
-  await withJob("echo ran", async (intentPath, files) => {
-    const paths = jobPaths(intentPath);
-    const left = (pidLine: string) => {
-      rmSync(paths.lock, { recursive: true, force: true });
-      require("fs").mkdirSync(paths.dir, { recursive: true });
-      require("fs").mkdirSync(paths.lock);
-      writeFileSync(paths.started, "1");
-      writeFileSync(paths.pid, pidLine);
-      rmSync(paths.exit, { force: true });
+/** A machine of fake processes: each pid's command line, and what was started. */
+const machine = () => {
+  const processes = new Map<number, string>();
+  const started: string[][] = [];
+  let nextPid = 1000;
+  let clock = 1_000_000;
+  const platform = {
+    ...nodePlatform,
+    selfCommand: () => ["onc"],
+    spawnDetached: (argv: string[], { log }: { log: string }) => {
+      const pid = nextPid++;
+      processes.set(pid, argv.join(" "));
+      started.push(argv);
+      writeFileSync(log, `ran ${argv.slice(1, 3).join(" ")}\n`);
+      return pid;
+    },
+    commandLineOf: async (pid: number) => processes.get(pid),
+  };
+  /** The run started last, as it would see itself: its pid, and how it ends. */
+  const run = () => {
+    const argv = started[started.length - 1];
+    const dir = argv[argv.indexOf("--job") + 1];
+    const runId = argv[argv.indexOf("--run-id") + 1];
+    const pid = [...processes].find(([, line]) => line === argv.join(" "))?.[0];
+    const end = jobEnding(platform, dir, runId, () => clock);
+    return {
+      runId,
+      /** Ends as provision does: says how, then exits. */
+      exits: (exitCode: number) => (end({ exitCode }), pid !== undefined && processes.delete(pid)),
+      /** SIGTERM: its handler says so, then it exits. */
+      stopped: () => (end({ signal: "SIGTERM" }), pid !== undefined && processes.delete(pid)),
+      /** kill -9, out of memory: gone without a word. */
+      killed: () => pid !== undefined && processes.delete(pid),
+      pid: pid!,
     };
-    // A pid that is not running (written in the same second as the lock).
-    left("999999 whatever-boot\n");
-    t.is((await provisionStatus({ intentPath, files })).state, "interrupted");
-    t.true((await startProvision({ intentPath, files, now: () => 2 })).started);
-    t.is((await settle(intentPath, files)).state, "succeeded");
-    // This very process's pid, but from another boot: after a reboot it may be anyone's.
-    left(`${process.pid} another-boot\n`);
-    t.is((await provisionStatus({ intentPath, files })).state, "interrupted");
-    t.true((await startProvision({ intentPath, files, now: () => 3 })).started);
-    t.is((await settle(intentPath, files)).state, "succeeded");
-  });
+  };
+  return { platform, processes, run, now: () => clock, advance: (ms: number) => void (clock += ms) };
+};
+
+const withIntent = () => {
+  const intentPath = join(tempDir("job"), "intent.json");
+  writeFileSync(intentPath, JSON.stringify({ schema: 1, system: { name: "A" } }));
+  return intentPath;
+};
+
+const status = (intentPath: string, m: ReturnType<typeof machine>) => provisionStatus({ intentPath, files: m.platform, now: m.now });
+const start = (intentPath: string, m: ReturnType<typeof machine>) => startProvision({ intentPath, files: m.platform, now: m.now });
+
+test("a run that applied makes the snapshot it took live, and says it succeeded", async (t) => {
+  const m = machine();
+  const intentPath = withIntent();
+  t.is((await status(intentPath, m)).state, "idle");
+  t.true((await start(intentPath, m)).started);
+  const running = await status(intentPath, m);
+  t.is(running.state, "running");
+  t.is(running.startedAt, m.now());
+  t.regex(running.log, /ran provision .*provisioning\.json/);
+  // An edit during the run is not what gets provisioned.
+  writeFileSync(intentPath, JSON.stringify({ schema: 1, system: { name: "B" } }));
+  m.run().exits(0);
+  const done = await status(intentPath, m);
+  t.is(done.state, "succeeded");
+  t.is(done.exitCode, 0);
+  t.is(JSON.parse(readFileSync(jobPaths(intentPath).live, "utf8")).system.name, "A");
+  t.is(done.live, "differs", "the draft moved on during the run");
+  t.false(existsSync(jobPaths(intentPath).lock), "the lock is given back");
 });
 
-test.serial("a lock with no pid yet is a job starting, for a minute; then it is stale", async (t) => {
-  await withJob("echo ran", async (intentPath, files) => {
-    const paths = jobPaths(intentPath);
-    require("fs").mkdirSync(paths.lock, { recursive: true });
-    writeFileSync(paths.started, "1");
-    t.is((await provisionStatus({ intentPath, files })).state, "running");
-    t.false((await startProvision({ intentPath, files, now: () => 2 })).started);
-    const old = new Date(Date.now() - 5 * 60_000);
-    require("fs").utimesSync(paths.lock, old, old);
-    t.is((await provisionStatus({ intentPath, files })).state, "interrupted");
-    t.true((await startProvision({ intentPath, files, now: () => 3 })).started);
-    t.is((await settle(intentPath, files)).state, "succeeded");
-  });
+test("a run applied everywhere whose later step failed is live, and says so", async (t) => {
+  const m = machine();
+  const intentPath = withIntent();
+  await start(intentPath, m);
+  m.run().exits(3);
+  const done = await status(intentPath, m);
+  t.is(done.state, "applied-with-problems");
+  t.is(done.live, "matches");
 });
 
-test.serial("requests at the same moment over a dead job's lock start one run", async (t) => {
-  await withJob("sleep 0.5", async (intentPath, files) => {
-    const paths = jobPaths(intentPath);
-    require("fs").mkdirSync(paths.lock, { recursive: true });
-    writeFileSync(paths.started, "1");
-    writeFileSync(paths.pid, "999999 whatever-boot\n");
-    const all = await Promise.all([1, 2, 3, 4].map((n) => startProvision({ intentPath, files, now: () => n })));
-    t.is(all.filter((r) => r.started).length, 1, JSON.stringify(all));
-    t.deepEqual(
-      all.filter((r) => !r.started).map((r) => r.reason),
-      ["Settings are already being applied.", "Settings are already being applied.", "Settings are already being applied."]
-    );
-    t.is((await settle(intentPath, files)).state, "succeeded");
-  });
+test("a failed run leaves what was live", async (t) => {
+  const m = machine();
+  const intentPath = withIntent();
+  await start(intentPath, m);
+  m.run().exits(4);
+  const done = await status(intentPath, m);
+  t.is(done.state, "failed");
+  t.is(done.exitCode, 4);
+  t.is(done.live, "none");
+});
+
+test("a run asked to stop says so: interrupted, its lock given back", async (t) => {
+  const m = machine();
+  const intentPath = withIntent();
+  await start(intentPath, m);
+  m.run().stopped();
+  t.is((await status(intentPath, m)).state, "interrupted");
+  t.false(existsSync(jobPaths(intentPath).lock));
+  t.true((await start(intentPath, m)).started);
+});
+
+test("a run killed outright reads as interrupted, and its lock is taken over", async (t) => {
+  const m = machine();
+  const intentPath = withIntent();
+  await start(intentPath, m);
+  m.run().killed();
+  t.is((await status(intentPath, m)).state, "interrupted");
+  t.true(existsSync(jobPaths(intentPath).lock), "left behind");
+  t.true((await start(intentPath, m)).started, "a dead run's lock is taken over");
+  t.is((await status(intentPath, m)).state, "running");
+});
+
+test("a pid handed to another process is not the run: after it died, or a reboot", async (t) => {
+  const m = machine();
+  const intentPath = withIntent();
+  await start(intentPath, m);
+  const run = m.run();
+  m.processes.set(run.pid, "/usr/sbin/dnsmasq -C /var/etc/dnsmasq.conf");
+  t.is((await status(intentPath, m)).state, "interrupted", "same pid, another program");
+  m.processes.set(run.pid, `onc provision x --run-id not-${run.runId}`);
+  t.is((await status(intentPath, m)).state, "interrupted", "same program, another run");
+  m.processes.clear();
+  t.is((await status(intentPath, m)).state, "interrupted", "after a reboot: the record kept, no such pid");
+  t.true((await start(intentPath, m)).started);
+});
+
+test("one run at a time: requests while one runs, or several at once, start one", async (t) => {
+  const m = machine();
+  const intentPath = withIntent();
+  const all = await Promise.all([1, 2, 3].map(() => start(intentPath, m)));
+  t.is(all.filter((r) => r.started).length, 1, JSON.stringify(all));
+  t.deepEqual(all.filter((r) => !r.started).map((r) => r.reason), ["Settings are already being applied.", "Settings are already being applied."]);
+  t.false((await start(intentPath, m)).started, "while it runs");
+  m.run().exits(0);
+  t.true((await start(intentPath, m)).started, "once it has ended");
+});
+
+test("requests at the same moment over a dead run's lock start one run", async (t) => {
+  const m = machine();
+  const intentPath = withIntent();
+  await start(intentPath, m);
+  m.run().killed();
+  const all = await Promise.all([1, 2, 3, 4].map(() => start(intentPath, m)));
+  t.is(all.filter((r) => r.started).length, 1, JSON.stringify(all));
+});
+
+test("a run being started (its record, no pid yet) holds for a minute, then is taken over", async (t) => {
+  const m = machine();
+  const intentPath = withIntent();
+  const paths = jobPaths(intentPath);
+  // Taken, its record written, and the server killed before it spawned.
+  m.platform.makeDir(paths.dir);
+  m.platform.makeDir(paths.lock);
+  writeFileSync(join(paths.lock, "owner"), "half-started");
+  write(m.platform, jobRecordKey(paths.dir), { runId: "half-started", startedAt: m.now() });
+  t.is((await status(intentPath, m)).state, "running");
+  t.false((await start(intentPath, m)).started);
+  m.advance(61_000);
+  t.is((await status(intentPath, m)).state, "interrupted");
+  t.true((await start(intentPath, m)).started);
+});
+
+test("a run that could not be started says so, and leaves the lock free", async (t) => {
+  const m = machine();
+  const intentPath = withIntent();
+  const platform = { ...m.platform, spawnDetached: () => { throw new Error("qjs: command not found"); } };
+  const result = await startProvision({ intentPath, files: platform, now: m.now });
+  t.false(result.started);
+  t.regex(!result.started ? result.reason : "", /command not found/);
+  t.is((await status(intentPath, m)).state, "failed");
+  t.true((await start(intentPath, m)).started);
+});
+
+test("provision --job says how it ended, even when it ends before reaching a device", async (t) => {
+  const intentPath = join(tempDir("job-cli"), "intent.json");
+  const { dir } = jobPaths(intentPath);
+  const quiet = { ...nodePlatform, onStop: () => {} };
+  write(nodePlatform, jobRecordKey(dir), { runId: "r1", startedAt: 1 });
+  await t.throwsAsync(() => main({ argv: ["provision", join(dir, "missing.json"), "--job", dir, "--run-id", "r1"], platform: quiet }));
+  const state = await provisionStatus({ intentPath, files: { ...nodePlatform, commandLineOf: async () => undefined } });
+  t.is(state.state, "failed");
+  t.is(state.exitCode, 1);
+  await t.throwsAsync(() => main({ argv: ["provision", "x.json", "--job", dir], platform: quiet }), { message: /go together/ });
+});
+
+test("on this machine: a detached program is found by its run id while it runs, and not after", async (t) => {
+  const log = join(tempDir("detached"), "log");
+  const pid = nodePlatform.spawnDetached([process.execPath, "-e", "setTimeout(() => {}, 1500)", "--", "--run-id", "abc123"], { log });
+  t.true((await nodePlatform.commandLineOf(pid))?.includes("--run-id abc123"));
+  await new Promise((r) => setTimeout(r, 2500));
+  t.is(await nodePlatform.commandLineOf(pid), undefined);
 });

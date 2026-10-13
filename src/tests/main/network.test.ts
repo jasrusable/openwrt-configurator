@@ -1,10 +1,10 @@
 import test from "ava";
 import { fixtureConfig } from "../helpers/fixtures";
 import { getDeviceSchema } from "../../getDeviceSchema";
-import { getOpenWrtConfig } from "../../getOpenWrtConfig";
+import { getOpenWrtConfig } from "../../engine/getOpenWrtConfig";
 import { nodePlatform } from "../../platforms/node";
 
-const { oncConfig, deviceConfigs } = fixtureConfig("config.json");
+const { plan, deviceConfigs } = fixtureConfig("config.json");
 
 test("network", async (t) => {
   const deviceSchemas = await Promise.all(
@@ -20,20 +20,20 @@ test("network", async (t) => {
   const routerDeviceConfig = deviceConfigs[0];
   const routerDeviceSchema = deviceSchemas[0];
   const routerOpenWrtConfig = getOpenWrtConfig({
-    oncConfig,
+    plan,
     deviceConfig: routerDeviceConfig,
     deviceSchema: routerDeviceSchema,
   });
 
   // Ensure no switch or switch_vlan on DSA router.
-  t.is(routerOpenWrtConfig.network?.switch, undefined);
-  t.is(routerOpenWrtConfig.network?.switch_vlan, undefined);
+  t.is(routerOpenWrtConfig.network?.switch as unknown, undefined);
+  t.is(routerOpenWrtConfig.network?.switch_vlan as unknown, undefined);
 
   // Ensure br-lan device is defined.
   t.is(routerOpenWrtConfig.network?.device?.[0][".name"], "device0");
   t.is(routerOpenWrtConfig.network?.device?.[0].name, "br-lan");
   t.is(routerOpenWrtConfig.network?.device?.[0].type, "bridge");
-  t.is(routerOpenWrtConfig.network?.device?.[0].ports?.length, 4);
+  t.is((routerOpenWrtConfig.network?.device?.[0].ports as string[]).length, 4);
   t.deepEqual(routerOpenWrtConfig.network?.device?.[0].ports, [
     "eth1",
     "eth2",
@@ -85,7 +85,7 @@ test("network", async (t) => {
   const apDeviceConfig = deviceConfigs[1];
   const apDeviceSchema = deviceSchemas[1];
   const apOpenWrtConfig = getOpenWrtConfig({
-    oncConfig,
+    plan,
     deviceConfig: apDeviceConfig,
     deviceSchema: apDeviceSchema,
   });
@@ -93,7 +93,7 @@ test("network", async (t) => {
   t.is(apOpenWrtConfig.system?.system?.[0]?.timezone, "Africa/Johannesburg");
 
   // Ensure no bridge-vlan on swconfig ap.
-  t.is(apOpenWrtConfig.network?.["bridge-vlan"], undefined);
+  t.is(apOpenWrtConfig.network?.["bridge-vlan"] as unknown, undefined);
 
   // Ensure switch0 is defined.
   t.is(apOpenWrtConfig.network?.switch?.[0].name, "switch0");
@@ -118,14 +118,14 @@ test("network", async (t) => {
   t.is(apOpenWrtConfig.network?.device?.[0][".name"], "device0");
   t.is(apOpenWrtConfig.network?.device?.[0].name, "br-lan.1");
   t.is(apOpenWrtConfig.network?.device?.[0].type, "bridge");
-  t.is(apOpenWrtConfig.network?.device?.[0].ports?.length, 1);
+  t.is((apOpenWrtConfig.network?.device?.[0].ports as string[]).length, 1);
   t.deepEqual(apOpenWrtConfig.network?.device?.[0].ports, ["eth0.1"]);
 
   // Ensure br-lan.2 device is defined.
   t.is(apOpenWrtConfig.network?.device?.[1][".name"], "device1");
   t.is(apOpenWrtConfig.network?.device?.[1].name, "br-lan.2");
   t.is(apOpenWrtConfig.network?.device?.[1].type, "bridge");
-  t.is(apOpenWrtConfig.network?.device?.[1].ports?.length, 1);
+  t.is((apOpenWrtConfig.network?.device?.[1].ports as string[]).length, 1);
   t.deepEqual(apOpenWrtConfig.network?.device?.[1].ports, ["eth0.2"]);
 
   // Ensure loopback interface is defined

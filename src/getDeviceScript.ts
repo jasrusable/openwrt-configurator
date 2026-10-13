@@ -1,336 +1,45 @@
+// What an apply does on one device, as data: the records each of the agent's
+// step verbs is given (src/agent: prepare, stage, finalise, services, hooks),
+// worked out from the device's state and what was read from it. How each
+// step is done, and why in that order, is the agent's (src/agent/script.ts).
+// For a dry run, `getDeviceScript` shows the verbs with their records, as
+// they would be sent.
+import { AgentRecord, encodeRecords } from "./agent/records";
 import { Redact } from "./secretOptions";
-import { getUciCommands } from "./getUciCommands";
-import {
-  changedConfigs,
-  declaredConfigs,
-  uciFileText,
-  UciConfigs,
-  wipeOperations,
-} from "./uci";
-import { OpenWrtState } from "./openWrtConfigSchema";
-import { dirname } from "./paths";
-import { shellQuote } from "./shell";
+import { getUciCommands } from "./engine/getUciCommands";
+import { changedConfigs, declaredConfigs, uciFileText, UciConfigs, wipeOperations } from "./engine/uci";
+import { OpenWrtState } from "./engine/openWrtState";
 
 // Manifest of files written by this tool, so files removed from config are
 // removed from the device on the next provision (declarative, like UCI resets).
 export const managedFilesManifest = "/etc/onc/managed_files";
 
-const uciErrFile = "/tmp/.onc-uci-err";
-
-/**
- * A per-config `uci` operation that tolerates the config not being there.
- *
- * `uci commit <pkg>` and `uci revert <pkg>` both exit 1 when the config file
- * does not exist (verified on 25.12.5), and this script runs under `set -e`. A
- * config can legitimately be absent — a built-in this image does not ship, or
- * one whose package `apk del` removed earlier in this same run — and a missing
- * config must not abort the provision or, worse, stop the remaining reverts
- * partway through a rollback.
- */
-const forEachExistingConfig = (configKeys: string[], operation: string) =>
-  configKeys.map(
-    (configKey) =>
-      `if [ -f /etc/config/${configKey} ]; then uci ${operation} ${configKey}; fi`
-  );
-
-/**
- * Discard every staged UCI change on the device, whoever made it.
- *
- * The tool owns the device's config, so a run starts and ends from committed
- * state. Three reasons it has to be everything, not just the configs this run
- * writes:
- *
- * - A run that dies without reverting (the link drops mid-configure) leaves
- *   its deltas in /tmp/.uci, and the watchdog restores /etc/config without
- *   touching them; the next commit would re-apply a rolled-back provision.
- * - `default_postinst` ends with a bare `uci commit` for any package shipping
- *   /etc/uci-defaults, so installing a package mid-run would commit whatever
- *   was staged anywhere — including someone's unfinished `uci set`.
- * - A rollback's own reload_config reads deltas on top of the restored files.
- *
- * The package list is read on the device, so it covers packages nothing here
- * knows about. LuCI's unsaved edits are not affected: rpcd stages those per
- * session under /var/run/rpcd/uci-<session>, which `uci changes` does not see
- * (verified on 25.12.5).
- *
- * Guarded, because `uci revert` exits 1 on a config file that does not exist
- * and these run under `set -e`. Used before staging, on abort, and by the
- * rollback watchdog.
- */
-export const revertPendingCommands = [
-  `for pkg in $(uci changes | sed 's/^[-+]//; s/[.=].*//' | sort -u); do if [ -f "/etc/config/$pkg" ]; then uci revert "$pkg"; fi; done`,
-];
-
-/**
- * The trailing commands that make staged UCI changes take effect.
- *
- * The commit names each config explicitly rather than being a bare
- * `uci commit`, which commits *every* package — including staged changes this
- * tool did not make. That swept up whatever a LuCI session happened to have
- * pending, and leftovers from an earlier failed run.
- *
- * Stops at the reload. `run_after_reload` hooks follow, but `provision` runs
- * them as their own step rather than as part of this one — see
- * `getPostReloadCommands`.
- */
-export const getFinaliseCommands = ({
-  state,
-  current,
-}: {
-  state: OpenWrtState;
-  /** The device's config as read after the package step. */
-  current: UciConfigs;
-}) => [
-  ...forEachExistingConfig(
-    changedConfigs({
-      current,
-      declared: declaredConfigs(state.config),
-      keep: state.configsToNotReset || [],
-    }),
-    "commit"
-  ),
-  ["reload_config", ...protocolRefreshCommands(state)].join("; "),
-];
-
-/**
- * netifd learns its protocol handlers (/lib/netifd/proto/*.sh) only when it
- * starts: one a package installed by this run (wireguard, batadv) is unknown
- * to it, and reload_config does not change that, so the interface would stay
- * down until a reboot (verified on 25.12.5). So when a declared interface's
- * protocol is one netifd does not know, it is restarted, once, here: inside
- * the confirm window, so a restart that cut the device off is rolled back.
- * It shares reload_config's line: a reload that drops the link kills the
- * script at its next marker, which would skip a command of its own. netifd's
- * built-ins (none, static) are never in the list, and dhcp and dhcpv6 ship
- * on every image, so only the others are checked: listing none restarted the
- * network on every apply to any device with a VLAN network.
- */
-const builtinProtocols = ["none", "static", "dhcp", "dhcpv6"];
-
-export const protocolRefreshCommands = (state: OpenWrtState) => {
-  const protos = [
-    ...new Set(
-      (state.config.network?.interface ?? []).flatMap((i: { proto?: unknown }) =>
-        typeof i.proto === "string" && !builtinProtocols.includes(i.proto) ? [i.proto] : []
-      )
-    ),
-  ];
-  return protos.length
-    ? [
-        `for p in ${protos.map(shellQuote).join(" ")}; do ubus call network get_proto_handlers | grep -q "\\"$p\\":" || { /etc/init.d/network restart >/dev/null 2>&1; break; }; done`,
-      ]
-    : [];
-};
-
-/**
- * Hooks that must not run until the new config is actually live.
- *
- * Unlike `run_after`, which fires as soon as its file is written, these run
- * after `uci commit` and `reload_config`, so they can rely on interfaces and
- * services the new config creates.
- *
- * `provision` runs them over a *reconnected* session rather than appending
- * them to the finalise script. `reload_config` is the step that can sever the
- * link, and once dropbear exits, the next marker `printf` in `execScript`
- * takes SIGPIPE and kills the script — so a hook sitting after the reload in
- * the same script would be silently dropped on exactly the runs that reshape
- * networking, while the tool still reported success. Running them once the
- * device has been reconnected to makes that impossible.
- */
-export const getPostReloadCommands = (state: OpenWrtState) =>
-  (state.files || []).flatMap((file) => (file.run_after_reload ? [file.run_after_reload] : []));
-
-/**
- * Every declared service enabled at boot and started. A package enables its
- * service only when first installed, so one disabled since stays off after a
- * reboot; and a stopped service has no reload triggers in procd, so changes
- * to its config are ignored until something starts it. "Started" is procd
- * knowing the service at all (it then holds its triggers), not a running
- * process: sqm and the firewall have none, and starting them again would
- * re-apply them for nothing. An init script the device lacks (ubihealthd
- * without UBI flash) is skipped. A failure is reported, not fatal: the
- * check after says what is not running. Run over the first reconnect,
- * before the confirming one (confirmDevice): a stopped firewall's new rules
- * take effect only as it starts, so a lockout there must still roll back.
- */
-export const servicesCommands = (state: OpenWrtState) => {
-  const on = (state.services || []).filter((s) => s.enabled !== false).map((s) => shellQuote(s.name));
-  // Installed but not used: stopped and disabled, as an empty config is not
-  // always nothing (mwan3 with none still marks every packet; verified).
-  const off = (state.services || []).filter((s) => s.enabled === false).map((s) => shellQuote(s.name));
-  return [
-    ...(on.length
-      ? [
-          [
-            `for s in ${on.join(" ")}; do`,
-            '  [ -x "/etc/init.d/$s" ] || continue',
-            '  "/etc/init.d/$s" enabled || "/etc/init.d/$s" enable || echo "could not enable $s" >&2',
-            `  ubus call service list '{"name":"'"$s"'"}' 2>/dev/null | grep -q "^[[:space:]]*\\"$s\\"" || "/etc/init.d/$s" start || echo "could not start $s" >&2`,
-            "done",
-          ].join("\n"),
-        ]
-      : []),
-    ...(off.length
-      ? [
-          [
-            `for s in ${off.join(" ")}; do`,
-            '  [ -x "/etc/init.d/$s" ] || continue',
-            '  ! "/etc/init.d/$s" enabled || "/etc/init.d/$s" disable || echo "could not disable $s" >&2',
-            '  ! "/etc/init.d/$s" running >/dev/null 2>&1 || "/etc/init.d/$s" stop >/dev/null 2>&1 || echo "could not stop $s" >&2',
-            "done",
-          ].join("\n"),
-        ]
-      : []),
-  ];
-};
-
-/**
- * Enter every existing config into procd's change baseline, before staging.
- *
- * `reload_config` fires `config.change` only for configs listed in
- * /var/run/config.md5 — it diffs with `md5sum -c`, which never looks at a file
- * that is not already in that list. The list is written by /etc/init.d/boot and
- * by `reload_config` itself; those are the only callers in the whole OpenWrt
- * tree. Installing a package does **not** refresh it, because `default_postinst`
- * runs `kmodloader`, `sysctl restart`, uci-defaults and `<init> enable/start`,
- * but never `reload_config`.
- *
- * So without this, a package installed by this run ships /etc/config/<pkg>, apk
- * starts its service on the shipped defaults, we configure it, and the closing
- * `reload_config` fires nothing for it: the service keeps its defaults until a
- * reboot or the next provision, while `uci show` reports the intended config.
- *
- * This has to run *before* anything is staged. `reload_config` compares
- * `uci show`, which includes uncommitted deltas, so refreshing the baseline
- * after staging would record our own changes as the baseline and the closing
- * reload would then fire nothing at all.
- *
- * It also applies any drift since boot, but the closing `reload_config` would
- * have applied that same drift anyway — this only makes it happen earlier, with
- * the rollback watchdog already armed.
- */
-export const baselineRefreshCommands = ["reload_config"];
-
-// Pick a heredoc delimiter guaranteed not to occur in the content.
-export const heredocDelimiter = (content: string, base = "ONC_EOF") => {
-  let delimiter = base;
-  while (content.includes(delimiter)) {
-    delimiter = `${delimiter}_`;
-  }
-  return delimiter;
-};
-
-/**
- * Write a file, and run `runAfter` only when its content changed.
- *
- * Via a quoted heredoc: `cat` is always present (unlike the `base64` applet,
- * which is missing on stripped/small-flash busybox builds), and a quoted
- * delimiter keeps content literal so `$vars` in scripts aren't expanded at
- * write time. Into a new file beside it first, under umask 077, so a file
- * holding secrets is never readable by others, not even until its chmod;
- * then moved over the old one only if it differs (busybox `cmp`, verified on
- * 25.12.5), so a hook that restarts a service (OpenVPN's) runs when there is
- * something new, not on every apply. With no mode, 0644, as before.
- */
-const writeFileCommand = (path: string, content: string, mode?: string, runAfter?: string) => {
-  const delimiter = heredocDelimiter(content);
-  const body = content.endsWith("\n") ? content : `${content}\n`;
-  const [file, next] = [shellQuote(path), shellQuote(`${path}.onc-new`)];
-  return [
-    // Its label, for a log that names the file without its content (commandLabel).
-    `# write ${path.replace(/\n/g, " ")}`,
-    `mkdir -p ${shellQuote(dirname(path))}`,
-    `(umask 077; cat > ${next}) <<'${delimiter}'`,
-    `${body}${delimiter}`,
-    `chmod ${shellQuote(mode ?? "0644")} ${next}`,
-    `if cmp -s ${next} ${file}; then rm -f ${next}; chmod ${shellQuote(mode ?? "0644")} ${file}; else mv -f ${next} ${file}${
-      runAfter ? `; ${runAfter}` : ""
-    }; fi`,
-  ].join("\n");
-};
-
-/**
- * Apply many UCI operations with a single `uci` process.
- *
- * Spawning `uci` per command costs ~1.5ms on the device; one `uci batch`
- * consuming the same operations on stdin costs ~0.1ms each, a 13x saving on a
- * ~300 command provision. A quoted heredoc keeps values literal, so no shell
- * escaping is layered on top of the quoting `getUciCommands` already applies.
- *
- * `uci batch` reports failures on stderr but still exits 0, so the exit status
- * cannot be trusted — any stderr output is treated as a failure instead. The
- * wipe's deletes go through it too: each names a section read from the device
- * after the prepare step, so a missing one is a real error.
- *
- * The batch is line-oriented, so an operation carrying an embedded newline
- * would be split across lines and misparsed. Those are issued as standalone
- * `uci` commands, where the shell's quoting keeps the value intact — and the
- * batch is flushed around them rather than partitioned, because UCI lists are
- * ordered and hoisting every batchable operation ahead of a multi-line one
- * would silently move a list element relative to its siblings.
- */
-const uciBatchCommands = (uciCommands: string[]) => {
-  const commands: string[] = [];
-  let pending: string[] = [];
-
-  const flush = () => {
-    if (pending.length === 0) {
-      return;
-    }
-    const operations = pending
-      .map((command) => command.replace(/^uci /, ""))
-      .join("\n");
-    const delimiter = heredocDelimiter(operations, "ONC_UCI");
-    commands.push(
-      [
-        `uci batch 2>${uciErrFile} <<'${delimiter}'`,
-        operations,
-        delimiter,
-        `if [ -s ${uciErrFile} ]; then cat ${uciErrFile} >&2; rm -f ${uciErrFile}; exit 1; fi`,
-        `rm -f ${uciErrFile}`,
-      ].join("\n")
-    );
-    pending = [];
-  };
-
-  for (const command of uciCommands) {
-    if (command.includes("\n")) {
-      flush();
-      commands.push(command);
-    } else {
-      pending.push(command);
-    }
-  }
-  flush();
-
-  return commands;
-};
-
 /** The packages a run installs: those the state names that the device lacks (all of them, unread). */
 export const packagesToAdd = ({ state, installedPackages }: { state: OpenWrtState; installedPackages?: string[] }) =>
-  (state.packagesToInstall || []).filter((p) => !installedPackages?.includes(p.packageName));
+  state.packages.add.filter((name) => !installedPackages?.includes(name));
 
 /** The packages a run removes: those the state removes that the device has (all of them, unread). */
 export const getPackagesToRemove = ({ state, installedPackages }: { state: OpenWrtState; installedPackages?: string[] }) =>
-  (state.packagesToUninstall || []).filter((p) => !installedPackages || installedPackages.includes(p));
+  state.packages.remove.filter((name) => !installedPackages || installedPackages.includes(name));
 
-const packageCommands = (packages: { state: OpenWrtState; installedPackages?: string[] }) => {
-  const remove = getPackagesToRemove(packages);
-  const add = packagesToAdd(packages).map((p) => p.packageName);
-  return [
-    ...(remove.length > 0 ? [`apk del --rdepends ${remove.map(shellQuote).join(" ")}`] : []),
-    ...(add.length > 0 ? [`apk add --update-cache ${add.map(shellQuote).join(" ")}`] : []),
-  ];
+/** Declared configs nothing of which is kept: the ones the tool writes whole. */
+const ownedConfigs = (state: OpenWrtState) => {
+  return Object.entries(declaredConfigs(state.config)).filter(
+    ([configKey, sections]) => sections.length > 0 && !state.keep.some((entry) => entry.config === configKey)
+  );
 };
 
+/** Where prepare seeds: a file it finds missing is a change only the watchdog can undo. */
+export const seededConfigPaths = (state: OpenWrtState) => ownedConfigs(state).map(([configKey]) => `/etc/config/${configKey}`);
+
 /**
- * Everything that changes the device's config behind our back, run before the
- * config is read: discard pending changes, install and remove packages (their
- * postinst and uci-defaults add sections and whole configs), then refresh the
- * reload baseline. Leaving `installedPackages` out installs and removes every
- * package the state names, unfiltered.
+ * Prepare's records: every owned config, for the device to write where it
+ * has none (not a config anything of which is kept: a package that makes its
+ * own on first boot, ubihealthd, skips that when the file exists), then the
+ * packages to remove and to install. Leaving `installedPackages` out removes
+ * and installs every package the state names.
  */
-export const getPrepareCommands = ({
+export const prepareRecords = ({
   state,
   installedPackages,
   redact,
@@ -339,71 +48,48 @@ export const getPrepareCommands = ({
   /** From the installedPackages probe. */
   installedPackages?: string[];
   redact?: Redact;
-}) => {
-  const packages = packageCommands({ state, installedPackages });
-  return [
-    ...revertPendingCommands,
-    // Seeded every run, not only with packages to install: a declared config
-    // whose file is missing (deleted by hand) is otherwise never made, and
-    // `uci set` has nothing to set into. Each is written only if missing.
-    ...seedCommands({ state, redact }),
-    ...(packages.length ? [...packages, ...stockConfigCleanup(state)] : []),
-    ...baselineRefreshCommands,
-  ];
-};
+}): AgentRecord[] => [
+  ...ownedConfigs(state).map(
+    ([configKey, sections]): AgentRecord => ({ kind: "seed", path: `/etc/config/${configKey}`, content: uciFileText(sections, redact) })
+  ),
+  ...getPackagesToRemove({ state, installedPackages }).map((name): AgentRecord => ({ kind: "remove", name })),
+  ...packagesToAdd({ state, installedPackages }).map((name): AgentRecord => ({ kind: "add", name })),
+];
 
-/** Declared configs nothing of which is kept: the ones the tool writes whole. */
-const ownedConfigs = (state: OpenWrtState) => {
-  const keep = (state.configsToNotReset || []).map((entry) => entry.replace(/^\?/, "").split(".")[0]);
-  return Object.entries(declaredConfigs(state.config)).filter(
-    ([configKey, sections]) => sections.length > 0 && !keep.includes(configKey)
-  );
+const unquote = (quoted: string) => quoted.slice(1, -1).replace(/'\\''/g, "'");
+
+/** An operation whose value spans lines (getUciCommands quotes every value), as its own record. */
+const spanning = (operation: string): AgentRecord => {
+  const match = /^(set|add_list) ([^=\s]+)=('[\s\S]*')$/.exec(operation);
+  if (!match) throw new Error(`A uci operation spanning lines that is not a set: ${operation.split("\n")[0]}`);
+  return { kind: match[1] as "set" | "add_list", key: match[2], value: unquote(match[3]) };
 };
 
 /**
- * Each owned config the device does not have yet (checked there), written
- * before packages are installed, so a package never starts on its stock
- * config: apk keeps a config file that exists, setting its own aside as
- * <name>.apk-new, and the service's first start reads ours. https-dns-proxy's
- * stock config, for one, rewrites dnsmasq and captures clients' DNS the
- * moment it starts. Not a config anything of which is kept: a package that
- * makes its own on first boot (ubihealthd) skips that when the file exists.
- * The wipe and verify still follow, as for any config; a rollback restores
- * /etc/config whole, seeded files included.
+ * uci operations as stage takes them: each run of one-line operations one
+ * `uci batch` (one uci process: ~0.1 ms an operation, not ~1.5), and one whose
+ * value spans lines on its own (the batch is line-oriented and would misread
+ * it), in place: lists are ordered, and hoisting the rest ahead of it would
+ * move a list's items.
  */
-export const seedCommands = ({
-  state,
-  redact,
-}: {
-  state: OpenWrtState;
-  redact?: Redact;
-}) =>
-  ownedConfigs(state).map(([configKey, sections]) => {
-    const path = shellQuote(`/etc/config/${configKey}`);
-    const text = uciFileText(sections, redact);
-    const delimiter = heredocDelimiter(text);
-    // Owner-only, like the provision script: a config can hold secrets, and
-    // a new file would otherwise take the shell's umask.
-    return [`if [ ! -e ${path} ]; then`, `(umask 077; cat > ${path}) <<'${delimiter}'`, `${text}${delimiter}`, "fi"].join("\n");
-  });
-
-/** Where seedCommands writes: a file it finds missing is a change only the watchdog can undo. */
-export const seededConfigPaths = (state: OpenWrtState) => ownedConfigs(state).map(([configKey]) => `/etc/config/${configKey}`);
-
-/** The stock configs apk set aside for an owned config: never used. */
-const stockConfigCleanup = (state: OpenWrtState) => {
-  const paths = ownedConfigs(state).map(([configKey]) => shellQuote(`/etc/config/${configKey}.apk-new`));
-  return paths.length ? [`rm -f ${paths.join(" ")}`] : [];
-};
+const uciRecords = (operations: string[]): AgentRecord[] =>
+  operations.reduce<AgentRecord[]>((records, operation) => {
+    if (operation.includes("\n")) return [...records, spanning(operation)];
+    const last = records[records.length - 1];
+    if (last?.kind !== "batch") return [...records, { kind: "batch", operations: [operation] }];
+    last.operations.push(operation);
+    return records;
+  }, []);
 
 /**
- * Stage the declared config over a wiped one, in a single `uci batch`: delete
- * every section of `current` that `configs_to_not_reset` does not keep, by
- * exact name, then set every declared section. `current` must be read after
- * the prepare step, or sections a package adds survive the wipe. Then write
- * the managed files. Leaving `managedFiles` out prunes nothing.
+ * Stage's records: the declared config over a wiped one, then the managed
+ * files. The wipe deletes every section of `current` that
+ * `configs_to_not_reset` does not keep, by exact name; `current` must be read
+ * after prepare, or sections a package adds survive it. Then the files no
+ * longer declared, each declared file, and the manifest of them. Leaving
+ * `managedFiles` out prunes nothing.
  */
-export const getStageCommands = ({
+export const stageRecords = ({
   state,
   current,
   managedFiles,
@@ -413,60 +99,115 @@ export const getStageCommands = ({
   current: UciConfigs;
   /** From the managedFiles probe: what the previous provision wrote. */
   managedFiles?: string[];
-  /** Replace a secret before it is written into the script. */
+  /** Replace a secret before it is sent. */
   redact?: Redact;
-}) => {
-  const hide = (value: string) => (redact ? redact(value) : value);
-  const wipe = wipeOperations(current, state.configsToNotReset || []).map(
-    (operation) => `uci ${operation}`
-  );
-  const uciCommands = getUciCommands({ openWrtConfig: state.config, redact });
-
+}): AgentRecord[] => {
   const files = state.files || [];
-  const staleFiles = (managedFiles || []).filter(
-    (path) => !files.find((file) => file.path === path)
-  );
-
-  const fileCommands =
-    files.length > 0 || staleFiles.length > 0
-      ? [
-          // A service whose init script goes is stopped first: removing the
-          // file leaves procd running it until a reboot.
-          ...staleFiles.flatMap((path) => [
-            ...(/^\/etc\/init\.d\/[^/]+$/.test(path)
-              ? [`if [ -x ${shellQuote(path)} ]; then ${shellQuote(path)} stop; ${shellQuote(path)} disable; fi >/dev/null 2>&1 || true`]
-              : []),
-            `rm -f ${shellQuote(path)}`,
-          ]),
-          // Each with its optional command, run right after the file is
-          // written when it changed (e.g. trigger a new hotplug script now).
-          ...files.map((file) =>
-            writeFileCommand(
-              file.path,
-              redact ? redact(file.content, { file }) : file.content,
-              file.mode,
-              file.run_after && hide(file.run_after)
-            )
-          ),
-          writeFileCommand(
-            managedFilesManifest,
-            files.map((file) => file.path).join("\n")
-          ),
-        ]
+  const stale = (managedFiles || []).filter((path) => !files.some((file) => file.path === path));
+  const operations = [
+    ...wipeOperations(current, state.keep),
+    ...getUciCommands({ openWrtConfig: state.config, redact }).map((command) => command.replace(/^uci /, "")),
+  ];
+  const manifest: AgentRecord[] =
+    files.length > 0 || stale.length > 0
+      ? [{ kind: "write", path: managedFilesManifest, mode: "0644", content: files.map((file) => file.path).join("\n") }]
       : [];
-
-  // Files are written before `uci commit` so a file-write failure aborts before
-  // the UCI changes are committed (the revert is then effective), and so a
-  // freshly-written hotplug script is in place when reload_config runs.
-  return [...uciBatchCommands([...wipe, ...uciCommands]), ...fileCommands];
+  return [
+    ...uciRecords(operations),
+    ...stale.map((path): AgentRecord => ({ kind: "remove-file", path })),
+    ...files.map(
+      (file): AgentRecord => ({
+        kind: "write",
+        path: file.path,
+        // With no mode, 0644, as it always was.
+        mode: file.mode ?? "0644",
+        content: redact ? redact(file.content, { file }) : file.content,
+        ...(file.runAfter ? { runAfter: redact ? redact(file.runAfter) : file.runAfter } : {}),
+      })
+    ),
+    ...manifest,
+  ];
 };
 
 /**
- * The whole run as one script, for a dry run. `provision` runs it in parts
- * (see devicePhases), reading the device's config between the prepare and
- * stage steps; here `current` is read up front, so sections that packages
+ * Protocols netifd may not know (it learns its handlers only as it starts):
+ * a declared interface's, but never its built-ins (none, static) or the ones
+ * every image ships (dhcp, dhcpv6). Listing those restarted the network on
+ * every apply to any device with a VLAN network.
+ */
+const builtinProtocols = ["none", "static", "dhcp", "dhcpv6"];
+
+export const refreshedProtocols = (state: OpenWrtState) => [
+  ...new Set(
+    (state.config.network?.interface ?? []).flatMap((i) =>
+      typeof i.proto === "string" && !builtinProtocols.includes(i.proto) ? [i.proto] : []
+    )
+  ),
+];
+
+/**
+ * Finalise's records: each config this run changes, committed by name (a
+ * bare `uci commit` would commit staged changes this tool did not make: a
+ * LuCI session's, an earlier failed run's), and the protocols to check after
+ * the reload. Its post-reload hooks are a step of their own (hooks).
+ */
+export const finaliseRecords = ({
+  state,
+  current,
+}: {
+  state: OpenWrtState;
+  /** The device's config as read after prepare. */
+  current: UciConfigs;
+}): AgentRecord[] => [
+  ...changedConfigs({ current, declared: declaredConfigs(state.config), keep: state.keep }).map(
+    (config): AgentRecord => ({ kind: "commit", config })
+  ),
+  ...refreshedProtocols(state).map((name): AgentRecord => ({ kind: "protocol", name })),
+];
+
+/**
+ * Services' records: every declared service enabled and started, or (its
+ * feature unused) stopped and disabled. Run over the first reconnect after
+ * the commit, before the confirming one: a stopped firewall's new rules take
+ * effect only as it starts, so a lockout there must still roll back.
+ */
+export const servicesRecords = (state: OpenWrtState): AgentRecord[] => [
+  ...state.services.filter((s) => s.enabled !== false).map((s): AgentRecord => ({ kind: "enable", name: s.name })),
+  ...state.services.filter((s) => s.enabled === false).map((s): AgentRecord => ({ kind: "disable", name: s.name })),
+];
+
+/**
+ * The hooks that need the new config live (run_after_reload, in file order),
+ * run after the commit and reload over a reconnected session of their own:
+ * reload_config is what can sever the link, and a hook after it in the same
+ * verb would die with it.
+ */
+export const hookCommands = (state: OpenWrtState) =>
+  state.files.flatMap((file) => (file.runAfterReload ? [file.runAfterReload] : []));
+
+export const hookRecords = (commands: string[]): AgentRecord[] => commands.map((command) => ({ kind: "run", command }));
+
+/** A heredoc delimiter that is none of the text's lines. */
+const delimiterFor = (text: string, base = "ONC_DATA") => {
+  const lines = new Set(text.split("\n"));
+  let delimiter = base;
+  while (lines.has(delimiter)) delimiter = `${delimiter}_`;
+  return delimiter;
+};
+
+/** One verb with its records, as it is sent: what a dry run shows. */
+export const renderVerb = (name: string, records: AgentRecord[]) => {
+  const data = encodeRecords(records);
+  const delimiter = delimiterFor(data);
+  return `onc-agent ${name} <<'${delimiter}'\n${data}${delimiter}`;
+};
+
+/**
+ * The whole run, for a dry run: each verb `provision` calls, with its
+ * records, in order. `provision` reads the device's config between prepare
+ * and stage; here `current` is read up front, so sections that packages
  * installed by this run would add are not shown being wiped. Leaving
- * `current` out wipes nothing.
+ * `current` out wipes nothing. Services and hooks show only when there are any.
  */
 export const getDeviceScript = ({
   state,
@@ -480,13 +221,14 @@ export const getDeviceScript = ({
   managedFiles?: string[];
   current?: UciConfigs;
   redact?: Redact;
-}) => [
-  ...getPrepareCommands({ state, installedPackages, redact }),
-  ...getStageCommands({ state, current, managedFiles, redact }),
-  ...getFinaliseCommands({ state, current }),
-  // Printed so a dry run shows the whole sequence, but `provision` runs these
-  // over a reconnected session. See `servicesCommands`, `getPostReloadCommands`.
-  ...[...servicesCommands(state), ...getPostReloadCommands(state)].map((command) =>
-    redact ? redact(command) : command
-  ),
-];
+}) => {
+  const services = servicesRecords(state);
+  const hooks = hookRecords(hookCommands(state).map((command) => (redact ? redact(command) : command)));
+  return [
+    renderVerb("prepare", prepareRecords({ state, installedPackages, redact })),
+    renderVerb("stage", stageRecords({ state, current, managedFiles, redact })),
+    renderVerb("finalise", finaliseRecords({ state, current })),
+    ...(services.length > 0 ? [renderVerb("services", services)] : []),
+    ...(hooks.length > 0 ? [renderVerb("hooks", hooks)] : []),
+  ];
+};

@@ -1,13 +1,14 @@
 import test from "ava";
 import { sampleIntentText } from "../helpers/fixtures";
 import { tempDir } from "../helpers/tempDir";
-import { chmodSync, readFileSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import {
   factsMaxAgeMs,
   listSeen,
   readFacts,
   readFailures,
+  renameFacts,
   retryAfterMs,
   staleDevices,
   writeFacts,
@@ -36,7 +37,7 @@ test("facts are kept beside the intent, per device; one never read has none", (t
   const facts = readFacts(nodePlatform, path, ["home-router", "home-ap-1"]);
   t.deepEqual(facts["home-router"], { hostname: "home-router", readAt: 1234, schema });
   t.is(facts["home-ap-1"], undefined);
-  t.true(readFileSync(`${path}.state/devices/home-router.json`, "utf8").includes('"readAt": 1234'));
+  t.is(JSON.parse(readFileSync(`${path}.state/devices/home-router.json`, "utf8")).value.readAt, 1234);
 });
 
 test("a file that is not facts reads as none, not an error", (t) => {
@@ -90,16 +91,19 @@ test("a device that cannot be reached keeps its facts, says why, and rests befor
 
 test("facts in an older format are read again, but keep where the device is and its key", (t) => {
   const path = intentFile();
-  writeFacts(nodePlatform, path, { hostname: "home-ap-1", readAt: 5, schema, address: "10.0.0.9", hostKey: { type: "ssh-ed25519", key: "K" } });
+  const facts = { hostname: "home-ap-1", readAt: 5, schema, address: "10.0.0.9", hostKey: { type: "ssh-ed25519", key: "K" } };
+  writeFacts(nodePlatform, path, facts);
   t.is(readFacts(nodePlatform, path, ["home-ap-1"])["home-ap-1"]?.readAt, 5);
   const file = `${path}.state/devices/home-ap-1.json`;
-  const { format: _, ...older } = JSON.parse(readFileSync(file, "utf8"));
-  writeFileSync(file, JSON.stringify(older));
-  t.like(readFacts(nodePlatform, path, ["home-ap-1"])["home-ap-1"], {
-    readAt: 0,
-    address: "10.0.0.9",
-    hostKey: { type: "ssh-ed25519", key: "K" },
-  });
+  const kept = { address: "10.0.0.9", hostKey: { type: "ssh-ed25519", key: "K" } };
+  // An older format, the store's or from before it: read again, found meanwhile.
+  for (const older of [{ format: 3, value: facts }, { ...facts, format: 3 }, facts]) {
+    writeFileSync(file, JSON.stringify(older));
+    t.like(readFacts(nodePlatform, path, ["home-ap-1"])["home-ap-1"], { readAt: 0, ...kept });
+  }
+  // The last format before the store is today's, as written then.
+  writeFileSync(file, JSON.stringify({ ...facts, format: 4 }));
+  t.like(readFacts(nodePlatform, path, ["home-ap-1"])["home-ap-1"], { readAt: 5, ...kept });
 });
 
 test("an apply's write of the schema alone keeps the pinned key, MACs and address", (t) => {
@@ -141,4 +145,30 @@ test("a device named seen keeps its facts beside the list of devices seen", (t) 
   writeFacts(nodePlatform, path, { hostname: "seen", readAt: 8, schema });
   t.like(readFacts(nodePlatform, path, ["seen"]).seen, { readAt: 8, hostKey: { type: "ssh-ed25519", key: "K" } });
   t.deepEqual(listSeen(nodePlatform, path), ["seen"]);
+});
+
+test("pins outlive facts that no longer parse: a later write keeps them, and a rename moves them", (t) => {
+  const path = intentFile();
+  const pinned = { address: "10.0.0.9", macs: ["aa:bb:cc:dd:ee:ff"], hostKey: { type: "ssh-ed25519", key: "K" } };
+  const file = `${path}.state/devices/home-ap-1.json`;
+  mkdirSync(`${path}.state/devices`, { recursive: true });
+  // An older format whose schema this build no longer reads.
+  writeFileSync(file, JSON.stringify({ format: 3, value: { hostname: "home-ap-1", readAt: 5, schema: { ports: "not a list" }, ...pinned } }));
+  t.is(readFacts(nodePlatform, path, ["home-ap-1"])["home-ap-1"], undefined, "its facts do not read");
+  renameFacts(nodePlatform, path, "home-ap-1", "ap-2");
+  t.false(existsSync(file));
+  writeFacts(nodePlatform, path, { hostname: "ap-2", readAt: 9, schema });
+  t.like(readFacts(nodePlatform, path, ["ap-2"])["ap-2"], { readAt: 9, ...pinned });
+});
+
+test("the devices seen: every device's file, whether its facts read or not; files from before the store cleared", (t) => {
+  const path = intentFile();
+  const dir = `${path}.state/devices`;
+  mkdirSync(dir, { recursive: true });
+  writeFacts(nodePlatform, path, { hostname: "home-router", readAt: 1, schema });
+  writeFileSync(`${dir}/old-ap.json`, JSON.stringify({ format: 2, value: { hostname: "old-ap", schema: "unreadable" } }));
+  for (const old of ["home-router.failed.json", "inspected-10.0.0.66.json", ".seen.json"]) writeFileSync(`${dir}/${old}`, "{}");
+  writeFileSync(`${dir}/seen.json`, JSON.stringify(["home-router"]));
+  t.deepEqual(listSeen(nodePlatform, path).sort(), ["home-router", "old-ap"]);
+  t.deepEqual(readdirSync(dir).sort(), ["home-router.json", "old-ap.json"]);
 });

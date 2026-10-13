@@ -2,6 +2,7 @@
 // what to what, and what it means. Secrets are never included, only that
 // they changed.
 import { fieldInfo } from "./fields";
+import { isPlainObject as isObject, sameJson as equal } from "../json";
 
 export type Change = {
   path: string;
@@ -13,10 +14,6 @@ export type Change = {
   description?: string;
 };
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  !!value && typeof value === "object" && !Array.isArray(value);
-
-const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 const display = (value: unknown, path: string[]): string | undefined => {
   const info = fieldInfo(path);
@@ -36,17 +33,15 @@ export const describePath = (path: string[], intent: unknown) => labelFor(path, 
 
 /** The human name of each step of a path, skipping steps with none. */
 const labelFor = (path: string[], before: unknown, after: unknown) => {
-  const label: string[] = [];
-  let b: any = before;
-  let a: any = after;
-  path.forEach((part, i) => {
-    b = b?.[part];
-    a = a?.[part];
-    const info = fieldInfo(path.slice(0, i + 1));
-    if (!info) return;
-    label.push(typeof info.label === "function" ? info.label(a ?? b) : info.label);
+  /** The value `steps` into `value`, whatever it is. */
+  const at = (value: unknown, steps: string[]) =>
+    steps.reduce<unknown>((node, step) => (isObject(node) || Array.isArray(node) ? (node as Record<string, unknown>)[step] : undefined), value);
+  return path.flatMap((_, i) => {
+    const steps = path.slice(0, i + 1);
+    const info = fieldInfo(steps);
+    if (!info) return [];
+    return [typeof info.label === "function" ? info.label(at(after, steps) ?? at(before, steps)) : info.label];
   });
-  return label;
 };
 
 /** What a list item is, to pair it across two lists: its id, else its name. */

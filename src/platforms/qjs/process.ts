@@ -146,6 +146,34 @@ export const spawn = async (
   }
 };
 
+/**
+ * Started and left running, in a session of its own where there is setsid
+ * (OpenWrt's busybox, which runs the program in place rather than forking,
+ * as it is not a process group leader: so the pid returned is the program's,
+ * verified on 25.12.5), its output to `log`. Never a shell between, which
+ * could exec away the arguments that say what the program is.
+ */
+export const spawnDetached = (argv: string[], { log }: { log: string }) => {
+  const out = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600);
+  if (out < 0) throw new Error(`${log}: could not write it`);
+  const none = os.open("/dev/null", os.O_RDONLY);
+  try {
+    const setsid = which("setsid");
+    const pid = os.exec([...(setsid ? [setsid] : []), ...resolveArgv(argv)], {
+      block: false,
+      usePath: false,
+      stdin: none,
+      stdout: out,
+      stderr: out,
+    });
+    if (pid < 0) throw new Error(`${argv[0]}: could not be started`);
+    return pid;
+  } finally {
+    os.close(out);
+    if (none >= 0) os.close(none);
+  }
+};
+
 /** Synchronous variant, for the few interface methods that are synchronous. */
 export const spawnSync = (argv: string[], stdin?: string): ExecResult => {
   const command = resolveArgv(argv);

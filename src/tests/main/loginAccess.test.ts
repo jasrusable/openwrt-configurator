@@ -3,6 +3,7 @@ import { sampleIntent, sampleIntentJson } from "../helpers/fixtures";
 import { tempDir } from "../helpers/tempDir";
 import { writeFileSync } from "fs";
 import { join } from "path";
+import { printPlan } from "../../lowLevel/print";
 import { compileIntent } from "../../intent/compile";
 import { Intent, intentSchema } from "../../intent/schema";
 import { lockoutReason } from "../../loginAccess";
@@ -16,13 +17,13 @@ const other = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBBBBBBBBBBBBBBBBBBBBBBBBBBBB
 test("keys and password login compile to dropbear's authorized_keys and options", (t) => {
   const intent = sample();
   intent.system = { ...intent.system, ssh: { authorized_keys: [key], password_login: false } };
-  const compiled = compileIntent(intent) as any;
+  const compiled = printPlan(compileIntent(intent)) as any;
   t.like(compiled.config.dropbear.dropbear[0], { PasswordAuth: "off", RootPasswordAuth: "off" });
   t.deepEqual(
     compiled.files.find((f: any) => f.path === "/etc/dropbear/authorized_keys"),
     { ".if": "*", path: "/etc/dropbear/authorized_keys", mode: "0600", content: `${key}\n` }
   );
-  const none = compileIntent(sample()) as any;
+  const none = printPlan(compileIntent(sample())) as any;
   t.like(none.config.dropbear.dropbear[0], { PasswordAuth: "on" }, "the default: as before");
   t.false(none.files.some((f: any) => f.path === "/etc/dropbear/authorized_keys"), "no keys: a device's own file is left alone");
 });

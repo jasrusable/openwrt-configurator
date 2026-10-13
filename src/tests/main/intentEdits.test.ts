@@ -2,9 +2,9 @@ import test from "ava";
 import { sampleIntent } from "../helpers/fixtures";
 import { keepSiteSeed, withNetworkAdded, withoutLine, withoutNetwork, withoutProvider } from "../../intent/edits";
 import { compileIntent } from "../../intent/compile";
-import { meshId } from "../../intent/features/mesh";
+import { meshId } from "../../intent/mesh";
 import { lineRole } from "../../intent/connections";
-import { templateOf, templateSettings, withTemplate } from "../../intent/networkTemplates";
+import { templateOf, templateSettings, withTemplate } from "../../intent/networks";
 import { intentSchema } from "../../intent/schema";
 
 const sample = () =>

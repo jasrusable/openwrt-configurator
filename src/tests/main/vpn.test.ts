@@ -1,13 +1,13 @@
 import test from "ava";
 import { sampleIntent } from "../helpers/fixtures";
-import { protocolRefreshCommands } from "../../getDeviceScript";
-import { OpenWrtState } from "../../openWrtConfigSchema";
+import { refreshedProtocols } from "../../getDeviceScript";
+import { OpenWrtState } from "../../engine/openWrtState";
 import { availability } from "../../intent/choices";
-import { templateOf, withTemplate } from "../../intent/networkTemplates";
+import { templateOf, withTemplate } from "../../intent/networks";
 import { compileIntent } from "../../intent/compile";
-import { ddnsService } from "../../intent/features/internet";
-import { ovpnFile } from "../../intent/features/vpn";
-import { ovpnUnsafe } from "../../intent/ovpn";
+import { ddnsService } from "../../intent/internet";
+import { ovpnFile } from "../../intent/vpn";
+import { ovpnUnsafe } from "../../intent/vpn";
 import { intentSchema } from "../../intent/schema";
 import { clientAddresses, clientConf, decodeInvite, encodeInvite, inviteOf, nextClientHost, withPort } from "../../intent/vpn";
 import { newPrivateKey, publicKeyOf } from "../../wireguard";
@@ -65,13 +65,11 @@ test("a site's invitation carries what the other needs, and reads back the same"
   t.throws(() => decodeInvite("hello"), { message: /onc-site:/ });
 });
 
-test("netifd is restarted only for a protocol it may not know, on reload_config's own line", (t) => {
+test("netifd is checked only for a protocol it may not know", (t) => {
   const state = (protos: string[]) =>
     ({ config: { network: { interface: protos.map((proto) => ({ proto })) } } }) as unknown as OpenWrtState;
-  t.deepEqual(protocolRefreshCommands(state(["none", "static", "dhcp", "dhcpv6"])), []);
-  const [line] = protocolRefreshCommands(state(["static", "wireguard", "none"]));
-  t.regex(line, /for p in 'wireguard'; do/);
-  t.notRegex(line, /'none'/);
+  t.deepEqual(refreshedProtocols(state(["none", "static", "dhcp", "dhcpv6"])), []);
+  t.deepEqual(refreshedProtocols(state(["static", "wireguard", "none", "wireguard"])), ["wireguard"]);
 });
 
 test("an .ovpn that would run or write things on the router is refused, and never written", (t) => {

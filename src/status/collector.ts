@@ -5,22 +5,36 @@
 // otherwise, so the graphs have no gaps; never while an apply runs. On a
 // Mac it runs inside `onc ui`, writing beside the intent; on a router it is
 // its own service (`onc collect`), writing to RAM, which the CGI reads.
+import { z } from "zod";
 import { Platform } from "../platform";
-import { parseJson } from "../parseJson";
+import { fail, Problem, problem } from "../problem";
+import { Result, attempt, map, messageOf, ok } from "../result";
 import { jobState } from "../server/provisionJob";
+import { read, StoreFiles, StoreKey, write } from "../store";
 import { bucketMs, History, LineCounts, readingsOf, throughputOf, withReadings } from "./history";
 import { NetworkStatus } from "./network";
 import { readNetworkStatus } from "./read";
 
-type Files = Pick<Platform, "readTextFile" | "writeFileAtomic" | "mkdirp">;
-
 export type Snapshot = { at: number; status: NetworkStatus };
 
-const paths = (dir: string) => ({
-  snapshot: `${dir}/status.json`,
-  history: `${dir}/history.json`,
-  wanted: `${dir}/wanted`,
+// Shapes checked lightly: only the collector writes them, and their format
+// number is raised when NetworkStatus or the history's points change. Kept
+// before the store, they were the values as written: still good.
+const asWritten = (stored: unknown, format: number | undefined) => (format === undefined ? stored : undefined);
+const snapshotKey = (dir: string): StoreKey<Snapshot> => ({
+  path: `${dir}/status.json`,
+  schema: z.object({ at: z.number(), status: z.custom<NetworkStatus>((v) => !!v && typeof v === "object") }),
+  format: 1,
+  upgrade: asWritten,
 });
+const historyKey = (dir: string): StoreKey<History> => ({
+  path: `${dir}/history.json`,
+  schema: z.custom<History>((v) => !!v && typeof v === "object" && !Array.isArray(v)),
+  format: 1,
+  upgrade: asWritten,
+});
+/** When a page last asked for status. */
+const wantedKey = (dir: string): StoreKey<number> => ({ path: `${dir}/wanted`, schema: z.number(), format: 1, upgrade: asWritten });
 
 /** How fast to read: while someone looks, and otherwise (for the graphs). */
 export const watchedEveryMs = 10_000;
@@ -30,46 +44,66 @@ const watchingForMs = 10 * 60_000;
 /** A snapshot older than this is not answered from (no collector running): the request reads itself. */
 export const snapshotFreshMs = unwatchedEveryMs + 30_000;
 
-const readJson = (files: Pick<Platform, "readTextFile">, path: string): unknown => {
-  try {
-    return parseJson(files.readTextFile(path), path);
-  } catch {
-    return undefined;
-  }
-};
-
-const write = (files: Files, dir: string, path: string, value: unknown) => {
-  files.mkdirp(dir);
-  files.writeFileAtomic(path, JSON.stringify(value), 0o600);
-};
-
 /** A page wants status: read fast for a while. */
-export const markWanted = (files: Files, dir: string, now: number) => {
+export const markWanted = (files: StoreFiles, dir: string, now: number) => {
   try {
-    write(files, dir, paths(dir).wanted, now);
+    write(files, wantedKey(dir), now);
   } catch {
     // Read at the slow pace meanwhile.
   }
 };
 
-export const readSnapshot = (files: Pick<Platform, "readTextFile">, dir: string): Snapshot | undefined => {
-  const value = readJson(files, paths(dir).snapshot) as Snapshot | undefined;
-  return value && typeof value.at === "number" && value.status ? value : undefined;
-};
+export const readSnapshot = (files: Pick<Platform, "readTextFile">, dir: string) => read(files, snapshotKey(dir));
 
-export const readHistory = (files: Pick<Platform, "readTextFile">, dir: string): History => {
-  const value = readJson(files, paths(dir).history);
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as History) : {};
+export const readHistory = (files: Pick<Platform, "readTextFile">, dir: string): History => read(files, historyKey(dir)) ?? {};
+
+/** Whether an apply is running: its devices are mid-change, and nothing reads them meanwhile. */
+const applying = async (intentPath: string, platform: Platform) =>
+  (await jobState({ intentPath, files: platform }).catch(() => undefined))?.state === "running";
+
+/**
+ * What the status pages show now: the snapshot, when it is fresh or an apply
+ * is running (then marked so, as old as it is; with none, the apply is the
+ * reason); otherwise read now and kept (a request with no collector).
+ */
+export const currentStatus = async ({
+  intentPath,
+  platform,
+  dir,
+  now = Date.now,
+}: {
+  intentPath: string;
+  platform: Platform;
+  dir: string;
+  now?: () => number;
+}): Promise<Result<NetworkStatus, Problem>> => {
+  const kept = readSnapshot(platform, dir);
+  if (await applying(intentPath, platform)) {
+    return kept
+      ? ok({ ...kept.status, applying: true })
+      : fail("conflict", "Settings are being applied: the devices are read again once that has finished.");
+  }
+  if (kept && now() - kept.at < snapshotFreshMs) return ok(kept.status);
+  return map(await readAndKeep({ intentPath, platform, dir, now }), (snapshot) => snapshot.status);
 };
 
 /** Read every device now and keep it as the snapshot (a request with no collector to answer it). */
-export const readAndKeep = async ({ intentPath, platform, dir, now = Date.now }: { intentPath: string; platform: Platform; dir: string; now?: () => number }) => {
-  const status = await readNetworkStatus({ intentPath, platform, now });
-  if (!status) return undefined;
-  const snapshot: Snapshot = { at: now(), status: { ...status, readAt: now() } };
-  write(platform, dir, paths(dir).snapshot, snapshot);
-  return snapshot;
-};
+export const readAndKeep = async ({
+  intentPath,
+  platform,
+  dir,
+  now = Date.now,
+}: {
+  intentPath: string;
+  platform: Platform;
+  dir: string;
+  now?: () => number;
+}): Promise<Result<Snapshot, Problem>> =>
+  map(await readNetworkStatus({ intentPath, platform, now }), (status) => {
+    const snapshot: Snapshot = { at: now(), status: { ...status, readAt: now() } };
+    write(platform, snapshotKey(dir), snapshot);
+    return snapshot;
+  });
 
 type State = { history: History; counts: LineCounts; savedBucket?: number };
 
@@ -86,18 +120,19 @@ export const collectOnce = async ({
   dir: string;
   now?: () => number;
   state: State;
-}): Promise<State> => {
-  const status = await readNetworkStatus({ intentPath, platform, now });
-  if (!status) return state;
+}): Promise<Result<State, Problem>> => {
+  const read = await readNetworkStatus({ intentPath, platform, now });
+  if (!read.ok) return read;
+  const status = read.value;
   const at = now();
   const { counts, ...throughput } = throughputOf(status.internetCounters, state.counts);
-  write(platform, dir, paths(dir).snapshot, { at, status: { ...status, throughput, readAt: at } } satisfies Snapshot);
+  write(platform, snapshotKey(dir), { at, status: { ...status, throughput, readAt: at } });
   const history = withReadings(state.history, at, readingsOf(status, throughput), status.devices.map((d) => d.name));
   // Saved as each minute starts: a restart loses a minute at most, and a
   // router's RAM (or a Mac's disk) is written once a minute, not each read.
   const bucket = at - (at % bucketMs);
-  if (bucket !== state.savedBucket) write(platform, dir, paths(dir).history, history);
-  return { history, counts, savedBucket: bucket };
+  if (bucket !== state.savedBucket) write(platform, historyKey(dir), history);
+  return ok({ history, counts, savedBucket: bucket });
 };
 
 /** Read for as long as it runs (or until `stop` says so, for tests). */
@@ -108,6 +143,7 @@ export const runCollector = async ({
   now = Date.now,
   tickMs = 2_000,
   stop = () => false,
+  collect = collectOnce,
 }: {
   intentPath: string;
   platform: Platform;
@@ -115,29 +151,32 @@ export const runCollector = async ({
   now?: () => number;
   tickMs?: number;
   stop?: () => boolean;
+  /** One read (tests give their own). */
+  collect?: typeof collectOnce;
 }) => {
   let state: State = { history: readHistory(platform, dir), counts: {} };
   let lastRead = -Infinity;
   let lastError: string | undefined;
   while (!stop()) {
     const t = now();
-    const wanted = readJson(platform, paths(dir).wanted);
-    const watched = typeof wanted === "number" && t - wanted < watchingForMs;
+    const wanted = read(platform, wantedKey(dir));
+    const watched = wanted !== undefined && t - wanted < watchingForMs;
     const every = watched ? watchedEveryMs : unwatchedEveryMs;
     if (t - lastRead >= every) {
       // An apply's devices are mid-change: leave them to it.
-      const applying = (await jobState({ intentPath, files: platform }).catch(() => undefined))?.state === "running";
-      if (!applying) {
+      if (!(await applying(intentPath, platform))) {
         lastRead = t;
-        try {
-          state = await collectOnce({ intentPath, platform, dir, now, state });
-          lastError = undefined;
-        } catch (e) {
-          // Said once, not every read (no intent yet, say).
-          const error = String((e as Error)?.message ?? e);
-          if (error !== lastError) console.error(`Reading status: ${error}`);
-          lastError = error;
-        }
+        // Whatever goes wrong (a full disk, a bug) is said, and the loop goes on.
+        const attempted = await attempt(
+          () => collect({ intentPath, platform, dir, now, state }),
+          (thrown) => problem("internal", messageOf(thrown))
+        );
+        const result = attempted.ok ? attempted.value : attempted;
+        if (result.ok) state = result.value;
+        // Said once, not every read (no intent yet, say).
+        const error = result.ok ? undefined : result.error.message;
+        if (error !== undefined && error !== lastError) console.error(`Reading status: ${error}`);
+        lastError = error;
       }
     }
     await platform.sleep(tickMs);

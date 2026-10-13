@@ -2,7 +2,7 @@
 // is (facts), and what the network is doing now (status, read from the
 // devices every 30 seconds while this page is open), interpreted against the
 // settings: what does not match them is shown, never hidden.
-import { meshMtu } from "../../../src/intent/features/mesh";
+import { meshMtu } from "../../../src/intent/mesh";
 import { where } from "../../../src/intent/places";
 import { meshNodeState, peerState } from "../../../src/status/views";
 import { Anchor, Box, Button, Group, SimpleGrid, Stack, Text } from "@mantine/core";
@@ -11,7 +11,7 @@ import { ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { Intent } from "../../../src/intent/schema";
 import { internetIpv6 } from "../../../src/intent/connections";
-import { templateOf } from "../../../src/intent/networkTemplates";
+import { templateOf } from "../../../src/intent/networks";
 import { useFreshDevices } from "../data/devices";
 import { useProvision } from "../data/provision";
 import { useSeries } from "../data/history";

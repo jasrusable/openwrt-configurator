@@ -3,7 +3,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { deviceSchemaSchema } from "../../deviceSchema";
 import { parseDeviceFacts } from "../../facts/board";
-import { resolveHtmode } from "../../radioModes";
+import { bestMode } from "../../engine/radioModes";
 
 const boards = join(__dirname, "../helpers/boards");
 const read_ = (file: string) => JSON.parse(readFileSync(join(boards, file), "utf8"));
@@ -118,13 +118,12 @@ test("a radio's mode: the newest standard it has, at the widest width up to the 
   const [, ac] = facts("wifi7-multiradio").radios!.filter((r) => r.band === "5g");
   const [twoG, fiveG] = facts("nwa50ax-pro").radios!;
   const [, , sixG] = facts("wifi7-multiradio").radios!;
-  t.is(resolveHtmode("@best/80", fiveG.htmodes), "HE80", "Wi-Fi 6 at 80 MHz");
-  t.is(resolveHtmode("@best/80", twoG.htmodes), "HE40", "capped at what the radio has");
-  t.is(resolveHtmode("@best/80", ac.htmodes), "VHT80", "a Wi-Fi 5 radio gets VHT, not HE");
-  t.is(resolveHtmode("@best/320", sixG.htmodes), "EHT320", "Wi-Fi 7");
-  t.is(resolveHtmode("@best/80", undefined), "HE80", "modes unknown: as before");
-  t.is(resolveHtmode("@best/20", []), undefined, "nothing fits: OpenWrt's default");
-  t.is(resolveHtmode("VHT40", ac.htmodes), "VHT40", "a mode given outright is kept");
+  t.is(bestMode(80, fiveG.htmodes), "HE80", "Wi-Fi 6 at 80 MHz");
+  t.is(bestMode(80, twoG.htmodes), "HE40", "capped at what the radio has");
+  t.is(bestMode(80, ac.htmodes), "VHT80", "a Wi-Fi 5 radio gets VHT, not HE");
+  t.is(bestMode(320, sixG.htmodes), "EHT320", "Wi-Fi 7");
+  t.is(bestMode(80, undefined), "HE80", "modes unknown: as before");
+  t.is(bestMode(20, []), undefined, "nothing fits: OpenWrt's default");
 });
 
 test("whether each radio can be a mesh point: as read on the access point; unknown where not read", (t) => {

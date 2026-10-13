@@ -1,5 +1,6 @@
 // What a radio may be set to, the same for the schema, the compiler and the
 // UI's choices: each band's channels, the widths, and the mesh's own.
+import { where } from "./places";
 import type { Intent } from "./schema";
 
 export const bands = ["2g", "5g", "6g"] as const;
@@ -49,3 +50,29 @@ export const broadcastBands = (wifi: WifiSettings, ssid: { bands?: readonly Band
       (!ssid.bands || ssid.bands.includes(band)) &&
       !(wifi.mesh.enabled && wifi.mesh.band_reserved && wifi.mesh.band === band)
   );
+
+/** The radio section the compiler declares for each band, named as OpenWrt names a device's, with its usual width (MHz). */
+export const radios: { band: Band; name: string; width: string }[] = [
+  { band: "2g", name: "radio0", width: "20" },
+  { band: "5g", name: "radio1", width: "80" },
+  { band: "6g", name: "radio2", width: "160" },
+];
+
+/**
+ * The widest a band's radio is set to (MHz): its setting, else the band's
+ * usual; the mesh's band at most 80 MHz on 5 GHz, as wider reaches radar
+ * channels. One rule for every node's radio, the router's mesh one included,
+ * or the mesh's links would differ by node.
+ */
+export const radioWidth = (intent: Intent, band: Band) => {
+  const settings = intent.wifi.radios[band];
+  const usual = radios.find((r) => r.band === band)!.width;
+  const width = settings.width === "auto" ? usual : settings.width;
+  return intent.wifi.mesh.enabled && intent.wifi.mesh.band === band && band === "5g" ? String(Math.min(80, Number(width))) : width;
+};
+
+/** Why these Wi-Fi settings may not be: an SSID broadcast now would be on no band. */
+export const strandedReason = (intent: Intent, wifi: WifiSettings) => {
+  const stranded = intent.wifi.networks.find((w) => broadcastBands(intent.wifi, w).length && !broadcastBands(wifi, w).length);
+  return stranded && `“${stranded.ssid || "Unnamed"}” would be broadcast nowhere: give it another band first (${where("ssids")}).`;
+};

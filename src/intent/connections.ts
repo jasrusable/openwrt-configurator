@@ -114,3 +114,6 @@ export const withMain = (connections: Connection[], index: number): Connection[]
 export const withoutConnection = (connections: Connection[], index: number): Connection[] =>
   // withMain puts the second first and the main second: that one goes.
   index === 0 ? withMain(connections, 1).filter((_, i) => i !== 1) : connections.filter((_, i) => i !== index);
+
+/** How many networks' /64s a delegated IPv6 prefix of this length holds. */
+export const roomIn = (prefix: string) => 2 ** (64 - Number(prefix));

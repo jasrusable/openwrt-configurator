@@ -1,11 +1,11 @@
 // Shared by the firewall pages: where a rule's traffic comes from and goes
 // to (a network, the internet, the router, anywhere), and how a rule reads.
 import { useDraftValue } from "../form/draft";
-import { anywhere, internet, router } from "../../../src/intent/firewall";
+import { anywhere, internet, router } from "../../../src/intent/access";
 import { protocolLabels } from "../../../src/intent/labels";
 import { Intent } from "../../../src/intent/schema";
 import { SelectField } from "../form/fields";
-import { IntentField } from "../form/IntentForm";
+import { IntentField } from "../form/draft";
 
 export const actionOptions = [
   { value: "allow" as const, label: "Allow" },

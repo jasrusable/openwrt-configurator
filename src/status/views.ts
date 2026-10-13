@@ -3,11 +3,13 @@
 // network, each device's health and ports, each access point's radios, the
 // internet line as the router sees it, and what happened lately in words.
 // Pure, like networkStatus: tested against recorded output.
+import { z } from "zod";
 import type { DeviceFacts } from "../deviceFacts";
 import { networkHasIpv6 } from "../intent/connections";
-import { bands, type Intent } from "../intent/schema";
+import { type Intent } from "../intent/schema";
+import { bands } from "../intent/radios";
 import type { InternetCheck, PortLink } from "./device";
-import { networkOfAddress, type NetworkStatus, Reachability, reached, routerOf, weakMeshLinkMbps } from "./network";
+import { networkOfAddress, type NetworkStatus, Reachability, readDevices, readOf, reached, routerOf, weakMeshLinkMbps, whyUnread } from "./network";
 import { bandOf } from "./values";
 
 
@@ -76,9 +78,18 @@ export type RadioView = {
   clients: number;
 };
 
-/** What kind of event: for its icon and the page's filter. Absent on events kept before kinds were. */
-export type ActivityKind = "up" | "down" | "start" | "apply" | "problem" | "note";
-export type ActivityView = { at: number; device: string; text: string; kind?: ActivityKind };
+/** What kind of event: for its icon and the page's filter. */
+export const activityKinds = ["up", "down", "start", "apply", "problem", "note"] as const;
+export type ActivityKind = (typeof activityKinds)[number];
+
+/** One event in words; also the shape Activity is kept in (src/status/read.ts). Kind is absent on events kept before kinds were. */
+export const activityViewSchema = z.object({
+  at: z.number(),
+  device: z.string(),
+  text: z.string(),
+  kind: z.enum(activityKinds).optional(),
+});
+export type ActivityView = z.infer<typeof activityViewSchema>;
 
 /**
  * A service Status may offer to restart: one the settings need running, and
@@ -95,21 +106,21 @@ export const clientsOf = (
   devices: Reachability[],
   facts: Record<string, DeviceFacts | undefined>
 ): ClientView[] => {
-  const router = routerOf(intent, devices);
+  const router = reached(routerOf(intent, devices));
   const ours = new Set(Object.values(facts).flatMap((f) => f?.macs ?? []));
   const reservations = intent.networks.flatMap((n) => n.dhcp.reservations.map((r) => ({ ...r, mac: r.mac.toLowerCase() })));
-  const wifi = devices.filter(reached).flatMap((d) =>
+  const wifi = readDevices(devices).flatMap((d) =>
     d.wifi.flatMap((w) => w.clients.map((c) => ({ ...c, accessPoint: d.hostname, ssid: w.ssid, band: bandOf(w.freq) })))
   );
-  const leases = reached(router) ? router.leases : [];
+  const leases = router?.leases ?? [];
   // Not what is seen on an internet line (the provider's modem): those are not your devices.
   const lineDevices = new Set(
-    reached(router)
+    router
       ? intent.internet.lines.flatMap((c) => router.interfaces.filter((i) => i.id === c.id || i.id === `${c.id}6`).map((i) => i.device))
       : []
   );
-  const neighbours = reached(router) ? router.neighbours.filter((n) => !n.device || !lineDevices.has(n.device)) : [];
-  const v6 = reached(router) ? router.ipv6Leases : [];
+  const neighbours = (router?.neighbours ?? []).filter((n) => !n.device || !lineDevices.has(n.device));
+  const v6 = router?.ipv6Leases ?? [];
   const macs = [
     ...new Set([...leases.map((l) => l.mac), ...wifi.map((c) => c.mac), ...neighbours.filter((n) => !n.address.startsWith("fe80")).map((n) => n.mac)]),
   ].filter((mac) => !ours.has(mac));
@@ -127,9 +138,9 @@ export const clientsOf = (
         ]),
       ];
       const active = seen.some((n) => ["REACHABLE", "DELAY", "PROBE"].includes(n.state));
-      const counted = reached(router) ? router.traffic[mac] : undefined;
+      const counted = router?.traffic[mac];
       // usteer's own nodes on each access point (another's are "<address>#hostapd…").
-      const heardBy = devices.filter(reached).flatMap((d) =>
+      const heardBy = readDevices(devices).flatMap((d) =>
         d.heardBy
           .filter((h) => h.mac === mac && !h.node.includes("#"))
           .map((h) => {
@@ -178,7 +189,8 @@ export const clientsOf = (
 
 export const devicesOf = (intent: Intent, devices: Reachability[], facts: Record<string, DeviceFacts | undefined>): DeviceView[] =>
   intent.hardware.map((d) => {
-    const status = devices.find((s) => s.hostname === d.name);
+    const read = readOf(devices, d.name);
+    const status = reached(read);
     const f = facts[d.name];
     const portNames = (f?.schema.ports ?? []).filter((p) => !p.sw_config_cpu_name).map((p) => p.name);
     return {
@@ -186,9 +198,9 @@ export const devicesOf = (intent: Intent, devices: Reachability[], facts: Record
       role: d.role,
       ...(f?.schema.model ? { model: f.schema.model } : {}),
       ...(f?.schema.version ? { version: f.schema.version } : {}),
-      reachable: reached(status),
-      ...(status && "error" in status ? { error: status.error } : {}),
-      ...(reached(status)
+      reachable: !!status,
+      ...(whyUnread(read) !== undefined ? { error: whyUnread(read) } : {}),
+      ...(status
         ? {
             uptime: status.uptime,
             load: status.load[0],
@@ -198,12 +210,12 @@ export const devicesOf = (intent: Intent, devices: Reachability[], facts: Record
             ...(status.cores ? { cores: status.cores } : {}),
           }
         : {}),
-      ports: portNames.map((name) => (reached(status) ? status.links.find((l) => l.name === name) : undefined) ?? { name, up: false }),
+      ports: portNames.map((name) => status?.links.find((l) => l.name === name) ?? { name, up: false }),
     };
   });
 
 export const radiosOf = (devices: Reachability[]): RadioView[] =>
-  devices.filter(reached).flatMap((d) =>
+  readDevices(devices).flatMap((d) =>
     d.wifi.map((w) => ({
       accessPoint: d.hostname,
       ifname: w.ifname,
@@ -219,8 +231,7 @@ export const radiosOf = (devices: Reachability[]): RadioView[] =>
 
 /** The router's Internet checks, when the Performance view read them. */
 export const internetOf = (intent: Intent, devices: Reachability[]): InternetCheck | undefined => {
-  const router = routerOf(intent, devices);
-  return reached(router) ? router.internet : undefined;
+  return reached(routerOf(intent, devices))?.internet;
 };
 
 /** A device's log lines, said in words; lines not worth telling are left out. */
@@ -245,8 +256,7 @@ export const activityOf = (intent: Intent, devices: Reachability[]): ActivityVie
     if ((m = /^onc(?:-[\w-]+)?(?:\[\d+\])?: (.*)/.exec(text))) return { text: m[1].charAt(0).toUpperCase() + m[1].slice(1), kind: "note" };
     return undefined;
   };
-  return devices
-    .filter(reached)
+  return readDevices(devices)
     .flatMap((d) =>
       (d.log ?? []).flatMap((line) => {
         const said = say(line.text);
@@ -272,15 +282,16 @@ export const attentionOf = ({
   applied?: "none" | "matches" | "differs";
 }): Attention[] => {
   const out: Attention[] = [];
-  const router = routerOf(intent, devices);
+  const router = reached(routerOf(intent, devices));
   for (const d of intent.hardware) {
-    const status = devices.find((s) => s.hostname === d.name);
-    if (!reached(status)) {
+    const read = readOf(devices, d.name);
+    const status = reached(read);
+    if (!status) {
       out.push({
         id: `unreachable:${d.name}`,
         severity: "problem",
         title: `${d.name} cannot be reached`,
-        detail: status && "error" in status ? status.error : "It did not answer.",
+        detail: whyUnread(read) ?? "It did not answer.",
         link: "/hardware",
       });
       continue;
@@ -336,7 +347,7 @@ export const attentionOf = ({
       }
     }
   }
-  if (reached(router)) {
+  if (router) {
     const connections = intent.internet.lines;
     const up = connections.filter((c) => {
       const line = router.lines.find((l) => l.id === c.id);
@@ -391,8 +402,8 @@ export const attentionOf = ({
 
 /** Each internet line's byte counters now, on the router, and when (the server's clock): throughput comes from two reads. */
 export const internetCountersOf = (intent: Intent, devices: Reachability[]) => {
-  const router = routerOf(intent, devices);
-  if (!reached(router)) return undefined;
+  const router = reached(routerOf(intent, devices));
+  if (!router) return undefined;
   const lines = Object.fromEntries(
     intent.internet.lines.flatMap((c) => {
       const device = router.interfaces.find((i) => i.id === c.id)?.device;

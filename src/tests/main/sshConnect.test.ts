@@ -1,20 +1,15 @@
 import test from "ava";
-import { provisionableDevices, sshConnectOptions } from "../../provisionConfig";
-import { ONCDeviceConfig, oncConfigSchema } from "../../oncConfigSchema";
+import { provisionableDevices, sshConnectOptions } from "../../apply/provisionConfig";
+import { PlanDevice } from "../../plan/types";
+import { planOf } from "../helpers/fixtures";
+import { deviceFromJson } from "../../lowLevel/names";
 import { homedir } from "os";
 import { join } from "path";
 import { nodePlatform } from "../../platforms/node";
 
-const device = (
-  ssh_auth: ONCDeviceConfig["provisioning_config"]
-): ONCDeviceConfig =>
-  ({
-    model_id: "test",
-    ipaddr: "10.0.0.1",
-    hostname: "box",
-    tags: {},
-    provisioning_config: ssh_auth,
-  } as ONCDeviceConfig);
+/** A device as a low-level config writes it (`provisioning_config.ssh_auth`), read as the plan has it. */
+const device = (provisioning_config: { ssh_auth: { username: string; password?: string; private_key_path?: string } }): PlanDevice =>
+  deviceFromJson({ model_id: "test", ipaddr: "10.0.0.1", hostname: "box", tags: {}, provisioning_config });
 
 test("password-only auth", (t) => {
   const opts = sshConnectOptions({
@@ -96,7 +91,7 @@ test("only devices with an address and SSH login are provisioned", (t) => {
   const auth = { ssh_auth: { username: "root", password: "x" } };
   const base = { model_id: "m", tags: {} };
   const { ready, skipped } = provisionableDevices({
-    devices: [
+    devices: ([
       {
         ...base,
         hostname: "router",
@@ -112,7 +107,7 @@ test("only devices with an address and SSH login are provisioned", (t) => {
         provisioning_config: auth,
         enabled: false,
       },
-    ],
+    ] as Parameters<typeof deviceFromJson>[0][]).map(deviceFromJson),
     config: {},
   } as any);
   t.deepEqual(
@@ -128,7 +123,7 @@ test("only devices with an address and SSH login are provisioned", (t) => {
 
 test("a device needs no ipaddr to be valid", (t) => {
   t.notThrows(() =>
-    oncConfigSchema.parse({
+    planOf({
       devices: [{ model_id: "m", hostname: "image-only", tags: {} }],
       config: {},
     })

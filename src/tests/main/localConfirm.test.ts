@@ -4,7 +4,7 @@ import { spawn, spawnSync } from "child_process";
 import { chmodSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { createServer, Server } from "net";
-import { reachableSession, reconnectSettled } from "../../confirm";
+import { reachableSession, reconnectSettled } from "../../apply/reconnect";
 import { answersSsh, servicesSettled } from "../../deviceProbes";
 import { Session } from "../../platform";
 

@@ -1,3 +1,4 @@
+import type { PathsOf } from "../../intent/paths";
 import test from "ava";
 import { sampleIntent } from "../helpers/fixtures";
 import { availability, choiceIssues, choices } from "../../intent/choices";
@@ -48,7 +49,8 @@ test("no dead ends: whatever the rules leave available can be chosen without bre
   );
   t.true(places.length > 10);
   for (const { path, value } of places) {
-    const rules = availability(base, path.join("."));
+    // Places found at run time: a path the type cannot know.
+    const rules = availability(base, path.join(".") as PathsOf<Intent>);
     const option = rules.option(value);
     if (option.unavailable) continue;
     const current = path.reduce((v: any, k) => v?.[k], base);

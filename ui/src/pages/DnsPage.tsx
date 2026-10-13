@@ -15,7 +15,7 @@ import {
 } from "../form/fields";
 import { DataTable } from "../kit/DataTable";
 import { EmptyState, Section, SettingsPage } from "../kit/layout";
-import { poolStart } from "../../../src/intent/features/network";
+import { poolStart } from "../../../src/intent/networks";
 import { shownName } from "../../../src/intent/labels";
 
 type DnsRecord = { name: string; address: string };

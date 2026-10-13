@@ -1,0 +1,38 @@
+// Values several settings share the rules of: names, addresses, Wi-Fi
+// passwords. A rule only one feature uses lives in that feature's schema.
+import { z } from "zod";
+import { isIpAddress, parseIpv4 } from "./addresses";
+
+/** A device's or network's name: a hostname's rules. */
+export const namePattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+
+export const name = z.string().regex(namePattern, "lowercase letters, digits and -, like a hostname");
+
+export const wifiPassword = z
+  .string()
+  .min(8, "at least 8 characters")
+  .max(63, "at most 63 characters");
+
+/** A private IPv4 /24 (RFC 1918), like 10.0.0.0/24, as "a.b.c.0/24". */
+export const parseSubnet = (subnet: string) => {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.0\/24$/.exec(subnet);
+  if (!match) return undefined;
+  const [a, b, c] = match.slice(1).map(Number);
+  const isPrivate =
+    a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  return isPrivate && b <= 255 && c <= 255 ? [a, b, c] : undefined;
+};
+
+export const ipv4Subnet = z
+  .string()
+  .refine(
+    (subnet) => parseSubnet(subnet) !== undefined,
+    "a private range: 10.x.x.0/24, 172.16-31.x.0/24 or 192.168.x.0/24"
+  );
+
+export const ipv4 = z
+  .string()
+  .refine((a) => parseIpv4(a) !== undefined, "an IPv4 address, like 203.0.113.10");
+
+/** A DNS server: IPv4 or IPv6. */
+export const dnsServer = z.string().refine(isIpAddress, "an IP address, like 9.9.9.9");

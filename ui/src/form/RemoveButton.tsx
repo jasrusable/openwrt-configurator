@@ -6,24 +6,27 @@ import { useState } from "react";
 import { describePath } from "../../../src/intent/diff";
 import { Intent } from "../../../src/intent/schema";
 import { settingPages } from "../settingPages";
-import { getIn, issuesOf, useDraft } from "./draft";
+import { getAt, issuesOf, useDraft } from "./draft";
 
 const json = (value: unknown) => JSON.stringify(value);
 
 /** What an item is, as opposed to what it holds: an edited item is the same item. */
-const identity = (item: any) => String(item?.id ?? item?.ssid ?? item?.name ?? json(item));
+const identity = (item: unknown) => {
+  const named = (item ?? {}) as { id?: unknown; ssid?: unknown; name?: unknown };
+  return String(named.id ?? named.ssid ?? named.name ?? json(item));
+};
 
 /** Items of every list that `after` no longer has, other than `itself`. */
 const removedWith = (before: Intent, after: Intent, itself: string) =>
   settingPages
-    .filter((s) => s.item && Array.isArray(getIn(before, s.path)))
+    .filter((s) => s.item && Array.isArray(getAt(before, s.path)))
     .flatMap(({ path }) => {
       // Counted, so one of two same-named rules going is still seen.
       const left = new Map<string, number>();
-      ((getIn(after, path) ?? []) as unknown[]).forEach((item) =>
+      ((getAt(after, path) ?? []) as unknown[]).forEach((item) =>
         left.set(identity(item), (left.get(identity(item)) ?? 0) + 1)
       );
-      return ((getIn(before, path) ?? []) as unknown[]).flatMap((item, i) => {
+      return ((getAt(before, path) ?? []) as unknown[]).flatMap((item, i) => {
         const key = identity(item);
         const count = left.get(key) ?? 0;
         if (count > 0) {

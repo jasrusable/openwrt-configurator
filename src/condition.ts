@@ -13,19 +13,10 @@
 // The ordering operators compare releases (device.version < '25.12.6'): an
 // rc before its release, a snapshot after its line; anything that is not a
 // release, or an absent value, matches nothing.
-import { compareReleases } from "./release";
-
-type Value = string | number | boolean;
-
-type Node =
-  | { kind: "always" }
-  | { kind: "or" | "and"; left: Node; right: Node }
-  | { kind: "not"; operand: Node }
-  | { kind: "compare"; op: "==" | "!="; name: string; value: Value }
-  | { kind: "order"; op: Order; name: string; value: string }
-  | { kind: "in"; name: string; values: Value[] };
-
-type Order = "<" | "<=" | ">" | ">=";
+//
+// A hand-written config's `.if` is read into the typed tree the compiler
+// builds directly (src/plan/when.ts), which is all the engine evaluates.
+import { isFact, Literal, Order, unknownFactMessage, When } from "./plan/when";
 
 type Token =
   | { type: "punct"; text: string; at: number }
@@ -76,7 +67,13 @@ const tokenize = (source: string): Token[] => {
   return [...tokens, { type: "end", at: source.length }];
 };
 
-const parse = (source: string): Node => {
+/** Same-kind chains flattened, so `a AND b AND c` is one `all`. */
+const join = (kind: "all" | "any", left: When, right: When): When => ({
+  kind,
+  of: [...(left.kind === kind ? left.of : [left]), ...(right.kind === kind ? right.of : [right])],
+});
+
+const parse = (source: string): When => {
   const tokens = tokenize(source);
   let pos = 0;
   const peek = () => tokens[pos];
@@ -93,7 +90,7 @@ const parse = (source: string): Node => {
     }
   };
 
-  const value = (): Value => {
+  const value = (): Literal => {
     const token = tokens[pos++];
     if (token.type === "string") return token.value;
     // As written, since values compare by text: 25.10 is not 25.1, nor 01 1.
@@ -103,7 +100,7 @@ const parse = (source: string): Node => {
     throw new ConditionError(`expected a value ${where(token)}`);
   };
 
-  const primary = (): Node => {
+  const primary = (): When => {
     const token = tokens[pos];
     if (isPunct(token, "(")) {
       pos++;
@@ -120,15 +117,14 @@ const parse = (source: string): Node => {
         `expected a name like device.tag.role ${where(token)}`
       );
     }
+    // A name no device can have is a typo: refused as it is read.
+    const fact = token.text;
+    if (!isFact(fact)) throw new ConditionError(unknownFactMessage(fact));
     pos++;
     const op = tokens[pos++];
     if (isPunct(op, "==", "!=")) {
-      return {
-        kind: "compare",
-        op: (op as { text: "==" | "!=" }).text,
-        name: token.text,
-        value: value(),
-      };
+      const negated = (op as { text: string }).text === "!=";
+      return { kind: "is", fact, value: value(), ...(negated ? { negated: true as const } : {}) };
     }
     if (isPunct(op, "<", "<=", ">", ">=")) {
       // Kept as written: 25.10 is not 25.1.
@@ -138,8 +134,8 @@ const parse = (source: string): Node => {
       }
       return {
         kind: "order",
+        fact,
         op: (op as { text: Order }).text,
-        name: token.text,
         value: literal.type === "string" ? literal.value : literal.text,
       };
     }
@@ -151,31 +147,31 @@ const parse = (source: string): Node => {
         values.push(value());
       }
       expect("]");
-      return { kind: "in", name: token.text, values };
+      return { kind: "oneOf", fact, values };
     }
     throw new ConditionError(`expected "==", "!=", "<", "<=", ">", ">=" or "in" ${where(op)}`);
   };
 
-  const not = (): Node => {
+  const not = (): When => {
     if (isKeyword(peek(), "NOT") || isPunct(peek(), "!")) {
       pos++;
-      return { kind: "not", operand: not() };
+      return { kind: "not", of: not() };
     }
     return primary();
   };
 
   const binary =
-    (kind: "and" | "or", keyword: string, symbol: string, next: () => Node) =>
-    (): Node => {
+    (kind: "all" | "any", keyword: string, symbol: string, next: () => When) =>
+    (): When => {
       let left = next();
       while (isKeyword(peek(), keyword) || isPunct(peek(), symbol)) {
         pos++;
-        left = { kind, left, right: next() };
+        left = join(kind, left, next());
       }
       return left;
     };
-  const and = binary("and", "AND", "&&", not);
-  const or = binary("or", "OR", "||", and);
+  const and = binary("all", "AND", "&&", not);
+  const or = binary("any", "OR", "||", and);
 
   const tree = or();
   if (peek().type !== "end") {
@@ -184,71 +180,11 @@ const parse = (source: string): Node => {
   return tree;
 };
 
-/**
- * What a name in a condition refers to. `value: undefined` means absent (a
- * tag this device does not set); throw for a name that cannot exist at all.
- */
-export type Lookup = (name: string) => { value?: Value | Value[] };
-
-const evaluate = (node: Node, lookup: Lookup): boolean => {
-  switch (node.kind) {
-    case "always":
-      return true;
-    case "or":
-      return evaluate(node.left, lookup) || evaluate(node.right, lookup);
-    case "and":
-      return evaluate(node.left, lookup) && evaluate(node.right, lookup);
-    case "not":
-      return !evaluate(node.operand, lookup);
-    case "order": {
-      const { value } = lookup(node.name);
-      const order = typeof value === "string" ? compareReleases(value, node.value) : undefined;
-      if (order === undefined) return false;
-      return { "<": order < 0, "<=": order <= 0, ">": order > 0, ">=": order >= 0 }[node.op];
-    }
-    case "compare":
-    case "in": {
-      const { value } = lookup(node.name);
-      const wanted = node.kind === "in" ? node.values : [node.value];
-      // An absent value (a tag this device does not set) matches nothing.
-      // By text: `device.sw_config == 'true'` and `device.tag.floor == 2`
-      // mean what they say, though one side is a boolean or a number.
-      const same = (a: Value, b: Value) => String(a) === String(b);
-      const matches =
-        value !== undefined &&
-        wanted.some((w) =>
-          Array.isArray(value) ? value.some((v) => same(v, w)) : same(value, w)
-        );
-      return node.kind === "compare" && node.op === "!=" ? !matches : matches;
-    }
-  }
-};
-
-/** Every name a condition mentions, in branches evaluation may skip too. */
-const namesIn = (node: Node): string[] => {
-  switch (node.kind) {
-    case "or":
-    case "and":
-      return [...namesIn(node.left), ...namesIn(node.right)];
-    case "not":
-      return namesIn(node.operand);
-    case "always":
-      return [];
-    default:
-      return [node.name];
-  }
-};
-
-export const evaluateCondition = (condition: string, lookup: Lookup) => {
+/** A condition as written, read into the tree, its names checked. */
+export const parseCondition = (condition: string): When => {
   try {
-    const tree = parse(condition);
-    // Each looked up first: a mistyped name fails here even in a branch an
-    // OR or AND would not reach on this device.
-    namesIn(tree).forEach((name) => lookup(name));
-    return evaluate(tree, lookup);
+    return parse(condition);
   } catch (e) {
-    throw new Error(
-      `Invalid condition "${condition}": ${(e as Error).message}`
-    );
+    throw new Error(`Invalid condition "${condition}": ${(e as Error).message}`);
   }
 };

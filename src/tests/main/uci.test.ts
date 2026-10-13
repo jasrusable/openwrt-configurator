@@ -1,4 +1,6 @@
 import test from "ava";
+import { keepsOf } from "../helpers/fixtures";
+import { keepText } from "../../plan/types";
 import {
   changedConfigs,
   declaredConfigs,
@@ -6,7 +8,7 @@ import {
   unmatchedKeeps,
   verifyConfigs,
   wipeOperations,
-} from "../../uci";
+} from "../../engine/uci";
 
 // Real `uci export` output (25.12.5), plus the probe's marker for a config uci
 // could not parse.
@@ -74,7 +76,7 @@ test("parsing never echoes a value in its errors", (t) => {
 
 test("the wipe deletes every section not kept, by exact name", (t) => {
   const { configs } = parseUciExport(exported);
-  t.deepEqual(wipeOperations(configs, ["qosify.*", "firewall.defaults"]), [
+  t.deepEqual(wipeOperations(configs, keepsOf("qosify.*", "firewall.defaults")), [
     "delete firewall.@rule[0]",
     "delete firewall.@rule[0]",
     "delete network.lan",
@@ -140,7 +142,7 @@ test("commits every config the wipe or the declared config changes", (t) => {
     usteer: [],
   };
   t.deepEqual(
-    changedConfigs({ current, declared, keep: ["luci.*", "dhcp.dnsmasq"] }),
+    changedConfigs({ current, declared, keep: keepsOf("luci.*", "dhcp.dnsmasq") }),
     ["firewall", "network"]
   );
 });
@@ -167,7 +169,7 @@ test("verification passes when the staged config is exactly the declared one", (
         luci: [section("core", "main")],
       },
       declared,
-      keep: ["network.globals", "luci.*"],
+      keep: keepsOf("network.globals", "luci.*"),
     }),
     []
   );
@@ -204,7 +206,7 @@ test("a declared section of a kept type only needs its declared options", (t) =>
   const declared = {
     network: [section("globals", "globals", { packet_steering: "1" })],
   };
-  const keep = ["network.globals"];
+  const keep = keepsOf("network.globals");
   t.deepEqual(
     verifyConfigs({
       actual: {
@@ -236,32 +238,42 @@ test("a declared config the device does not have is a problem", (t) => {
 
 test("keep entries naming no config on the device are reported", (t) => {
   t.deepEqual(
-    unmatchedKeeps(["dropbaer.*", "luci.*", "system.led"], {
+    unmatchedKeeps(keepsOf("dropbaer.*", "luci.*", "system.led"), {
       luci: [],
       system: [],
-    }),
+    }).map(keepText),
     ["dropbaer.*"]
   );
 });
 
 test("an optional keep (?config.*) keeps a config if present and is never reported missing", (t) => {
   const { configs } = parseUciExport("package ubihealthd\n\nconfig ubi-device 'ubi0'\n\toption device '/dev/ubi0'\n");
-  t.deepEqual(wipeOperations(configs, ["?ubihealthd.*"]), []);
+  t.deepEqual(wipeOperations(configs, keepsOf("?ubihealthd.*")), []);
   t.true(wipeOperations(configs, []).length > 0, "without the keep it would be wiped");
-  t.deepEqual(unmatchedKeeps(["?ubihealthd.*", "typo.*"], {}), ["typo.*"]);
+  t.deepEqual(unmatchedKeeps(keepsOf("?ubihealthd.*", "typo.*"), {}).map(keepText), ["typo.*"]);
 });
 
 test("a section name uci refuses (a hyphen) stops the run before anything is sent", (t) => {
-  const { getUciCommands } = require("../../getUciCommands");
+  const { getUciCommands } = require("../../engine/getUciCommands");
   const config = (name: string) => ({ network: { interface: [{ ".name": name, proto: "none" }] } });
   t.throws(() => getUciCommands({ openWrtConfig: config("my-lan") }), { message: /section name "my-lan"/ });
   t.notThrows(() => getUciCommands({ openWrtConfig: config("my_lan") }));
 });
 
-test("an unset value is no option at all, never the text undefined", (t) => {
-  const { getUciCommands } = require("../../getUciCommands");
-  const commands: string[] = getUciCommands({
-    openWrtConfig: { wireless: { "wifi-device": [{ ".name": "radio0", type: "mac80211", htmode: undefined, channel: null }] } },
+test("an unset value is no option at all, never the text undefined: a radio mode no width fits", (t) => {
+  const { getUciCommands } = require("../../engine/getUciCommands");
+  const { getOpenWrtConfig } = require("../../engine/getOpenWrtConfig");
+  const { planOf } = require("../helpers/fixtures");
+  const plan = planOf({
+    devices: [{ hostname: "ap", tags: {} }],
+    config: { wireless: { "wifi-device": [{ ".name": "radio0", band: "5g", htmode: "@best/20" }] } },
   });
-  t.false(commands.some((c) => /undefined|null|htmode|channel/.test(c)), commands.join("\n"));
+  const openWrtConfig = getOpenWrtConfig({
+    plan,
+    deviceConfig: plan.devices[0],
+    deviceSchema: { name: "x", version: "25.12.5", ports: [], radios: [{ name: "radio0", type: "mac80211", path: "p", band: "5g", htmodes: [] }] },
+  });
+  const commands: string[] = getUciCommands({ openWrtConfig });
+  t.true(commands.includes("uci set wireless.radio0=wifi-device"));
+  t.false(commands.some((c) => /undefined|null|htmode/.test(c)), commands.join("\n"));
 });

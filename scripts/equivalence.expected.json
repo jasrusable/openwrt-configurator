@@ -1,0 +1,12 @@
+[
+  {
+    "why": "The device agent keeps a run's watchdog pid in its run directory; the mesh rescue watcher looks for it there (src/agent/paths.ts).",
+    "from": "/tmp/onc-watchdog-*.pid",
+    "to": "/tmp/onc-run-*/watchdog.pid"
+  },
+  {
+    "why": "An apply in progress shows as the device agent's script, which replaced the provision script (src/agent/paths.ts' agentGlob).",
+    "from": "/tmp/.onc-provision-*.sh",
+    "to": "/tmp/onc-agent-*.sh"
+  }
+]

@@ -1,48 +1,41 @@
-// Intent -> the low-level config the engine provisions. Pure: no device facts
-// and no I/O, so the same intent always compiles to the same config, and
-// everything device-specific is resolved later, against the live device.
-import { airtime } from "./features/airtime";
-import { devices } from "./features/devices";
-import { discovery } from "./features/discovery";
-import { dns } from "./features/dns";
-import { firewall } from "./features/firewall";
-import { internet } from "./features/internet";
-import { mesh } from "./features/mesh";
-import { vpn } from "./features/vpn";
-import { network } from "./features/network";
-import { roles } from "./features/roles";
-import { system } from "./features/system";
-import { traffic } from "./features/traffic";
-import { wifi } from "./features/wifi";
-import { Feature, merge } from "./fragment";
-import { patchesFeature } from "./patches";
-import { Intent, intentSchema } from "./schema";
+// Intent -> the plan the engine applies (src/plan/types.ts). Pure: no device
+// facts and no I/O, so the same intent always compiles to the same plan, and
+// everything device-specific is a condition or placeholder the engine
+// resolves later, against the live device.
+import { merge } from "./fragment";
+import { featureModules } from "./modules";
+import { Intent } from "./schema";
+import { planIssues } from "../plan/check";
+import { Plan } from "../plan/types";
+import { fail, Problem } from "../problem";
+import { messageOf, ok, Result } from "../result";
 
-/** In order: where two add sections of one type, earlier ones come first. */
-const features: Feature[] = [
-  devices,
-  system,
-  network,
-  internet,
-  firewall,
-  dns,
-  wifi,
-  airtime,
-  mesh,
-  vpn,
-  discovery,
-  traffic,
-  roles,
-  // Last: fixes layered over everything else (src/intent/patches).
-  patchesFeature,
-];
+/** Every feature's compile steps, in their order: where two add sections of one type, earlier ones come first. */
+const steps = featureModules
+  .flatMap((feature) => feature.compile ?? [])
+  .sort((a, b) => a.order - b.order)
+  .map((step) => step.compile);
 
-/** Unvalidated: the caller parses it with oncConfigSchema, like any config. */
-export const compileIntent = (intent: Intent) =>
-  merge(features.map((feature) => feature(intent)));
+export const compileIntent = (intent: Intent): Plan => merge(steps.map((step) => step(intent)));
+
+/**
+ * An intent's plan, if it passes the plan's own check (the one every plan
+ * meets, src/plan/check.ts): a compiler bug shows up when the intent is
+ * saved, not halfway through an apply. Its issues in `details.issues`.
+ */
+export const checkCompiles = (intent: Intent): Result<Plan, Problem> => {
+  let plan: Plan;
+  try {
+    plan = compileIntent(intent);
+  } catch (e) {
+    return fail("invalid", `The intent did not compile: ${messageOf(e)}`, { details: { issues: [{ path: [], message: messageOf(e) }] } });
+  }
+  const issues = planIssues(plan);
+  return issues.length
+    ? fail("invalid", `The intent compiles to a plan that is not valid: ${issues.map((i) => i.message).join("; ")}`, { details: { issues } })
+    : ok(plan);
+};
 
 /** A parsed config file is an intent file if it says which intent schema it uses. */
 export const isIntent = (json: unknown) =>
   !!json && typeof json === "object" && "schema" in json;
-
-export { intentSchema };

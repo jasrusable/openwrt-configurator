@@ -4,14 +4,13 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { DeviceNow, deviceDiff } from "../../applyDiff";
 import { deviceSchemaSchema } from "../../deviceSchema";
-import { getOpenWrtState } from "../../getOpenWrtState";
+import { getOpenWrtState } from "../../engine/getOpenWrtState";
 import { compileIntent } from "../../intent/compile";
 import { Intent } from "../../intent/schema";
-import { oncConfigSchema } from "../../oncConfigSchema";
-import { OpenWrtState } from "../../openWrtConfigSchema";
+import { OpenWrtState } from "../../engine/openWrtState";
 import { nodePlatform } from "../../platforms/node";
-import { provisionableDevices } from "../../provisionConfig";
-import { declaredConfigs } from "../../uci";
+import { provisionableDevices } from "../../apply/provisionConfig";
+import { declaredConfigs } from "../../engine/uci";
 
 const root = join(__dirname, "..", "..", "..");
 const sample = (): Intent =>
@@ -20,21 +19,21 @@ const models: Record<string, string> = { "home-router": "friendlyarm,nanopi-r6s"
 
 /** What the apply leaves on `hostname` for this intent. */
 const stateFor = (intent: Intent, hostname: string) => {
-  const oncConfig = oncConfigSchema.parse(compileIntent(intent));
-  const deviceConfig = provisionableDevices(oncConfig).ready.find((d) => d.hostname === hostname)!;
+  const plan = compileIntent(intent);
+  const deviceConfig = provisionableDevices(plan).ready.find((d) => d.hostname === hostname)!;
   const deviceSchema = deviceSchemaSchema.parse(
     JSON.parse(readFileSync(join(root, "deviceSchemas", `${models[hostname]}.json`), "utf8"))
   );
-  return getOpenWrtState({ oncConfig, deviceConfig, deviceSchema });
+  return getOpenWrtState({ plan, deviceConfig, deviceSchema });
 };
 const written = (content: string) => nodePlatform.sha256(content.endsWith("\n") ? content : `${content}\n`);
 
 /** A device that an apply of `state` has just left as it should be. */
 const appliedWith = (state: OpenWrtState): DeviceNow => ({
   config: declaredConfigs(state.config),
-  installed: (state.packagesToInstall ?? []).map((p) => p.packageName),
-  managed: (state.files ?? []).map((f) => f.path),
-  hashes: Object.fromEntries((state.files ?? []).map((f) => [f.path, written(f.content)])),
+  installed: state.packages.add,
+  managed: state.files.map((f) => f.path),
+  hashes: Object.fromEntries(state.files.map((f) => [f.path, written(f.content)])),
 });
 const diff = (state: OpenWrtState, now: DeviceNow) =>
   deviceDiff({ hostname: "x", state, now, sha256: nodePlatform.sha256 }) as Extract<
@@ -75,8 +74,7 @@ test("a Wi-Fi password change shows, but never the password on either side", (t)
 test("what the device has and the settings do not is removed, except what is kept", (t) => {
   const state = stateFor(sample(), "home-router");
   const now = appliedWith(state);
-  const keep = (state.configsToNotReset ?? []).find((k) => k.endsWith(".*") && !k.startsWith("?"))!;
-  const keptConfig = keep.replace(/\.\*$/, "");
+  const keptConfig = state.keep.find((k) => k.type === undefined && !k.optional)!.config;
   const d = diff(state, {
     ...now,
     config: {
@@ -97,9 +95,9 @@ test("packages and files: missing, unwanted, changed and no longer managed", (t)
   const state = stateFor(sample(), "home-router");
   const now = appliedWith(state);
   const [missing, ...installed] = now.installed;
-  const file = (state.files ?? [])[0];
+  const file = state.files[0];
   const d = diff(
-    { ...state, packagesToUninstall: ["odhcpd-ipv6only"] },
+    { ...state, packages: { ...state.packages, remove: ["odhcpd-ipv6only"] } },
     {
       ...now,
       installed: [...installed, "odhcpd-ipv6only"],

@@ -18,21 +18,20 @@ import {
 } from "@tabler/icons-react";
 import { useDraft, useDraftList, useDraftValue, useFieldError } from "../form/draft";
 import { withNetworkAdded, withoutNetwork } from "../../../src/intent/edits";
-import {
-  availability,
-  reachableNetworks,
-} from "../../../src/intent/choices";
+import { availability } from "../../../src/intent/choices";
+import { reachableNetworks } from "../../../src/intent/networks";
 import {
   NetworkTemplate,
   templateOf,
   templateSettings,
   withTemplate,
-} from "../../../src/intent/networkTemplates";
+} from "../../../src/intent/networks";
 import { internetIpv6 } from "../../../src/intent/connections";
 import { vpnZones } from "../../../src/intent/vpn";
-import { deviceOf } from "../../../src/intent/features/network";
+import { deviceOf } from "../../../src/intent/networks";
 import { where } from "../../../src/intent/places";
-import { Intent, parseSubnet } from "../../../src/intent/schema";
+import { Intent } from "../../../src/intent/schema";
+import { parseSubnet } from "../../../src/intent/validators";
 import {
   DurationField,
   MultiSelectField,
@@ -52,7 +51,7 @@ import { defineList, ListPage } from "../form/ListPage";
 import { EmptyState, ItemIcon, ItemName, Section, SettingRow } from "../kit/layout";
 import { networkTypeLabels, routerAccessOptions, zoneLabels } from "../../../src/intent/labels";
 
-/** Each template, and Custom for a network that follows none (networkTemplates.ts). */
+/** Each template, and Custom for a network that follows none (src/intent/networks/templates.ts). */
 const types: {
   value: NetworkTemplate | "custom";
   label: string;

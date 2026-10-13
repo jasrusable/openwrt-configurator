@@ -1,6 +1,5 @@
 import test from "ava";
-import { cgiRequest } from "../../server/cgi";
-import { cgiResponse } from "../../server/handlers";
+import { cgiRequest, cgiResponse } from "../../server/cgi";
 
 const names = ["gateway", "gateway.lan", "openwrt.lan"];
 // Only what uhttpd passes (verified on 25.12.5): no X-ONC, no X-ONC-Version.

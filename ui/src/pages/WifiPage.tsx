@@ -7,8 +7,9 @@ import {
   steeringLabels,
   steeringSummary,
   takesPart,
-} from "../../../src/intent/roaming";
-import { Band, Intent } from "../../../src/intent/schema";
+} from "../../../src/intent/wifi";
+import { Intent } from "../../../src/intent/schema";
+import { Band } from "../../../src/intent/radios";
 import { useDraftValue } from "../form/draft";
 import {
   MultiSelectField,

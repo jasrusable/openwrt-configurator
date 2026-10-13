@@ -1,5 +1,5 @@
-import { countries } from "../../../src/intent/countries";
-import { timezones } from "../../../src/intent/timezones";
+import { countries } from "../../../src/intent/system";
+import { timezones } from "../../../src/intent/system";
 import { Button, Group, TextInput } from "@mantine/core";
 import { useState } from "react";
 import { describeKey, keyIdentity } from "../../../src/sshKeys";

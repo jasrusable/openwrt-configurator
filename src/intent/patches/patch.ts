@@ -3,7 +3,10 @@
 // problems are found, and dropped when OpenWrt fixes them upstream. It says
 // why it exists, what it targets and, for a fix waiting on OpenWrt, the
 // upstream issue; everything it emits applies only where it targets.
-import { Feature, Fragment } from "../fragment";
+import { Feature, merge } from "../fragment";
+import type { Fragment } from "../../plan/types";
+import { KeepEntry, PlanFile, Sections, Service } from "../../plan/types";
+import { when, When } from "../../plan/when";
 import { Intent } from "../schema";
 
 type Role = Intent["hardware"][number]["role"];
@@ -29,27 +32,25 @@ export type Patch = {
   applies?: (intent: Intent) => boolean;
   /** What it changes, without conditions: the target is added to each. */
   apply: (intent: Intent) => {
-    files?: Omit<NonNullable<Fragment["files"]>[number], ".if">[];
-    config?: Fragment["config"];
-    packages?: string[];
-    /** configs_to_not_reset entries, like "?ubihealthd.*". */
-    keeps?: string[];
-    services?: Omit<NonNullable<Fragment["services"]>[number], ".if">[];
+    files?: Omit<PlanFile, "when">[];
+    config?: Sections;
+    packages?: { add?: string[]; remove?: string[] };
+    /** What the wipe leaves alone on the target. */
+    keeps?: KeepEntry[];
+    services?: Omit<Service, "when">[];
   };
 };
 
-const list = (values: string[]) => `[${values.map((v) => `'${v}'`).join(", ")}]`;
-
-/** The target as an engine condition. */
-export const targetCondition = ({ models, roles, releases }: Target) =>
-  [
-    models && `device.model_id in ${list(models)}`,
-    roles && `device.tag.role in ${list(roles)}`,
-    releases?.from && `device.version >= '${releases.from}'`,
-    releases?.before && `device.version < '${releases.before}'`,
-  ]
-    .filter(Boolean)
-    .join(" AND ") || "*";
+/** The target as a condition: each part narrowing it, every device when it has none. */
+export const targetCondition = ({ models, roles, releases }: Target): When => {
+  const parts = [
+    ...(models ? [when.oneOf("device.model_id", models)] : []),
+    ...(roles ? [when.oneOf("device.tag.role", roles)] : []),
+    ...(releases?.from ? [when.order("device.version", ">=", releases.from)] : []),
+    ...(releases?.before ? [when.order("device.version", "<", releases.before)] : []),
+  ];
+  return parts.length ? when.all(...parts) : when.always;
+};
 
 /** What the device facts (model, release) still decide, in words; roles are known from the intent. */
 export const describeTarget = ({ models, releases }: Target) =>
@@ -64,42 +65,33 @@ export const describeTarget = ({ models, releases }: Target) =>
 const needed = (intent: Intent) => (patch: Patch) => patch.applies?.(intent) ?? true;
 
 /** A patch's changes, each made conditional on its target. */
-export const applyPatches = (patches: Patch[]): Feature => (intent) =>
-  patches.filter(needed(intent)).reduce<Fragment>(
-    (acc, patch) => {
-      const when = targetCondition(patch.target);
-      const { files = [], config = {}, packages = [], keeps = [], services = [] } = patch.apply(intent);
-      return {
-        files: [...(acc.files ?? []), ...files.map((f) => ({ ...f, ".if": when }))],
-        package_profiles: [
-          ...(acc.package_profiles ?? []),
-          ...(packages.length ? [{ ".if": when, packages }] : []),
-        ],
-        configs_to_not_reset: [
-          ...(acc.configs_to_not_reset ?? []),
-          ...(keeps.length ? [{ ".if": when, configs: keeps }] : []),
-        ],
-        services: [...(acc.services ?? []), ...services.map((s) => ({ ...s, ".if": when }))],
-        config: Object.entries(config).reduce(
-          (merged, [key, types]) => ({
-            ...merged,
-            [key]: Object.entries(types).reduce(
-              (sections, [type, sectionList]) => ({
-                ...sections,
-                [type]: [
-                  ...(sections[type] ?? []),
-                  ...sectionList.map((section) => ({ ...section, ".if": when })),
-                ],
-              }),
-              merged[key] ?? {}
-            ),
-          }),
-          acc.config ?? {}
-        ),
-      };
-    },
-    { files: [], package_profiles: [], configs_to_not_reset: [], services: [], config: {} }
-  );
+const fragmentOf = (patch: Patch, intent: Intent): Fragment => {
+  const target = targetCondition(patch.target);
+  const { files = [], config = {}, packages, keeps = [], services = [] } = patch.apply(intent);
+  // The target narrows what each declares for itself, never replaces it.
+  const onTarget = <T extends object>(item: T & { when?: When }): T & { when: When } => ({
+    ...item,
+    when: when.all(target, item.when ?? when.always),
+  });
+  return {
+    files: files.map(onTarget),
+    packages: packages?.add?.length || packages?.remove?.length ? [{ when: target, ...packages }] : [],
+    keep: keeps.length ? [{ when: target, entries: keeps }] : [],
+    services: services.map(onTarget),
+    config: Object.fromEntries(
+      Object.entries(config).map(([key, types]) => [
+        key,
+        Object.fromEntries(Object.entries(types).map(([type, sections]) => [type, sections.map(onTarget)])),
+      ])
+    ),
+  };
+};
+
+/** Every patch the intent needs, as one fragment (merged in the patches' order). */
+export const applyPatches =
+  (patches: Patch[]): Feature =>
+  (intent) =>
+    merge(patches.filter(needed(intent)).map((patch) => fragmentOf(patch, intent)));
 
 /**
  * The patches each device gets, as far as the intent decides: its role and

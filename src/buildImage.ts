@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { dirname } from "./paths";
+import { messageOf } from "./result";
+import { dirname } from "./posixPath";
 import { HttpResponse, Platform } from "./platform";
 
 type Http = Pick<Platform, "http" | "sleep">;
@@ -32,7 +33,7 @@ const withRetry = async <T>(
       const wait = baseMs * Math.pow(2, i);
       console.warn(
         `[${label}] transient error (attempt ${i + 1}/${attempts}): ${
-          (e as Error).message
+          messageOf(e)
         } — retrying in ${wait}ms`
       );
       await sleep(wait);

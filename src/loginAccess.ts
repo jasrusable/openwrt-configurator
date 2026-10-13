@@ -4,7 +4,7 @@
 // lock it out, so it is refused before any device is touched.
 import type { Intent } from "./intent/schema";
 import { Platform } from "./platform";
-import { expandHome } from "./provisionConfig";
+import { expandHome } from "./apply/provisionConfig";
 import { where } from "./intent/places";
 import { keyIdentity } from "./sshKeys";
 

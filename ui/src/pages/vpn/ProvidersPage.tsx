@@ -6,7 +6,7 @@ import { IconShieldLock } from "@tabler/icons-react";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { withoutProvider } from "../../../../src/intent/edits";
-import { ovpnUnsafe } from "../../../../src/intent/ovpn";
+import { ovpnUnsafe } from "../../../../src/intent/vpn";
 import { where } from "../../../../src/intent/places";
 import { Intent } from "../../../../src/intent/schema";
 import { parseWgConf } from "../../../../src/wireguardConf";

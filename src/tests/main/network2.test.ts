@@ -1,10 +1,10 @@
 import test from "ava";
 import { fixtureConfig } from "../helpers/fixtures";
 import { getDeviceSchema } from "../../getDeviceSchema";
-import { getOpenWrtConfig } from "../../getOpenWrtConfig";
+import { getOpenWrtConfig } from "../../engine/getOpenWrtConfig";
 import { nodePlatform } from "../../platforms/node";
 
-const { oncConfig, deviceConfigs } = fixtureConfig("config2.json");
+const { plan, deviceConfigs } = fixtureConfig("config2.json");
 
 test("network", async (t) => {
   const deviceSchemas = await Promise.all(
@@ -20,7 +20,7 @@ test("network", async (t) => {
   const routerDeviceConfig = deviceConfigs[0];
   const routerDeviceSchema = deviceSchemas[0];
   const routerOpenWrtConfig = getOpenWrtConfig({
-    oncConfig,
+    plan,
     deviceConfig: routerDeviceConfig,
     deviceSchema: routerDeviceSchema,
   });
@@ -32,7 +32,7 @@ test("network", async (t) => {
   );
 
   // Ensure no bridge-vlan on swconfig ap.
-  t.is(routerOpenWrtConfig.network?.["bridge-vlan"], undefined);
+  t.is(routerOpenWrtConfig.network?.["bridge-vlan"] as unknown, undefined);
 
   // Ensure switch0 is defined.
   t.is(routerOpenWrtConfig.network?.switch?.[0].name, "switch0");
@@ -57,7 +57,7 @@ test("network", async (t) => {
   t.is(routerOpenWrtConfig.network?.device?.[0][".name"], "device0");
   t.is(routerOpenWrtConfig.network?.device?.[0].name, "br-lan.1");
   t.is(routerOpenWrtConfig.network?.device?.[0].type, "bridge");
-  t.is(routerOpenWrtConfig.network?.device?.[0].ports?.length, 1);
+  t.is((routerOpenWrtConfig.network?.device?.[0].ports as string[]).length, 1);
   t.deepEqual(routerOpenWrtConfig.network?.device?.[0].ports, ["eth0.1"]);
 
   // Ensure loopback interface is defined

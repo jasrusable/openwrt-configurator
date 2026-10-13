@@ -1,164 +1,56 @@
+// Managed files as the engine sends them (src/getDeviceScript.ts): written in
+// stage, before the commit, with their manifest; their hooks after the
+// reload, a step of their own. How a file is written on the device (beside
+// it, owner-only, moved over it only if it differs, run_after only then) is
+// the agent's, tested under sh in agent.test.ts.
 import test from "ava";
-import { tempDir } from "../helpers/tempDir";
-import { spawnSync } from "child_process";
-import { existsSync, readFileSync, statSync } from "fs";
-import { join } from "path";
-import {
-  getDeviceScript,
-  getFinaliseCommands,
-  getPostReloadCommands,
-  getPrepareCommands,
-  getStageCommands,
-} from "../../getDeviceScript";
-import { OpenWrtState } from "../../openWrtConfigSchema";
+import { stateOf } from "../helpers/fixtures";
+import { finaliseRecords, getDeviceScript, hookCommands, prepareRecords, stageRecords } from "../../getDeviceScript";
 
-test("getDeviceScript writes managed files + manifest before commit", async (t) => {
+test("stage writes each managed file, its mode and run_after with it, then the manifest", (t) => {
   const content = '#!/bin/sh\necho "$ACTION"\n';
   const runAfter = "ACTION=add INTERFACE=phy1-ap0 sh /etc/hotplug.d/net/20-aql";
-  const state: OpenWrtState = {
-    // A real config, so the run actually has something to commit to order
-    // against — the commit now names each touched config rather than being a
-    // bare `uci commit`.
-    config: {
-      system: { system: [{ ".name": "system0", hostname: "r1" }] },
-    } as any,
-    files: [
-      {
-        path: "/etc/hotplug.d/net/20-aql",
-        content,
-        mode: "0755",
-        run_after: runAfter,
-      },
-    ],
-  };
-
-  const commands = await getDeviceScript({ state });
-  const commitIdx = commands.findIndex((c) => c.includes("uci commit"));
-  t.true(commitIdx > -1, "the touched config is committed");
-
-  const writeCmd = commands.find(
-    (c) => c.includes("'/etc/hotplug.d/net/20-aql'") && c.startsWith("# write /etc/hotplug.d/net/20-aql\nmkdir -p")
-  );
-  t.truthy(writeCmd);
-
-  // run_after runs right after the file is written, before `uci commit`, and
-  // only when it changed. (Use run_after_reload for anything that needs the
-  // config to be live.)
-  const writeCmdIdx = commands.indexOf(writeCmd!);
-  t.true(writeCmd!.endsWith(`else mv -f '/etc/hotplug.d/net/20-aql.onc-new' '/etc/hotplug.d/net/20-aql'; ${runAfter}; fi`));
-  t.true(writeCmdIdx < commitIdx);
-  // Quoted heredoc (no base64 — busybox often lacks it) keeps content literal,
-  // written private (umask 077) beside the file, then moved over it if it differs.
-  t.true(writeCmd!.includes("(umask 077; cat > '/etc/hotplug.d/net/20-aql.onc-new') <<'ONC_EOF'"));
-  t.true(writeCmd!.includes(content));
-  t.true(writeCmd!.includes("mkdir -p '/etc/hotplug.d/net'"));
-  t.true(writeCmd!.includes("chmod '0755' '/etc/hotplug.d/net/20-aql.onc-new'"));
-  t.true(writeCmd!.includes("if cmp -s '/etc/hotplug.d/net/20-aql.onc-new' '/etc/hotplug.d/net/20-aql'; then rm -f"));
-
-  // A manifest of managed files is written so stale files can be pruned later.
-  t.truthy(commands.find((c) => c.includes("'/etc/onc/managed_files'")));
-
-  // Files are written before `uci commit` (clean rollback on failure).
-  const writeIdx = commands.findIndex((c) => c.includes("20-aql"));
-  t.true(writeIdx > -1 && writeIdx < commitIdx);
+  const state = stateOf({
+    config: { system: { system: [{ ".name": "system0", hostname: "r1" }] } } as any,
+    files: [{ path: "/etc/hotplug.d/net/20-aql", content, mode: "0755", runAfter: runAfter }, { path: "/etc/plain", content: "x" }],
+  });
+  const writes = stageRecords({ state, current: {} }).filter((r) => r.kind === "write");
+  t.deepEqual(writes, [
+    { kind: "write", path: "/etc/hotplug.d/net/20-aql", mode: "0755", content, runAfter },
+    // With no mode, 0644, as it always was.
+    { kind: "write", path: "/etc/plain", mode: "0644", content: "x" },
+    // So a file dropped from the config can be pruned on the next run.
+    { kind: "write", path: "/etc/onc/managed_files", mode: "0644", content: "/etc/hotplug.d/net/20-aql\n/etc/plain" },
+  ]);
+  // Before the commit (a failed write leaves nothing committed), which is finalise's.
+  t.false(finaliseRecords({ state, current: {} }).some((r) => r.kind === "write"));
 });
 
 // `run_after` fires as soon as the file is written, which is before the config
 // is live — a hotplug script aimed at an interface this provision creates would
 // run against an interface that does not exist yet, silently doing nothing.
-// `run_after_reload` runs once the config has been committed and reloaded.
-test("run_after_reload runs after the config is live, run_after before", async (t) => {
-  const state: OpenWrtState = {
-    config: {
-      wireless: { "wifi-iface": [{ ".name": "wifinet0", ssid: "x" }] },
-    } as any,
-    files: [
-      {
-        path: "/etc/hotplug.d/net/20-aql",
-        content: "#!/bin/sh\n",
-        run_after: "EARLY",
-        run_after_reload: "LATE",
-      },
-    ],
-  };
-
-  const commands = await getDeviceScript({ state });
-  const early = commands.findIndex((c) => c.endsWith("; EARLY; fi"));
-  const late = commands.indexOf("LATE");
-  const commitIdx = commands.findIndex((c) => c.includes("uci commit"));
-  const reloadIdx = commands.lastIndexOf("reload_config");
-
-  t.true(early > -1 && late > -1, "both hooks are emitted");
-  t.true(early < commitIdx, "run_after fires before the commit");
-  t.true(late > reloadIdx, "run_after_reload fires after the reload");
-});
-
-// `reload_config` is the step that can sever the link, and once dropbear exits
-// the next marker printf in execScript takes SIGPIPE and kills the script. A
-// hook sitting after the reload in that same script would be dropped on
-// exactly the runs that reshape networking, while the tool reported success.
-// So provision runs them separately, over a reconnected session.
-test("post-reload hooks are split out of the finalise segment", async (t) => {
-  const state: OpenWrtState = {
+// `run_after_reload` runs once the config has been committed and reloaded: a
+// step of its own (hooks), over a new session, as reload_config can sever the
+// link and a hook after it in the same verb would die with it.
+test("run_after_reload hooks are their own step, after finalise, in file order", (t) => {
+  const state = stateOf({
     config: { network: { interface: [{ ".name": "lan" }] } } as any,
     files: [
-      { path: "/etc/a", content: "x", run_after_reload: "HOOK-A" },
+      { path: "/etc/a", content: "x", runAfter: "EARLY", runAfterReload: "HOOK-A" },
       { path: "/etc/b", content: "y" },
-      { path: "/etc/c", content: "z", run_after_reload: "HOOK-C" },
+      { path: "/etc/c", content: "z", runAfterReload: "HOOK-C" },
     ],
-  };
-
-  const all = getDeviceScript({ state });
-  const prepare = getPrepareCommands({ state });
-  const stage = getStageCommands({ state, current: {} });
-  const finalise = getFinaliseCommands({ state, current: {} });
-  const postReload = getPostReloadCommands(state);
-
-  // The finalise segment stops at the reload.
-  t.is(finalise[finalise.length - 1], "reload_config");
-  t.false(finalise.some((c) => c.startsWith("HOOK-")));
-  // Only files that declare one contribute, in file order.
-  t.deepEqual(postReload, ["HOOK-A", "HOOK-C"]);
-  // The dry run shows the whole sequence, in the order provision runs it.
-  t.deepEqual([...prepare, ...stage, ...finalise, ...postReload], all);
-  t.false([...prepare, ...stage].some((c) => c.startsWith("HOOK-")));
-});
-
-test("a file with no run_after_reload adds nothing after the reload", async (t) => {
-  const state: OpenWrtState = {
-    config: {
-      system: { system: [{ ".name": "system0", hostname: "r1" }] },
-    } as any,
-    files: [{ path: "/etc/x", content: "y" }],
-  };
-  const commands = await getDeviceScript({ state });
-  t.is(commands[commands.length - 1], "reload_config");
-});
-
-test("getDeviceScript emits no file commands when there are no files", async (t) => {
-  const commands = await getDeviceScript({ state: { config: {} as any } });
-  t.falsy(commands.find((c) => c.includes("/etc/onc/managed_files")));
-});
-
-test("a file is replaced, and its run_after run, only when its content changed", (t) => {
-  const dir = tempDir("write");
-  const path = join(dir, "x.conf");
-  const state = (content: string): OpenWrtState => ({
-    config: {} as any,
-    files: [{ path, content, mode: "0600", run_after: `echo restarted >> ${dir}/log` }],
   });
-  const write = (content: string) => {
-    const command = getStageCommands({ state: state(content), current: {} }).find((c) => c.includes("x.conf.onc-new"))!;
-    const r = spawnSync("sh", ["-ec", command], { encoding: "utf8" });
-    t.is(r.status, 0, r.stderr);
-  };
-  const restarts = () => (existsSync(join(dir, "log")) ? readFileSync(join(dir, "log"), "utf8").trim().split("\n").length : 0);
-  write("a");
-  write("a");
-  t.is(restarts(), 1, "the same content: nothing restarted");
-  write("b");
-  t.is(restarts(), 2);
-  t.is(readFileSync(path, "utf8"), "b\n");
-  t.is(statSync(path).mode & 0o777, 0o600);
-  t.false(existsSync(`${path}.onc-new`));
+  t.deepEqual(hookCommands(state), ["HOOK-A", "HOOK-C"]);
+  const sent = JSON.stringify([...prepareRecords({ state }), ...stageRecords({ state, current: {} }), ...finaliseRecords({ state, current: {} })]);
+  t.false(sent.includes("HOOK-"), "never with prepare, stage or finalise");
+  t.true(sent.includes('"runAfter":"EARLY"'));
+  const script = getDeviceScript({ state });
+  t.is(script[script.length - 1].split(" ")[1], "hooks", "last in the dry run");
+});
+
+test("no files: no writes and no manifest; no runAfterReload: no hooks step", (t) => {
+  const state = stateOf({ config: { system: { system: [{ ".name": "s", hostname: "r1" }] } } as any });
+  t.false(stageRecords({ state, current: {} }).some((r) => r.kind === "write"));
+  t.false(getDeviceScript({ state }).some((verb) => verb.startsWith("onc-agent hooks")));
 });

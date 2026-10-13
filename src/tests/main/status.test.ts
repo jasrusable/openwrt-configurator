@@ -1,4 +1,5 @@
 import test from "ava";
+import { reads } from "../helpers/reads";
 import { sampleIntent } from "../helpers/fixtures";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -106,7 +107,7 @@ test("interpreted against the settings: what matches, and what does not", (t) =>
     leases: parseLeases("1 aa:bb:cc:00:00:01 10.0.0.23 phone *\n1 aa:bb:cc:00:00:09 10.0.20.5 * *"),
   });
   const ap = device("home-ap-1", { wifi: parseWifi(hostapd) });
-  const status = networkStatus(intent, [router, ap]);
+  const status = networkStatus(intent, reads(router, ap));
   t.deepEqual(status.internet, { up: true, ipv4: ["203.0.113.5/24"], ipv6: ["2001:db8::5/64"], uptime: 99 });
   t.deepEqual(
     status.networks.map((n) => [n.id, n.up, n.clients]),
@@ -120,22 +121,22 @@ test("interpreted against the settings: what matches, and what does not", (t) =>
   t.deepEqual(status.clients, { total: 3, wifi: 2 });
   t.deepEqual(status.unexpected, { interfaces: ["oldvpn"], ssids: ["Not Ours"] });
   // The access point's own lease is not a client: the Clients page leaves it out too.
-  const apLeased = networkStatus(intent, [router, ap], { "home-ap-1": ["aa:bb:cc:00:00:09"] });
+  const apLeased = networkStatus(intent, reads(router, ap), { "home-ap-1": ["aa:bb:cc:00:00:09"] });
   t.is(apLeased.clients.total, 2);
   t.deepEqual(apLeased.networks.map((n) => n.clients), [1, 0]);
   const withVpn = { ...intent, vpn: { ...intent.vpn, remote_access: { ...intent.vpn.remote_access, enabled: true } }, wifi: { ...intent.wifi, mesh: { ...intent.wifi.mesh, enabled: true } } };
   const ours = device("home-router", {
     interfaces: ["vpn", "bat0", "batmesh", "oldvpn"].map((id) => ({ id, up: true, ipv4: [], ipv6: [] })),
   });
-  t.deepEqual(networkStatus(withVpn, [ours]).unexpected.interfaces, ["oldvpn"], "the VPN's and the mesh's are ours");
+  t.deepEqual(networkStatus(withVpn, reads(ours)).unexpected.interfaces, ["oldvpn"], "the VPN's and the mesh's are ours");
   t.like(status.devices[0], { name: "home-router", health: { uptime: 3600, load: 0.5, memoryUsed: 0.4 } });
 });
 
 test("a device not reached is said so; nothing is made up for it", (t) => {
-  const status = networkStatus(sample(), [
+  const status = networkStatus(sample(), reads(
     { hostname: "home-router", error: "connect ECONNREFUSED" },
     device("home-ap-1", {}),
-  ]);
+  ));
   t.is(status.internet, undefined);
   t.like(status.devices[0], { name: "home-router", error: "connect ECONNREFUSED" });
   t.is(status.networks[0].up, undefined);
@@ -166,14 +167,14 @@ test("several lines: mwan3's view of each, and which carry traffic", (t) => {
       ],
     });
   const using = (status: ReturnType<typeof networkStatus>) => status.connections.filter((c) => c.inUse).map((c) => c.id);
-  t.deepEqual(using(networkStatus(intent, [router("online", "online")])), ["wan"], "failover: the first that works");
-  const onBackup = networkStatus(intent, [router("offline", "online")]);
+  t.deepEqual(using(networkStatus(intent, reads(router("online", "online")))), ["wan"], "failover: the first that works");
+  const onBackup = networkStatus(intent, reads(router("offline", "online")));
   t.deepEqual(using(onBackup), ["wanb"]);
   t.like(onBackup.connections[0], { line: { state: "offline", since: 600 }, inUse: false });
   t.true(onBackup.internet!.up);
   intent.internet.use_lines.mode = "balance";
-  t.deepEqual(using(networkStatus(intent, [router("online", "online")])), ["wan"], "sharing: a metered line held back");
-  t.deepEqual(using(networkStatus(intent, [router("disconnecting", "online")])), ["wan"], "failing is still working");
+  t.deepEqual(using(networkStatus(intent, reads(router("online", "online")))), ["wan"], "sharing: a metered line held back");
+  t.deepEqual(using(networkStatus(intent, reads(router("disconnecting", "online")))), ["wan"], "failing is still working");
 });
 
 test("the mesh: each node's direct neighbours and their throughput, named by any of their MACs", (t) => {
@@ -191,7 +192,7 @@ test("the mesh: each node's direct neighbours and their throughput, named by any
 
   const intent = sample();
   intent.wifi.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", band_reserved: false, over_cable: false, large_frames: true };
-  const status = networkStatus(intent, [device("home-ap-1", { mesh: parseOriginators(table) })], {
+  const status = networkStatus(intent, reads(device("home-ap-1", { mesh: parseOriginators(table) })), {
     "home-router": ["02:aa:00:00:00:02"],
     "home-ap-2": ["02:cc:00:00:00:04", "02:dd:00:00:00:04"],
   });
@@ -205,19 +206,19 @@ test("the mesh: each node's direct neighbours and their throughput, named by any
     },
   ]);
   const wired = { ...intent, wifi: { ...intent.wifi, mesh: { ...intent.wifi.mesh, over_cable: true, large_frames: true } } };
-  const split = networkStatus(wired, [device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1500 })], {});
+  const split = networkStatus(wired, reads(device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1500 })), {});
   t.true(split.mesh![0].fragmentsOverCable, "a port at 1500: batman splits its frames over cable");
-  const whole = networkStatus(wired, [device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1532 })], {});
+  const whole = networkStatus(wired, reads(device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1532 })), {});
   t.is(whole.mesh![0].fragmentsOverCable, undefined);
-  const dropped = networkStatus(wired, [device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1532, meshWiredPath: { small: 3, large: 1 } })], {});
+  const dropped = networkStatus(wired, reads(device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1532, meshWiredPath: { small: 3, large: 1 } })), {});
   t.true(dropped.mesh![0].dropsLargeFrames, "neighbours that answer small but not full-size pings: a switch drops the larger frames");
-  const fine = networkStatus(wired, [device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1532, meshWiredPath: { small: 3, large: 3 } })], {});
+  const fine = networkStatus(wired, reads(device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1532, meshWiredPath: { small: 3, large: 3 } })), {});
   t.is(fine.mesh![0].dropsLargeFrames, undefined);
-  t.is(networkStatus(sample(), []).mesh, undefined, "mesh off: nothing about it");
+  t.is(networkStatus(sample(), reads()).mesh, undefined, "mesh off: nothing about it");
 });
 
 test("mesh depth: from the cabled nodes' routes, a repeater through another is deeper", async (t) => {
-  const { meshDepths, parseMeshView } = await import("../../meshOrder");
+  const { meshDepths, parseMeshView } = await import("../../apply/meshOrder");
   // ap-1 cabled; ap-2 its neighbour; ap-3 reached through ap-2 (batctl's layout, not recorded).
   // ap-2 is known to batman by its cable's MAC (cc), reached over its mesh0 (bb).
   const views = {

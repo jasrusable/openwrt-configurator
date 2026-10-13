@@ -26,15 +26,15 @@ jobs:
 
       - run: npm ci
 
-      # The version lives in package.json and src/cli.ts, and the Homebrew
+      # The version lives in package.json and src/cli/index.ts, and the Homebrew
       # formula's test checks `--version` against the tag.
       - name: Check the tag matches the version
         run: |
           tag="${GITHUB_REF_NAME#v}"
           pkg=$(node -p 'require("./package.json").version')
-          cli=$(sed -n 's/.*version: "\([0-9.]*\)".*/\1/p' src/cli.ts | head -1)
+          cli=$(sed -n 's/.*version: "\([0-9.]*\)".*/\1/p' src/cli/index.ts | head -1)
           [ "$tag" = "$pkg" ] && [ "$tag" = "$cli" ] || {
-            echo "Tag $tag, package.json $pkg and src/cli.ts $cli must match." >&2
+            echo "Tag $tag, package.json $pkg and src/cli/index.ts $cli must match." >&2
             exit 1
           }
 

@@ -17,7 +17,7 @@ export const ubihealthdConfig: Patch = {
   target: {},
   apply: () => ({
     // "?": a device without UBI flash has no such config.
-    keeps: ["?ubihealthd.*"],
+    keeps: [{ config: "ubihealthd", optional: true }],
     services: [{ name: "ubihealthd" }],
     files: [
       {
@@ -43,7 +43,7 @@ EOF
 	/etc/init.d/ubihealthd restart
 fi
 `,
-        run_after_reload: script,
+        runAfterReload: script,
       },
     ],
   }),

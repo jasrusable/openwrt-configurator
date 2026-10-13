@@ -4,12 +4,17 @@
 import test from "ava";
 import { join } from "path";
 import { nodePlatform } from "../../platforms/node";
-import { readHistory, runCollector, snapshotFreshMs } from "../../status/collector";
-import { historyApi, statusApi } from "../../server/handlers";
+import { jobPaths, jobRecordKey } from "../../server/provisionJob";
+import { write } from "../../store";
+import { markWanted, readHistory, runCollector, snapshotFreshMs } from "../../status/collector";
+import { uiHandler } from "../../server/app";
 import { tempDir } from "../helpers/tempDir";
-import { writeFileSync } from "fs";
+import { mkdirSync, writeFileSync } from "fs";
+import { ok } from "../../result";
 
-const get = (path: string) => ({ method: "GET", path, body: "", headers: {} });
+const get = (path: string) => ({ method: "GET", path, body: "", headers: { "x-onc": "1" } });
+const api = (dir: string, now = Date.now) =>
+  uiHandler({ intentPath: join(dir, "missing.json"), uiRoot: dir, platform: nodePlatform, statusDir: dir, now });
 
 test("status is answered from a fresh snapshot without reading any device, and marks that someone is looking", async (t) => {
   const dir = tempDir("collector");
@@ -17,26 +22,26 @@ test("status is answered from a fresh snapshot without reading any device, and m
   const status = { connections: [], devices: [], networks: [], ssids: [], clients: { total: 0, wifi: 0 }, readAt: now - 5000 };
   writeFileSync(join(dir, "status.json"), JSON.stringify({ at: now - 5000, status }));
   // No intent at this path: a read of the devices would fail, not answer.
-  const handle = statusApi({ intentPath: join(dir, "missing.json"), platform: nodePlatform, statusDir: dir, now: () => now });
-  const response = await handle(get("/api/status"));
+  const response = await api(dir, () => now)(get("/api/status"));
   t.is(response.status, 200);
   t.deepEqual(JSON.parse(response.body), status);
-  t.is(Number(nodePlatform.readTextFile(join(dir, "wanted"))), now);
-  // Too old: no collector is running, so the request reads for itself (here, and fails).
-  const stale = statusApi({ intentPath: join(dir, "missing.json"), platform: nodePlatform, statusDir: dir, now: () => now + snapshotFreshMs });
-  await t.throwsAsync(() => stale(get("/api/status")));
+  t.is(JSON.parse(nodePlatform.readTextFile(join(dir, "wanted"))).value, now);
+  // Too old: no collector is running, so the request reads for itself (here, with no settings to read by).
+  const stale = await api(dir, () => now + snapshotFreshMs)(get("/api/status"));
+  t.is(stale.status, 404);
+  t.regex(JSON.parse(stale.body).error, /No settings are saved/);
 });
 
 test("history is answered whole, or from a time on", async (t) => {
   const dir = tempDir("collector");
   writeFileSync(join(dir, "history.json"), JSON.stringify({ down: [[60_000, 1, 1], [120_000, 2, 1]] }));
-  const handle = historyApi({ platform: nodePlatform, statusDir: dir });
+  const handle = api(dir);
   t.deepEqual(JSON.parse((await handle(get("/api/history"))).body).down.length, 2);
   t.deepEqual(JSON.parse((await handle(get("/api/history/130000"))).body), { down: [[120_000, 2, 1]] });
   t.is((await handle(get("/api/history/soon"))).status, 404);
 });
 
-test("the collector reads fast only while someone looks, and says a lasting failure once", async (t) => {
+test.serial("the collector reads fast only while someone looks, and says a lasting failure once", async (t) => {
   const dir = tempDir("collector");
   let clock = 0;
   const reads: number[] = [];
@@ -45,14 +50,74 @@ test("the collector reads fast only while someone looks, and says a lasting fail
   console.error = (message: string) => errors.push(message);
   t.teardown(() => (console.error = error));
   // No intent: every read fails at once, which is all this needs to count reads.
-  const platform = { ...nodePlatform, readTextFile: (path: string) => (path.endsWith("missing.json") && reads.push(clock), nodePlatform.readTextFile(path)), sleep: async (ms: number) => void (clock += ms) };
+  // Each read starts by looking for the settings file: counted there.
+  const platform = { ...nodePlatform, fileMode: (path: string) => (path.endsWith("missing.json") && reads.push(clock), nodePlatform.fileMode(path)), sleep: async (ms: number) => void (clock += ms) };
   await runCollector({ intentPath: join(dir, "missing.json"), platform, dir, now: () => clock, stop: () => clock >= 300_000 });
   t.deepEqual(reads, [0, 60_000, 120_000, 180_000, 240_000], "nobody looking: once a minute");
   t.is(errors.length, 1);
-  writeFileSync(join(dir, "wanted"), "0");
+  markWanted(platform, dir, 0);
   reads.length = 0;
   clock = 0;
   await runCollector({ intentPath: join(dir, "missing.json"), platform, dir, now: () => clock, stop: () => clock >= 60_000 });
   t.deepEqual(reads, [0, 10_000, 20_000, 30_000, 40_000, 50_000], "someone looking: every ten seconds");
   t.deepEqual(readHistory(platform, dir), {});
+});
+
+test("while an apply runs, status is what was read before, marked so, and no device is read", async (t) => {
+  const dir = tempDir("collector");
+  const intentPath = join(dir, "missing.json");
+  // A job starting: its lock taken, its record written, no pid yet (src/server/provisionJob.ts).
+  mkdirSync(jobPaths(intentPath).lock, { recursive: true });
+  write(nodePlatform, jobRecordKey(jobPaths(intentPath).dir), { runId: "r", startedAt: Date.now() });
+  const handle = api(dir);
+  const none = await handle(get("/api/status"));
+  t.is(none.status, 409, "nothing kept, and nothing read: the apply is why");
+  t.regex(JSON.parse(none.body).error, /being applied/);
+  const status = { connections: [], devices: [], networks: [], ssids: [], clients: { total: 0, wifi: 0 }, readAt: 1 };
+  writeFileSync(join(dir, "status.json"), JSON.stringify({ at: 1, status }));
+  const kept = await handle(get("/api/status"));
+  t.is(kept.status, 200, "however old");
+  t.deepEqual(JSON.parse(kept.body), { ...status, applying: true });
+});
+
+test.serial("the collector goes on after a read that throws, and says it once", async (t) => {
+  const dir = tempDir("collector");
+  let clock = 0;
+  let calls = 0;
+  const errors: string[] = [];
+  const error = console.error;
+  console.error = (message: string) => errors.push(message);
+  t.teardown(() => (console.error = error));
+  const platform = { ...nodePlatform, sleep: async (ms: number) => void (clock += ms) };
+  await runCollector({
+    intentPath: join(dir, "missing.json"),
+    platform,
+    dir,
+    now: () => clock,
+    stop: () => clock >= 180_000,
+    collect: async ({ state }) => {
+      calls++;
+      if (calls < 3) throw new Error("No space left on device");
+      return ok(state);
+    },
+  });
+  t.is(calls, 3, "read again each minute");
+  t.deepEqual(errors, ["Reading status: No space left on device"]);
+});
+
+test("a mark of someone looking kept before the store still counts", async (t) => {
+  const dir = tempDir("collector");
+  let clock = 0;
+  let calls = 0;
+  writeFileSync(join(dir, "wanted"), "0");
+  const platform = { ...nodePlatform, sleep: async (ms: number) => void (clock += ms) };
+  await runCollector({
+    intentPath: join(dir, "missing.json"),
+    platform,
+    dir,
+    now: () => clock,
+    stop: () => clock >= 30_000,
+    collect: async ({ state }) => (calls++, ok(state)),
+  });
+  t.is(calls, 3, "every ten seconds");
 });

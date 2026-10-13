@@ -11,7 +11,7 @@ import { IconAccessPoint, IconRouter } from "@tabler/icons-react";
 import { useDraftValue } from "../form/draft";
 import { useDevices, useFreshDevices } from "../data/devices";
 import { Intent } from "../../../src/intent/schema";
-import { rescueAddress, rescueAfterMinutes, rescueSsid } from "../../../src/intent/features/mesh";
+import { rescueAddress, rescueAfterMinutes, rescueSsid } from "../../../src/intent/mesh";
 import { AddHardwarePage } from "./AddHardwarePage";
 import { useNetworkStatus } from "../data/status";
 import { ago, bandsOf, duration, meshAbility, modelOf, portsOf } from "../facts";

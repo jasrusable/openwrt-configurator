@@ -14,11 +14,11 @@ import { RemoveButton } from "./RemoveButton";
 import {
   Draft,
   DraftProvider,
-  getIn,
+  getAt,
   issuesOf,
   ItemOf,
   ListPath,
-  setIn,
+  setAt,
   useDerived,
   useDraft,
   useDraftValue,
@@ -171,8 +171,8 @@ const ListItemPage = <N extends ListName>({
   base: string;
 }) => {
   const navigate = useNavigate();
-  const item: Item<N> = useDerived((d) => d.get(`${list.name}.${index}`));
-  const items: Item<N>[] = useDerived((d) => d.get(list.name)) ?? [];
+  const item = useDerived((d) => getAt(d.value, `${list.name}.${index}`)) as Item<N>;
+  const items = (useDerived((d) => getAt(d.value, list.name)) ?? []) as Item<N>[];
   const removable = !list.canRemove || list.canRemove(item, items);
   const back = () => navigate(base);
   // Same width and header position as the list: only the title grows a
@@ -188,10 +188,10 @@ const ListItemPage = <N extends ListName>({
           <RemoveButton
             path={`${list.name}.${index}`}
             remove={(intent) => {
-              const items: unknown[] = getIn(intent, list.name) ?? [];
+              const items = (getAt(intent, list.name) ?? []) as unknown[];
               return list.onRemove
                 ? list.onRemove(intent, index)
-                : setIn(intent, list.name, items.filter((_, i) => i !== index));
+                : setAt(intent, list.name, items.filter((_, i) => i !== index));
             }}
             onRemoved={back}
           />
@@ -223,22 +223,22 @@ const NewItemPage = <N extends ListName>({
   // Its own draft, over a copy with the item appended. Problems show only
   // once a field is edited, or Add is pressed: not on a blank form.
   const [{ copy, index, openedOn }] = useState(() => {
-    const items: Item<N>[] = main.get(list.name) ?? [];
-    const value = setIn(main.value, list.name, [...items, newItem(items, main.value)]);
+    const items = (getAt(main.value, list.name) ?? []) as Item<N>[];
+    const value = setAt(main.value, list.name, [...items, newItem(items, main.value)]);
     return { copy: new Draft(main.value, value, false), index: items.length, openedOn: main.value };
   });
   // What only a hook knows (the router's ports) may arrive after the page
   // opened: the new item is made again, until anything on it is edited.
   const seeded = useRef(copy.value);
   const remade = (() => {
-    const items: Item<N>[] = main.get(list.name) ?? [];
+    const items = (getAt(main.value, list.name) ?? []) as Item<N>[];
     return newItem(items, main.value);
   })();
   useEffect(() => {
     if (copy.value !== seeded.current) return;
-    const current = getIn(copy.value, `${list.name}.${index}`);
+    const current = getAt(copy.value, `${list.name}.${index}`);
     if (JSON.stringify(current) === JSON.stringify(remade)) return;
-    const next = setIn(copy.value, `${list.name}.${index}`, remade);
+    const next = setAt(copy.value, `${list.name}.${index}`, remade);
     seeded.current = next;
     copy.replace(next);
   });
@@ -246,11 +246,11 @@ const NewItemPage = <N extends ListName>({
   const add = () => {
     // The draft changed meanwhile (reverted, say): the new item onto it as it
     // is now, rather than the copy taken when the page opened.
-    const items: Item<N>[] = main.get(list.name) ?? [];
+    const items = (getAt(main.value, list.name) ?? []) as Item<N>[];
     const [source, at] =
       main.value === openedOn
         ? [copy.value, index]
-        : [setIn(main.value, list.name, [...items, getIn(copy.value, `${list.name}.${index}`)]), items.length];
+        : [setAt(main.value, list.name, [...items, getAt(copy.value, `${list.name}.${index}`)]), items.length];
     // What adding implies (home networks reach it) first, so the check sees it.
     const next = list.onAdd ? list.onAdd(source, at) : source;
     if (itemProblems(next, `${list.name}.${at}`).length) {

@@ -8,6 +8,10 @@ import {
   readFileHead,
   readTextFile,
   removeFile,
+  listDir,
+  makeDir,
+  removeDir,
+  modifiedAt,
   sha256,
   sha256File,
   writeFileAtomic,
@@ -15,8 +19,8 @@ import {
   appendTextFile,
 } from "./files";
 import { http } from "./http";
-import { removeTmpDir, resolveArgv, spawn } from "./process";
-import { os, sleep } from "./runtime";
+import { removeTmpDir, resolveArgv, spawn, spawnDetached } from "./process";
+import { fileExists, os, sleep } from "./runtime";
 import { connect } from "./ssh";
 
 export const qjsPlatform: Platform = {
@@ -37,6 +41,10 @@ export const qjsPlatform: Platform = {
   mkdirp,
   fileMode,
   removeFile,
+  listDir,
+  makeDir,
+  removeDir,
+  modifiedAt,
   readFileHead,
   sha256,
   sha256File,
@@ -51,6 +59,32 @@ export const qjsPlatform: Platform = {
   },
   runInteractive: async (argv) =>
     os.exec(resolveArgv(argv), { block: true, usePath: false }),
+  spawnDetached,
+  commandLineOf: async (pid) => {
+    // /proc reports a size of 0, so it is read as a stream (readTextFile), never std.loadFile.
+    if (fileExists("/proc/self")) {
+      try {
+        // An exited child not yet reaped has an empty one: not running.
+        return readTextFile(`/proc/${pid}/cmdline`).replace(/\0/g, " ").trim() || undefined;
+      } catch {
+        return undefined;
+      }
+    }
+    const out = await spawn(["ps", "-ww", "-p", String(pid), "-o", "command="]);
+    return out.code === 0 && out.stdout.trim() ? out.stdout.trim() : undefined;
+  },
+  onStop: (handler) => {
+    const signals: [string, number][] = [["SIGHUP", 1], ["SIGINT", os.SIGINT], ["SIGTERM", os.SIGTERM]];
+    for (const [name, number] of signals) {
+      os.signal(number, () => {
+        handler(name);
+        removeTmpDir();
+        std.out.flush();
+        std.err.flush();
+        std.exit(128 + number);
+      });
+    }
+  },
 
   connect,
 

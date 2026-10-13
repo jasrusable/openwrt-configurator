@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import {
   appendFileSync,
   chmodSync,
@@ -10,6 +10,7 @@ import {
   openSync,
   readFileSync,
   readSync,
+  readdirSync,
   renameSync,
   rmSync,
   statSync,
@@ -27,7 +28,7 @@ import {
   keyTypeOfBlob,
   parseKnownHosts,
 } from "../knownHosts";
-import { dirname } from "../paths";
+import { dirname } from "../posixPath";
 import { loopbackHosts, NetworkError, Platform, SshTarget } from "../platform";
 
 const transientCodes = new Set([
@@ -59,9 +60,9 @@ const reasons: Record<string, string> = {
 };
 const fileError = (path: string, e: unknown) => {
   const code = (e as NodeJS.ErrnoException)?.code;
-  return new Error(
-    `${path}: ${(code && reasons[code]) ?? (e as Error)?.message ?? e}`
-  );
+  return Object.assign(new Error(`${path}: ${(code && reasons[code]) ?? (e as Error)?.message ?? e}`), {
+    ...(code && code in reasons ? { code } : {}),
+  });
 };
 const withPath = <T>(path: string, fn: () => T): T => {
   try {
@@ -131,6 +132,18 @@ const headersOf = (response: Response) => {
   return headers;
 };
 
+/**
+ * Writes to stdout and stderr finish before the next line runs, even into a
+ * pipe: `exit` (process.exit) otherwise drops what a pipe has not taken yet,
+ * cutting `compile | jq` off at 64 KiB. Writes to a file or a terminal are
+ * already synchronous. Called by the CLI's entry point, before any output.
+ */
+export const blockingStdio = () => {
+  for (const stream of [process.stdout, process.stderr]) {
+    (stream as { _handle?: { setBlocking?: (blocking: boolean) => void } })._handle?.setBlocking?.(true);
+  }
+};
+
 export const nodePlatform: Platform = {
   os: process.platform,
   env: (name) => process.env[name],
@@ -154,6 +167,30 @@ export const nodePlatform: Platform = {
     }
   },
   removeFile: (path) => rmSync(path, { force: true }),
+  listDir: (path) => {
+    try {
+      return readdirSync(path).sort();
+    } catch {
+      return [];
+    }
+  },
+  makeDir: (path) => {
+    try {
+      mkdirSync(path, { mode: 0o700 });
+      return true;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
+      throw fileError(path, e);
+    }
+  },
+  removeDir: (path) => rmSync(path, { recursive: true, force: true }),
+  modifiedAt: (path) => {
+    try {
+      return statSync(path).mtimeMs;
+    } catch {
+      return undefined;
+    }
+  },
   readFileHead: (path, bytes) => {
     const head = Buffer.alloc(bytes);
     const fd = openSync(path, "r");
@@ -238,6 +275,42 @@ export const nodePlatform: Platform = {
       child.on("error", reject);
       child.on("close", (code) => resolve(code));
     }),
+  spawnDetached: (argv, { log }) => {
+    const out = openSync(log, "w", 0o600);
+    try {
+      // detached: a session of its own (setsid), so neither the server
+      // stopping nor its terminal's Ctrl-C ends the run.
+      const child = spawn(argv[0], argv.slice(1), { detached: true, stdio: ["ignore", out, out] });
+      if (child.pid === undefined) throw new Error(`${argv[0]}: could not be started`);
+      child.unref();
+      return child.pid;
+    } finally {
+      closeSync(out);
+    }
+  },
+  commandLineOf: async (pid) => {
+    if (existsSync("/proc/self")) {
+      try {
+        const line = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ").trim();
+        // An exited child not yet reaped has an empty one: not running.
+        return line || undefined;
+      } catch {
+        return undefined;
+      }
+    }
+    // macOS: no /proc. ps exits non-zero for a pid with no process.
+    const out = await nodePlatform.run(["ps", "-ww", "-p", String(pid), "-o", "command="]);
+    return out.code === 0 && out.stdout.trim() ? out.stdout.trim() : undefined;
+  },
+  onStop: (handler) => {
+    const signals = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 } as const;
+    for (const [signal, number] of Object.entries(signals)) {
+      process.once(signal, () => {
+        handler(signal);
+        process.exit(128 + number);
+      });
+    }
+  },
 
   connect: async (target) => {
     const ssh = new NodeSSH();
@@ -265,13 +338,18 @@ export const nodePlatform: Platform = {
 
   writeFileAtomic: (path, data, mode) =>
     withPath(path, () => {
-      const temporary = `${path}.onc-tmp`;
-      // New, with its mode from the start: a leftover from a crash would
-      // otherwise keep its own (writeFileSync sets a mode only on creation).
-      rmSync(temporary, { force: true });
-      writeFileSync(temporary, data, { mode, flag: "wx" });
-      chmodSync(temporary, mode);
-      renameSync(temporary, path);
+      // A name of its own: writers in several processes (the server, a job,
+      // the collector) never share one. Made new, with its mode from the
+      // start (writeFileSync sets a mode only on creation).
+      const temporary = `${path}.onc-tmp-${process.pid}-${randomBytes(6).toString("hex")}`;
+      try {
+        writeFileSync(temporary, data, { mode, flag: "wx" });
+        chmodSync(temporary, mode);
+        renameSync(temporary, path);
+      } catch (e) {
+        rmSync(temporary, { force: true });
+        throw e;
+      }
     }),
   readStdin: () => readFileSync(0, "utf8"),
   selfCommand: () => {

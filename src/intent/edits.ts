@@ -1,6 +1,6 @@
 // Edits that span settings, as pure functions of the intent: the UI applies
 // them, and the tests check them without a browser.
-import { siteSeed } from "./fragment";
+import { siteSeed } from "./site";
 import { networkHolding } from "./addresses";
 import { withoutConnection } from "./connections";
 import { Intent } from "./schema";

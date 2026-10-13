@@ -1,5 +1,5 @@
 import { deviceSchemaSchema } from "./deviceSchema";
-import { ONCDeviceConfig } from "./oncConfigSchema";
+import { PlanDevice } from "./plan/types";
 import {
   boardJson as boardJsonProbe,
   radios as radiosProbe,
@@ -38,7 +38,7 @@ export const getDeviceSchema = async ({
   ssh,
   local,
 }: {
-  deviceConfig: ONCDeviceConfig;
+  deviceConfig: PlanDevice;
   /** An already-connected session. Reused so provisioning need not reconnect. */
   ssh?: Session;
   /**
@@ -48,7 +48,7 @@ export const getDeviceSchema = async ({
   local?: Pick<Platform, "readTextFile">;
 }) => {
   if (local) {
-    const path = `./deviceSchemas/${deviceConfig.model_id}.json`;
+    const path = `./deviceSchemas/${deviceConfig.modelId}.json`;
     return parseSchema(
       deviceSchemaSchema,
       parseJson(local.readTextFile(path), path)

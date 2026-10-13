@@ -2,7 +2,10 @@ import test from "ava";
 import { sampleIntent } from "../helpers/fixtures";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
-import { evaluateCondition } from "../../condition";
+import { evaluateChecked, printWhen, when as w } from "../../plan/when";
+
+const onRouterOnly = w.role("router");
+import { section } from "../../plan/types";
 import { patches } from "../../intent/patches";
 import { applyPatches, Patch, patchesFor, targetCondition } from "../../intent/patches/patch";
 
@@ -37,14 +40,19 @@ test("a target is an engine condition: models, roles and a range of releases", (
     releases: { from: "25.12", before: "25.12.6" },
   });
   const on = (model: string, role: string, version: string) =>
-    evaluateCondition(condition, (name) => ({
+    evaluateChecked(condition, (name) => ({
       value: { "device.model_id": model, "device.tag.role": role, "device.version": version }[name],
     }));
   t.true(on("friendlyarm,nanopi-r6s", "router", "25.12.5"));
   t.false(on("friendlyarm,nanopi-r6s", "router", "25.12.6"), "fixed upstream from 25.12.6");
   t.false(on("zyxel,nwa50ax-pro", "router", "25.12.5"));
   t.false(on("friendlyarm,nanopi-r6s", "access-point", "25.12.5"));
-  t.is(targetCondition({}), "*", "no target: every device");
+  t.is(printWhen(targetCondition({})), "*", "no target: every device");
+  t.is(
+    printWhen(condition),
+    "device.model_id in ['friendlyarm,nanopi-r6s'] AND device.tag.role in ['router'] AND device.version >= '25.12' AND device.version < '25.12.6'",
+    "as a hand-written config would say it"
+  );
 });
 
 const example: Patch = {
@@ -54,29 +62,34 @@ const example: Patch = {
   applies: (intent) => intent.internet.lines[0].ipv6.enabled,
   apply: () => ({
     files: [{ path: "/etc/example", content: "x" }],
-    config: { system: { example: [{ enabled: true }] } },
-    packages: ["example-pkg"],
-    keeps: ["?example.*"],
+    config: { system: { example: [section({}, { enabled: true })] } },
+    packages: { add: ["example-pkg"] },
+    keeps: [{ config: "example", optional: true }],
     services: [{ name: "example", running: true }],
   }),
 };
 
 test("everything a patch emits carries its target; one the intent does not need emits nothing", (t) => {
-  const when = "device.tag.role in ['access-point'] AND device.version < '26.03'";
+  const when = targetCondition(example.target);
+  t.is(printWhen(when), "device.tag.role in ['access-point'] AND device.version < '26.03'");
   const fragment = applyPatches([example])(sample());
-  t.deepEqual(fragment.files, [{ path: "/etc/example", content: "x", ".if": when }]);
-  t.deepEqual(fragment.config, { system: { example: [{ enabled: true, ".if": when }] } });
-  t.deepEqual(fragment.package_profiles, [{ ".if": when, packages: ["example-pkg"] }]);
-  t.deepEqual(fragment.configs_to_not_reset, [{ ".if": when, configs: ["?example.*"] }]);
-  t.deepEqual(fragment.services, [{ name: "example", running: true, ".if": when }]);
+  t.deepEqual(fragment.files, [{ path: "/etc/example", content: "x", when }]);
+  t.deepEqual(fragment.config, { system: { example: [{ options: { enabled: true }, when }] } });
+  t.deepEqual(fragment.packages, [{ when, add: ["example-pkg"] }]);
+  t.deepEqual(fragment.keep, [{ when, entries: [{ config: "example", optional: true }] }]);
+  t.deepEqual(fragment.services, [{ name: "example", running: true, when }]);
+  // What a patch's section says of itself is narrowed by the target, never replaced.
+  const own = applyPatches([{ ...example, apply: () => ({ config: { system: { example: [section({ when: onRouterOnly }, {})] } } }) }])(sample());
+  t.is(printWhen(own.config!.system.example[0].when!), `${printWhen(when)} AND device.tag.role == 'router'`);
 
   const intent = sample();
   intent.internet.lines[0].ipv6.enabled = false;
   t.deepEqual(applyPatches([example])(intent), {
+    devices: [],
     files: [],
     config: {},
-    package_profiles: [],
-    configs_to_not_reset: [],
+    packages: [],
+    keep: [],
     services: [],
   });
 });

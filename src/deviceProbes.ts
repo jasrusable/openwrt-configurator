@@ -5,13 +5,12 @@
 // round trip (runProbes) — which matters under QuickJS, where every round trip
 // is a new SSH client process.
 //
-// The script protocol (execScript's per-command markers) and the transport's
-// exit-status marker are not here: they wrap commands rather than ask things.
+// The agent's verbs (src/agent) and the transport's exit-status marker are
+// not here: they change the device, or wrap commands, rather than ask things.
 import { ExecResult, Session } from "./platform";
 import { shellQuote } from "./shell";
-import { stagedScriptPath } from "./execScript";
 import { parseJson } from "./utils";
-import { parseUciExport, UNREADABLE } from "./uci";
+import { parseUciExport, UNREADABLE } from "./engine/uci";
 
 export type Probe<T> = { command: string; parse: (result: ExecResult) => T };
 
@@ -25,10 +24,10 @@ const PROBE_END = "__ONC_PROBE__";
  * marker line carrying its exit status ends its output. Stderr is discarded:
  * it cannot be told apart per probe, so parsers rely on the exit status.
  */
-export const runProbes = async <P extends Record<string, Probe<unknown>>>(
-  session: Session,
-  probes: P
-): Promise<{ [K in keyof P]: P[K] extends Probe<infer T> ? T : never }> => {
+/** What each probe of a set answers, by name. */
+export type Answers<P extends Record<string, Probe<unknown>>> = { [K in keyof P]: P[K] extends Probe<infer T> ? T : never };
+
+export const runProbes = async <P extends Record<string, Probe<unknown>>>(session: Session, probes: P): Promise<Answers<P>> => {
   const names = Object.keys(probes);
   const { stdout } = await session.execCommand(
     names
@@ -58,7 +57,7 @@ export const runProbes = async <P extends Record<string, Probe<unknown>>>(
         code: Number(parts[i * 2 + 1]),
       }),
     ])
-  ) as any;
+  ) as Answers<P>;
 };
 
 const lines = (text: string) =>
@@ -73,13 +72,18 @@ const lines = (text: string) =>
  * /etc/board.json as it is: its layout differs across targets and releases,
  * so it is interpreted by the tolerant parser in src/facts/board.ts, not here.
  */
-export const boardJson: Probe<{ model?: { id?: string; name?: string } } & Record<string, unknown>> = {
+export type BoardJson = { model?: { id?: string; name?: string } } & Record<string, unknown>;
+
+export const boardJson: Probe<BoardJson> = {
   command: "cat /etc/board.json",
   parse: ({ stdout, code }) => {
     if (code !== 0 || !stdout) {
       throw new Error("Failed to read /etc/board.json from the device.");
     }
-    return parseJson(stdout, "/etc/board.json") as any;
+    const board = parseJson(stdout, "/etc/board.json");
+    // Only its shape is assumed here; every field is read tolerantly after.
+    if (!board || typeof board !== "object" || Array.isArray(board)) throw new Error("/etc/board.json is not an object.");
+    return board as BoardJson;
   },
 };
 
@@ -196,12 +200,6 @@ export const pendingChanges: Probe<Record<string, number>> = {
   parse: ({ stdout }) => summarisePendingChanges(stdout),
 };
 
-/** Packages fetched into the rollback directory, for an offline reinstall. */
-export const stagedPackageCount = (dir: string): Probe<number> => ({
-  command: `ls ${shellQuote(dir)}/*.apk 2>/dev/null | wc -l`,
-  parse: ({ stdout }) => Number(stdout.trim()) || 0,
-});
-
 // --- during a provision ------------------------------------------------------
 
 /**
@@ -265,72 +263,4 @@ export const notRunning = (names: string[]): Probe<{ name: string; missing: bool
         ? [{ name, missing: count === "-" }]
         : [];
     }),
-});
-
-/** Whether a run's commit finished: its marker, written after every `uci commit` (rollback.ts). */
-export const commitFinished = (committedFlag: string): Probe<boolean> => ({
-  command: `[ -f ${committedFlag} ] && echo ONC_COMMITTED`,
-  parse: ({ stdout }) => stdout.includes("ONC_COMMITTED"),
-});
-
-/**
- * Stand the watchdog down: set its confirm flag and end its sleep, so it wakes,
- * sees the flag and cleans up after itself. Never kill the watchdog itself:
- * once it has started restoring (it marks that), half a restore is worse than
- * either config, so a disarm that comes too late says it "fired" instead. One
- * not running at all (the restore done, or a reboot that cleared /tmp) fired
- * too.
- */
-export const disarmWatchdog = ({
-  confirmFlag,
-  pidFile,
-  sleepPidFile,
-  watchdogPath,
-  rollbackDir,
-  bootDir,
-  disarmedFlag,
-}: {
-  confirmFlag: string;
-  pidFile: string;
-  /** What the watchdog runs: its pid is checked to still be this run's watchdog. */
-  watchdogPath: string;
-  sleepPidFile: string;
-  rollbackDir: string;
-  /** The boot-time copy (rollback.ts): gone with the disarm, or a restart would restore it. */
-  bootDir: string;
-  /** There once the watchdog stood down: a disarm repeated after one that went through. */
-  disarmedFlag: string;
-}): Probe<"disarmed" | "fired"> => {
-  const gone = 'i=0; while kill -0 "$p" 2>/dev/null && [ $i -lt 5 ]; do sleep 1; i=$((i+1)); done';
-  // Confirmed: this config is the one a restart must keep, so every earlier
-  // run's boot-time copy goes too (one reverted, say, whose watchdog has not
-  // woken yet to remove its own), or a restart would restore it over this.
-  const bootRoot = bootDir.replace(/\/[^/]+$/, "");
-  return {
-    command: [
-      `rm -f ${stagedScriptPath}`,
-      // Saved pids, checked to still be what they were (a pid is reused once its process ends).
-      `p=$(cat ${pidFile} 2>/dev/null); s=$(cat ${sleepPidFile} 2>/dev/null)`,
-      `if [ -f ${disarmedFlag} ]; then rm -rf ${bootRoot}; echo ONC_DISARMED`,
-      // This run's watchdog by its script, an argument of its own (cmdline is NUL-separated).
-      `elif [ -z "$p" ] || ! tr '\\0' '\\n' < /proc/$p/cmdline 2>/dev/null | grep -qxF ${watchdogPath}; then echo ONC_FIRED`,
-      `else touch ${confirmFlag}`,
-      `  if [ -n "$s" ] && [ "$(cat /proc/$s/comm 2>/dev/null)" = sleep ] && kill "$s" 2>/dev/null; then ${gone}; rm -rf ${bootRoot}; echo ONC_DISARMED`,
-      // Its sleep had just ended: it either saw the flag (and exits) or is restoring.
-      `  else sleep 1; if [ -f ${rollbackDir}/restoring ]; then echo ONC_FIRED; else ${gone}; rm -rf ${bootRoot}; echo ONC_DISARMED; fi`,
-      `  fi`,
-      `fi`,
-    ].join("\n"),
-    parse: ({ stdout }) => (stdout.includes("ONC_DISARMED") ? "disarmed" : "fired"),
-  };
-};
-
-/**
- * Once a rollback has restored the old config (the watchdog marks that), tell
- * it access came back, so it need not reboot. Before then, reaching the device
- * proves nothing: it is still on the config being rolled back.
- */
-export const markRecovered = ({ restoredFlag, recoveredFlag }: { restoredFlag: string; recoveredFlag: string }): Probe<boolean> => ({
-  command: `[ -f ${restoredFlag} ] && touch ${recoveredFlag} && echo ONC_RECOVERED`,
-  parse: ({ stdout }) => stdout.includes("ONC_RECOVERED"),
 });

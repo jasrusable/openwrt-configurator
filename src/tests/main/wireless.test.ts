@@ -1,17 +1,16 @@
 import test from "ava";
 import { fixtureConfig } from "../helpers/fixtures";
 import { getDeviceSchema } from "../../getDeviceSchema";
-import { getOpenWrtConfig } from "../../getOpenWrtConfig";
-import { getUciCommands } from "../../getUciCommands";
-import { oncConfigSchema } from "../../oncConfigSchema";
-import { parseSchema } from "../../utils";
+import { getOpenWrtConfig } from "../../engine/getOpenWrtConfig";
+import { getUciCommands } from "../../engine/getUciCommands";
 import { nodePlatform } from "../../platforms/node";
+import { planOf } from "../helpers/fixtures";
 
-const { json: oncJson, oncConfig, deviceConfigs } = fixtureConfig("config.json");
+const { json: oncJson, plan, deviceConfigs } = fixtureConfig("config.json");
 
 test("station PSK shorter than 8 characters is rejected", (t) => {
   const err = t.throws(() =>
-    parseSchema(oncConfigSchema, {
+    planOf({
       ...oncJson,
       config: {
         ...oncJson.config,
@@ -47,16 +46,16 @@ test("wireless", async (t) => {
   const routerDeviceConfig = deviceConfigs[0];
   const routerDeviceSchema = deviceSchemas[0];
   const routerOpenWrtConfig = getOpenWrtConfig({
-    oncConfig,
+    plan,
     deviceConfig: routerDeviceConfig,
     deviceSchema: routerDeviceSchema,
   });
-  t.is(routerOpenWrtConfig.wireless, undefined);
+  t.is(routerOpenWrtConfig.wireless as unknown, undefined);
 
   const apDeviceConfig = deviceConfigs[1];
   const apDeviceSchema = deviceSchemas[1];
   const apOpenWrtConfig = getOpenWrtConfig({
-    oncConfig,
+    plan,
     deviceConfig: apDeviceConfig,
     deviceSchema: apDeviceSchema,
   });

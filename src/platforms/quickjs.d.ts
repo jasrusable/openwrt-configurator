@@ -36,16 +36,23 @@ interface QuickJsOs {
   platform: string;
   WNOHANG: number;
   SIGTERM: number;
+  SIGINT: number;
+  /** Call `handler` (in the event loop) when `signal` arrives; null restores the default. */
+  signal(signal: number, handler: (() => void) | null): void;
+  O_RDONLY: number;
+  O_TRUNC: number;
   S_IFMT: number;
   S_IFDIR: number;
   exec(args: string[], options?: QuickJsExecOptions): number;
   waitpid(pid: number, options: number): [number, number];
   kill(pid: number, signal: number): number;
   setTimeout(fn: () => void, ms: number): unknown;
-  stat(path: string): [{ mode: number; size: number } | null, number];
+  /** mtime in ms. */
+  stat(path: string): [{ mode: number; size: number; mtime: number } | null, number];
   mkdir(path: string, mode?: number): number;
   remove(path: string): number;
   rename(oldPath: string, newPath: string): number;
+  readdir(path: string): [string[], number];
   O_WRONLY: number;
   O_CREAT: number;
   O_EXCL: number;

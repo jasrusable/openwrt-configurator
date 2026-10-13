@@ -8,18 +8,23 @@
 // stock device's dropbear accepts with any password). Picking it is the
 // trust-on-first-use moment: its host key is recorded then, and taking it on
 // keeps its address, MACs and key as facts, so it is found by identity after.
+import { z } from "zod";
 import { DeviceFacts, listSeen, readFacts, writeFacts } from "./deviceFacts";
 import { Probe, runProbes } from "./deviceProbes";
 import { DeviceSchema } from "./deviceSchema";
 import { deviceSchemaOf, deviceSchemaProbes } from "./getDeviceSchema";
-import type { Intent } from "./intent/schema";
-import { loadOncConfig } from "./loadConfig";
+import { Intent } from "./intent/schema";
+import { namePattern } from "./intent/validators";
 import { knownKey, Located, locateEach, macsProbe, Neighbour } from "./locate";
-import { ONCDeviceConfig } from "./oncConfigSchema";
+import { PlanDevice } from "./plan/types";
 import { Platform } from "./platform";
-import { provisionableDevices, sshConnectOptions } from "./provisionConfig";
+import { provisionableDevices, sshConnectOptions } from "./apply/provisionConfig";
+import { fail, Problem } from "./problem";
+import { map, messageOf, ok, Result } from "./result";
+import { loadSettings } from "./settings";
 import { shellQuote } from "./shell";
 import { Lease } from "./status/device";
+import { fileName, read, stateLayout, StoreFiles, StoreKey, tryWrite } from "./store";
 
 export type Candidate = {
   address: string;
@@ -97,20 +102,28 @@ const banners = (addresses: string[]): Probe<Record<string, string>> => {
   };
 };
 
-/** What to show while the network is looked at: the candidates, or why there are none. */
-export const discover = async ({ intentPath, platform }: { intentPath: string; platform: Platform }) => {
-  const { oncConfig, intent } = await loadOncConfig({ path: intentPath, platform });
-  const { ready } = provisionableDevices(oncConfig);
-  const names = (intent?.hardware ?? []).map((d) => d.name);
+/** What is on the network and not in Hardware, best first; or why it could not be looked at. */
+export const discover = async ({
+  intentPath,
+  platform,
+}: {
+  intentPath: string;
+  platform: Platform;
+}): Promise<Result<Candidate[], Problem>> => {
+  const loaded = await loadSettings(intentPath, platform);
+  if (!loaded.ok) return loaded;
+  const { plan, intent } = loaded.value;
+  const { ready } = provisionableDevices(plan);
+  const names = intent.hardware.map((d) => d.name);
   const facts = readFacts(platform, intentPath, names);
   const seen = Object.values(readFacts(platform, intentPath, listSeen(platform, intentPath).filter((h) => !names.includes(h)))).flatMap(
     (f) => (f ? [f] : [])
   );
   const router = ready.find((d) => d.tags?.role === "router");
-  if (!router) return { candidates: [], error: "There is no router in Hardware to ask." };
+  if (!router) return fail("conflict", "There is no router in Hardware to ask.");
   const [found] = locateEach({ devices: [router], facts, platform });
   const r = await found;
-  if (!("session" in r)) return { candidates: [], error: `The router could not be reached: ${r.error}` };
+  if (!("session" in r)) return fail("unreachable", `The router could not be reached: ${r.error}`);
   try {
     const tables = r.tables ?? { leases: [], neighbours: [] };
     const known = {
@@ -122,7 +135,7 @@ export const discover = async ({ intentPath, platform }: { intentPath: string; p
     // Who answers SSH like OpenWrt: asked of the router, for these addresses only.
     const asked = first.slice(0, 32).map((c) => c.address).filter((a) => /^[\d.]+$/.test(a));
     const heard = asked.length ? (await runProbes(r.session, { heard: banners(asked) })).heard : {};
-    return { candidates: discoverCandidates({ ...tables, banners: heard, known, seen }) };
+    return ok(discoverCandidates({ ...tables, banners: heard, known, seen }));
   } finally {
     r.session.dispose();
   }
@@ -174,16 +187,14 @@ export const inspect = async ({
   address: string;
   intent: Intent;
   platform: Platform;
-}): Promise<Inspected> => {
-  const tries: ONCDeviceConfig["provisioning_config"][] = [
-    ...(intent.system.app_login.key
-      ? [{ ssh_auth: { username: "root", private_key_path: intent.system.app_login.key } }]
-      : []),
-    { ssh_auth: { username: "root", password: stockPassword } },
+}): Promise<Result<Inspected, Problem>> => {
+  const tries: NonNullable<PlanDevice["login"]>[] = [
+    ...(intent.system.app_login.key ? [{ username: "root", privateKeyPath: intent.system.app_login.key }] : []),
+    { username: "root", password: stockPassword },
   ];
   const failures: string[] = [];
-  for (const [i, provisioning_config] of tries.entries()) {
-    const at = { hostname: address, ipaddr: address, provisioning_config } as ONCDeviceConfig;
+  for (const [i, login] of tries.entries()) {
+    const at: PlanDevice = { hostname: address, ipaddr: address, tags: {}, login };
     const options = sshConnectOptions({ deviceConfig: at, platform });
     try {
       const session = await platform.connect({ ...options, readyTimeout: 5000 });
@@ -192,33 +203,100 @@ export const inspect = async ({
         const schema = deviceSchemaOf(address, read);
         const key = knownKey(platform, options.knownHostsFile!, address);
         const role = suggestRole(schema);
-        return {
+        return ok({
           address,
           schema,
           macs: read.macs,
           hostname: read.hostname,
           ...(key ? { hostKey: { type: key.type, key: key.key } } : {}),
-          openLogin: !!tries[i]?.ssh_auth?.password,
+          openLogin: !!tries[i]?.password,
           suggested: { role, name: suggestName(read.hostname, role, intent.hardware.map((d) => d.name)) },
-        };
+        });
       } finally {
         session.dispose();
       }
     } catch (e) {
-      failures.push((e as Error).message);
+      failures.push(messageOf(e));
     }
   }
-  throw new Error(`Could not log in to ${address}: ${failures.join("; ")}`);
+  return fail("unreachable", `Could not log in to ${address}: ${failures.join("; ")}`);
 };
 
-/** Take on an inspected device under `name`: its facts kept, so it is found by identity from now on. */
-export const adopt = (
-  files: Pick<Platform, "mkdirp" | "writeTextFile" | "readTextFile">,
-  intentPath: string,
-  name: string,
-  inspected: Inspected,
-  now: number
-) => {
+/** An address as the page may give one: an IP address or a name, nothing a shell would read. */
+const addressPattern = /^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$/;
+
+/** The read of a device picked to add, kept here so adopting uses it and nothing the browser sends. */
+export const inspectedKey = (intentPath: string, address: string): StoreKey<Inspected> => ({
+  path: `${stateLayout(intentPath).inspected}/${fileName(address)}.json`,
+  schema: z.custom<Inspected>((v) => !!v && typeof v === "object" && typeof (v as Inspected).address === "string"),
+  format: 1,
+});
+
+/** Read the device at `address` (read-only) and keep what it said, for adopting it. */
+export const inspectAt = async ({
+  intentPath,
+  platform,
+  address,
+}: {
+  intentPath: string;
+  platform: Platform;
+  address: string;
+}): Promise<Result<Inspected, Problem>> => {
+  if (!addressPattern.test(address)) return fail("invalid", "Give an address, like 10.0.0.143 or ap.lan.");
+  const intent = await savedIntent(intentPath, platform);
+  if (!intent.ok) return intent;
+  const inspected = await inspect({ address, intent: intent.value, platform });
+  if (!inspected.ok) return inspected;
+  const kept = tryWrite(platform, inspectedKey(intentPath, address), inspected.value);
+  return kept.ok ? inspected : fail("internal", `${address} was read, but what it said could not be kept: ${kept.error.message}`);
+};
+
+const savedIntent = async (intentPath: string, platform: Platform): Promise<Result<Intent, Problem>> =>
+  map(await loadSettings(intentPath, platform), (settings) => settings.intent);
+
+/**
+ * Take on an inspected device under `name`: its facts kept, so it is found by
+ * identity from now on. Adopting writes the facts locating trusts (address,
+ * host key), so never under a name already in Hardware (it would re-pin that
+ * device to this one), nor the same box twice under another name.
+ */
+export const adopt = async ({
+  intentPath,
+  platform,
+  address,
+  name,
+  now = Date.now,
+}: {
+  intentPath: string;
+  platform: Platform;
+  address: string;
+  name: string;
+  now?: () => number;
+}): Promise<Result<{ ok: true }, Problem>> => {
+  if (!addressPattern.test(address)) return fail("invalid", "Give an address, like 10.0.0.143 or ap.lan.");
+  if (!namePattern.test(name) || name.length > 31) return fail("invalid", "A name like ap-2.");
+  const intent = await savedIntent(intentPath, platform);
+  if (!intent.ok) return intent;
+  if (intent.value.hardware.some((d) => d.name === name)) return fail("conflict", `${name} is already in Hardware.`);
+  const inspected = read(platform, inspectedKey(intentPath, address));
+  if (!inspected) return fail("conflict", "Read the device first.");
+  const known = readFacts(platform, intentPath, intent.value.hardware.map((d) => d.name));
+  const same = Object.values(known).find(
+    (f) =>
+      f &&
+      ((inspected.hostKey && f.hostKey?.key === inspected.hostKey.key) || (f.macs ?? []).some((mac) => inspected.macs.includes(mac)))
+  );
+  if (same) return fail("conflict", `This is ${same.hostname}, already in Hardware.`);
+  try {
+    keepAdopted(platform, intentPath, name, inspected, now());
+  } catch (thrown) {
+    return fail("internal", `${name} could not be kept: ${messageOf(thrown)}`);
+  }
+  return ok({ ok: true as const });
+};
+
+/** An inspected device's facts, kept under `name`. */
+const keepAdopted = (files: StoreFiles, intentPath: string, name: string, inspected: Inspected, now: number) => {
   const located: Omit<Located, "session"> = {
     hostname: name,
     address: inspected.address,

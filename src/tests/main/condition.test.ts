@@ -1,5 +1,9 @@
 import test from "ava";
-import { evaluateCondition, Lookup } from "../../condition";
+import { parseCondition } from "../../condition";
+import { evaluateChecked, Lookup } from "../../plan/when";
+
+/** Whether a condition as written holds (its names checked as it is read, then each looked up). */
+const evaluateCondition = (condition: string, lookup: Lookup) => evaluateChecked(parseCondition(condition), lookup);
 
 const device: Record<string, string | boolean | string[]> = {
   "device.hostname": "jason's ap",
@@ -65,7 +69,7 @@ test("not, parentheses, in, and either spelling of the operators", (t) => {
 
 test("mistakes are reported with the condition and a position", (t) => {
   t.throws(() => check("device.hostnmae == 'x'"), {
-    message: `Invalid condition "device.hostnmae == 'x'": unknown name device.hostnmae`,
+    message: /^Invalid condition "device\.hostnmae == 'x'": unknown name device\.hostnmae; use device\.tag\.<key> or one of /,
   });
   t.throws(() => check("device.tag.role = 'ap'"), {
     message: /unexpected "=" at column 17/,
@@ -105,4 +109,33 @@ test("an unquoted number compares as written", (t) => {
   t.false(evaluateCondition("device.tag.x == 25.10", tagged("25.1")));
   t.true(evaluateCondition("device.tag.x in [01, 2]", tagged("01")));
   t.false(evaluateCondition("device.tag.x == 01", tagged("1")));
+});
+
+test("a condition's values compare by text, and a mistyped name fails even where OR would skip it", (t) => {
+  const lookup = (name: string) => {
+    if (name === "device.sw_config") return { value: true };
+    if (name === "device.tag.floor") return { value: "2" };
+    if (name === "device.tag.role") return { value: "ap" };
+    if (name.startsWith("device.tag.")) return {};
+    throw new Error(`unknown name ${name}`);
+  };
+  t.true(evaluateCondition("device.sw_config == 'true'", lookup));
+  t.true(evaluateCondition("device.tag.floor == 2", lookup));
+  t.throws(() => evaluateCondition("device.tag.role == 'ap' OR device.modle_id == 'x'", lookup), { message: /modle_id/ });
+});
+
+test("a condition tree prints as the language and reads back as itself", (t) => {
+  const { when, printWhen } = require("../../plan/when");
+  const { parseCondition } = require("../../condition");
+  const trees = [
+    when.always,
+    when.all(),
+    when.any(),
+    when.role("router"),
+    when.all(when.role("router"), when.any(when.radio("2g"), when.radio("5g"))),
+    when.not(when.all(when.swConfig(false), when.device("ap's"))),
+    when.all(when.oneOf("device.model_id", ["a", "b"]), when.order("device.version", "<", "25.12.6")),
+  ];
+  for (const tree of trees) t.deepEqual(parseCondition(printWhen(tree)), tree, printWhen(tree));
+  t.is(printWhen(when.all()), "*", "nothing to hold: every device");
 });

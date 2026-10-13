@@ -1,6 +1,6 @@
 import test from "ava";
 import { posix } from "path";
-import { dirname, join } from "../../paths";
+import { dirname, join } from "../../posixPath";
 import { decodeUtf8Hex, utf8ByteLength } from "../../utf8";
 
 test("dirname matches path.posix.dirname", (t) => {

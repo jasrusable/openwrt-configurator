@@ -7,7 +7,7 @@ There are two ways to write that file:
 - **An intent file** (`{ "schema": 1, ... }`): your network in your own terms — the internet lines, networks, Wi-Fi, firewall exceptions, VPN, DNS and your hardware — edited in a web UI (or by hand) and compiled to OpenWrt's configuration for each device. Device facts (model, ports, radios) are read from the devices, never written down. [`sampleConfigs/intent.json`](sampleConfigs/intent.json) is an example.
 - **A low-level config**: UCI-like JSON, conditionally composed with `.if` and `.overrides` so one file drives routers and access points of different models. [`sampleConfigs/basic.json`](sampleConfigs/basic.json) is an example, and [the low-level config](#the-low-level-config) below documents it.
 
-Every command takes either.
+Every command takes either, except `build-images`, which needs a low-level config (an intent file names no models or release: those are read from the devices).
 
 ```sh
 $ openwrt-configurator ui ./network.intent.json      # edit it in the web UI, and apply from there
@@ -49,7 +49,7 @@ $ openwrt-configurator provision ./network.intent.json
 
    Each device's SSH host key is remembered the first time you connect (`~/.config/openwrt-configurator/known_hosts`; on a device, dropbear's `~/.ssh/known_hosts`), and a changed key is refused. After reflashing a device, delete its line from that file.
 
-   The web UI needs the Node build (the macOS binary from the releases page, or `npm run ui` in a checkout): the Homebrew build runs on QuickJS, which cannot listen on a port. On a router the package serves the UI itself, at `/cgi-bin/onc/`, behind a login with the root password; its settings live in `/etc/onc/intent.json`.
+   The web UI needs the Node build (the macOS binary from the releases page, or `npm run ui` in a checkout): the Homebrew build runs on QuickJS, which cannot listen on a port. On a router the package serves the UI itself, at `/cgi-bin/onc/`, behind a login with the root password (refused while root has none); its settings live in `/etc/onc/intent.json`, and a service of its own (`onc-collector`) keeps the Status pages' readings, in RAM.
 
 2. Start from a [sample](https://github.com/jasrusable/openwrt-configurator/tree/main/sampleConfigs): `intent.json` for the web UI, `basic.json` for a low-level config.
 
@@ -60,18 +60,23 @@ $ openwrt-configurator provision ./network.intent.json
 ```sh
 $ openwrt-configurator print-uci-commands ./network-config.json
 #device my-ap-1
-for pkg in $(uci changes | sed 's/^[-+]//; s/[.=].*//' | sort -u); do if [ -f "/etc/config/$pkg" ]; then uci revert "$pkg"; fi; done
-apk del --rdepends 'firewall4'
-reload_config
-uci batch 2>/tmp/.onc-uci-err <<'ONC_UCI'
+onc-agent prepare <<'ONC_DATA'
+seed 31 /etc/config/wireless
+config wifi-device 'radio0'
+	option type 'mac80211'
+...
+	option key '<redacted>'
+remove firewall4
+end
+ONC_DATA
+onc-agent stage <<'ONC_DATA'
+batch 63
 set system.system0=system
 set system.system0.hostname='my-ap-1'
-set system.system0.timezone='SAST-2'
-set system.system0.zonename='Africa/Johannesburg'
-set network.device0=device
-set network.device0.name='br-lan'
 ...
 ```
+
+   Each step is one of the device-side agent's verbs with the data it is given; secrets print as `<redacted>` unless `--show-secrets`.
 
    `compile` prints the low-level config an intent file compiles to, offline.
 
@@ -286,19 +291,22 @@ Its top-level keys: `devices`, `package_profiles`, `files`, `configs_to_not_rese
   }
 ```
 
+5. Placeholders fit one file to different hardware. In a port list (`device.ports`, `bridge-vlan.ports`, `switch_vlan.ports`), `"*"` is every free physical port and `"*t"` the same tagged; a bridge VLAN's whole `"ports": "*"` is every port of its bridge, and a Wi-Fi interface's `"device": "*"` every radio. `@wan_port`, `@port:<name>` and `@cpu_port`, each optionally `.<vlan>`, name a port wherever a device is named; `@best/<width>` as a radio's `htmode` is the newest mode it supports up to that width; `@bridge_ports` as a device's `name` gives each bridge port a section of its own. A placeholder where it means nothing is refused, and text that only looks like one is written with a second `@` (`"@@wan_port"` is the SSID `@wan_port`). An override may carry `.name` to rename its section; any other unknown `.`-key is refused.
+
 ## Commands
 
 | Command | |
 |---|---|
 | `ui <intent>` | serve the web UI on this machine (loopback only) |
 | `provision <file>` | apply to the devices (`--no-confirm`, `--confirm-timeout`, `--rollback`, `--identity`) |
-| `print-uci-commands <file>` | print what `provision` would run on each device (reads the devices) |
+| `print-uci-commands <file>` | print what `provision` would do on each device, step by step (reads the devices) |
 | `compile <file>` | print the low-level config a file compiles to (offline) |
-| `build-images <file>` | build per-device sysupgrade images (`--dry-run`, `--out`) |
+| `build-images <file>` | build per-device sysupgrade images from a low-level config (`--dry-run`, `--out`) |
 | `verify-images` | check built images against their manifest |
 | `capture-device-schema <file>` | record a device's ports and radios (read-only) |
 | `secrets set <name>` | store a secret in the keychain |
 | `cgi <intent>` | answer one web UI request under uhttpd (what the router package runs) |
+| `collect <intent>` | keep reading the devices for the Status pages (the router package's service; `ui` does it itself) |
 
 ## Roadmap
 

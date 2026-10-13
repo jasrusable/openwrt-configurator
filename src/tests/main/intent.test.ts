@@ -5,34 +5,36 @@ import { spawnSync } from "child_process";
 import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { deviceSchemaSchema } from "../../deviceSchema";
-import { getOpenWrtConfig } from "../../getOpenWrtConfig";
-import { getOpenWrtState } from "../../getOpenWrtState";
+import { getOpenWrtConfig } from "../../engine/getOpenWrtConfig";
+import { getOpenWrtState } from "../../engine/getOpenWrtState";
 import { availability } from "../../intent/choices";
 import { withMain, withoutConnection } from "../../intent/connections";
 import { compileIntent } from "../../intent/compile";
-import { rescueAfterMinutes } from "../../intent/features/mesh";
-import { ulaPrefix } from "../../intent/features/network";
+import { rescueAfterMinutes } from "../../intent/mesh";
+import { ulaPrefix } from "../../intent/site";
 import { migrateIntent } from "../../intent/migrations";
 import { Intent, intentSchema } from "../../intent/schema";
-import { oncConfigSchema } from "../../oncConfigSchema";
+import { printPlan } from "../../lowLevel/print";
 
 const root = join(__dirname, "../../..");
 const sample = () =>
   sampleIntentJson();
-const compile = (intent = sample()) =>
-  oncConfigSchema.parse(compileIntent(intentSchema.parse(intent)));
+/** The plan an intent compiles to, for the engine. */
+const planFor = (intent = sample()) => compileIntent(intentSchema.parse(intent));
+/** And as low-level JSON (what `compile` prints), for what the compiler writes. */
+const compile = (intent = sample()) => printPlan(planFor(intent));
 
 // Real hardware, captured read-only from the user's devices: the compiled
 // config must resolve on each, exactly as a hand-written one would.
 const onDevice = (hostname: string, model: string, intent = sample()) => {
-  const oncConfig = compile(intent);
+  const plan = planFor(intent);
   const deviceSchema = deviceSchemaSchema.parse(
     JSON.parse(
       readFileSync(join(root, "deviceSchemas", `${model}.json`), "utf8")
     )
   );
-  const deviceConfig = oncConfig.devices.find((d) => d.hostname === hostname)!;
-  return getOpenWrtConfig({ oncConfig, deviceConfig, deviceSchema }) as any;
+  const deviceConfig = plan.devices.find((d) => d.hostname === hostname)!;
+  return getOpenWrtConfig({ plan, deviceConfig, deviceSchema }) as any;
 };
 
 test("the sample intent compiles to a valid low-level config", (t) => {
@@ -269,7 +271,7 @@ test("packages are fixed per role; a setting off is config, not a removal", (t) 
   t.deepEqual(config.sqm.queue, [{ ".name": "wan", enabled: false, interface: "eth1" }]);
   // The proxy has no "enabled": off is no instance, and hands off dnsmasq.
   t.like(config["https-dns-proxy"].main[0], { dnsmasq_config_update: "-", force_dns: false });
-  t.deepEqual(config["https-dns-proxy"]["https-dns-proxy"], []);
+  t.false("https-dns-proxy" in config["https-dns-proxy"], "no instance");
   t.false("server" in config.dhcp.dnsmasq[0], "dnsmasq uses the provider's resolvers");
 });
 
@@ -284,7 +286,7 @@ test("internet: UPnP on the main network only", (t) => {
   t.like(config.upnpd.perm_rule[0], { action: "allow", int_addr: "10.0.0.0/24" });
   t.like(config.upnpd.perm_rule[1], { action: "deny", int_addr: "0.0.0.0/0" });
   const ap = onDevice("home-ap-1", "zyxel,nwa50ax-pro", intent).upnpd;
-  t.deepEqual(ap, { upnpd: [], perm_rule: [] }, "router only: no sections on an AP");
+  t.deepEqual(ap, {}, "router only: no sections on an AP");
 });
 
 test("IPv6: per network, announced only with a public prefix, and only with the internet's", (t) => {
@@ -480,12 +482,12 @@ test("patches apply only where they say: by model, by role", (t) => {
   const files = (hostname: string, model: string, change: (i: any) => void = () => {}) => {
     const intent = sample();
     change(intent);
-    const oncConfig = compile(intent);
+    const plan = planFor(intent);
     const deviceSchema = deviceSchemaSchema.parse(
       JSON.parse(readFileSync(join(root, "deviceSchemas", `${model}.json`), "utf8"))
     );
-    const deviceConfig = oncConfig.devices.find((d) => d.hostname === hostname)!;
-    return (getOpenWrtState({ oncConfig, deviceConfig, deviceSchema }).files ?? []).map((f: any) => f.path);
+    const deviceConfig = plan.devices.find((d) => d.hostname === hostname)!;
+    return (getOpenWrtState({ plan, deviceConfig, deviceSchema }).files ?? []).map((f: any) => f.path);
   };
   t.deepEqual(files("home-router", "friendlyarm,nanopi-r6s").filter((p: string) => !p.includes("avahi")), [
     "/usr/libexec/platform/packet-steering.sh",
@@ -627,8 +629,8 @@ test("rules across settings are checked, at the field they concern", (t) => {
   ]);
   t.deepEqual(issues((i) => (i.networks[1].id = "router")), [
     "networks.1.id: reserved",
-    "wifi.networks.1.network: pick a network",
     'networks.0.access.networks: no network "guest"',
+    "wifi.networks.1.network: pick a network",
     "firewall.rules.0.from: pick a network, the internet or anywhere",
   ]);
   t.deepEqual(issues((i) => (i.networks[0].access.router = "services")), [
@@ -684,12 +686,12 @@ test("services: each role's kept enabled and started; those that must run are ch
   const services = (hostname: string, model: string, change: (i: any) => void = () => {}) => {
     const intent = sample();
     change(intent);
-    const oncConfig = compile(intent);
+    const plan = planFor(intent);
     const deviceSchema = deviceSchemaSchema.parse(
       JSON.parse(readFileSync(join(root, "deviceSchemas", `${model}.json`), "utf8"))
     );
-    const deviceConfig = oncConfig.devices.find((d) => d.hostname === hostname)!;
-    return getOpenWrtState({ oncConfig, deviceConfig, deviceSchema }).services ?? [];
+    const deviceConfig = plan.devices.find((d) => d.hostname === hostname)!;
+    return getOpenWrtState({ plan, deviceConfig, deviceSchema }).services ?? [];
   };
   const router = services("home-router", "friendlyarm,nanopi-r6s");
   const running = (list: { name: string; running: boolean }[]) => list.filter((s) => s.running).map((s) => s.name).sort();
@@ -762,14 +764,14 @@ test("two internet connections: a line on a LAN port, mwan3 over both, queueing 
   t.true(packages.includes("mwan3"));
   t.true(compile().package_profiles!.flatMap((p: any) => p.packages).includes("mwan3"), "one line: installed all the same");
   const oneLine = getOpenWrtState({
-    oncConfig: compile(),
-    deviceConfig: compile().devices.find((d) => d.hostname === "home-router")!,
+    plan: planFor(),
+    deviceConfig: planFor().devices.find((d) => d.hostname === "home-router")!,
     deviceSchema: deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", "friendlyarm,nanopi-r6s.json"), "utf8"))),
   });
   t.like(oneLine.services!.find((s) => s.name === "mwan3"), { enabled: false }, "...and off: stopped and disabled");
   t.deepEqual(
     onDevice("home-router", "friendlyarm,nanopi-r6s").mwan3,
-    { globals: [{ ".name": "globals", mmx_mask: "0x3F00" }], interface: [], member: [], policy: [], rule: [] },
+    { globals: [{ ".name": "globals", mmx_mask: "0x3F00" }] },
     "one line: declared all the same, so the package's first start reads nothing to track"
   );
 });
@@ -865,11 +867,11 @@ test("mesh: access points (and a router with a radio) link over 802.11s with bat
   t.false(router.network.device[0].ports.includes("bat0"));
   // A router with Wi-Fi: the R6S's ports, the access point's radios.
   const radioRouter = (() => {
-    const oncConfig = compile(meshed());
+    const plan = planFor(meshed());
     const read = (model: string) => JSON.parse(readFileSync(join(root, "deviceSchemas", `${model}.json`), "utf8"));
     const deviceSchema = deviceSchemaSchema.parse({ ...read("friendlyarm,nanopi-r6s"), radios: read("zyxel,nwa50ax-pro").radios });
-    const deviceConfig = oncConfig.devices.find((d) => d.hostname === "home-router")!;
-    return getOpenWrtConfig({ oncConfig, deviceConfig, deviceSchema }) as any;
+    const deviceConfig = plan.devices.find((d) => d.hostname === "home-router")!;
+    return getOpenWrtConfig({ plan, deviceConfig, deviceSchema }) as any;
   })();
   t.truthy(radioRouter.network.interface.find((i: any) => i[".name"] === "bat0"), "a router with a radio is a node");
   t.like(radioRouter.wireless["wifi-device"].find((d: any) => d.band === "5g"), { channel: 44 });
@@ -934,8 +936,8 @@ test("mesh rescue: a repeater gets a rescue Wi-Fi (off), its own link-local addr
   t.is(rescue.encryption, "sae", "WPA3, as the mesh: its key never offered to a WPA2 handshake");
   t.regex(ap.network.interface.find((i: any) => i[".name"] === "rescue").ipaddr, /^169\.254\.\d+\.\d+$/);
   const state = getOpenWrtState({
-    oncConfig: compile(intent),
-    deviceConfig: compile(intent).devices.find((d) => d.hostname === "home-ap-1")!,
+    plan: planFor(intent),
+    deviceConfig: planFor(intent).devices.find((d) => d.hostname === "home-ap-1")!,
     deviceSchema: deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", "zyxel,nwa50ax-pro.json"), "utf8"))),
   });
   t.true(state.files!.some((f) => f.path === "/etc/init.d/onc-mesh-rescue"));
@@ -1028,8 +1030,8 @@ test("mesh rescue watcher: on once after the quiet, off once when the mesh is ba
   intent.wifi.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", band_reserved: false, over_cable: false, large_frames: true };
   intent.hardware[1].uplink = "mesh";
   const state = getOpenWrtState({
-    oncConfig: compile(intent),
-    deviceConfig: compile(intent).devices.find((d) => d.hostname === "home-ap-1")!,
+    plan: planFor(intent),
+    deviceConfig: planFor(intent).devices.find((d) => d.hostname === "home-ap-1")!,
     deviceSchema: deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", "zyxel,nwa50ax-pro.json"), "utf8"))),
   });
   const script = state.files!.find((f) => f.path === "/usr/libexec/onc/mesh-rescue")!.content;
@@ -1086,10 +1088,10 @@ test("the main connection's IPv6 moves with the role: promoting a backup or remo
 test("a radio that cannot mesh (facts say so) makes its device no mesh node", (t) => {
   const intent = sample();
   intent.wifi.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", band_reserved: false, over_cable: false, large_frames: true };
-  const oncConfig = compile(intent);
+  const plan = planFor(intent);
   const schema = deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", "zyxel,nwa50ax-pro.json"), "utf8")));
   const on = (deviceSchema: typeof schema) =>
-    getOpenWrtConfig({ oncConfig, deviceConfig: oncConfig.devices.find((d) => d.hostname === "home-ap-1")!, deviceSchema }) as any;
+    getOpenWrtConfig({ plan, deviceConfig: plan.devices.find((d) => d.hostname === "home-ap-1")!, deviceSchema }) as any;
   const mesh = (config: any) => config.wireless["wifi-iface"].some((w: any) => w.mode === "mesh");
   t.true(mesh(on(schema)), "unknown: a node");
   t.false(mesh(on({ ...schema, radios: schema.radios!.map((r) => (r.band === "5g" ? { ...r, mesh: false } : r)) })));
@@ -1155,11 +1157,11 @@ test("larger frames over cable off: the mesh splits its packets there, and no MT
 
 test("odhcpd is re-bound when a network comes up, and restarted after a rollback", (t) => {
   const state = getOpenWrtState({
-    oncConfig: compile(),
-    deviceConfig: compile().devices.find((d) => d.hostname === "home-router")!,
+    plan: planFor(),
+    deviceConfig: planFor().devices.find((d) => d.hostname === "home-router")!,
     deviceSchema: deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", "friendlyarm,nanopi-r6s.json"), "utf8"))),
   });
-  t.like(state.services!.find((s) => s.name === "odhcpd"), { restart_after_rollback: true });
+  t.like(state.services!.find((s) => s.name === "odhcpd"), { restartAfterRollback: true });
   const hook = state.files!.find((f) => f.path === "/etc/hotplug.d/iface/30-odhcpd-ra-fix")!.content;
   // Run it as netifd would, with odhcpd's init script and pidof stubbed.
   const dir = tempDir("hook");

@@ -1,21 +1,22 @@
 import { DeviceSchema } from "./deviceSchema";
-import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
-import { conditionMatches, resolveOncConfig } from "./resolveOncConfig";
+import { Plan, PlanDevice } from "./plan/types";
+import { appliesTo, deviceLookup } from "./plan/device";
+import { resolveDeclarations, ResolvedSections, resolveSections } from "./engine/resolvePlan";
 import { utf8ByteLength } from "./utf8";
 import { shellQuote } from "./shell";
 
 /** An image is built for a model, so a device to build for must name one. */
-type BuildDevice = ONCDeviceConfig & { model_id: string };
+type BuildDevice = PlanDevice & { modelId: string };
 
-const requireModelId = (deviceConfig: ONCDeviceConfig): BuildDevice => {
-  if (!deviceConfig.model_id) {
+const requireModelId = (deviceConfig: PlanDevice): BuildDevice => {
+  if (!deviceConfig.modelId) {
     throw new Error(
       `${deviceConfig.hostname} has no model_id. build-images needs a config with ` +
         `each device's model_id and a "version": there is no live device to read ` +
         `them from (an intent file reads both from the devices, so it cannot build images).`
     );
   }
-  return { ...deviceConfig, model_id: deviceConfig.model_id };
+  return { ...deviceConfig, modelId: deviceConfig.modelId };
 };
 
 const BOOTSTRAP_MARKER = "/etc/openwrt-configurator-bootstrapped";
@@ -23,53 +24,40 @@ const UCI_DEFAULTS_MAX_BYTES = 20480;
 
 /** The device as far as an image knows it: its model, and the release once chosen (so `.if`s on releases hold). */
 export const buildModeDeviceSchema = (deviceConfig: BuildDevice, version = "build-time"): DeviceSchema => ({
-  name: deviceConfig.model_id,
+  name: deviceConfig.modelId,
   version,
   ports: [],
 });
 
-const matches = (condition: string | undefined, deviceConfig: BuildDevice, deviceSchema: DeviceSchema) =>
-  conditionMatches({ condition, deviceConfig, deviceSchema });
-
-export const resolveVersion = ({
-  oncConfig,
-  deviceConfig,
-}: {
-  oncConfig: ONCConfig;
-  deviceConfig: BuildDevice;
-}): string => {
-  if (!oncConfig.version) {
+export const resolveVersion = ({ plan, deviceConfig }: { plan: Plan; deviceConfig: BuildDevice }): string => {
+  if (!plan.version) {
     throw new Error(
       `No "version" set on the config. Add a top-level "version" field (e.g. "23.05.5") to build images.`
     );
   }
-  if (typeof oncConfig.version === "string") {
-    return oncConfig.version;
-  }
-  const deviceSchema = buildModeDeviceSchema(deviceConfig);
-  return (oncConfig.version[".overrides"] || [])
-    .filter((o) => matches(o[".if"], deviceConfig, deviceSchema))
-    .reduce((acc, o) => o.override[".value"] ?? acc, oncConfig.version[".value"]);
+  const lookup = deviceLookup(deviceConfig, buildModeDeviceSchema(deviceConfig));
+  return (plan.version.overrides ?? []).filter((o) => appliesTo(o.when, lookup)).reduce((acc, o) => o.value, plan.version.value);
 };
 
 export const resolvePackages = ({
-  oncConfig,
+  plan,
   deviceConfig,
   deviceSchema,
 }: {
-  oncConfig: ONCConfig;
+  plan: Plan;
   deviceConfig: BuildDevice;
   deviceSchema: DeviceSchema;
-}): string[] =>
-  (oncConfig.package_profiles || [])
-    .filter((p) => matches(p[".if"], deviceConfig, deviceSchema))
-    .reduce<string[]>((acc, p) => [...new Set([...acc, ...p.packages])], [])
-    .map((entry) => entry.split("@")[0]);
+}): string[] => [
+  // As the image builder takes them: a leading "-" leaves one out.
+  ...new Set(
+    resolveDeclarations(plan, deviceConfig, deviceSchema).packages.flatMap((p) => [...(p.add ?? []), ...(p.remove ?? []).map((name) => `-${name}`)])
+  ),
+];
 
 /** What the bootstrap sets from the config as resolved for the device: the LAN interface and the timezone. */
-const resolveBootstrap = (config: ReturnType<typeof resolveOncConfig>) => {
-  const { ".name": _name, ...lan } = (config.network?.interface || []).find((iface) => iface[".name"] === "lan") ?? {};
-  const system = (config.system?.system || []).reduce<Record<string, unknown>>((acc, s) => ({ ...acc, ...s }), {});
+const resolveBootstrap = (config: ResolvedSections) => {
+  const lan = (config.network?.interface || []).find((iface) => iface.name === "lan")?.options ?? {};
+  const system = (config.system?.system || []).reduce<Record<string, unknown>>((acc, s) => ({ ...acc, ...s.options }), {});
   const text = (value: unknown) => (typeof value === "string" ? value : undefined);
   return {
     lan: Object.keys(lan).length > 0 ? (lan as Record<string, unknown>) : undefined,
@@ -152,19 +140,19 @@ export type DeviceBuildPlan = {
 };
 
 export const getDeviceBuildPlan = ({
-  oncConfig,
+  plan,
   deviceConfig: unchecked,
   redact,
 }: {
-  oncConfig: ONCConfig;
-  deviceConfig: ONCDeviceConfig;
+  plan: Plan;
+  deviceConfig: PlanDevice;
   redact?: (value: string) => string;
 }): DeviceBuildPlan => {
   const deviceConfig = requireModelId(unchecked);
-  const version = resolveVersion({ oncConfig, deviceConfig });
+  const version = resolveVersion({ plan, deviceConfig });
   const deviceSchema = buildModeDeviceSchema(deviceConfig, version);
-  const packages = resolvePackages({ oncConfig, deviceConfig, deviceSchema });
-  const { lan, timezone, zonename } = resolveBootstrap(resolveOncConfig({ oncConfig, deviceConfig, deviceSchema }));
+  const packages = resolvePackages({ plan, deviceConfig, deviceSchema });
+  const { lan, timezone, zonename } = resolveBootstrap(resolveSections(plan.config, deviceLookup(deviceConfig, deviceSchema)));
   const uciDefaults = getUciDefaultsScript({
     timezone,
     zonename,

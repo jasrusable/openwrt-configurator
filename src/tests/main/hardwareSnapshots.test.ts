@@ -2,9 +2,9 @@ import test from "ava";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { deviceSchemaSchema } from "../../deviceSchema";
-import { getOpenWrtConfig } from "../../getOpenWrtConfig";
-import { getUciCommands } from "../../getUciCommands";
-import { loadOncConfig } from "../../loadConfig";
+import { getOpenWrtConfig } from "../../engine/getOpenWrtConfig";
+import { getUciCommands } from "../../engine/getUciCommands";
+import { loadConfigOrThrow } from "../../loadConfig";
 import { nodePlatform } from "../../platforms/node";
 
 // The sample config on real hardware, captured with `capture-device-schema`:
@@ -24,17 +24,17 @@ const cases: [string, string, string][] = [
 
 for (const [role, hostname, model] of cases) {
   test(`the sample ${role} on a ${model}`, async (t) => {
-    const { oncConfig } = await loadOncConfig({
+    const { plan } = await loadConfigOrThrow({
       path: join(root, "sampleConfigs/basic.json"),
       platform: nodePlatform,
       lookup: async (name) => `placeholder-${name}`,
     });
     const deviceConfig = {
-      ...oncConfig.devices.find((d) => d.hostname === hostname)!,
+      ...plan.devices.find((d) => d.hostname === hostname)!,
       model_id: model,
     };
     const openWrtConfig = getOpenWrtConfig({
-      oncConfig,
+      plan,
       deviceConfig,
       deviceSchema: schema(model),
     });

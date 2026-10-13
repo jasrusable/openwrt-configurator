@@ -24,7 +24,7 @@ export const leasesToRam: Patch = {
 cp /etc/dhcp.leases /tmp/dhcp.leases
 `,
         // When first written: during staging, before the commit restarts dnsmasq.
-        run_after: script,
+        runAfter: script,
       },
     ],
   }),

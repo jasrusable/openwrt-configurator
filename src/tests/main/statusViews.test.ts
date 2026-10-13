@@ -1,7 +1,9 @@
 import test from "ava";
+import { reads } from "../helpers/reads";
 import { sampleIntent } from "../helpers/fixtures";
 import { DeviceStatus, parseHeardBy, parseTraffic } from "../../status/device";
 import { activityOf, attentionOf, clientsOf, devicesOf, internetCountersOf, keepActivity, restartable } from "../../status/views";
+import { printPlan } from "../../lowLevel/print";
 import { compileIntent } from "../../intent/compile";
 import { neighboursOf, parseSpeed, parseSurvey } from "../../status/actions";
 
@@ -38,12 +40,12 @@ test("needs attention: the router silent on IPv6 (solicits heard, no adverts) is
   const intent = sample();
   intent.internet.lines[0].ipv6.enabled = true;
   const router = device("home-router", { interfaces: lanUp, adverts: [{ device: "br-lan", sent: 0, solicits: 84 }] });
-  const found = attentionOf({ intent, devices: [router, device("home-ap-1", {})], facts: {} });
+  const found = attentionOf({ intent, devices: reads(router, device("home-ap-1", {})), facts: {} });
   t.like(found[0], { id: "ipv6:silent", severity: "problem", fix: { device: "home-router", service: "odhcpd" } });
   const healthy = device("home-router", { interfaces: lanUp, adverts: [{ device: "br-lan", sent: 120, solicits: 84 }] });
-  t.false(attentionOf({ intent, devices: [healthy, device("home-ap-1", {})], facts: {} }).some((a) => a.id === "ipv6:silent"));
+  t.false(attentionOf({ intent, devices: reads(healthy, device("home-ap-1", {})), facts: {} }).some((a) => a.id === "ipv6:silent"));
   const silentOf = (adverts: DeviceStatus["adverts"], i = intent) =>
-    attentionOf({ intent: i, devices: [device("home-router", { interfaces: lanUp, adverts }), device("home-ap-1", {})], facts: {} }).some(
+    attentionOf({ intent: i, devices: reads(device("home-router", { interfaces: lanUp, adverts }), device("home-ap-1", {})), facts: {} }).some(
       (a) => a.id === "ipv6:silent"
     );
   // Over the last few minutes: asked and not answered is silent; answered since (fixed) is not, however it was before.
@@ -62,12 +64,12 @@ test("needs attention: an unreachable device, a stopped service with its fix, an
     interfaces: [{ id: "lan", up: true, ipv4: [], ipv6: [] }, { id: "wan", up: false, ipv4: [], ipv6: [] }],
     notRunning: [{ name: "dnsmasq", missing: false }],
   });
-  const ids = attentionOf({ intent, devices: [router, device("home-ap-1", { wifi: [] })], facts: {}, applied: "differs" }).map((a) => a.id);
+  const ids = attentionOf({ intent, devices: reads(router, device("home-ap-1", { wifi: [] })), facts: {}, applied: "differs" }).map((a) => a.id);
   t.true(ids.includes("internet:down"));
   t.true(ids.includes("service:home-router:dnsmasq"));
   t.true(ids.some((id) => id.startsWith("ssid:home-ap-1:")));
   t.is(ids[ids.length - 1], "apply:pending", "information last");
-  t.true(attentionOf({ intent, devices: [{ hostname: "home-router", error: "timed out" }], facts: {} }).some((a) => a.id === "unreachable:home-router"));
+  t.true(attentionOf({ intent, devices: reads({ hostname: "home-router", error: "timed out" }), facts: {} }).some((a) => a.id === "unreachable:home-router"));
 });
 
 test("needs attention: no restart offered for what the link depends on, or for a service declared off; unread parts said", (t) => {
@@ -77,7 +79,7 @@ test("needs attention: no restart offered for what the link depends on, or for a
     notRunning: [{ name: "dropbear", missing: false }],
     unread: ["mwan3"],
   });
-  const items = attentionOf({ intent, devices: [router], facts: {} });
+  const items = attentionOf({ intent, devices: reads(router), facts: {} });
   t.is(items.find((a) => a.id === "service:home-router:dropbear")?.fix, undefined);
   t.true(items.some((a) => a.id === "unread:home-router" && a.detail.startsWith("mwan3")));
   t.true(restartable({ name: "odhcpd", running: true }));
@@ -103,7 +105,7 @@ test("clients: one row per device, from leases, neighbours and Wi-Fi; our own de
     interfaces: [{ id: "wan", up: true, ipv4: [], ipv6: [], device: "eth1" }],
   });
   const ap = device("home-ap-1", { wifi: [{ ifname: "phy1-ap0", ssid: "Home", freq: 5180, clients: [{ mac: "aa:00:00:00:00:01", signal: -58 }] }] });
-  const clients = clientsOf(intent, [router, ap], { "home-ap-1": { hostname: "home-ap-1", readAt: 0, schema: { name: "x", version: "25.12.5" }, macs: ["aa:00:00:00:00:09"] } });
+  const clients = clientsOf(intent, reads(router, ap), { "home-ap-1": { hostname: "home-ap-1", readAt: 0, schema: { name: "x", version: "25.12.5" }, macs: ["aa:00:00:00:00:09"] } });
   t.deepEqual(clients.map((c) => c.name), ["nas", "phone"]);
   t.like(clients.find((c) => c.name === "phone"), { state: "online", connection: { kind: "wifi", accessPoint: "home-ap-1", ssid: "Home", band: "5 GHz", signal: -58 } });
   t.like(clients.find((c) => c.name === "nas"), { state: "online", connection: { kind: "wired" }, ipv6: ["2001:db8::24"] });
@@ -114,7 +116,7 @@ test("devices: each one's ports from its facts, with their links", (t) => {
   const facts = {
     "home-router": { hostname: "home-router", readAt: 0, schema: { name: "r", version: "25.12.5", ports: [{ name: "eth0" }, { name: "eth1", default_role: "wan" as const }] } },
   };
-  const [router] = devicesOf(intent, [device("home-router", { links: [{ name: "eth0", up: true, speed: 1000 }, { name: "phy0-ap0", up: true }] })], facts);
+  const [router] = devicesOf(intent, reads(device("home-router", { links: [{ name: "eth0", up: true, speed: 1000 }, { name: "phy0-ap0", up: true }] })), facts);
   t.deepEqual(router.ports, [{ name: "eth0", up: true, speed: 1000 }, { name: "eth1", up: false }]);
 });
 
@@ -130,7 +132,7 @@ test("activity: log lines in words, newest first; the rest left out", (t) => {
     // A client's name in someone else's line is not this app speaking.
     { at: 6000, text: "dnsmasq-dhcp[1]: DHCPACK(br-lan) 10.0.0.9 aa:bb onc-ipv6: all clear" },
   ];
-  t.deepEqual(activityOf(intent, [device("home-router", { log })]).map(({ text, kind }) => [text, kind]), [
+  t.deepEqual(activityOf(intent, reads(device("home-router", { log }))).map(({ text, kind }) => [text, kind]), [
     [`${intent.internet.lines[0].name} is offline`, "down"],
     ["Wan6 has an IPv6 default route, restarting odhcpd", "note"],
     ["Port eth1 disconnected", "down"],
@@ -175,7 +177,7 @@ test("needs attention: an SSID is missed only where the access point has a radio
     "home-ap-1": { hostname: "home-ap-1", readAt: 0, schema: { name: "ap", version: "25.12.5", radios: [{ name: "radio0", type: "mac80211" as const, band }] } },
   });
   const missed = (band: "2g" | "5g") =>
-    attentionOf({ intent, devices: [device("home-ap-1", { wifi: [] })], facts: facts(band) as never }).some((a) => a.id === "ssid:home-ap-1:Fast");
+    attentionOf({ intent, devices: reads(device("home-ap-1", { wifi: [] })), facts: facts(band) as never }).some((a) => a.id === "ssid:home-ap-1:Fast");
   t.false(missed("2g"));
   t.true(missed("5g"));
 });
@@ -214,10 +216,10 @@ test("clients: the router's traffic count over its access point's, each saying w
       { mac: "aa:00:00:00:00:01", node: "10.0.0.3#hostapd.phy1-ap0", signal: -71, connected: false },
     ],
   });
-  const [phone] = clientsOf(intent, [router, ap], {});
+  const [phone] = clientsOf(intent, reads(router, ap), {});
   t.deepEqual(phone.traffic, { down: 900, up: 100, over: "month" });
   t.deepEqual(phone.heardBy, [{ accessPoint: "home-ap-1", band: "5 GHz", signal: -58, connected: true }]);
-  const [alone] = clientsOf(intent, [device("home-router", { leases: router.leases }), ap], {});
+  const [alone] = clientsOf(intent, reads(device("home-router", { leases: router.leases }), ap), {});
   t.deepEqual(alone.traffic, { down: 2, up: 1, over: "connection" }, "the access point's: what it sent is what the client downloaded");
 });
 
@@ -228,8 +230,8 @@ test("throughput counters: each line's own, by its device on the router", (t) =>
     interfaces: [{ id: "wan", up: true, device: "eth1", ipv4: [], ipv6: [] }],
     counters: { eth1: { rx: 10, tx: 20 }, "br-lan": { rx: 99, tx: 99 } },
   });
-  t.deepEqual(internetCountersOf(intent, [router]), { lines: { wan: { rx: 10, tx: 20 } }, at: 5000 });
-  t.is(internetCountersOf(intent, [{ hostname: "home-router", error: "x" }]), undefined);
+  t.deepEqual(internetCountersOf(intent, reads(router)), { lines: { wan: { rx: 10, tx: 20 } }, at: 5000 });
+  t.is(internetCountersOf(intent, reads({ hostname: "home-router", error: "x" })), undefined);
 });
 
 test("activity kept: newest first, the same event read twice kept once, bounded", (t) => {
@@ -239,7 +241,7 @@ test("activity kept: newest first, the same event read twice kept once, bounded"
 });
 
 test("traffic: nlbwmon on the router only, running, its database in RAM", (t) => {
-  const compiled = compileIntent(sample()) as any;
+  const compiled = printPlan(compileIntent(sample())) as any;
   const profile = compiled.package_profiles.find((p: any) => p.packages.includes("nlbwmon"));
   t.regex(profile[".if"], /router/);
   const section = compiled.config.nlbwmon.nlbwmon[0];

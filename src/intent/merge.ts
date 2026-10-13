@@ -3,16 +3,7 @@
 // someone was editing it, so saving keeps both their edits and the other
 // change. Where both changed the same setting, the edit being made wins.
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  !!value && typeof value === "object" && !Array.isArray(value);
-
-/** JSON with sorted keys: equal values compare equal however they were built. */
-export const canonical = (value: unknown): string =>
-  JSON.stringify(value, (_, v) =>
-    isObject(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v
-  ) ?? "undefined";
-
-const same = (a: unknown, b: unknown) => a === b || canonical(a) === canonical(b);
+import { isPlainObject as isObject, sameJson as same } from "../json";
 
 const idOf = (item: unknown) =>
   isObject(item) && typeof item.id === "string" && item.id ? item.id : undefined;

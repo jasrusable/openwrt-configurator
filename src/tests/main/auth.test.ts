@@ -4,7 +4,7 @@ import { tempDir } from "../helpers/tempDir";
 import { writeFileSync } from "fs";
 import { join } from "path";
 import { rpcdAuth } from "../../server/auth";
-import { uiHandler } from "../../server/handlers";
+import { uiHandler } from "../../server/app";
 import { nodePlatform } from "../../platforms/node";
 
 test("a router whose root has no password refuses every login, as rpcd would take any", async (t) => {

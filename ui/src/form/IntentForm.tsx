@@ -7,9 +7,6 @@ import { useSaveIntent } from "../data/intent";
 import { whereIs } from "../settingPages";
 import { Draft, DraftProvider, useDraft, useDraftChanged, useDraftValue, useIssues } from "./draft";
 
-export type { IntentField } from "./draft";
-export { useDraftChanged } from "./draft";
-
 /**
  * Edits not yet saved when the form was taken down: only a router session
  * ending does that (it mounts once otherwise). Kept in memory, never storage

@@ -1,13 +1,20 @@
 import * as std from "std";
-import { ExecResult } from "../../platform";
+import { ExecResult, FileErrorCode } from "../../platform";
 import { spawn, spawnSync, which } from "./process";
 import { fileExists, os } from "./runtime";
+
+/** errno numbers (the same on Linux and macOS) by the names the platforms share (src/platform.ts). */
+const errnoCodes: Record<number, FileErrorCode> = { 2: "ENOENT", 13: "EACCES", 20: "ENOTDIR", 21: "EISDIR" };
+
+/** An error worded as Node's are (strerror), with the errno's name as its code. */
+const fileError = (path: string, errno = 0) =>
+  Object.assign(new Error(`${path}: ${std.strerror(errno)}`), errnoCodes[errno] ? { code: errnoCodes[errno] } : {});
 
 export const readTextFile = (path: string) => {
   const errorObj: { errno?: number } = {};
   const file = std.open(path, "r", errorObj);
   if (!file) {
-    throw new Error(`${path}: ${std.strerror(errorObj.errno ?? 0)}`);
+    throw fileError(path, errorObj.errno);
   }
   try {
     return file.readAsString();
@@ -20,7 +27,7 @@ const writeWith = (how: "w" | "a") => (path: string, data: string) => {
   const errorObj: { errno?: number } = {};
   const file = std.open(path, how, errorObj);
   if (!file) {
-    throw new Error(`${path}: ${std.strerror(errorObj.errno ?? 0)}`);
+    throw fileError(path, errorObj.errno);
   }
   try {
     file.puts(data);
@@ -33,24 +40,33 @@ export const writeTextFile = writeWith("w");
 export const appendTextFile = writeWith("a");
 
 export const writeFileAtomic = (path: string, data: string, mode: number) => {
-  const temporary = `${path}.onc-tmp`;
-  // Made new, with its mode, before anything is written to it: the data (a
-  // Wi-Fi password) is never in a file others can read, even for a moment,
-  // and a leftover from a crash cannot lend it its own.
-  os.remove(temporary);
+  // A name of its own (QuickJS has no getpid: chance does it, and O_EXCL
+  // refuses a clash): writers in several processes (CGI requests, the
+  // collector, a job) never share one. Made new, with its mode, before
+  // anything is written to it: the data (a Wi-Fi password) is never in a
+  // file others can read, even for a moment.
+  const temporary = `${path}.onc-tmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode);
   if (fd < 0) throw new Error(`${path}: could not write it`);
   os.close(fd);
-  writeTextFile(temporary, data);
-  // Exactly the mode asked for, whatever the umask took off. QuickJS's os has no chmod.
-  os.exec(["chmod", mode.toString(8), temporary], { block: true });
-  if (os.rename(temporary, path) !== 0) {
-    throw new Error(`${path}: could not replace it`);
+  try {
+    writeTextFile(temporary, data);
+    // Exactly the mode asked for, whatever the umask took off. QuickJS's os has no chmod.
+    os.exec(["chmod", mode.toString(8), temporary], { block: true });
+    if (os.rename(temporary, path) !== 0) throw new Error(`${path}: could not replace it`);
+  } catch (e) {
+    os.remove(temporary);
+    throw e;
   }
 };
 
 export const removeFile = (path: string) => {
   os.remove(path);
+};
+
+export const listDir = (path: string) => {
+  const [names, error] = os.readdir(path);
+  return error ? [] : names.filter((name) => name !== "." && name !== "..").sort();
 };
 
 export const mkdirp = (path: string) => {
@@ -60,11 +76,25 @@ export const mkdirp = (path: string) => {
     if (prefix && !fileExists(prefix)) {
       const result = os.mkdir(prefix, 0o777);
       if (result < 0 && !fileExists(prefix)) {
-        throw new Error(`${prefix}: ${std.strerror(-result)}`);
+        throw fileError(prefix, -result);
       }
     }
   }
 };
+
+/** Made new, owner-only; false when it exists (mkdir's EEXIST, 17). */
+export const makeDir = (path: string) => {
+  const result = os.mkdir(path, 0o700);
+  if (result === 0) return true;
+  if (result === -17) return false;
+  throw fileError(path, -result);
+};
+
+export const removeDir = (path: string) => {
+  if (fileExists(path)) spawnSync(["rm", "-rf", path]);
+};
+
+export const modifiedAt = (path: string) => os.stat(path)[0]?.mtime;
 
 export const fileMode = (path: string) => {
   const [stat] = os.stat(path);

@@ -95,6 +95,14 @@ export type Platform = {
   fileMode: (path: string) => number | undefined;
   /** No-op when the file does not exist. */
   removeFile: (path: string) => void;
+  /** The names in a directory (not "." or ".."); none when it does not exist. */
+  listDir: (path: string) => string[];
+  /** Make one directory, owner-only; false when it already exists (atomic: what a lock is). */
+  makeDir: (path: string) => boolean;
+  /** A directory and everything in it gone; no-op when it does not exist. */
+  removeDir: (path: string) => void;
+  /** When a file or directory last changed, ms since the epoch; undefined when it does not exist. */
+  modifiedAt: (path: string) => number | undefined;
   readFileHead: (path: string, bytes: number) => Uint8Array;
   sha256: (text: string) => string;
   sha256File: (path: string) => Promise<string>;
@@ -116,6 +124,17 @@ export type Platform = {
   run: (argv: string[], options?: { stdin?: string }) => Promise<ExecResult>;
   /** Run a local program attached to this terminal; resolves its exit code. */
   runInteractive: (argv: string[]) => Promise<number | null>;
+  /**
+   * Start a program that outlives this process, in a session of its own (a
+   * web server ending the request that started it must not end it), its
+   * output to `log`. Returns its pid: the program itself, never a shell
+   * between, so its command line says what it is (commandLineOf).
+   */
+  spawnDetached: (argv: string[], options: { log: string }) => number;
+  /** A running process's command line, its arguments joined by spaces; undefined when no process has that pid. */
+  commandLineOf: (pid: number) => Promise<string | undefined>;
+  /** Call `handler` when this process is asked to stop (SIGTERM, SIGINT, SIGHUP); then it exits as killed. */
+  onStop: (handler: (signal: string) => void) => void;
 
   connect: (target: SshTarget) => Promise<Session>;
 
@@ -143,3 +162,13 @@ export type Platform = {
 
 /** What `serve` listens on: this machine only (it has no login). */
 export const loopbackHosts = ["127.0.0.1", "::1", "localhost"];
+
+/**
+ * Why a file operation failed, the same on both platforms: the errno's name,
+ * carried as `code` on the error each throws, for these.
+ */
+export type FileErrorCode = "ENOENT" | "EACCES" | "EISDIR" | "ENOTDIR";
+export const fileErrorCode = (thrown: unknown): FileErrorCode | undefined => {
+  const code = (thrown as { code?: unknown } | undefined)?.code;
+  return code === "ENOENT" || code === "EACCES" || code === "EISDIR" || code === "ENOTDIR" ? code : undefined;
+};

@@ -1,5 +1,5 @@
 // What an apply says about where it is, as data: each device's step and the
-// run's outcome. The phases report them (devicePhases.ts, provisionNetwork.ts);
+// run's outcome. The phases report them (src/apply, apply/provisionNetwork.ts);
 // `provision --events <file>` writes them as JSON lines, and the UI shows
 // them, so nothing reads the human log to find out.
 

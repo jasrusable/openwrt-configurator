@@ -2,7 +2,7 @@ import test from "ava";
 import { tempDir } from "../helpers/tempDir";
 import { chmodSync, writeFileSync } from "fs";
 import { join } from "path";
-import { resolveSecrets, secretsFileSource } from "../../resolveSecrets";
+import { resolveSecrets, secretsFileSource } from "../../secrets";
 import { nodePlatform } from "../../platforms/node";
 
 const secretsFile = (content: string, mode = 0o600) => {
@@ -18,25 +18,18 @@ test("resolves refs from a 0600 file", async (t) => {
     path: secretsFile('{"wifi/home": "pw-123"}'),
     platform: nodePlatform,
   });
-  const { value } = await resolveSecrets(
-    { key: { $secret: "wifi/home" } },
-    source.lookup,
-    source.describeMissing
-  );
+  const resolved = await resolveSecrets({ key: { $secret: "wifi/home" } }, source.lookup, source.describeMissing);
+  if (!resolved.ok) return t.fail(resolved.error.message);
+  const { value } = resolved.value;
   t.deepEqual(value, { key: "pw-123" });
 });
 
 test("missing names are listed with the file's own hint", async (t) => {
   const path = secretsFile("{}");
   const source = secretsFileSource({ path: path, platform: nodePlatform });
-  const error = await t.throwsAsync(
-    resolveSecrets(
-      { a: { $secret: "x" } },
-      source.lookup,
-      source.describeMissing
-    )
-  );
-  t.true(error!.message.startsWith(`Missing secrets in ${path}:\n  - x`));
+  const resolved = await resolveSecrets({ a: { $secret: "x" } }, source.lookup, source.describeMissing);
+  if (resolved.ok) return t.fail("resolved");
+  t.true(resolved.error.message.startsWith(`Missing secrets in ${path}:\n  - x`));
 });
 
 test("an absent file means every secret is missing, not an error", async (t) => {

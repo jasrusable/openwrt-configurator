@@ -2,7 +2,7 @@ import { Alert, Loader, Stack, Text, ThemeIcon } from "@mantine/core";
 import { IconAlertTriangle, IconCheck, IconCloudUpload, IconLoader2 } from "@tabler/icons-react";
 import type { ProvisionInfo } from "../data/api";
 import { useProvision } from "../data/provision";
-import { useDraftChanged } from "../form/IntentForm";
+import { useDraftChanged } from "../form/draft";
 import { Section, SettingRow } from "../kit/layout";
 import { applyStatus } from "./status";
 import { DeviceChangesSection } from "./UciDiff";
@@ -20,6 +20,14 @@ const summaryOf = (info: ProvisionInfo) => {
     return info.progress.outcome === "rolled-back"
       ? { title: "Not applied", detail: "A device could not be reached afterwards, so every device went back to its previous settings.", color: "red", icon: IconAlertTriangle }
       : { title: "Not applied", detail: "The run stopped before changing anything. Details below.", color: "red", icon: IconAlertTriangle };
+  }
+  if (info.state === "interrupted") {
+    return {
+      title: "Stopped before it finished",
+      detail: "The apply was stopped, or what ran it restarted, before it could say how it ended. A device it had changed and not confirmed goes back to its previous settings by itself. Apply again to finish.",
+      color: "orange",
+      icon: IconAlertTriangle,
+    };
   }
   if (info.state === "applied-with-problems") {
     return { title: "Applied, with a problem", detail: "Your devices have the new settings, but a step after it failed. Details below.", color: "orange", icon: IconAlertTriangle };

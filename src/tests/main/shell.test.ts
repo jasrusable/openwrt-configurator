@@ -1,12 +1,14 @@
 import test from "ava";
 import { tempDir } from "../helpers/tempDir";
 import { spawnSync } from "child_process";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { getDeviceScript } from "../../getDeviceScript";
-import { getUciCommands } from "../../getUciCommands";
-import { oncConfigSchema } from "../../oncConfigSchema";
+import { encodeRecords } from "../../agent/records";
+import { agentScript } from "../../agent/script";
+import { stageRecords } from "../../getDeviceScript";
+import { getUciCommands } from "../../engine/getUciCommands";
 import { shellQuote } from "../../shell";
+import { planOf, stateOf } from "../helpers/fixtures";
 
 const hostile = [
   "Jason's WiFi",
@@ -55,32 +57,30 @@ test("UCI names that cannot be quoted are rejected with a clear error", (t) => {
   );
 });
 
-test("a file with a hostile path is written exactly, by a real sh", (t) => {
+test("a file with a hostile path or content is written exactly by the agent, under a real sh, and nothing runs", (t) => {
   const dir = tempDir("files");
-  const path = join(dir, "it's $(touch PWNED); a`b`\nc");
-  const commands = getDeviceScript({
-    state: {
-      config: {} as any,
-      files: [{ path, content: "x'y $(z)\n", mode: "0600" }],
-    },
-  });
-  // Only this file's write: its mkdir line names the test dir. The manifest
-  // lists the path in its content, but goes to /etc/onc on a device.
-  const writes = commands.filter(
-    (c) => c.includes("cat >") && c.split("\n")[0].includes(dir)
+  const tmp = join(dir, "tmp");
+  mkdirSync(tmp);
+  const path = "/it's $(touch PWNED); a`b`c";
+  const content = "x'y $(z) `w`\n";
+  const records = stageRecords({ state: stateOf({ files: [{ path, content, mode: "0600" }] }), current: {} }).filter(
+    (r) => r.kind === "write" && r.path === path
   );
-  const result = spawnSync("sh", ["-c", writes.join("\n")], {
-    cwd: dir,
-    encoding: "utf8",
-  });
+  const agent = join(tmp, "onc-agent-t.sh");
+  writeFileSync(agent, agentScript);
+  const env = { ...process.env, ONC_ROOT: dir, ONC_TMP: tmp };
+  t.is(spawnSync("sh", [agent, "begin"], { env, cwd: dir }).status, 0);
+  const result = spawnSync("sh", [agent, "stage"], { env, cwd: dir, input: encodeRecords(records), encoding: "utf8" });
   t.is(result.status, 0, result.stderr);
-  t.is(readFileSync(path, "utf8"), "x'y $(z)\n");
+  t.is(readFileSync(join(dir, path), "utf8"), content);
   t.false(existsSync(join(dir, "PWNED")), "nothing was executed");
+  // A line break would split the agent's records: refused before it is sent.
+  t.throws(() => encodeRecords([{ kind: "write", path: "/a\nb", mode: "0644", content: "x" }]), { message: /one line/ });
 });
 
 test("package names, file modes and paths are validated up front", (t) => {
   const parse = (extra: object) => () =>
-    oncConfigSchema.parse({ devices: [], config: {}, ...extra });
+    planOf({ devices: [], config: {}, ...extra });
   t.notThrows(
     parse({
       package_profiles: [

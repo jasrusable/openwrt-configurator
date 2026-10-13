@@ -1,85 +1,123 @@
 // Device facts: what each device is (model, OpenWrt version, ports, radios),
 // as the engine's probes read it, kept beside the intent file and never in
-// it. They keep themselves fresh: a page that shows them asks for the stale
-// ones (missing, or older than a day) to be read, and an apply refreshes
-// them as it reads the devices; never a timer. No config values are kept:
-// device UCI holds Wi-Fi keys. See CLAUDE.md, "Reading devices".
-import { DeviceSchema, deviceSchemaSchema } from "./deviceSchema";
-import { parseJson } from "./parseJson";
+// it (kept by src/store.ts). They keep themselves fresh: every read that
+// finds a device renews them (the status collector's too), a page that shows
+// them asks for the stale ones (missing, or older than a day), and an apply
+// refreshes them as it reads the devices. No config values are kept: device
+// UCI holds Wi-Fi keys. See CLAUDE.md, "Reading devices".
+import { z } from "zod";
+import { deviceSchemaSchema } from "./deviceSchema";
 import { Platform } from "./platform";
 import { isAddress, Located, locateEach } from "./locate";
-import { ONCConfig } from "./oncConfigSchema";
-import { provisionableDevices } from "./provisionConfig";
+import { Plan } from "./plan/types";
+import { provisionableDevices } from "./apply/provisionConfig";
+import { fileName, move, read, remove, stateLayout, StoreFiles, StoreKey, write } from "./store";
 
-export type DeviceFacts = {
-  hostname: string;
-  /** When it was read, ms since the epoch. */
-  readAt: number;
-  schema: DeviceSchema;
+/** What finds a device again and holds it to its identity: kept through any change of what else is known. */
+const pinsSchema = z.object({
   /** Where it was last reached (src/locate.ts tries it first). */
-  address?: string;
+  address: z.string().optional(),
   /** Its interfaces' MACs: how the router's leases and neighbours recognise it. */
-  macs?: string[];
+  macs: z.array(z.string()).optional(),
   /** Its SSH host key (public): another address is trusted only if it shows this. */
-  hostKey?: { type: string; key: string };
-};
+  hostKey: z.object({ type: z.string(), key: z.string() }).optional(),
+});
+export type DevicePins = z.infer<typeof pinsSchema>;
 
-const dir = (intentPath: string) => `${intentPath}.state/devices`;
-/** One plain file name per device, whatever the hostname holds. */
-const file = (intentPath: string, hostname: string) =>
-  `${dir(intentPath)}/${hostname.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "_")}.json`;
+const factsSchema = pinsSchema.extend({
+  hostname: z.string(),
+  /** When it was read, ms since the epoch. */
+  readAt: z.number(),
+  schema: deviceSchemaSchema,
+});
+export type DeviceFacts = z.infer<typeof factsSchema>;
 
-const readJson = <T>(files: Pick<Platform, "readTextFile">, path: string): T | undefined => {
+const devicesDir = (intentPath: string) => stateLayout(intentPath).devices;
+
+/**
+ * What facts files hold. Raised when what is read from a device changes
+ * (2: radios from board.json, with their modes; 3: whether each can mesh;
+ * 4: switch ports by number, and NICs beside the switch; 5: kept by the
+ * store), so older facts are read again: as if never read (`readAt` 0),
+ * their address and host key kept meanwhile, to find the device.
+ */
+const factsFormat = 5;
+
+/** Format 4, written before the store as the facts themselves with a `format` beside them. */
+const beforeStore = 4;
+
+const factsKeyAt = (path: string): StoreKey<DeviceFacts> => ({
+  path,
+  schema: factsSchema,
+  format: factsFormat,
+  upgrade: (stored) => {
+    const flat = stored as { format?: unknown } | undefined;
+    return flat && typeof flat === "object" && flat.format === beforeStore ? stored : { ...flat, readAt: 0 };
+  },
+});
+
+/**
+ * The same file, read only for its pins, whatever format the rest is in: a
+ * device's facts can go stale or stop parsing (a format change) without
+ * losing what finds it again and holds it to its key.
+ */
+const pinsKeyAt = (path: string): StoreKey<DevicePins> => ({
+  path,
+  schema: pinsSchema,
+  format: factsFormat,
+  upgrade: (stored) => stored,
+});
+
+const factsPath = (intentPath: string, hostname: string) => `${devicesDir(intentPath)}/${fileName(hostname)}.json`;
+
+/** One file per device, whatever the hostname holds. */
+const factsKey = (intentPath: string, hostname: string) => factsKeyAt(factsPath(intentPath, hostname));
+
+/** A device's file: its name and .json, and a hostname has no dots (namePattern). */
+const deviceFile = (name: string) => /^[^.]+\.json$/.test(name);
+
+/**
+ * Files kept here before the store, read by nothing since: named for no
+ * device (failed reads `<name>.failed.json`, inspections
+ * `inspected-<address>.json`, the list `.seen.json`), or the list of devices
+ * seen at `seen.json`, which a device named "seen" may hold its facts in.
+ */
+const leftover = (files: Pick<Platform, "readTextFile">, dir: string, name: string) => {
+  if (!name.endsWith(".json")) return false;
+  if (!deviceFile(name)) return true;
+  if (name !== "seen.json") return false;
   try {
-    return parseJson(files.readTextFile(path), path) as T;
+    return Array.isArray(JSON.parse(files.readTextFile(`${dir}/${name}`)));
   } catch {
-    return undefined;
+    return false;
   }
 };
 
 /**
- * Every device whose facts were ever kept: Add hardware offers those no longer
- * in Hardware. A dot file, which no device's file name can be (`file`): as
- * `seen.json` it was a device named "seen"'s facts too, overwritten by it.
+ * Every device whose facts were ever kept: Add hardware offers those no
+ * longer in Hardware. One whose facts no longer read (an older format) still
+ * counts, by its file's name. Clears what came before the store on the way.
  */
-const seenFile = (intentPath: string) => `${dir(intentPath)}/.seen.json`;
-const formerSeenFile = (intentPath: string) => `${dir(intentPath)}/seen.json`;
-
-export const listSeen = (files: Pick<Platform, "readTextFile">, intentPath: string): string[] => {
-  const list = [seenFile(intentPath), formerSeenFile(intentPath)]
-    .map((path) => readJson<unknown>(files, path))
-    .find(Array.isArray);
-  return (list ?? []).filter((h): h is string => typeof h === "string");
+export const listSeen = (files: Pick<Platform, "readTextFile" | "listDir" | "removeFile">, intentPath: string): string[] => {
+  const dir = devicesDir(intentPath);
+  const [old, current] = files
+    .listDir(dir)
+    .reduce<[string[], string[]]>(
+      ([old, current], name) =>
+        leftover(files, dir, name) ? [[...old, name], current] : deviceFile(name) ? [old, [...current, name]] : [old, current],
+      [[], []]
+    );
+  old.forEach((name) => files.removeFile(`${dir}/${name}`));
+  return current.map((name) => read(files, factsKeyAt(`${dir}/${name}`))?.hostname ?? name.slice(0, -".json".length));
 };
 
-/**
- * What facts files hold. Bumped when what is read from a device changes
- * (2: radios from board.json, with their modes; 3: whether each can mesh;
- * 4: switch ports by number, and NICs beside the switch),
- * so older facts are read again; their address and host key are kept
- * meanwhile, to find the device.
- */
-const factsFormat = 4;
-
-export const writeFacts = (
-  files: Pick<Platform, "mkdirp" | "writeTextFile" | "readTextFile">,
-  intentPath: string,
-  facts: DeviceFacts
-) => {
-  files.mkdirp(dir(intentPath));
+export const writeFacts = (files: StoreFiles, intentPath: string, facts: DeviceFacts) => {
   // Where it was found and what it is known by are kept unless this read
   // learnt them again: a write of a schema alone (an apply's) must never
-  // drop the pinned host key, which is what keeps found addresses safe.
-  const before = readFacts(files, intentPath, [facts.hostname])[facts.hostname];
-  const { address, macs, hostKey } = before ?? {};
-  files.writeTextFile(
-    file(intentPath, facts.hostname),
-    JSON.stringify({ format: factsFormat, address, macs, hostKey, ...facts }, null, 2) + "\n"
-  );
-  const seen = listSeen(files, intentPath);
-  if (!seen.includes(facts.hostname)) {
-    files.writeTextFile(seenFile(intentPath), JSON.stringify([...seen, facts.hostname]));
-  }
+  // drop the pinned host key, which is what keeps found addresses safe. Read
+  // as pins alone, so facts that no longer parse keep them too.
+  const pins = read(files, pinsKeyAt(factsPath(intentPath, facts.hostname))) ?? {};
+  write(files, factsKey(intentPath, facts.hostname), { ...pins, ...facts });
 };
 
 /**
@@ -88,18 +126,13 @@ export const writeFacts = (
  * address its settings give (src/locate.ts) and never be re-adopted. Nothing
  * moves onto a name that has facts of its own.
  */
-export const renameFacts = (
-  files: Pick<Platform, "readTextFile" | "writeTextFile" | "removeFile" | "mkdirp">,
-  intentPath: string,
-  from: string,
-  to: string
-) => {
-  const stored = readJson<Record<string, unknown>>(files, file(intentPath, from));
-  if (!stored || readJson(files, file(intentPath, to)) !== undefined) return;
-  files.writeTextFile(file(intentPath, to), JSON.stringify({ ...stored, hostname: to }, null, 2) + "\n");
-  files.removeFile(file(intentPath, from));
-  files.removeFile(attemptFile(intentPath, from));
-  files.writeTextFile(seenFile(intentPath), JSON.stringify(listSeen(files, intentPath).map((h) => (h === from ? to : h))));
+export const renameFacts = (files: StoreFiles, intentPath: string, from: string, to: string) => {
+  // As stored, pins and all, even facts that no longer parse; their hostname
+  // inside is the old one, which readFacts always takes from the name asked.
+  const known = (hostname: string) => read(files, pinsKeyAt(factsPath(intentPath, hostname))) !== undefined;
+  if (!known(from) || known(to)) return;
+  move(files, factsKey(intentPath, from), factsKey(intentPath, to));
+  remove(files, attemptKey(intentPath, from));
 };
 
 /** The facts last read for each of `hostnames`; a device never read has none. */
@@ -110,29 +143,8 @@ export const readFacts = (
 ): Record<string, DeviceFacts | undefined> =>
   Object.fromEntries(
     hostnames.map((hostname) => {
-      try {
-        const path = file(intentPath, hostname);
-        const stored = parseJson(files.readTextFile(path), path) as DeviceFacts & { format?: number };
-        const schema = deviceSchemaSchema.safeParse(stored?.schema);
-        if (!schema.success || typeof stored.readAt !== "number") return [hostname, undefined];
-        const hostKey = stored.hostKey;
-        return [
-          hostname,
-          {
-            hostname,
-            // An older format: as if never read, so it is read again.
-            readAt: stored.format === factsFormat ? stored.readAt : 0,
-            schema: schema.data,
-            ...(typeof stored.address === "string" ? { address: stored.address } : {}),
-            ...(Array.isArray(stored.macs) ? { macs: stored.macs.filter((m) => typeof m === "string") } : {}),
-            ...(hostKey && typeof hostKey.type === "string" && typeof hostKey.key === "string"
-              ? { hostKey: { type: hostKey.type, key: hostKey.key } }
-              : {}),
-          },
-        ];
-      } catch {
-        return [hostname, undefined];
-      }
+      const facts = read(files, factsKey(intentPath, hostname));
+      return [hostname, facts && { ...facts, hostname }];
     })
   );
 
@@ -143,9 +155,12 @@ export const retryAfterMs = 10 * 60 * 1000;
 
 export type ReadAttempt = { at: number; error: string };
 
-const attemptFile = (intentPath: string, hostname: string) =>
-  file(intentPath, hostname).replace(/\.json$/, ".failed.json");
-
+/** A device's last failed read, while it is its last read: a dir of its own, as facts' is listed. */
+const attemptKey = (intentPath: string, hostname: string): StoreKey<ReadAttempt> => ({
+  path: `${stateLayout(intentPath).attempts}/${fileName(hostname)}.json`,
+  schema: z.object({ at: z.number(), error: z.string() }),
+  format: 1,
+});
 
 /** The last failed read of each of `hostnames`, if its last read failed. */
 export const readFailures = (
@@ -153,7 +168,7 @@ export const readFailures = (
   intentPath: string,
   hostnames: string[]
 ): Record<string, ReadAttempt | undefined> =>
-  Object.fromEntries(hostnames.map((h) => [h, readJson<ReadAttempt>(files, attemptFile(intentPath, h))]));
+  Object.fromEntries(hostnames.map((h) => [h, read(files, attemptKey(intentPath, h))]));
 
 /** Which devices a page should have read: no facts, or old ones; not one that just failed. */
 export const staleDevices = ({
@@ -173,16 +188,11 @@ export const staleDevices = ({
     return old && !resting;
   });
 
-/** Keep what was learnt while locating a device: where it is, its MACs and host key, its schema. */
 /** How old stored facts may grow before a read that learnt nothing new writes them again (only their age). */
 const rewriteAfterMs = 3600_000;
 
-export const rememberLocated = (
-  files: Pick<Platform, "mkdirp" | "writeTextFile" | "readTextFile">,
-  intentPath: string,
-  located: Located,
-  now: number
-) => {
+/** Keep what was learnt while locating a device: where it is, its MACs and host key, its schema. */
+export const rememberLocated = (files: StoreFiles, intentPath: string, located: Located, now: number) => {
   const facts: DeviceFacts = {
     hostname: located.hostname,
     readAt: now,
@@ -200,24 +210,12 @@ export const rememberLocated = (
 };
 
 /** A read that failed: the device is rested for a while (staleDevices). */
-export const recordFailure = (
-  files: Pick<Platform, "mkdirp" | "writeTextFile">,
-  intentPath: string,
-  hostname: string,
-  attempt: ReadAttempt
-) => {
-  files.mkdirp(dir(intentPath));
-  files.writeTextFile(attemptFile(intentPath, hostname), JSON.stringify(attempt));
-};
+export const recordFailure = (files: StoreFiles, intentPath: string, hostname: string, attempt: ReadAttempt) =>
+  write(files, attemptKey(intentPath, hostname), attempt);
 
 /** A read that worked: any failure before it is forgotten. */
-export const clearFailure = (files: Pick<Platform, "removeFile">, intentPath: string, hostname: string) => {
-  try {
-    files.removeFile(attemptFile(intentPath, hostname));
-  } catch {
-    // It never failed: nothing to clear.
-  }
-};
+export const clearFailure = (files: Pick<Platform, "removeFile">, intentPath: string, hostname: string) =>
+  remove(files, attemptKey(intentPath, hostname));
 
 /**
  * The config with each device's address where it was found (src/locate.ts),
@@ -225,8 +223,8 @@ export const clearFailure = (files: Pick<Platform, "removeFile">, intentPath: st
  * has shown it is that device. One not found keeps its configured address,
  * and the apply reports it as unreachable as before.
  */
-export const withLocatedAddresses = async (oncConfig: ONCConfig, intentPath: string, platform: Platform) => {
-  const { ready } = provisionableDevices(oncConfig);
+export const withLocatedAddresses = async (plan: Plan, intentPath: string, platform: Platform) => {
+  const { ready } = provisionableDevices(plan);
   const facts = readFacts(platform, intentPath, ready.map((d) => d.hostname));
   const found = await Promise.all(locateEach({ devices: ready, facts, platform }));
   const addresses = new Map<string, string>();
@@ -250,9 +248,9 @@ export const withLocatedAddresses = async (oncConfig: ONCConfig, intentPath: str
     if (f.hostKey && !(f.address === configured && isAddress(f.address))) hostKeys[f.hostname] = f.hostKey;
   }
   return {
-    oncConfig: {
-      ...oncConfig,
-      devices: oncConfig.devices.map((d) =>
+    plan: {
+      ...plan,
+      devices: plan.devices.map((d) =>
         addresses.has(d.hostname) ? { ...d, ipaddr: addresses.get(d.hostname)! } : d
       ),
     },
