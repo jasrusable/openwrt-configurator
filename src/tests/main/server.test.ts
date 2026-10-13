@@ -245,3 +245,18 @@ test("an IPv6 client is counted by its /64, and everyone together has a ceiling"
   for (let i = 1; i <= 7; i++) statuses.push((await guess(`2001:db8:1:2::${i.toString(16)}`)).status);
   t.true(statuses.includes(429), JSON.stringify(statuses));
 });
+
+test("one client hammering past its limit cannot lock everyone out: refused attempts do not fill the ceiling", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "onc-authdos-"));
+  const intentPath = join(dir, "intent.json");
+  writeFileSync(intentPath, readFileSync(join(__dirname, "../../../sampleConfigs/intent.json")));
+  const run = async (argv: string[], options?: { stdin?: string }) =>
+    argv[0] === "ucode" ? { code: 0, stdout: JSON.stringify({ result: null }), stderr: "" } : nodePlatform.run(argv, options);
+  const platform = { ...nodePlatform, run, sleep: async () => {} };
+  const handle = uiHandler({ intentPath, uiRoot: dir, platform, auth: rpcdAuth(platform) });
+  const guess = (from: string) =>
+    handle({ method: "POST", path: "/api/login", body: JSON.stringify({ password: "nope" }), headers: { "x-onc": "1" }, remoteAddress: from });
+  for (let i = 0; i < 40; i++) await guess("10.0.0.66");
+  t.is((await guess("10.0.0.66")).status, 429, "the hammering client stays paused");
+  t.is((await guess("10.0.0.77")).status, 401, "the owner can still try");
+});

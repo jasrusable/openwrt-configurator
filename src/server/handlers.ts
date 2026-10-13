@@ -493,8 +493,14 @@ const sessionApi =
         return true;
       });
     const fromClient = recent.filter((name) => name.split("-")[1] === client);
-    if (fromClient.length > loginAttempts || recent.length > loginAttemptsAll) {
-      // Kept: a client hammering stays paused (only itself: counted per client).
+    // The ceiling counts only passwords actually checked (a refused attempt
+    // is marked "-r"): else one client hammering past its own limit would
+    // fill it, and lock the owner out from everywhere.
+    const checked = recent.filter((name) => !name.endsWith("-r"));
+    if (fromClient.length > loginAttempts || checked.length > loginAttemptsAll) {
+      // Kept, for its own client's pause (only itself: counted per client), but marked refused.
+      platform.writeTextFile(`${dir}/${mine}-r`, "");
+      platform.removeFile(`${dir}/${mine}`);
       return json(429, { error: "Too many wrong passwords: wait a minute and try again." });
     }
     const sid = typeof password === "string" && password ? await auth.login(password) : undefined;
