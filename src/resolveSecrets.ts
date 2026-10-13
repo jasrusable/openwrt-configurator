@@ -1,3 +1,4 @@
+import { isSecretSource, redactedText } from "./secretOptions";
 import { ExecResult, Platform } from "./platform";
 import { decodeUtf8Hex } from "./utf8";
 
@@ -227,18 +228,19 @@ export const redactValue = (
 };
 
 /**
- * Paths of plaintext `password` / `key` string fields. Used as a migration
- * warning; tests and samples may still use placeholders.
+ * A string field that holds a secret, judged as everywhere else
+ * (secretOptions.ts): by its name, or as the content of an owner-only file.
  */
-const isSecretField = (key: string, child: unknown): child is string =>
-  (key === "password" || key === "key") &&
+const isSecretField = (key: string, child: unknown, parent: Record<string, unknown>): child is string =>
   typeof child === "string" &&
   child.length > 0 &&
-  // Some packages' `key` option names a file rather than holding one,
-  // e.g. uhttpd's TLS key (/etc/uhttpd.key); that path is not a secret.
-  !(key === "key" && child.startsWith("/"));
+  isSecretSource(
+    key === "content" && typeof parent.path === "string"
+      ? { file: { mode: typeof parent.mode === "string" ? parent.mode : undefined } }
+      : { option: key }
+  );
 
-/** A copy with every `password` / `key` value replaced, for printing. */
+/** A copy with every secret value replaced, for printing. */
 export const redactSecretFields = (value: unknown): unknown =>
   Array.isArray(value)
     ? value.map(redactSecretFields)
@@ -246,10 +248,18 @@ export const redactSecretFields = (value: unknown): unknown =>
     ? Object.fromEntries(
         Object.entries(value).map(([key, child]) => [
           key,
-          isSecretField(key, child) ? "<redacted>" : redactSecretFields(child),
+          isSecretField(key, child, value) ? redactedText : redactSecretFields(child),
         ])
       )
     : value;
+
+/**
+ * Not worth a warning, though printing hides them all: a file's name
+ * (uhttpd's /etc/uhttpd.key, an SSH key's path), a login's user name (SSH's
+ * root), or a switch (dropbear's PasswordAuth "on").
+ */
+const worthWarning = (key: string, value: string) =>
+  !/^[/~]/.test(value) && !/(user(name)?|path|file)$/i.test(key) && !/^(on|off|0|1|yes|no|true|false)$/i.test(value);
 
 export const findPlaintextSecrets = (value: unknown, path = ""): string[] => {
   if (Array.isArray(value)) {
@@ -263,7 +273,7 @@ export const findPlaintextSecrets = (value: unknown, path = ""): string[] => {
   const hits: string[] = [];
   for (const [key, child] of Object.entries(value)) {
     const childP = childPath(path, key);
-    if (isSecretField(key, child)) {
+    if (isSecretField(key, child, value) && worthWarning(key, child)) {
       hits.push(childP);
     }
     hits.push(...findPlaintextSecrets(child, childP));

@@ -16,9 +16,9 @@ export const readTextFile = (path: string) => {
   }
 };
 
-export const writeTextFile = (path: string, data: string) => {
+const writeWith = (how: "w" | "a") => (path: string, data: string) => {
   const errorObj: { errno?: number } = {};
-  const file = std.open(path, "w", errorObj);
+  const file = std.open(path, how, errorObj);
   if (!file) {
     throw new Error(`${path}: ${std.strerror(errorObj.errno ?? 0)}`);
   }
@@ -28,6 +28,9 @@ export const writeTextFile = (path: string, data: string) => {
     file.close();
   }
 };
+
+export const writeTextFile = writeWith("w");
+export const appendTextFile = writeWith("a");
 
 export const writeFileAtomic = (path: string, data: string, mode: number) => {
   const temporary = `${path}.onc-tmp`;

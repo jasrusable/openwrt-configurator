@@ -2,11 +2,13 @@
 // compiler, the schema and the UI: their zones, addresses, a client's .conf,
 // and a site's invitation. One place, so a client's file always matches what
 // the router was given.
+import { siteSeed } from "./fragment";
 import { publicKeyOf } from "../wireguard";
 import { formatWgConf, WgConf } from "../wireguardConf";
 import { fromUtf8, toUtf8 } from "../utf8";
 import { fromBase64, toBase64 } from "../wireguard";
 import { ulaPrefix } from "./features/network";
+import { remoteAccessZone, sitesZone } from "./firewall";
 import type { Intent } from "./schema";
 
 export type VpnClient = Intent["vpn"]["remote_access"]["clients"][number];
@@ -14,8 +16,8 @@ export type Site = Intent["vpn"]["sites"]["peers"][number];
 
 /** The zones remote access and sites add: targets of an access, like networks. */
 export const vpnZones = (intent: Pick<Intent, "vpn">) => [
-  ...(intent.vpn.remote_access.enabled ? ["vpn"] : []),
-  ...(intent.vpn.sites.peers.length ? ["sites"] : []),
+  ...(intent.vpn.remote_access.enabled ? [remoteAccessZone] : []),
+  ...(intent.vpn.sites.peers.length ? [sitesZone] : []),
 ];
 
 /** The first three parts of a /24: "10.0.99" for 10.0.99.0/24. */
@@ -28,7 +30,7 @@ export const vpnRouterAddress = (intent: Pick<Intent, "vpn">) => `${prefixOf(int
  * Its IPv6, from the networks' ULA prefix: the /64 numbered ffff. A network's
  * is its VLAN in hex (features/network.ts), at most ffe (VLAN 4094), so never this.
  */
-const vpnUla = (intent: Pick<Intent, "system">) => ulaPrefix(intent.system.name).replace("::/48", ":ffff::");
+const vpnUla = (intent: Pick<Intent, "system">) => ulaPrefix(siteSeed(intent)).replace("::/48", ":ffff::");
 
 export const vpnRouterAddresses = (intent: Pick<Intent, "vpn" | "system">) => [
   `${vpnRouterAddress(intent)}/24`,
@@ -64,7 +66,7 @@ const clientRoutes = (intent: Pick<Intent, "vpn" | "networks" | "system">, clien
     : [
         ...intent.networks.map((n) => n.subnet),
         intent.vpn.remote_access.subnet,
-        ulaPrefix(intent.system.name),
+        ulaPrefix(siteSeed(intent)),
         ...(vpnReachesSites(intent) ? intent.vpn.sites.peers.flatMap((p) => p.subnets) : []),
       ];
 

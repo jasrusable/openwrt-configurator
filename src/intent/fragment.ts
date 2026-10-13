@@ -33,13 +33,17 @@ export const everyDevice = "*";
 export const onRouter = role("router");
 export const onAccessPoints = role("access-point");
 export const onDevice = (name: string) => `device.hostname == '${name}'`;
-export const onModel = (model: string) => `device.model_id == '${model}'`;
+
+/** Sections for the router alone. */
+export const routerOnly = <S extends object>(sections: S[]) => sections.map((s) => ({ ".if": onRouter, ...s }));
 
 export type Network = Intent["networks"][number];
 
-/** The untagged network: the one devices are managed over. */
-export const mainNetwork = (intent: Intent) =>
-  intent.networks.find((n) => n.vlan === undefined)!;
+/** Whether a network is the main one: untagged, the one devices are managed over. */
+export const isMain = (network: Pick<Network, "vlan">) => network.vlan === undefined;
+
+/** The main network. */
+export const mainNetwork = (intent: Pick<Intent, "networks">) => intent.networks.find(isMain)!;
 
 /** The router takes the first address of each network. */
 export const gatewayOf = (network: Network) =>
@@ -87,3 +91,6 @@ export const merge = (fragments: Fragment[]) =>
  */
 export const serviceWhen = (condition: string, name: string, used: boolean) =>
   used ? { ".if": condition, name, running: true } : { ".if": condition, name, enabled: false };
+
+/** What the site's derived ids grow from: its first name, kept across renames (schema's `site_id`). */
+export const siteSeed = (intent: Pick<Intent, "system">) => intent.system.site_id ?? intent.system.name;

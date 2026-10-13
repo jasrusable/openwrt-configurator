@@ -10,11 +10,13 @@ export const settingPages: { path: string; page: string; item?: (index: string) 
   { path: "internet", page: "internet" },
   { path: "firewall.rules", page: "firewall", item: (i) => `/firewall/rules/${i}` },
   { path: "firewall.port_forwards", page: "firewall", item: (i) => `/firewall/${i}` },
+  { path: "firewall", page: "firewall" },
   { path: "networks", page: "networks", item: (i) => `/networks/${i}` },
   { path: "wifi.networks", page: "wifi", item: (i) => `/wifi/${i}` },
   { path: "wifi.radios", page: "wifi", item: (band) => `/wifi/radios/${band}` },
   { path: "wifi.roaming", page: "wifi", item: () => "/wifi/roaming" },
   { path: "wifi.mesh", page: "wifi", item: () => "/wifi/mesh" },
+  { path: "wifi", page: "wifi" },
   { path: "dns", page: "dns" },
   // Most specific first: the first whose path starts the setting's is its page.
   { path: "vpn.remote_access.clients", page: "vpn", item: (i) => `/vpn/${i}` },

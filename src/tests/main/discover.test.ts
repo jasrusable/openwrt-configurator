@@ -1,17 +1,17 @@
 import test from "ava";
-import { mkdtempSync, readFileSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { sampleIntent } from "../helpers/fixtures";
+import { tempDir } from "../helpers/tempDir";
+import { writeFileSync } from "fs";
 import { join } from "path";
 import { DeviceFacts } from "../../deviceFacts";
 import { discoverCandidates, inspect, suggestName, suggestRole } from "../../discover";
-import { Intent, intentSchema } from "../../intent/schema";
+import { Intent } from "../../intent/schema";
 import { Platform, Session, SshTarget } from "../../platform";
 import { nodePlatform } from "../../platforms/node";
 import { parseLeases } from "../../status/device";
 
-const root = join(__dirname, "..", "..", "..");
 const sample = (): Intent =>
-  intentSchema.parse(JSON.parse(readFileSync(join(root, "sampleConfigs", "intent.json"), "utf8")));
+  sampleIntent();
 
 const seenAp: DeviceFacts = {
   hostname: "old-ap",
@@ -60,7 +60,7 @@ test("suggested role and name", (t) => {
 
 /** One stock device at 10.0.0.143: its dropbear lets root in with any password, and has no keys. */
 const stock = (accepts: { key: boolean }) => {
-  const knownHosts = join(mkdtempSync(join(tmpdir(), "onc-discover-")), "known_hosts");
+  const knownHosts = join(tempDir("discover"), "known_hosts");
   writeFileSync(knownHosts, "");
   const targets: SshTarget[] = [];
   const session: Session = {

@@ -18,6 +18,14 @@ class OpenwrtConfigurator < Formula
     SH
   end
 
+  # QuickJS cannot listen on a port, so this build has no `ui` command.
+  def caveats
+    <<~EOS
+      The web UI (`openwrt-configurator ui`) needs the Node build: the macOS
+      binary from the GitHub release, or `npm run ui` in a checkout.
+    EOS
+  end
+
   test do
     assert_equal version.to_s, shell_output("#{bin}/openwrt-configurator --version").strip
   end

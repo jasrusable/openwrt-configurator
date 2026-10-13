@@ -5,15 +5,15 @@ import { Alert, Button, SegmentedControl, Text, Textarea, TextInput } from "@man
 import { IconShieldLock } from "@tabler/icons-react";
 import { useState } from "react";
 import { useNavigate } from "react-router";
+import { withoutProvider } from "../../../../src/intent/edits";
 import { ovpnUnsafe } from "../../../../src/intent/ovpn";
 import { where } from "../../../../src/intent/places";
 import { Intent } from "../../../../src/intent/schema";
 import { parseWgConf } from "../../../../src/wireguardConf";
-import { useDraft, useDraftValue } from "../../form/draft";
+import { setIn, useDraft, useDraftValue } from "../../form/draft";
 import { PasswordField, TagsField, TextField, Value } from "../../form/fields";
-import { defineList, ListPage } from "../../form/ListPage";
-import { Experimental } from "./shared";
-import { ItemIcon, ItemName, Section, SettingRow, SettingsPage } from "../../kit/layout";
+import { addChecked, defineList, ListPage } from "../../form/ListPage";
+import { Experimental, ItemIcon, ItemName, Section, SettingRow, SettingsPage } from "../../kit/layout";
 
 type Tunnel = Intent["vpn"]["providers"][number];
 
@@ -60,14 +60,19 @@ const NewProviderPage = () => {
   const [name, setName] = useState("");
   const [text, setText] = useState("");
   const [login, setLogin] = useState({ username: "", password: "" });
-  const [error, setError] = useState<string>();
+  // What was wrong with the provider as it was when Add was pressed: gone once anything is edited.
+  const [failed, setFailed] = useState<{ message: string; inputs: string }>();
+  const inputs = JSON.stringify([kind, name, text, login]);
+  const error = failed?.inputs === inputs ? failed.message : undefined;
+  const setError = (message: string) => setFailed({ message, inputs });
   const back = () => navigate("/vpn/providers");
   const free = [...Array(9).keys()].map((n) => `tun${n + 1}`).find((id) => !intent.vpn.providers.some((t) => t.id === id));
   const add = () => {
     try {
       if (!free) throw new Error("Nine providers at most.");
-      const tunnel = fromFile(kind, free, name.trim(), text, login);
-      draft.replace({ ...intent, vpn: { ...intent.vpn, providers: [...intent.vpn.providers, tunnel] } });
+      const providers = [...intent.vpn.providers, fromFile(kind, free, name.trim(), text, login)];
+      const problem = addChecked(draft, setIn(intent, "vpn.providers", providers), `vpn.providers.${providers.length - 1}`);
+      if (problem) return setError(problem);
       back();
     } catch (e) {
       setError((e as Error).message);
@@ -153,19 +158,7 @@ const providers = defineList({
   addLabel: "Add provider",
   newPage: <NewProviderPage />,
   // Networks out through it go back to their usual line.
-  onRemove: (intent, index) => {
-    const gone = intent.vpn.providers[index];
-    return {
-      ...intent,
-      vpn: { ...intent.vpn, providers: intent.vpn.providers.filter((_, i) => i !== index) },
-      // Back to Automatic, with the others as fallback again.
-      networks: intent.networks.map((n) => {
-        if (n.access.via !== gone?.id) return n;
-        const { via: _, ...access } = n.access;
-        return { ...n, access: { ...access, fallback: true } };
-      }),
-    };
-  },
+  onRemove: withoutProvider,
   itemTitle: (i) => <Value name={`vpn.providers.${i}.name`} fallback="Provider" />,
   empty: "No VPN providers. Add one, then choose it as a network's Internet line.",
   columns: [
@@ -201,13 +194,13 @@ const ProviderEditor = ({ index }: { index: number }) => {
       <Section>
         {tunnel?.type === "wireguard" ? (
           <>
-            <TextField name={`${at}.peer.endpoint` as never} label="Server address" />
-            <TextField name={`${at}.address` as never} label="Address" />
+            <TextField name={`${at}.peer.endpoint`} label="Server address" />
+            <TextField name={`${at}.address`} label="Address" />
           </>
         ) : (
           <>
-            <TextField name={`${at}.username` as never} label="Username" />
-            <PasswordField name={`${at}.password` as never} label="Password" />
+            <TextField name={`${at}.username`} label="Username" />
+            <PasswordField name={`${at}.password`} label="Password" />
           </>
         )}
         <TagsField name={`${at}.dns`} label="DNS servers" placeholder="Add a server" />

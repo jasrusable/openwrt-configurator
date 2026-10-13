@@ -1,6 +1,6 @@
 import test from "ava";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { tempDir } from "../helpers/tempDir";
+import { readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { nodePlatform } from "../../platforms/node";
 import {
@@ -14,15 +14,11 @@ const withJob = async (
   script: string,
   run: (intentPath: string, files: typeof nodePlatform) => Promise<void>
 ) => {
-  const dir = mkdtempSync(join(tmpdir(), "onc-job-"));
+  const dir = tempDir("job");
   const intentPath = join(dir, "intent.json");
   writeFileSync(intentPath, JSON.stringify({ schema: 1, system: { name: "A" } }));
   const files = { ...nodePlatform, selfCommand: () => ["sh", "-c", script, "onc"] };
-  try {
-    await run(intentPath, files);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  await run(intentPath, files);
 };
 
 const settle = async (intentPath: string, files: typeof nodePlatform) => {
@@ -128,6 +124,22 @@ test.serial("a lock with no pid yet is a job starting, for a minute; then it is 
     require("fs").utimesSync(paths.lock, old, old);
     t.is((await provisionStatus({ intentPath, files })).state, "interrupted");
     t.true((await startProvision({ intentPath, files, now: () => 3 })).started);
+    t.is((await settle(intentPath, files)).state, "succeeded");
+  });
+});
+
+test.serial("requests at the same moment over a dead job's lock start one run", async (t) => {
+  await withJob("sleep 0.5", async (intentPath, files) => {
+    const paths = jobPaths(intentPath);
+    require("fs").mkdirSync(paths.lock, { recursive: true });
+    writeFileSync(paths.started, "1");
+    writeFileSync(paths.pid, "999999 whatever-boot\n");
+    const all = await Promise.all([1, 2, 3, 4].map((n) => startProvision({ intentPath, files, now: () => n })));
+    t.is(all.filter((r) => r.started).length, 1, JSON.stringify(all));
+    t.deepEqual(
+      all.filter((r) => !r.started).map((r) => r.reason),
+      ["Settings are already being applied.", "Settings are already being applied.", "Settings are already being applied."]
+    );
     t.is((await settle(intentPath, files)).state, "succeeded");
   });
 });

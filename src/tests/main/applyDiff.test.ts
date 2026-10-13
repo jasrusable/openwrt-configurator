@@ -1,11 +1,12 @@
 import test from "ava";
+import { sampleIntent } from "../helpers/fixtures";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { DeviceNow, deviceDiff } from "../../applyDiff";
 import { deviceSchemaSchema } from "../../deviceSchema";
 import { getOpenWrtState } from "../../getOpenWrtState";
 import { compileIntent } from "../../intent/compile";
-import { Intent, intentSchema } from "../../intent/schema";
+import { Intent } from "../../intent/schema";
 import { oncConfigSchema } from "../../oncConfigSchema";
 import { OpenWrtState } from "../../openWrtConfigSchema";
 import { nodePlatform } from "../../platforms/node";
@@ -14,7 +15,7 @@ import { declaredConfigs } from "../../uci";
 
 const root = join(__dirname, "..", "..", "..");
 const sample = (): Intent =>
-  intentSchema.parse(JSON.parse(readFileSync(join(root, "sampleConfigs", "intent.json"), "utf8")));
+  sampleIntent();
 const models: Record<string, string> = { "home-router": "friendlyarm,nanopi-r6s", "home-ap-1": "zyxel,nwa50ax-pro" };
 
 /** What the apply leaves on `hostname` for this intent. */

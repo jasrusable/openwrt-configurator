@@ -6,6 +6,7 @@ import { Button, Group, Stack, Text, ThemeIcon } from "@mantine/core";
 import { IconAlertCircle, IconPlus } from "@tabler/icons-react";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
+import { describePath } from "../../../src/intent/diff";
 import { Intent } from "../../../src/intent/schema";
 import { Column, DataTable } from "../kit/DataTable";
 import { SettingsPage } from "../kit/layout";
@@ -18,6 +19,7 @@ import {
   ItemOf,
   ListPath,
   setIn,
+  useDerived,
   useDraft,
   useDraftValue,
   useIssues,
@@ -56,6 +58,26 @@ export type ListSpec<N extends ListName> = {
    */
   editor: (index: number) => ReactNode;
   empty: ReactNode;
+};
+
+/** The problems an item at `path` has in `intent`: its own and its settings'. */
+export const itemProblems = (intent: Intent, path: string) =>
+  issuesOf(intent).filter((issue) => issue.path === path || issue.path.startsWith(`${path}.`));
+
+/**
+ * Adds an item a page made its own way (a key made in the page, a pasted
+ * file) as the generic new-item page does: only when it has no problems.
+ * Returns what is wrong, in the settings' own words, or undefined once added.
+ */
+export const addChecked = (draft: Draft, next: Intent, path: string): string | undefined => {
+  const problems = itemProblems(next, path);
+  if (!problems.length) return void draft.replace(next);
+  return problems
+    .map((issue) => {
+      const label = describePath(issue.path.split("."), next).pop();
+      return issue.path === path || !label ? issue.message : `${label}: ${issue.message}`;
+    })
+    .join(" ");
 };
 
 /** Declares a list: only for type inference, it returns its argument. */
@@ -149,8 +171,8 @@ const ListItemPage = <N extends ListName>({
   base: string;
 }) => {
   const navigate = useNavigate();
-  const item = useDraftValue(`${list.name}.${index}` as never) as Item<N>;
-  const items = (useDraftValue(list.name as never) ?? []) as Item<N>[];
+  const item: Item<N> = useDerived((d) => d.get(`${list.name}.${index}`));
+  const items: Item<N>[] = useDerived((d) => d.get(list.name)) ?? [];
   const removable = !list.canRemove || list.canRemove(item, items);
   const back = () => navigate(base);
   // Same width and header position as the list: only the title grows a
@@ -231,11 +253,7 @@ const NewItemPage = <N extends ListName>({
         : [setIn(main.value, list.name, [...items, getIn(copy.value, `${list.name}.${index}`)]), items.length];
     // What adding implies (home networks reach it) first, so the check sees it.
     const next = list.onAdd ? list.onAdd(source, at) : source;
-    const path = `${list.name}.${at}`;
-    const incomplete = issuesOf(next).some(
-      (issue) => issue.path === path || issue.path.startsWith(`${path}.`)
-    );
-    if (incomplete) {
+    if (itemProblems(next, `${list.name}.${at}`).length) {
       copy.reveal();
       return;
     }
@@ -297,7 +315,8 @@ export const ListPage = <N extends ListName>({
   if (sub === "new") return list.newPage ? <>{list.newPage}</> : <NewItemPage {...props} />;
   const index = /^\d+$/.test(sub) ? Number(sub) : undefined;
   return index !== undefined && index < items.length ? (
-    <ListItemPage {...props} index={index} />
+    // Keyed by item: going to another one starts its fields afresh (a switch's remembered value).
+    <ListItemPage key={index} {...props} index={index} />
   ) : (
     <ListTable {...props} page={page} />
   );

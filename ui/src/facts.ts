@@ -4,15 +4,24 @@
 import type { DeviceSchema } from "../../src/deviceSchema";
 import type { Intent } from "../../src/intent/schema";
 import type { FactsByDevice } from "./data/api";
+import { bandLabels } from "../../src/intent/labels";
+import type { Band } from "../../src/intent/radios";
 
 /** "FriendlyElec NanoPi R6S", or its board id when the board gives no name. */
 export const modelOf = (schema: DeviceSchema) => schema.model ?? schema.name;
 
-const bandNames: Record<string, string> = { "2g": "2.4 GHz", "5g": "5 GHz", "6g": "6 GHz", "60g": "60 GHz" };
+const bandNames: Record<string, string> = { ...bandLabels, "60g": "60 GHz" };
 
 /** Its radios' bands, as people say them: "2.4 GHz, 5 GHz". */
 export const bandsOf = (schema: DeviceSchema) =>
   [...new Set((schema.radios ?? []).map((r) => r.band))].map((b) => bandNames[b] ?? b);
+
+/** Whether it can join the mesh in `band`: not known (no facts), no radio there, one that cannot mesh, or yes. */
+export const meshAbility = (schema: DeviceSchema | undefined, band: Band) => {
+  if (!schema) return "unknown" as const;
+  const radios = (schema.radios ?? []).filter((r) => r.band === band);
+  return !radios.length ? ("no-radio" as const) : radios.some((r) => r.mesh !== false) ? ("can" as const) : ("cannot" as const);
+};
 
 /** Its ports by role: the internet's (WAN) and the networks' (LAN). */
 export const portsOf = (schema: DeviceSchema) => ({

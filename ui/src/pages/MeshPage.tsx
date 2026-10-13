@@ -1,16 +1,16 @@
 // Wi-Fi › Mesh: access points linked over Wi-Fi (802.11s with batman-adv),
 // so one needs no cable. Experimental: the compiler follows a setup run at
 // another site, but this app has not yet run it on real hardware.
-import { Alert, Group, Text } from "@mantine/core";
-import { meshChannels } from "../../../src/intent/choices";
+import { Alert, Text } from "@mantine/core";
+import { meshChannels } from "../../../src/intent/radios";
 import { where } from "../../../src/intent/places";
 import { Intent } from "../../../src/intent/schema";
 import { useDevices } from "../data/devices";
 import { useDraftValue } from "../form/draft";
 import { PasswordField, SegmentedField, SelectField, SwitchField } from "../form/fields";
-import { ExperimentalBadge, Section, SettingRow, SettingsPage } from "../kit/layout";
-
-const bandLabels = { "2g": "2.4 GHz", "5g": "5 GHz", "6g": "6 GHz" } as const;
+import { Experimental, Section, SettingRow, SettingsPage } from "../kit/layout";
+import { bandLabels } from "../../../src/intent/labels";
+import { meshAbility } from "../facts";
 
 /** Each device, and how it takes part: by cable or over the mesh, if its radio can. */
 const Nodes = () => {
@@ -18,20 +18,15 @@ const Nodes = () => {
   const facts = useDevices().data?.facts;
   const { band } = intent.wifi.mesh;
   const rows = intent.hardware.map((device) => {
-    const radios = facts?.[device.name]?.schema.radios?.filter((r) => r.band === band);
-    const known = facts?.[device.name] !== undefined;
-    const canMesh = radios?.length ? radios.some((r) => r.mesh !== false) : false;
+    const ability = meshAbility(facts?.[device.name]?.schema, band);
     const cabled = device.role === "router" || device.uplink !== "mesh";
-    const how = !known
-      ? "Not read yet"
-      : !radios?.length
-        ? `No ${bandLabels[band]} radio: not in the mesh`
-        : !canMesh
-          ? "Its radio cannot mesh"
-          : cabled
-            ? "Cabled: links the mesh to your network"
-            : "Over the mesh";
-    return { device, known, node: known && !!radios?.length && canMesh, cabled, how };
+    const how = {
+      unknown: "Not read yet",
+      "no-radio": `No ${bandLabels[band]} radio: not in the mesh`,
+      cannot: "Its radio cannot mesh",
+      can: cabled ? "Cabled: links the mesh to your network" : "Over the mesh",
+    }[ability];
+    return { device, known: ability !== "unknown", node: ability === "can", cabled, how };
   });
   // What links the mesh to the rest: a cabled node. Only said once every device is known.
   const unlinked = rows.every((r) => r.known) && !rows.some((r) => r.node && r.cabled);
@@ -61,16 +56,11 @@ export const MeshPage = () => {
   const { enabled, band } = intent.wifi.mesh;
   return (
     <SettingsPage
-      title={
-        <Group gap={10}>
-          Mesh
-          <ExperimentalBadge />
-        </Group>
-      }
+      title={<Experimental>Mesh</Experimental>}
       description="Access points link over Wi-Fi, so they need only power."
     >
       <Section>
-        <SwitchField name="wifi.mesh.enabled" label="Mesh" />
+        <SwitchField name="wifi.mesh.enabled" />
       </Section>
       {enabled && (
         <>
@@ -83,22 +73,16 @@ export const MeshPage = () => {
           >
             <SegmentedField
               name="wifi.mesh.band"
-              label="Band"
-              options={[
-                { value: "5g", label: "5 GHz" },
-                { value: "2g", label: "2.4 GHz" },
-                { value: "6g", label: "6 GHz" },
-              ]}
+              options={(["5g", "2g", "6g"] as const).map((b) => ({ value: b, label: bandLabels[b] }))}
             />
             <SelectField
               name="wifi.mesh.channel"
-              label="Channel"
               options={meshChannels[band].map((channel) => ({ value: channel, label: String(channel) }))}
             />
-            <SwitchField name="wifi.mesh.band_reserved" label="Only for the mesh" />
-            <SwitchField name="wifi.mesh.over_cable" label="Also over cables" />
-            <SwitchField name="wifi.mesh.large_frames" label="Larger frames over cable" />
-            <PasswordField name="wifi.mesh.key" label="Mesh key" />
+            <SwitchField name="wifi.mesh.band_reserved" />
+            <SwitchField name="wifi.mesh.over_cable" />
+            <SwitchField name="wifi.mesh.large_frames" />
+            <PasswordField name="wifi.mesh.key" />
           </Section>
           <Nodes />
         </>

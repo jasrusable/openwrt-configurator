@@ -3,7 +3,7 @@
 // an explanation) on the left, its control on the right.
 import { Anchor, Badge, Box, Group, Stack, Text, ThemeIcon, Title, Tooltip } from "@mantine/core";
 import { IconInbox, IconInfoCircle } from "@tabler/icons-react";
-import { createContext, ReactNode, useContext } from "react";
+import { createContext, ReactNode, useContext, useId } from "react";
 import "./kit.css";
 
 export type Crumb = { label: ReactNode; onClick?: () => void };
@@ -138,6 +138,15 @@ export const Section = ({
   );
 };
 
+/** The ids of the row a control is in, so it is named by the row's label and described by its text. */
+const RowIds = createContext<{ label: string; description: string } | null>(null);
+
+/** A control's accessible name and description, from the row it is in. */
+export const useRowAria = () => {
+  const ids = useContext(RowIds);
+  return ids ? { "aria-labelledby": ids.label, "aria-describedby": ids.description } : {};
+};
+
 export const SettingRow = ({
   label,
   description,
@@ -154,59 +163,69 @@ export const SettingRow = ({
   /** What it does on the devices, in more depth than the description: the tooltip's body. */
   explain?: string;
   children?: ReactNode;
-}) => (
-  <Group justify="space-between" gap="md" px="md" py={10} mih={52} className="onc-row">
-    <Box style={{ flex: 1, minWidth: 0 }}>
-      <Group gap={4} wrap="nowrap">
-        {/* A div: a label may be an icon and a name, which a paragraph cannot hold. */}
-        <Text component="div" size="sm">
-          {label}
-        </Text>
-        {(explain || openwrt) && (
-          <Tooltip
-            label={
-              <Stack gap={6}>
-                {explain && <Text size="xs">{explain}</Text>}
-                {openwrt && (
-                  // The tooltip's own text colour, dimmed: it is dark on light in dark mode.
-                  <Text size="xs" ff="monospace" style={{ opacity: 0.7 }}>
-                    OpenWrt: {openwrt}
-                  </Text>
-                )}
-              </Stack>
-            }
-            multiline
-            w={320}
-            withArrow
-            openDelay={150}
-            events={{ hover: true, focus: true, touch: true }}
-          >
-            <ThemeIcon
-              variant="transparent"
-              size={16}
-              c="var(--onc-label-2)"
-              tabIndex={0}
-              aria-label={[explain, openwrt && `OpenWrt: ${openwrt}`].filter(Boolean).join(" ")}
+}) => {
+  const id = useId();
+  const ids = { label: `${id}-label`, description: `${id}-description` };
+  return (
+    <Group justify="space-between" gap="md" px="md" py={10} mih={52} className="onc-row">
+      <Box style={{ flex: 1, minWidth: 0 }}>
+        <Group gap={4} wrap="nowrap">
+          {/* A div: a label may be an icon and a name, which a paragraph cannot hold. */}
+          <Text component="div" size="sm" id={ids.label}>
+            {label}
+          </Text>
+          {(explain || openwrt) && (
+            <Tooltip
+              label={
+                <Stack gap={6}>
+                  {explain && <Text size="xs">{explain}</Text>}
+                  {openwrt && (
+                    // The tooltip's own text colour, dimmed: it is dark on light in dark mode.
+                    <Text size="xs" ff="monospace" style={{ opacity: 0.7 }}>
+                      OpenWrt: {openwrt}
+                    </Text>
+                  )}
+                </Stack>
+              }
+              multiline
+              w={320}
+              withArrow
+              openDelay={150}
+              events={{ hover: true, focus: true, touch: true }}
             >
-              <IconInfoCircle size={14} stroke={1.6} />
-            </ThemeIcon>
-          </Tooltip>
-        )}
-      </Group>
-      {description && (
-        <Text size="xs" c="dimmed">
-          {description}
-        </Text>
+              <ThemeIcon
+                variant="transparent"
+                size={16}
+                c="var(--onc-label-2)"
+                tabIndex={0}
+                aria-label={[explain, openwrt && `OpenWrt: ${openwrt}`].filter(Boolean).join(" ")}
+              >
+                <IconInfoCircle size={14} stroke={1.6} />
+              </ThemeIcon>
+            </Tooltip>
+          )}
+        </Group>
+        <Box id={ids.description}>
+          {description && (
+            <Text size="xs" c="dimmed">
+              {description}
+            </Text>
+          )}
+          {error && (
+            <Text size="xs" c="red">
+              {error}
+            </Text>
+          )}
+        </Box>
+      </Box>
+      {children && (
+        <Box className="onc-row-control">
+          <RowIds.Provider value={ids}>{children}</RowIds.Provider>
+        </Box>
       )}
-      {error && (
-        <Text size="xs" c="red">
-          {error}
-        </Text>
-      )}
-    </Box>
-    {children && <Box className="onc-row-control">{children}</Box>}
-  </Group>
-);
+    </Group>
+  );
+};
 
 /** Nothing here yet: a quiet icon and a line, inside a card or a table. */
 export const EmptyState = ({ icon: Icon = IconInbox, children }: { icon?: typeof IconInbox; children: ReactNode }) => (
@@ -251,6 +270,14 @@ export const StatusDot = ({ color }: { color: "green" | "orange" | "red" | "gray
     h={8}
     style={{ display: "inline-block", flexShrink: 0, borderRadius: 4, background: `var(--mantine-color-${color}-6)` }}
   />
+);
+
+/** A title marked experimental: built and tested in containers, not yet on real routers. */
+export const Experimental = ({ children }: { children: ReactNode }) => (
+  <Group gap={8} component="span">
+    {children}
+    <ExperimentalBadge />
+  </Group>
 );
 
 /** Marks something built but not yet run on a real router, with why in a tooltip. */

@@ -160,11 +160,14 @@ const Shell = () => {
 // A hash router: the URL's path after # is the page, so the same build works
 // wherever it is served from, with no server-side routes. `/*` lets a page
 // have its own nested pages (one Wi-Fi network, one device).
-/** A page that failed to render: say so, keep the rest of the app usable. */
-const PageError = () => {
+/**
+ * A page that failed to render: say so in its place, the sidebar and Save
+ * still there (edits are kept in the draft); or, the shell itself, alone.
+ */
+const PageError = ({ inShell = false }: { inShell?: boolean }) => {
   const error = useRouteError();
   return (
-    <Center h="100vh" p="md">
+    <Center h={inShell ? undefined : "100vh"} p="md">
       <Alert color="red" title="This page hit a problem" maw={560}>
         <Text size="sm" mb="md">
           {(error as Error)?.message ?? String(error)}
@@ -189,18 +192,24 @@ const router = createHashRouter([
     element: <Shell />,
     errorElement: <PageError />,
     children: [
-      { index: true, element: <Navigate to="overview" replace /> },
-      ...pages.map((page) => ({ path: `${page.id}/*`, element: <page.Page /> })),
-      // Apply was a page: it is the sheet over the Overview now.
-      { path: "apply", element: <Navigate to="/overview?apply" replace /> },
-      { path: "general/*", element: <MovedTo base="/system" /> },
-      // Old addresses: General is System, SSIDs and Radios are Wi-Fi's tabs.
-      { path: "ssids/*", element: <MovedTo base="/wifi" /> },
-      { path: "radios/*", element: <MovedTo base="/wifi/radios" /> },
-      // Status's tabs were under the Overview: each is its own page now.
-      ...["clients", "devices", "activity"].map((tab) => ({ path: `overview/${tab}`, element: <Navigate to={`/${tab}`} replace /> })),
-      ...["internet", "wifi"].map((tab) => ({ path: `overview/${tab}`, element: <Navigate to="/performance" replace /> })),
-      { path: "*", element: <Navigate to="overview" replace /> },
+      {
+        // A page's failure stays in the page.
+        errorElement: <PageError inShell />,
+        children: [
+          { index: true, element: <Navigate to="overview" replace /> },
+          ...pages.map((page) => ({ path: `${page.id}/*`, element: <page.Page /> })),
+          // Apply was a page: it is the sheet over the Overview now.
+          { path: "apply", element: <Navigate to="/overview?apply" replace /> },
+          { path: "general/*", element: <MovedTo base="/system" /> },
+          // Old addresses: General is System, SSIDs and Radios are Wi-Fi's tabs.
+          { path: "ssids/*", element: <MovedTo base="/wifi" /> },
+          { path: "radios/*", element: <MovedTo base="/wifi/radios" /> },
+          // Status's tabs were under the Overview: each is its own page now.
+          ...["clients", "devices", "activity"].map((tab) => ({ path: `overview/${tab}`, element: <Navigate to={`/${tab}`} replace /> })),
+          ...["internet", "wifi"].map((tab) => ({ path: `overview/${tab}`, element: <Navigate to="/performance" replace /> })),
+          { path: "*", element: <Navigate to="overview" replace /> },
+        ],
+      },
     ],
   },
 ]);
@@ -234,14 +243,15 @@ const Loading = () => (
 /** The router's root password, when the app runs there (src/server/auth.ts). */
 const LoginPage = ({ onDone }: { onDone: () => void }) => {
   const [password, setPassword] = useState("");
-  const [wrong, setWrong] = useState(false);
+  // Why not, in the server's words: wrong, no root password yet, too many tries, or not reached.
+  const [refused, setRefused] = useState<string>();
   const [busy, setBusy] = useState(false);
   const submit = async () => {
     setBusy(true);
-    const ok = await logIn(password).catch(() => false);
+    const why = await logIn(password);
     setBusy(false);
-    if (ok) onDone();
-    else setWrong(true);
+    if (why) setRefused(why);
+    else onDone();
   };
   return (
     <Center h="100vh" bg="var(--onc-page)">
@@ -263,9 +273,9 @@ const LoginPage = ({ onDone }: { onDone: () => void }) => {
               value={password}
               onChange={(e) => {
                 setPassword(e.currentTarget.value);
-                setWrong(false);
+                setRefused(undefined);
               }}
-              error={wrong && "That is not the router's password."}
+              error={refused}
               autoFocus
             />
             <Button type="submit" loading={busy} disabled={!password}>

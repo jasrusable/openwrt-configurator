@@ -4,7 +4,7 @@ import { Button, Group, TextInput } from "@mantine/core";
 import { useState } from "react";
 import { describeKey, keyIdentity } from "../../../src/sshKeys";
 import { useOwnKey } from "../data/admin";
-import { useDraft, useDraftValue, useFieldError } from "../form/draft";
+import { useDraftList, useFieldError } from "../form/draft";
 import { PasswordField, SelectField, SwitchField, TextField } from "../form/fields";
 import { Section, SettingRow, SettingsPage } from "../kit/layout";
 
@@ -25,11 +25,10 @@ const countryOptions = countries
  * cannot be turned off.
  */
 const AuthorizedKeys = () => {
-  const draft = useDraft();
-  const keys: string[] = useDraftValue("system.ssh.authorized_keys") ?? [];
+  const list = useDraftList("system.ssh.authorized_keys");
+  const keys = list.items;
   const own = useOwnKey().data;
   const [adding, setAdding] = useState("");
-  const set = (next: string[]) => draft.set("system.ssh.authorized_keys", next);
   const ownMissing = !!own && !keys.some((k) => keyIdentity(k) === keyIdentity(own));
   return (
     <Section
@@ -37,11 +36,11 @@ const AuthorizedKeys = () => {
       description="Public keys that may log in to the devices as root, installed on every device when you apply."
     >
       {keys.map((line, i) => (
-        <KeyRow key={i} index={i} line={line} onRemove={() => set(keys.filter((_, j) => j !== i))} />
+        <KeyRow key={i} index={i} line={line} onRemove={() => list.remove(i)} />
       ))}
       {ownMissing && (
         <SettingRow label="This app's key" description={`${describeKey(own!).type} · ${describeKey(own!).comment || "no comment"}: not authorized yet.`}>
-          <Button variant="light" size="compact-sm" onClick={() => set([...keys, own!])}>
+          <Button variant="light" size="compact-sm" onClick={() => list.add(own!)}>
             Add it
           </Button>
         </SettingRow>
@@ -60,7 +59,7 @@ const AuthorizedKeys = () => {
             size="sm"
             disabled={!adding.trim()}
             onClick={() => {
-              set([...keys, adding.trim()]);
+              list.add(adding.trim());
               setAdding("");
             }}
           >
@@ -91,18 +90,14 @@ export const SystemPage = () => (
     description="Name, time and administration."
   >
     <Section>
-      <TextField name="system.name" label="Name" />
+      <TextField name="system.name" />
       <SelectField
         name="system.country"
-        label="Country"
-        description="Sets the Wi-Fi channels and power allowed."
         options={countryOptions}
         searchable
       />
       <SelectField
         name="system.timezone"
-        label="Time zone"
-        description="Wi-Fi devices can set their clocks from it."
         options={timezoneOptions}
         searchable
       />
@@ -113,17 +108,14 @@ export const SystemPage = () => (
     >
       <TextField
         name="system.app_login.key"
-        label="SSH key"
         placeholder="~/.ssh/id_ed25519"
       />
-      <PasswordField name="system.app_login.password" label="Password" />
+      <PasswordField name="system.app_login.password" />
     </Section>
     <AuthorizedKeys />
     <Section>
       <SwitchField
         name="system.ssh.password_login"
-        label="Password login"
-        description="Off: only the authorized keys can log in. Recommended."
       />
     </Section>
   </SettingsPage>

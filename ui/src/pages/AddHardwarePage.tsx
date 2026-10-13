@@ -9,7 +9,7 @@ import { ReactNode, useState } from "react";
 import { useNavigate } from "react-router";
 import { availability } from "../../../src/intent/choices";
 import { where } from "../../../src/intent/places";
-import { Intent } from "../../../src/intent/schema";
+import { Intent, namePattern } from "../../../src/intent/schema";
 import type { Candidate, Inspected } from "../../../src/discover";
 import { useAdopt, useCandidates, useInspect } from "../data/discover";
 import { ago, bandsOf, modelOf, portsOf } from "../facts";
@@ -58,6 +58,19 @@ const CandidateRow = ({ candidate, onPick }: { candidate: Candidate; onPick: () 
 
 type Choice = { name: string; role: "router" | "access-point"; location: string };
 
+/**
+ * Why a name will not do: checked against the draft, not only the saved
+ * file, as its facts (its pinned key) are kept under it when added.
+ */
+const nameProblem = (intent: Intent, name: string) =>
+  !name
+    ? "Required."
+    : !namePattern.test(name)
+      ? "Lowercase letters, digits and -, like a hostname."
+      : intent.hardware.some((d) => d.name === name)
+        ? "Another device has this name."
+        : undefined;
+
 /** What the picked device is, and how it will be added (the page's Add takes it). */
 const Found = ({
   device,
@@ -97,7 +110,11 @@ const Found = ({
         </Alert>
       )}
       <Section title="Add it as">
-        <SettingRow label="Name" description="Also its hostname, once applied.">
+        <SettingRow
+          label="Name"
+          description="Also its hostname, once applied."
+          error={choice.name ? nameProblem(intent, choice.name) : undefined}
+        >
           <TextInput
             value={choice.name}
             onChange={(e) => onChange({ ...choice, name: e.currentTarget.value.toLowerCase() })}
@@ -212,7 +229,7 @@ export const AddHardwarePage = () => {
       description="A router or access point on your network. Pick it, and it is read to see what it is; nothing on it changes until you apply."
       actions={
         device ? (
-          <Button onClick={add} loading={adopt.isPending} disabled={!choice.name}>
+          <Button onClick={add} loading={adopt.isPending} disabled={!!nameProblem(intent, choice.name)}>
             Add
           </Button>
         ) : (

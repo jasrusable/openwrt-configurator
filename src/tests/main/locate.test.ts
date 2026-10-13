@@ -1,72 +1,10 @@
 import test from "ava";
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
+import { readFileSync, writeFileSync } from "fs";
 import { DeviceFacts } from "../../deviceFacts";
 import { candidatesFor, isAddress, Located, locateEach, NotLocated, parseNeighbours } from "../../locate";
-import { checkHostKey, formatKnownHost, parseKnownHosts } from "../../knownHosts";
-import { Platform, Session, SshTarget } from "../../platform";
-import { nodePlatform } from "../../platforms/node";
+import { formatKnownHost } from "../../knownHosts";
 import { ProvisionableDevice } from "../../provisionConfig";
-
-/** A machine on the fake network: its board, MACs, host key, and (a router) its tables. */
-type Machine = { board: string; macs: string[]; key: string; leases?: string; neighbours?: string; ip?: string };
-
-const board = (id: string) =>
-  JSON.stringify({ model: { id, name: id }, network: { lan: { ports: ["lan1"], protocol: "static" } } });
-
-/** Answers the probes the way a device does: each output, then its exit marker. */
-const session = (m: Machine): Session => ({
-  execCommand: async (command: string) => {
-    const parts = command.split(/\n\) 2>\/dev\/null; printf '\\n__ONC_PROBE__%s\\n' "\$\?"\n?/).filter((p) => p.trim());
-    const answer = (part: string) =>
-      part.includes("board.json")
-        ? m.board
-        : part.includes("ubus call uci get")
-        ? '{"values":{}}'
-        : part.includes("ubus call system board")
-        ? JSON.stringify({ board_name: JSON.parse(m.board).model.id, release: { version: "25.12.5" } })
-        : part.includes("/sys/class/net")
-        ? m.macs.join("\n")
-        : part.includes("dhcp.leases")
-        ? m.leases ?? ""
-        : part.includes("neigh")
-        ? m.neighbours ?? ""
-        : part.includes("SSH_CONNECTION")
-        ? m.ip ?? ""
-        : "";
-    return { stdout: parts.map((p) => `${answer(p)}\n__ONC_PROBE__0\n`).join(""), stderr: "", code: 0 };
-  },
-  dispose: () => {},
-});
-
-/** A network of machines by address; connect checks host keys as the real platforms do. */
-const network = (machines: Record<string, Machine>) => {
-  const knownHosts = join(mkdtempSync(join(tmpdir(), "onc-locate-")), "known_hosts");
-  writeFileSync(knownHosts, "");
-  const tried: string[] = [];
-  const platform: Platform = {
-    ...nodePlatform,
-    env: (name) => (name === "ONC_KNOWN_HOSTS" ? knownHosts : undefined),
-    connect: async (target: SshTarget) => {
-      const host = target.host ?? "";
-      tried.push(host);
-      const m = machines[host];
-      if (!m) throw new Error("connect ECONNREFUSED");
-      const offered = { host, type: "ssh-ed25519", key: m.key };
-      // A pinned key is checked by the client itself; the file is not involved.
-      if (target.hostKey) {
-        if (target.hostKey.key !== m.key || target.hostKey.type !== offered.type) throw new Error("host key changed");
-        return session(m);
-      }
-      const seen = checkHostKey(parseKnownHosts(readFileSync(knownHosts, "utf8")), offered);
-      if (seen === "changed") throw new Error("host key changed");
-      if (seen === "new") writeFileSync(knownHosts, readFileSync(knownHosts, "utf8") + formatKnownHost(offered));
-      return session(m);
-    },
-  };
-  return { platform, tried, knownHosts };
-};
+import { board, Machine, network } from "../helpers/fakeNetwork";
 
 const device = (hostname: string, ipaddr: string, role: string): ProvisionableDevice =>
   ({ hostname, ipaddr, tags: { role }, provisioning_config: { ssh_auth: { username: "root" } } }) as ProvisionableDevice;
@@ -175,4 +113,23 @@ test("a device's word for its address is not taken for an address we gave it", a
   const net = network({ "10.0.0.1": { ...routerMachine(""), ip: "10.0.0.99" } });
   const [r] = await settle(locateEach({ devices: [router], facts: {}, platform: net.platform }));
   t.like(r, { address: "10.0.0.1" });
+});
+
+test("each device is found in one round trip, the router's tables included", async (t) => {
+  const net = network({
+    "10.0.0.1": routerMachine("1 aa:bb:cc:00:00:01 10.0.0.77 * *"),
+    "10.0.0.77": apMachine,
+  });
+  let execs = 0;
+  const platform = {
+    ...net.platform,
+    connect: async (target: Parameters<typeof net.platform.connect>[0]) => {
+      const s = await net.platform.connect(target);
+      return { ...s, execCommand: (c: string) => (execs++, s.execCommand(c)) };
+    },
+  };
+  const [r, a] = await settle(locateEach({ devices: [router, ap], facts: { "home-ap-1": apFacts }, platform }));
+  t.true("session" in r && "session" in a);
+  t.deepEqual((r as Located).tables?.leases.map((l) => l.address), ["10.0.0.77"]);
+  t.is(execs, 2);
 });

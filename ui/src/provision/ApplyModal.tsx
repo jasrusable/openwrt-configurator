@@ -4,6 +4,7 @@
 // "?apply", so a reload during a run (minutes) opens it again; closing it
 // leaves a run going.
 import { Alert, Button, Group, Modal, Stack, Text } from "@mantine/core";
+import { useMediaQuery } from "@mantine/hooks";
 import { useSearchParams } from "react-router";
 import { useEffect } from "react";
 import { useProvision, useStartProvision } from "../data/provision";
@@ -28,6 +29,8 @@ export const useApplySheet = () => {
 
 export const ApplyModal = () => {
   const sheet = useApplySheet();
+  // Full screen on a phone, following a rotation or a resize.
+  const phone = useMediaQuery("(max-width: 48em)");
   const provision = useProvision();
   const start = useStartProvision();
   const unsaved = useDraftChanged();
@@ -48,7 +51,7 @@ export const ApplyModal = () => {
       radius="md"
       // Pages switch without animation; a sheet over them fades in once.
       transitionProps={{ duration: 120 }}
-      fullScreen={window.matchMedia?.("(max-width: 48em)").matches}
+      fullScreen={phone}
     >
       <Stack gap="lg">
         <Text size="sm" c="dimmed">

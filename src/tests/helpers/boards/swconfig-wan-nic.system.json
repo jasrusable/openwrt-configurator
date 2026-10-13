@@ -1,0 +1,7 @@
+{
+  "board_name": "tplink,archer-c7-v2",
+  "model": "TP-Link Archer C7 v2",
+  "release": {
+    "version": "25.12.5"
+  }
+}

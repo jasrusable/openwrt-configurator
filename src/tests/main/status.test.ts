@@ -1,7 +1,8 @@
 import test from "ava";
+import { sampleIntent } from "../helpers/fixtures";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { Intent, intentSchema } from "../../intent/schema";
+import { Intent } from "../../intent/schema";
 import {
   DeviceStatus,
   parseInterfaces,
@@ -13,11 +14,10 @@ import {
 } from "../../status/device";
 import { networkStatus } from "../../status/network";
 
-const root = join(__dirname, "..", "..", "..");
 const recorded = (name: string) =>
   JSON.parse(readFileSync(join(__dirname, "..", "helpers", "status", name), "utf8"));
 const sample = (): Intent =>
-  intentSchema.parse(JSON.parse(readFileSync(join(root, "sampleConfigs", "intent.json"), "utf8")));
+  sampleIntent();
 
 // As hostapd's ubus answers get_status and get_clients, assembled by the probe.
 const hostapd = [
@@ -119,6 +119,10 @@ test("interpreted against the settings: what matches, and what does not", (t) =>
   t.deepEqual(status.ssids[0], { ssid: "Home", accessPoints: ["home-ap-1"], clients: 2 });
   t.deepEqual(status.clients, { total: 3, wifi: 2 });
   t.deepEqual(status.unexpected, { interfaces: ["oldvpn"], ssids: ["Not Ours"] });
+  // The access point's own lease is not a client: the Clients page leaves it out too.
+  const apLeased = networkStatus(intent, [router, ap], { "home-ap-1": ["aa:bb:cc:00:00:09"] });
+  t.is(apLeased.clients.total, 2);
+  t.deepEqual(apLeased.networks.map((n) => n.clients), [1, 0]);
   const withVpn = { ...intent, vpn: { ...intent.vpn, remote_access: { ...intent.vpn.remote_access, enabled: true } }, wifi: { ...intent.wifi, mesh: { ...intent.wifi.mesh, enabled: true } } };
   const ours = device("home-router", {
     interfaces: ["vpn", "bat0", "batmesh", "oldvpn"].map((id) => ({ id, up: true, ipv4: [], ipv6: [] })),

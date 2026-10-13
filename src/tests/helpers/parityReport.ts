@@ -13,7 +13,17 @@ export const parityConfigs = [
   "src/tests/main/config.json",
   "src/tests/main/config2.json",
   "sampleConfigs/basic.json",
+  // An intent: compiled first, as on a router, where this is what runs.
+  "sampleConfigs/intent.json",
 ];
+
+/** An intent holds no models; give its devices the captured ones by role. */
+const capturedModels: Record<string, string> = {
+  router: "friendlyarm,nanopi-r6s",
+  "access-point": "zyxel,nwa50ax-pro",
+};
+const withCapturedModel = <D extends { model_id?: string; tags?: Record<string, unknown> }>(device: D): D =>
+  device.model_id ? device : { ...device, model_id: capturedModels[String(device.tags?.role)] };
 
 /** What a device's uciConfigs probe might print: the wipe is computed from it. */
 const deviceExport = [
@@ -60,7 +70,7 @@ export const parityReport = async ({ platform }: { platform: Platform }) => {
       platform,
       lookup: async (name) => `placeholder-${name}`,
     });
-    for (const deviceConfig of oncConfig.devices) {
+    for (const deviceConfig of oncConfig.devices.map(withCapturedModel)) {
       const deviceSchema = await getDeviceSchema({
         deviceConfig,
         local: platform,

@@ -1,58 +1,29 @@
 # OpenWrt Configurator
 
-OpenWrt Configurator is a CLI tool and corresponding JSON config file which lets you specify the entire state of your network including UCI configuration, packages and firmware versions in a single UCI-like JSON config file which can be provisioned to your OpenWrt devices using OpenWrt Configurator.
+OpenWrt Configurator describes your whole network — every router and access point, its packages, UCI configuration and files — in one file, and applies it to your OpenWrt devices over SSH, each change one that rolls itself back if it cuts you off.
+
+There are two ways to write that file:
+
+- **An intent file** (`{ "schema": 1, ... }`): your network in your own terms — the internet lines, networks, Wi-Fi, firewall exceptions, VPN, DNS and your hardware — edited in a web UI (or by hand) and compiled to OpenWrt's configuration for each device. Device facts (model, ports, radios) are read from the devices, never written down. [`sampleConfigs/intent.json`](sampleConfigs/intent.json) is an example.
+- **A low-level config**: UCI-like JSON, conditionally composed with `.if` and `.overrides` so one file drives routers and access points of different models. [`sampleConfigs/basic.json`](sampleConfigs/basic.json) is an example, and [the low-level config](#the-low-level-config) below documents it.
+
+Every command takes either.
 
 ```sh
-$ openwrt-configurator provision ./network-config.json
-```
-
-The JSON config file can be conditionally composed with `.if` and/or `.overrides` keys, and implements light abstractions over device ethernet ports and Wi-Fi radios to seamlessly support configuration for multiple devices, different device models/types, as well as different device roles (Router, switch, dump-ap etc) from a single JSON config file.
-
-```json
-  "interface": [
-    {
-      ".if": "device.tag.role == 'router'", // Apply the pppoe interface to only the router.
-      ".name": "wan",
-      "device": "eth0",
-      "proto": "pppoe",
-      "username": "me@pppoe.com",
-      "password": { "$secret": "pppoe" }
-    },
-    {
-      ".name": "lan",
-      "device": "br-lan.1",
-      ".overrides": [
-        {
-          ".if": "device.tag.role == 'router'", // Apply a static ip to only the router.
-          "override": {
-            "proto": "static",
-            "ipaddr": "10.0.0.1",
-            "netmask": "255.255.0.0"
-          }
-        },
-        {
-          ".if": "device.tag.role != 'router'", // Apply dhcp to all non-router devices.
-          "override": {
-            "proto": "dhcp"
-          }
-        }
-      ]
-    },
-  ]
+$ openwrt-configurator ui ./network.intent.json      # edit it in the web UI, and apply from there
+$ openwrt-configurator provision ./network.intent.json
 ```
 
 ## Features
 
-- Store all network config for all devices in a single UCI-like JSON config file (UCI config, packages, firmware versions and more).
-- Keep Wi-Fi / PPPoE / SSH secrets out of that file with `{ "$secret": "name" }` refs, resolved from the macOS keychain at provision time.
-- Provision arbitrary files (e.g. hotplug scripts) for config that UCI can't express, removed from devices when removed from config.
-- Conditionally compose your JSON file to support multiple OpenWrt devices, different device models/types, and different roles (Routers, switches and dump-ap's etc).
-- Light abstractions over ethernet ports and WiFi radios to keep multi-device configuration simple.
-- Strict config syntax validation and logical error checking for configuration to prevent invalid configuration.
-- Convert your JSON file into UCI commands for each of your OpenWrt devices.
-- Provision your JSON file to your OpenWrt devices.
-- JSON file migrations to keep your JSON file up-to-date with any UCI configuration changes/updates.
-- Build and flash sysupgrade images to your OpenWrt devices based on your JSON config file.
+- One file for every device on the network: its packages, UCI config and files.
+- The web UI: settings in plain terms, refused while invalid, with what each one does on the devices; status (what needs attention, clients, devices, performance, activity); and Apply, showing what will change on each device before it does.
+- Each device's config is exactly what the file declares: anything else is removed (see [What a provision does](#what-a-provision-does)).
+- Every device changes as one: each is armed with a rollback first, and the change is kept only once every device can be reached after it.
+- Secrets out of the file: `{ "$secret": "name" }` refs, resolved from the macOS keychain (or `/etc/onc/secrets.json` on a device).
+- Arbitrary files (hotplug scripts and the like), removed from devices when removed from the file.
+- Light abstractions over ethernet ports and Wi-Fi radios, so one file fits different models (DSA and swconfig alike).
+- Sysupgrade images built per device from the same file (`build-images`), through OpenWrt's firmware selector.
 
 ## Getting started
 
@@ -76,31 +47,35 @@ The JSON config file can be conditionally composed with `.if` and/or `.overrides
 
    Standalone binaries for macOS, Linux and Windows are also on the [GitHub Releases page](https://github.com/jasrusable/openwrt-configurator/releases).
 
-   `provision` treats all the devices in the file as **one change**: every device is armed with a rollback before any is touched, and only when every one of them can be reached afterwards is the change kept. If any fails, the devices already changed are rolled back too. The router (your machine's gateway) and the device running the tool are provisioned last.
-
    Each device's SSH host key is remembered the first time you connect (`~/.config/openwrt-configurator/known_hosts`; on a device, dropbear's `~/.ssh/known_hosts`), and a changed key is refused. After reflashing a device, delete its line from that file.
 
-2. Download a [sample configuration file](https://github.com/jasrusable/openwrt-configurator/tree/main/sampleConfigs).
+   The web UI needs the Node build (the macOS binary from the releases page, or `npm run ui` in a checkout): the Homebrew build runs on QuickJS, which cannot listen on a port. On a router the package serves the UI itself, at `/cgi-bin/onc/`, behind a login with the root password; its settings live in `/etc/onc/intent.json`.
 
-3. Adjust your configuration file as needed.
+2. Start from a [sample](https://github.com/jasrusable/openwrt-configurator/tree/main/sampleConfigs): `intent.json` for the web UI, `basic.json` for a low-level config.
 
-4. Print and inspect your device UCI commands.
+3. With an intent file, open it in the web UI (`openwrt-configurator ui <file>`, then http://127.0.0.1:8080/) and add your devices under Hardware. Or edit either kind by hand.
+
+4. Print and inspect what would be run on each device. This connects to each device read-only, as the plan depends on what is installed there.
 
 ```sh
 $ openwrt-configurator print-uci-commands ./network-config.json
-# device my-ap
-apk del --rdepends firewall firewall4
-uci set system.system0=system
-uci set system.system0.hostname='my-ap'
-uci set system.system0.timezone='Africa/Johannesburg'
-uci set network.switch0=switch
-uci set network.switch0.name='switch0'
-uci set network.switch0.reset='1'
-uci set network.switch0.enable_vlan='1'
+#device my-ap-1
+for pkg in $(uci changes | sed 's/^[-+]//; s/[.=].*//' | sort -u); do if [ -f "/etc/config/$pkg" ]; then uci revert "$pkg"; fi; done
+apk del --rdepends 'firewall4'
+reload_config
+uci batch 2>/tmp/.onc-uci-err <<'ONC_UCI'
+set system.system0=system
+set system.system0.hostname='my-ap-1'
+set system.system0.timezone='SAST-2'
+set system.system0.zonename='Africa/Johannesburg'
+set network.device0=device
+set network.device0.name='br-lan'
 ...
 ```
 
-> Note: SSH auth is `provisioning_config.ssh_auth` (`username`, optional `password` and/or `private_key_path`). Or pass `--identity ~/.ssh/id_ed25519` (like `ssh -i`). With neither password nor key, the SSH agent is used if `SSH_AUTH_SOCK` is set.
+   `compile` prints the low-level config an intent file compiles to, offline.
+
+   SSH auth is `provisioning_config.ssh_auth` (`username`, optional `password` and/or `private_key_path`), or `--identity ~/.ssh/id_ed25519` (like `ssh -i`). With neither password nor key, the SSH agent is used if `SSH_AUTH_SOCK` is set.
 
 Secrets (Wi-Fi PSK, PPPoE password, SSH password, …) should not live in the JSON file. Use a whole-value ref and store the value in the macOS keychain:
 
@@ -112,28 +87,26 @@ Secrets (Wi-Fi PSK, PPPoE password, SSH password, …) should not live in the JS
 $ openwrt-configurator secrets set wifi/home
 ```
 
-`provision`, `print-uci-commands` and `build-images` resolve refs at load. `print-uci-commands` and `build-images --dry-run` redact resolved values as `{ $secret: wifi/home }` unless you pass `--show-secrets`. After provision the device still has the secret in UCI — OpenWrt needs it to run.
+Refs are resolved at load. `print-uci-commands`, `compile` and `build-images --dry-run` redact secrets unless you pass `--show-secrets`. An intent file keeps its passwords itself (the web UI edits them), so keep it `0600`. After provision the device still has the secret in UCI — OpenWrt needs it to run.
 
-5. Provision configuration to your devices (Implemented with SSH).
+5. Provision: from the web UI's Apply, or
 
 ```sh
 $ openwrt-configurator provision ./network-config.json
-Provisioning device "my-ap" @ root@10.0.0.218
-Connecting over SSH...
-Connected.
-Verifying device...
-Verified.
-Setting configuration...
-Configuration set.
-Provisioning completed.
-...
 ```
 
-> Note: SSH auth is `provisioning_config.ssh_auth` (`username`, optional `password` and/or `private_key_path`). Or pass `--identity ~/.ssh/id_ed25519` (like `ssh -i`). With neither password nor key, the SSH agent is used if `SSH_AUTH_SOCK` is set.
+## What a provision does
 
-## How it works
+- **The file is the whole truth.** Each device's UCI config ends up exactly as declared: every section the file does not declare is removed, except what `configs_to_not_reset` keeps (`<config>.*` for a whole config, `<config>.<section type>` for every section of a type; a leading `?` for one the device may not have). Before committing, the result is read back and checked against the declaration; any difference reverts with nothing committed. An intent file keeps what it needs itself; a low-level config must keep, for example, `luci.*`, `rpcd.*` and `uhttpd.*` (see `sampleConfigs/basic.json`), or they are wiped.
+- **Commit-confirm.** Before committing, each device snapshots its state and starts a watchdog; after the commit the tool reconnects and confirms. A device that cannot be reached restores itself (config, files, packages, services) within the window (`--confirm-timeout`, 90 s by default), reboots if that still does not let it back in, and restores itself even across a restart inside the window.
+- **One change.** Every device is armed before any is changed, and nothing is confirmed until all are; if any fails, the devices already changed are rolled back too. The router (your machine's gateway) and the device running the tool go last.
+- Devices must run OpenWrt 25.12 or later.
+
+## The low-level config
 
 The config file is JSON, and may carry `//` and `/* */` comments and trailing commas.
+
+Its top-level keys: `devices`, `package_profiles`, `files`, `configs_to_not_reset` (see [What a provision does](#what-a-provision-does)), `config`, and `version` (the OpenWrt release `build-images` builds; a string, or `{ ".value": ..., ".overrides": [...] }` per device).
 
 1. Add your devices to the JSON config file. `ipaddr` and `provisioning_config` are only needed for devices you provision over SSH; a device that is only ever built as an image (`build-images`) can leave them out, and `provision` skips it with a note.
 
@@ -209,7 +182,7 @@ The config file is JSON, and may carry `//` and `/* */` comments and trailing co
 
 4. Specify your UCI configuration in JSON, and add `.if` and/or `.overrides` keys to apply configuration conditionally.
 
-   Conditions compare a device's properties: `device.tag.<key>`, `device.hostname`, `device.ipaddr`, `device.model_id`, `device.version` and `device.sw_config`.
+   Conditions compare a device's properties: `device.tag.<key>`, `device.hostname`, `device.ipaddr`, `device.model_id`, `device.version`, `device.sw_config`, and per band (`2g`, `5g`, `6g`) `device.wifi_<band>` (it has a radio there) and `device.mesh_<band>` (one that can mesh), each `== true` or `== false`.
 
    | Syntax | Meaning |
    |---|---|
@@ -241,43 +214,45 @@ The config file is JSON, and may carry `//` and `/* */` comments and trailing co
         }
       ]
     },
-    "interface": [
-      {
-        ".name": "loopback",
-        "device": "lo",
-        "proto": "static",
-        "ipaddr": "127.0.0.1",
-        "netmask": "255.0.0.0"
-      },
-      {
-        ".if": "device.tag.role == 'router'", // Apply the pppoe interface to only the router.
-        ".name": "wan",
-        "device": "eth0",
-        "proto": "pppoe",
-        "username": "me@pppoe.com",
-        "password": { "$secret": "pppoe" }
-      },
-      {
-        ".name": "lan",
-        "device": "br-lan.1",
-        ".overrides": [
-          {
-            ".if": "device.tag.role == 'router'", // Apply a static ip to only the router.
-            "override": {
-              "proto": "static",
-              "ipaddr": "10.0.0.1",
-              "netmask": "255.255.0.0"
+    "network": {
+      "interface": [
+        {
+          ".name": "loopback",
+          "device": "lo",
+          "proto": "static",
+          "ipaddr": "127.0.0.1",
+          "netmask": "255.0.0.0"
+        },
+        {
+          ".if": "device.tag.role == 'router'", // Apply the pppoe interface to only the router.
+          ".name": "wan",
+          "device": "eth0",
+          "proto": "pppoe",
+          "username": "me@pppoe.com",
+          "password": { "$secret": "pppoe" }
+        },
+        {
+          ".name": "lan",
+          "device": "br-lan.1",
+          ".overrides": [
+            {
+              ".if": "device.tag.role == 'router'", // Apply a static ip to only the router.
+              "override": {
+                "proto": "static",
+                "ipaddr": "10.0.0.1",
+                "netmask": "255.255.0.0"
+              }
+            },
+            {
+              ".if": "device.tag.role != 'router'", // Apply dhcp to all non-router devices.
+              "override": {
+                "proto": "dhcp"
+              }
             }
-          },
-          {
-            ".if": "device.tag.role != 'router'", // Apply dhcp to all non-router devices.
-            "override": {
-              "proto": "dhcp"
-            }
-          }
-        ]
-      }
-    ],
+          ]
+        }
+      ]
+    },
     "wireless": {
       ".if": "device.tag.role == 'ap'", // Applies the entire "wireless" object to only devices with the "ap" tag set.
       "wifi-device": [
@@ -311,20 +286,20 @@ The config file is JSON, and may carry `//` and `/* */` comments and trailing co
   }
 ```
 
+## Commands
+
+| Command | |
+|---|---|
+| `ui <intent>` | serve the web UI on this machine (loopback only) |
+| `provision <file>` | apply to the devices (`--no-confirm`, `--confirm-timeout`, `--rollback`, `--identity`) |
+| `print-uci-commands <file>` | print what `provision` would run on each device (reads the devices) |
+| `compile <file>` | print the low-level config a file compiles to (offline) |
+| `build-images <file>` | build per-device sysupgrade images (`--dry-run`, `--out`) |
+| `verify-images` | check built images against their manifest |
+| `capture-device-schema <file>` | record a device's ports and radios (read-only) |
+| `secrets set <name>` | store a secret in the keychain |
+| `cgi <intent>` | answer one web UI request under uhttpd (what the router package runs) |
+
 ## Roadmap
 
 Open work is tracked in [TODO.md](TODO.md).
-
-### Short-term
-
-- Improve README.md and add more documentation.
-- Add more configuration validation and error checking.
-- Improve error handling and messages.
-- Add more sample configurations.
-- Support firmware building and flashing.
-
-### Long-term
-
-- Configuration migrations.
-- Reduce CLI executable size.
-- Web UI for building configuration.

@@ -1,8 +1,8 @@
 // Wi-Fi › Radios: each band, on every access point. A read-only table, and
 // a page per band (/wifi/radios/5g) with its settings explained.
-import { Badge, Button, Text } from "@mantine/core";
+import { Badge, Button, Text, ThemeIcon } from "@mantine/core";
 import { useNavigate } from "react-router";
-import { channelWidths } from "../../../src/intent/choices";
+import { channelWidths } from "../../../src/intent/radios";
 import { placeName, where } from "../../../src/intent/places";
 import { Band, Intent } from "../../../src/intent/schema";
 import { useDevices } from "../data/devices";
@@ -16,23 +16,23 @@ import {
 } from "../form/fields";
 import { DataTable } from "../kit/DataTable";
 import { Section, SettingRow, SettingsPage } from "../kit/layout";
-import { ThemeIcon } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
+import { bandLabels } from "../../../src/intent/labels";
 
 const bands: { band: Band; label: string; description: string }[] = [
   {
     band: "2g",
-    label: "2.4 GHz",
+    label: bandLabels["2g"],
     description: "Longest range, slowest; many smart-home devices need it.",
   },
   {
     band: "5g",
-    label: "5 GHz",
+    label: bandLabels["5g"],
     description: "Fast, shorter range: most phones and laptops use it.",
   },
   {
     band: "6g",
-    label: "6 GHz",
+    label: bandLabels["6g"],
     description:
       "Fastest, shortest range. Wi-Fi 6E and 7, WPA3 only.",
   },
@@ -73,11 +73,11 @@ const RadiosTable = () => {
   const issues = useIssues();
   const cell = (
     band: Band,
-    key: string,
-    format: (v: any) => string | undefined,
+    key: keyof Intent["wifi"]["radios"][Band],
+    format: (v?: string) => string | undefined,
   ) => (
     <Text size="sm" c="dimmed">
-      <Value name={`wifi.radios.${band}.${key}` as never} format={format} />
+      <Value name={`wifi.radios.${band}.${key}`} format={(v) => format(v === undefined ? v : String(v))} />
     </Text>
   );
   return (
@@ -163,7 +163,7 @@ const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
   // The mesh's band is on its channel, on every node.
   const meshChannel = mesh.enabled && mesh.band === band ? mesh.channel : undefined;
   const haveBand = useHaveBand(label);
-  const at = (key: string) => `wifi.radios.${band}.${key}` as never;
+  const at = <K extends string>(key: K) => `wifi.radios.${band}.${key}` as const;
   return (
     <SettingsPage
       title={[
@@ -229,5 +229,5 @@ const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
 
 export const RadiosPage = ({ sub }: { sub: string }) => {
   const radio = bands.find((b) => b.band === sub);
-  return radio ? <RadioPage {...radio} /> : <RadiosTable />;
+  return radio ? <RadioPage key={radio.band} {...radio} /> : <RadiosTable />;
 };

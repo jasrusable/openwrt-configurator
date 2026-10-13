@@ -6,10 +6,10 @@
 // keeps a node that is also cabled from making a loop. As run at the
 // Stellenberg site, plus the MTU: batman adds its header to every frame, so
 // the mesh link carries 1532 bytes and nothing is fragmented.
-import { Feature, onAccessPoints, onDevice, onRouter } from "../fragment";
+import { Feature, onAccessPoints, onDevice, onRouter, siteSeed } from "../fragment";
 import { fnv } from "./network";
 import { radios, radioWidth } from "./wifi";
-import { meshWiredVlan } from "../choices";
+import { meshWiredVlan } from "../radios";
 import type { Intent } from "../schema";
 
 /** batman-adv's header, on top of a 1500-byte frame: the mesh link's MTU. */
@@ -36,7 +36,7 @@ export const meshRouting = "BATMAN_V";
 export const meshInterface = "mesh0";
 
 /** The mesh's name on the air, from the site: the same on every node, never typed. */
-export const meshId = (intent: Pick<Intent, "system">) => `onc-${fnv(`${intent.system.name}/mesh`)}`;
+export const meshId = (intent: Pick<Intent, "system">) => `onc-${fnv(`${siteSeed(intent)}/mesh`)}`;
 
 /**
  * A repeater's rescue network: the address it has there, link-local and from

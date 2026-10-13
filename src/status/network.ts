@@ -77,10 +77,17 @@ export type NetworkStatus = {
   internetCounters?: { lines: Record<string, { rx: number; tx: number }>; at: number };
 };
 
-const reached = (r: Reachability | undefined): r is DeviceStatus => !!r && !("error" in r);
+export const reached = (r: Reachability | undefined): r is DeviceStatus => !!r && !("error" in r);
 
-/** The /24 a network hands addresses out in: "10.0.20." for 10.0.20.0/24. */
-const prefixOf = (subnet: string) => subnet.split(".").slice(0, 3).join(".") + ".";
+/** What the router said (or why not), as the settings name it. */
+export const routerOf = (intent: Intent, devices: Reachability[]) => {
+  const name = intent.hardware.find((d) => d.role === "router")?.name;
+  return devices.find((d) => d.hostname === name);
+};
+
+/** The network an IPv4 address is in: each hands out its /24 ("10.0.20." for 10.0.20.0/24). */
+export const networkOfAddress = (intent: Intent, address: string) =>
+  intent.networks.find((n) => address.startsWith(n.subnet.split(".").slice(0, 3).join(".") + "."));
 
 export const networkStatus = (
   intent: Intent,
@@ -89,8 +96,7 @@ export const networkStatus = (
   macs: Record<string, string[] | undefined> = {}
 ): NetworkStatus => {
   const byName = new Map(devices.map((d) => [d.hostname, d]));
-  const routerName = intent.hardware.find((d) => d.role === "router")?.name;
-  const router = routerName ? byName.get(routerName) : undefined;
+  const router = routerOf(intent, devices);
   const routerUp = reached(router) ? router : undefined;
   const iface = (id: string) => routerUp?.interfaces.find((i) => i.id === id);
   const lineOf = (id: string) => routerUp?.lines.find((l) => l.id === id);
@@ -125,7 +131,9 @@ export const networkStatus = (
     };
   });
   const inUse = connections.find((c) => c.inUse);
-  const leases = routerUp?.leases ?? [];
+  // Clients only: our own devices (the access points) hold leases too.
+  const ours = new Set(Object.values(macs).flatMap((m) => m ?? []));
+  const leases = (routerUp?.leases ?? []).filter((l) => !ours.has(l.mac));
   const accessPoints = intent.hardware.filter((d) => d.role === "access-point");
   const radios = accessPoints.flatMap((ap) => {
     const status = byName.get(ap.name);
@@ -220,7 +228,7 @@ export const networkStatus = (
       id: n.id,
       name: n.name,
       ...(routerUp ? { up: !!iface(n.id)?.up } : {}),
-      clients: leases.filter((l) => l.address.startsWith(prefixOf(n.subnet))).length,
+      clients: leases.filter((l) => networkOfAddress(intent, l.address)?.id === n.id).length,
     })),
     ssids: intent.wifi.networks.map((w) => {
       const on = radios.filter((r) => r.ssid === w.ssid);

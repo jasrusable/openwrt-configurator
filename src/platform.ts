@@ -88,6 +88,8 @@ export type Platform = {
 
   readTextFile: (path: string) => string;
   writeTextFile: (path: string, data: string) => void;
+  /** Adds to the end, making the file if needed: one write, never the whole file again. */
+  appendTextFile: (path: string, data: string) => void;
   mkdirp: (path: string) => void;
   /** Permission bits (e.g. 0o600), or undefined when the file does not exist. */
   fileMode: (path: string) => number | undefined;
@@ -138,3 +140,6 @@ export type Platform = {
     options: { host: string; port: number }
   ) => Promise<void>;
 };
+
+/** What `serve` listens on: this machine only (it has no login). */
+export const loopbackHosts = ["127.0.0.1", "::1", "localhost"];

@@ -39,12 +39,7 @@ test("rollback paths are scoped to the run", (t) => {
 
 test("a confirmed run cleans up after itself instead of rolling back", (t) => {
   const watchdog = watchdogOf(arm());
-  t.true(
-    watchdog.includes(
-      "if [ -f /tmp/onc-confirmed-abc123 ]; then rm -rf /tmp/onc-rollback-abc123"
-    )
-  );
-  t.true(watchdog.includes("exit 0"));
+  t.regex(watchdog, /if \[ -f \/tmp\/onc-confirmed-abc123 \]; then rm -rf [^\n]*\/tmp\/onc-rollback-abc123 [^\n]*touch \/tmp\/onc-disarmed-abc123; exit 0; fi/);
 });
 
 test("rollback restores config, files and newly installed packages", (t) => {
@@ -189,9 +184,8 @@ test("nothing file- or package-related is emitted when there is nothing to do", 
   t.false(watchdog.includes("apk del"));
 });
 
-// `--rdepends` removes dependents too, so the named packages understate it:
-// removing firewall4 on a stock image takes 21 packages, uhttpd and the whole
-// LuCI stack among them.
+// `--rdepends` removes dependents too, so the named packages understate it
+// (firewall4 takes luci-app-firewall and the luci meta-packages on 25.12.5).
 test("the removal cascade reports everything apk would purge", (t) => {
   const probe = removalCascade(["firewall4"]);
   t.is(probe.command, "apk del --simulate --rdepends 'firewall4'");
@@ -207,16 +201,53 @@ test("the removal cascade reports everything apk would purge", (t) => {
   ]);
 });
 
-test("the removal cascade falls back to the named packages if apk output is unusable", (t) => {
-  // Reporting an empty list here would be falsely reassuring.
-  t.deepEqual(
-    removalCascade(["firewall4"]).parse({
-      stdout: "ERROR: unknown",
-      stderr: "",
-      code: 1,
-    }),
-    ["firewall4"]
+test("a removal cascade apk cannot simulate is an error, never the named packages alone", (t) => {
+  // The cascade is what a rollback stages: a guess would let a removal through that it cannot undo.
+  t.throws(() => removalCascade(["firewall4"]).parse({ stdout: "ERROR: unknown", stderr: "", code: 1 }));
+  t.throws(() => removalCascade(["firewall4"]).parse({ stdout: "OK: 10 MiB in 126 packages", stderr: "", code: 0 }));
+});
+
+test("a rollback discards staged changes before any package step: a postinst's uci commit would commit them", (t) => {
+  const watchdog = watchdogOf(
+    armWatchdogCommands({
+      runId: "r1",
+      timeoutSeconds: 90,
+      filesToRestore: [],
+      filesToDelete: [],
+      packagesToUninstallOnRollback: ["nlbwmon"],
+      revertCommands: ["REVERT"],
+    })
   );
+  const revert = watchdog.indexOf("REVERT");
+  t.true(revert > watchdog.indexOf("mv /etc/config.onc-new /etc/config"));
+  t.true(revert < watchdog.indexOf("apk del"));
+  t.true(revert < watchdog.indexOf("apk add"));
+});
+
+test("boot links are restored whether the rollback reloads or reboots", (t) => {
+  const watchdog = (mode: "reboot" | "reload") =>
+    watchdogOf(armWatchdogCommands({ runId: "r1", timeoutSeconds: 90, filesToRestore: [], filesToDelete: [], packagesToUninstallOnRollback: [], mode }));
+  for (const mode of ["reboot", "reload"] as const) {
+    const text = watchdog(mode);
+    t.true(text.includes("tar -xf /tmp/onc-rollback-r1/rc.d.tar"), mode);
+  }
+  const reboot = watchdog("reboot");
+  t.true(reboot.indexOf("rc.d.tar -C") < reboot.indexOf("\nreboot"));
+});
+
+test("the watchdog marks its restore done before it waits to hear access is back", (t) => {
+  const text = watchdogOf(armWatchdogCommands({ runId: "r1", timeoutSeconds: 90, filesToRestore: [], filesToDelete: [], packagesToUninstallOnRollback: [] }));
+  const restored = text.indexOf("touch /tmp/onc-restored-r1");
+  t.true(restored > text.indexOf("reload_config"));
+  t.true(restored < text.indexOf("if [ -f /tmp/onc-recovered-r1 ]"));
+});
+
+test("a failed arm takes its snapshots and staged packages with it, and stands its watchdog down", (t) => {
+  const { dropArmCommand } = require("../../rollback");
+  const command: string = dropArmCommand("r1");
+  t.true(command.includes("rm -rf /etc/onc/rollback/r1 /tmp/onc-rollback-r1"));
+  t.true(command.includes("[ -f /tmp/onc-watchdog-r1.pid ] && touch /tmp/onc-confirmed-r1"));
+  t.true(command.includes("/tmp/onc-watchdog-r1.sleep"));
 });
 
 test("a rollback restarts what a reload would leave on its old devices, after the reload", (t) => {

@@ -19,7 +19,7 @@ import { leasesCommand } from "./status/device";
 import type { DeviceFacts } from "./deviceFacts";
 import { Probe, runProbes } from "./deviceProbes";
 import { DeviceSchema } from "./deviceSchema";
-import { getDeviceSchema } from "./getDeviceSchema";
+import { deviceSchemaOf, deviceSchemaProbes } from "./getDeviceSchema";
 import { where } from "./intent/places";
 import { parseKnownHosts } from "./knownHosts";
 import { ONCDeviceConfig } from "./oncConfigSchema";
@@ -76,7 +76,7 @@ export const candidatesFor = ({
 };
 
 /** Every interface's MAC, so the device can be recognised in the router's leases. */
-const macs: Probe<string[]> = {
+export const macsProbe: Probe<string[]> = {
   command: "cat /sys/class/net/*/address 2>/dev/null || true",
   parse: ({ stdout }) => [
     ...new Set(
@@ -108,9 +108,15 @@ const answeredOn: Probe<string | undefined> = {
   },
 };
 
-const routerTables = {
+/** The router's DHCP leases and IPv4 neighbours: where to look for the rest, and what to offer adding. */
+export type RouterTables = { leases: Lease[]; neighbours: Neighbour[] };
+export const routerTables = {
   leases: { command: leasesCommand, parse: ({ stdout }) => parseLeases(stdout) } as Probe<Lease[]>,
   neighbours: { command: "ip -4 neigh show 2>/dev/null || true", parse: ({ stdout }) => parseNeighbours(stdout) } as Probe<Neighbour[]>,
+};
+const noTables = {
+  leases: { command: "true", parse: () => [] } as Probe<Lease[]>,
+  neighbours: { command: "true", parse: () => [] } as Probe<Neighbour[]>,
 };
 
 export type Located = {
@@ -120,6 +126,8 @@ export type Located = {
   schema: DeviceSchema;
   macs: string[];
   hostKey?: { type: string; key: string };
+  /** The router's tables, read with the rest (the router only). */
+  tables?: RouterTables;
 };
 
 export type NotLocated = { hostname: string; error: string };
@@ -164,7 +172,8 @@ const tryAddress = async (
   address: string,
   facts: DeviceFacts | undefined,
   pin: HostKey | undefined,
-  platform: Platform
+  platform: Platform,
+  withTables: boolean
 ): Promise<Located> => {
   const at = { ...deviceConfig, ipaddr: address } as ONCDeviceConfig;
   const file = sshConnectOptions({ deviceConfig: at, platform }).knownHostsFile!;
@@ -177,11 +186,17 @@ const tryAddress = async (
     ...(pin ? { hostKey: pin } : {}),
   });
   try {
-    const schema = await getDeviceSchema({ deviceConfig: at, ssh: session });
+    // All in one round trip (a whole SSH client process under QuickJS).
+    const read = await runProbes(session, {
+      ...deviceSchemaProbes,
+      macs: macsProbe,
+      answeredOn,
+      ...(withTables ? routerTables : noTables),
+    });
+    const schema = deviceSchemaOf(deviceConfig.hostname, read);
     if (facts && schema.name !== facts.schema.name) {
       throw new Error(`${address} is a ${schema.model ?? schema.name}, not ${deviceConfig.hostname}`);
     }
-    const read = await runProbes(session, { macs, answeredOn });
     // Its key: the pinned one, or the one just trusted on first use.
     const key = pin ?? knownKey(platform, file, address);
     return {
@@ -194,6 +209,7 @@ const tryAddress = async (
       schema,
       macs: read.macs,
       ...(key ? { hostKey: { type: key.type, key: key.key } } : {}),
+      ...(withTables ? { tables: { leases: read.leases, neighbours: read.neighbours } } : {}),
     };
   } catch (e) {
     session.dispose();
@@ -206,7 +222,8 @@ const locate = async (
   deviceConfig: ProvisionableDevice,
   candidates: Candidate[],
   facts: DeviceFacts | undefined,
-  platform: Platform
+  platform: Platform,
+  withTables = false
 ): Promise<Located | NotLocated> => {
   const failures: string[] = [];
   for (const { address, why, configured } of candidates) {
@@ -227,7 +244,7 @@ const locate = async (
       continue;
     }
     try {
-      return await tryAddress(deviceConfig, address, facts, pin, platform);
+      return await tryAddress(deviceConfig, address, facts, pin, platform, withTables);
     } catch (e) {
       failures.push(`${address} (${why}): ${(e as Error).message}`);
     }
@@ -252,19 +269,12 @@ export const locateEach = ({
 }): Promise<Located | NotLocated>[] => {
   const router = devices.find((d) => d.tags?.role === "router");
   const routerFound = router
-    ? locate(router, candidatesFor({ deviceConfig: router, facts: facts[router.hostname] }), facts[router.hostname], platform)
+    ? locate(router, candidatesFor({ deviceConfig: router, facts: facts[router.hostname] }), facts[router.hostname], platform, true)
     : Promise.resolve(undefined);
-  const tables = routerFound.then((found) =>
-    found && "session" in found
-      ? runProbes(found.session, routerTables).catch(() => ({ leases: [], neighbours: [] }))
-      : { leases: [] as Lease[], neighbours: [] as Neighbour[] }
-  );
-  // The router is handed over only once its tables are read, so its caller
-  // cannot close the session under that read.
-  const routerReady = tables.then(() => routerFound) as Promise<Located | NotLocated>;
+  const tables = routerFound.then((found): RouterTables => (found && "session" in found && found.tables) || { leases: [], neighbours: [] });
   return devices.map((d) =>
     d === router
-      ? routerReady
+      ? (routerFound as Promise<Located | NotLocated>)
       : tables.then((t) => locate(d, candidatesFor({ deviceConfig: d, facts: facts[d.hostname], ...t }), facts[d.hostname], platform))
   );
 };

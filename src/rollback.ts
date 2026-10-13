@@ -32,7 +32,17 @@ export const runPaths = (runId: string) => ({
   bootDir: `${bootRollbackRoot}/${runId}`,
   /** Written once every `uci commit` succeeded: a commit the link dropped during is told from a whole one. */
   committedFlag: `/tmp/onc-committed-${runId}`,
+  /** Written by the watchdog once the old config is restored and reloaded: only then does reaching the device mean it recovered. */
+  restoredFlag: `/tmp/onc-restored-${runId}`,
+  /** Left by the watchdog as it stands down on being confirmed: a disarm repeated over a new session still reads "disarmed". */
+  disarmedFlag: `/tmp/onc-disarmed-${runId}`,
 });
+
+/** Everything a run leaves in /tmp, for the watchdog to remove as it exits. */
+const runFiles = (runId: string) => {
+  const { rollbackDir, confirmFlag, recoveredFlag, committedFlag, restoredFlag, watchdogPath, pidFile, sleepPidFile } = runPaths(runId);
+  return [rollbackDir, confirmFlag, recoveredFlag, committedFlag, restoredFlag, watchdogPath, pidFile, sleepPidFile].join(" ");
+};
 
 const bootRollbackRoot = "/etc/onc/rollback";
 
@@ -153,7 +163,8 @@ export const armWatchdogCommands = ({
     sleepPidFile,
     recoveredFlag,
     bootDir,
-    committedFlag,
+    restoredFlag,
+    disarmedFlag,
   } = runPaths(runId);
   const filesArchive = `${rollbackDir}/files.tar`;
   // Derived rather than hardcoded, for the same reason the file writer derives
@@ -198,7 +209,7 @@ export const armWatchdogCommands = ({
       // run can end the wait early (rollBackNowCommand) and have the rollback
       // below start immediately rather than when the window runs out.
       `sleep ${timeoutSeconds} & echo $! > ${sleepPidFile}; wait $!`,
-      `if [ -f ${confirmFlag} ]; then rm -rf ${rollbackDir} ${bootDir} ${confirmFlag} ${recoveredFlag} ${committedFlag} ${watchdogPath} ${pidFile} ${sleepPidFile}; exit 0; fi`,
+      `if [ -f ${confirmFlag} ]; then rm -rf ${bootDir} ${runFiles(runId)}; touch ${disarmedFlag}; exit 0; fi`,
       // Past the point of no return: a disarm from now on must not kill this
       // (half a restore is worse than either config), and must say it fired.
       `touch ${rollbackDir}/restoring`,
@@ -211,6 +222,12 @@ export const armWatchdogCommands = ({
       `if cp -a ${rollbackDir}/config /etc/config.onc-new; then mv /etc/config /etc/config.onc-failed && mv /etc/config.onc-new /etc/config; else logger -t onc "rollback: could not stage the config snapshot, leaving current config in place"; fi`,
       // Restored: a restart from here on boots the old config anyway.
       `rm -rf ${bootDir}`,
+      // Drop staged UCI changes now, before any package step: every UCI read
+      // applies the deltas in /tmp/.uci on top of the restored files, and a
+      // package's postinst ends in a bare `uci commit` (default_postinst, for
+      // one shipping uci-defaults), which would commit the abandoned config
+      // straight over the restored one.
+      ...revertCommands,
       // Files this run created did not exist before, so remove them.
       ...filesToDelete.map((path) => `rm -f ${shellQuote(path)}`),
       // Files that existed before are put back as they were.
@@ -233,11 +250,10 @@ export const armWatchdogCommands = ({
       // Reinstall from the .apk files staged before anything was removed.
       // --repositories-file /dev/null keeps this entirely offline.
       `if ls ${rollbackDir}/packages/*.apk >/dev/null 2>&1; then apk add --allow-untrusted --repositories-file /dev/null ${rollbackDir}/packages/*.apk >/dev/null 2>&1 || logger -t onc "rollback could not reinstall removed packages"; fi`,
-      // Drop staged UCI changes too. The restore above only puts the files
-      // back, but every UCI read applies the deltas in /tmp/.uci on top, so
-      // without this the reload below reads the new values straight back out
-      // and re-applies exactly the config being rolled back.
-      ...revertCommands,
+      // Boot links back as they were, whether it reloads or reboots: /etc/config
+      // does not hold them. Extracted beside it and swapped, so a failed
+      // extract never leaves the device without one.
+      `if [ -f ${rollbackDir}/rc.d.tar ] && rm -rf /etc/rc.d.onc-new && mkdir /etc/rc.d.onc-new && tar -xf ${rollbackDir}/rc.d.tar -C /etc/rc.d.onc-new; then rm -rf /etc/rc.d.onc-old; mv /etc/rc.d /etc/rc.d.onc-old && mv /etc/rc.d.onc-new /etc/rc.d && rm -rf /etc/rc.d.onc-old; fi`,
       `sync`,
       ...(mode === "reboot"
         ? [`reboot`]
@@ -247,10 +263,7 @@ export const armWatchdogCommands = ({
             // fires the triggers for every package whose config changed.
             `reload_config`,
             ...(reloadWireless ? [`wifi reload`] : []),
-            // Boot links back as they were, and this run's services running
-            // (or not) as they were: /etc/config holds neither.
-            // Extracted beside it and swapped, so a failed extract never leaves the device without one.
-            `if [ -f ${rollbackDir}/rc.d.tar ] && rm -rf /etc/rc.d.onc-new && mkdir /etc/rc.d.onc-new && tar -xf ${rollbackDir}/rc.d.tar -C /etc/rc.d.onc-new; then rm -rf /etc/rc.d.onc-old; mv /etc/rc.d /etc/rc.d.onc-old && mv /etc/rc.d.onc-new /etc/rc.d && rm -rf /etc/rc.d.onc-old; fi`,
+            // This run's services running (or not) as they were.
             ...(services.length
               ? [
                   `for s in ${services.map(shellQuote).join(" ")}; do [ -x "/etc/init.d/$s" ] || continue; if grep -qx "$s" ${rollbackDir}/running 2>/dev/null; then ${procdKnows} || "/etc/init.d/$s" start; else ! ${procdKnows} || "/etc/init.d/$s" stop; fi; done >/dev/null 2>&1; true`,
@@ -263,6 +276,7 @@ export const armWatchdogCommands = ({
                   `for s in ${restartAfterRestore.map(shellQuote).join(" ")}; do [ -x "/etc/init.d/$s" ] && "/etc/init.d/$s" restart >/dev/null 2>&1; done; true`,
                 ]
               : []),
+            `touch ${restoredFlag}`,
             // A reload is not proof the operator can reach the device again, so
             // wait for them to get back in and say so. Rebooting without this
             // check would make the reload pointless; skipping the reboot
@@ -271,7 +285,7 @@ export const armWatchdogCommands = ({
             `while [ $i -lt ${recoverSeconds} ]; do`,
             `  if [ -f ${recoveredFlag} ]; then`,
             `    logger -t onc "revert restored access, no reboot needed"`,
-            `    rm -rf ${rollbackDir} ${confirmFlag} ${recoveredFlag} ${committedFlag} ${watchdogPath} ${pidFile} ${sleepPidFile}`,
+            `    rm -rf ${runFiles(runId)}`,
             `    exit 0`,
             `  fi`,
             `  sleep 5`,
@@ -293,6 +307,16 @@ export const armWatchdogCommands = ({
     `chmod 0755 ${watchdogPath}`,
     `setsid ${watchdogPath} </dev/null >/dev/null 2>&1 &`,
   ];
+};
+
+/**
+ * Undo an arm that failed partway: its snapshots (the one on flash would
+ * otherwise be restored at some later boot), its staged packages (in RAM), and
+ * its watchdog, if it started, stood down.
+ */
+export const dropArmCommand = (runId: string) => {
+  const { rollbackDir, bootDir, confirmFlag, pidFile } = runPaths(runId);
+  return `rm -rf ${bootDir} ${rollbackDir}; [ -f ${pidFile} ] && touch ${confirmFlag}; ${rollBackNowCommand(runId)}`;
 };
 
 /** Clear and recreate the rollback directory before anything is staged into it. */

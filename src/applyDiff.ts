@@ -5,6 +5,8 @@
 // managed files. Read only while the Apply page is open, held in memory,
 // never stored. Secret options (Wi-Fi keys, passwords) are compared but their
 // values never leave this module.
+import { getPackagesToRemove, packagesToAdd } from "./getDeviceScript";
+import { isSecretOption } from "./secretOptions";
 import { readFacts } from "./deviceFacts";
 import { installedPackages, managedFiles, Probe, runProbes, uciConfigs } from "./deviceProbes";
 import { managedFilesManifest } from "./getDeviceScript";
@@ -37,16 +39,6 @@ export type DeviceDiff =
     }
   /** Not reached: what it holds now is not known, so neither is the change. */
   | { hostname: string; error: string };
-
-/**
- * Options whose values are never shown. Matched broadly, since the device's
- * config holds packages' options this app does not know (802.11r's r0kh/r1kh
- * carry keys, WEP has key1-4, acme keeps API tokens in credentials): hiding
- * a harmless one only costs showing "(hidden)".
- */
-export const isSecret = (option: string) =>
-  // username: a PPPoE or VPN login is half the credential.
-  /key|secret|pass|psk|token|credential|r[01]kh|priv|auth(?!oritative)|user(name)?$/i.test(option);
 
 /** What the device holds after the apply: kept sections as they are, declared ones merged in or added. */
 export const configsAfter = ({
@@ -96,7 +88,7 @@ export const uciLines = (configs: UciConfigs) => {
   keyed(configs).forEach(({ key, section }) => {
     lines.set(key, { value: section.type, secret: false });
     Object.entries(section.options).forEach(([option, value]) =>
-      lines.set(`${key}.${option}`, { value: show(value), secret: isSecret(option) })
+      lines.set(`${key}.${option}`, { value: show(value), secret: isSecretOption(option) })
     );
   });
   return lines;
@@ -197,8 +189,8 @@ export const deviceDiff = ({
       ...diffLines(renamed(uciLines(now.config), pairs), uciLines(after)),
     ].sort((a, b) => a.key.localeCompare(b.key) || (a.renamedFrom ? -1 : 1)),
     packages: {
-      added: (state.packagesToInstall ?? []).map((p) => p.packageName).filter((p) => !now.installed.includes(p)),
-      removed: (state.packagesToUninstall ?? []).filter((p) => now.installed.includes(p)),
+      added: packagesToAdd({ state, installedPackages: now.installed }).map((p) => p.packageName),
+      removed: getPackagesToRemove({ state, installedPackages: now.installed }),
     },
     files: [
       ...files.flatMap((f): FileChange[] =>

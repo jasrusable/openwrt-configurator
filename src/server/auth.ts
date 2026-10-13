@@ -11,10 +11,15 @@ import { HttpRequest, Platform } from "../platform";
 export type Auth = {
   /** Whether the request carries a live session allowed to change settings. */
   check: (request: HttpRequest) => Promise<boolean>;
-  /** A new session for the root password, or undefined when it is wrong. */
-  login: (password: string) => Promise<string | undefined>;
+  /**
+   * A new session for the root password; refused when it is wrong, or when
+   * root has no password at all (stock OpenWrt), as rpcd then takes any.
+   */
+  login: (password: string) => Promise<LoginResult>;
   logout: (request: HttpRequest) => Promise<void>;
 };
+
+export type LoginResult = { sid: string } | { refused: "wrong" | "unprotected" };
 
 export const sessionCookie = "onc_session";
 
@@ -66,9 +71,20 @@ export const rpcdAuth = (platform: Pick<Platform, "run">): Auth => {
       return access?.access === true;
     },
     login: async (password) => {
-      const data = await session("login", { username: "root", password, timeout: sessionSeconds });
-      const sid = data?.ubus_rpc_session;
-      return typeof sid === "string" && sessionId.test(sid) ? sid : undefined;
+      const sessionFor = async (attempt: string) => {
+        const sid = (await session("login", { username: "root", password: attempt, timeout: sessionSeconds }))
+          ?.ubus_rpc_session;
+        return typeof sid === "string" && sessionId.test(sid) ? sid : undefined;
+      };
+      // A password no one chose that still gets in: root has none, and so
+      // anyone's would (verified on 25.12.5).
+      const anyone = await sessionFor(`onc-${Math.random().toString(36).slice(2)}${Date.now()}`);
+      if (anyone) {
+        await session("destroy", { ubus_rpc_session: anyone });
+        return { refused: "unprotected" };
+      }
+      const sid = await sessionFor(password);
+      return sid ? { sid } : { refused: "wrong" };
     },
     logout: async (request) => {
       const sid = sessionOf(request);

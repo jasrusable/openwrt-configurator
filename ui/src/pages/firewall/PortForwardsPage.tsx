@@ -1,4 +1,4 @@
-import { Group, Text } from "@mantine/core";
+import { Text } from "@mantine/core";
 import { IconArrowBarToRight } from "@tabler/icons-react";
 import { useDraftValue } from "../../form/draft";
 import { ItemIcon, ItemName } from "../../kit/layout";
@@ -11,12 +11,7 @@ import {
 } from "../../form/fields";
 import { defineList, ListPage } from "../../form/ListPage";
 import { Section } from "../../kit/layout";
-
-const protocolOptions = [
-  { value: "tcp+udp" as const, label: "TCP and UDP" },
-  { value: "tcp" as const, label: "TCP" },
-  { value: "udp" as const, label: "UDP" },
-];
+import { portProtocolOptions } from "../../../../src/intent/labels";
 
 /** Traffic let in from the internet, grey while the forward is off. */
 const ForwardIcon = ({ index }: { index: number }) => {
@@ -79,68 +74,39 @@ const forwards = defineList({
         </Text>
       ),
     },
-    {
-      header: "",
-      cell: (i) => (
-        <Group>
-          <Value
-            name={`firewall.port_forwards.${i}.enabled`}
-            format={(on) =>
-              !on && (
-                <Text size="xs" c="dimmed">
-                  Off
-                </Text>
-              )
-            }
-          />
-        </Group>
-      ),
-    },
   ],
   editor: (i) => (
     <>
       <Section>
-        <TextField name={`firewall.port_forwards.${i}.name`} label="Name" />
+        <TextField name={`firewall.port_forwards.${i}.name`} />
         <SwitchField
           name={`firewall.port_forwards.${i}.enabled`}
-          label="Enabled"
         />
       </Section>
       <Section title="Forward">
         <SegmentedField
           name={`firewall.port_forwards.${i}.protocol`}
-          label="Protocol"
-          options={protocolOptions}
+          options={portProtocolOptions}
         />
         <TextField
           name={`firewall.port_forwards.${i}.port`}
-          label="External port"
-          description="A port or a range, like 27015 or 6881-6889."
         />
         <TextField
           name={`firewall.port_forwards.${i}.to.address`}
-          label="To address"
-          description="A device on one of your networks."
           placeholder="10.0.0.50"
         />
         <TextField
           name={`firewall.port_forwards.${i}.to.port`}
-          label="To port"
-          description="Empty: the same as the external port."
           placeholder="Same"
         />
       </Section>
       <Section title="Advanced">
         <TagsField
           name={`firewall.port_forwards.${i}.from_addresses`}
-          label="Only from"
-          description="Empty: from anywhere."
           placeholder="203.0.113.7"
         />
         <SwitchField
           name={`firewall.port_forwards.${i}.reflection`}
-          label="NAT loopback"
-          description="Reachable from inside, by your public address, too."
         />
       </Section>
     </>

@@ -52,12 +52,12 @@ test("an older switch (swconfig), under any switch name; radios from UCI where b
   const c50 = facts("swconfig-archer-c50", read_("swconfig-archer-c50.uci-wireless.json"));
   t.true(c50.sw_config);
   t.deepEqual(c50.ports, [
-    { name: "eth0", default_role: "wan" },
-    { name: "eth1", default_role: "lan" },
-    { name: "eth2", default_role: "lan" },
-    { name: "eth3", default_role: "lan" },
-    { name: "eth4", default_role: "lan" },
-    { name: "eth6", sw_config_cpu_name: "eth0" },
+    { name: "port0", switch_port: 0, default_role: "wan" },
+    { name: "port1", switch_port: 1, default_role: "lan" },
+    { name: "port2", switch_port: 2, default_role: "lan" },
+    { name: "port3", switch_port: 3, default_role: "lan" },
+    { name: "port4", switch_port: 4, default_role: "lan" },
+    { name: "port6", switch_port: 6, sw_config_cpu_name: "eth0" },
   ]);
   t.deepEqual(
     c50.radios?.map((r) => [r.name, r.band, r.path]),
@@ -69,6 +69,19 @@ test("an older switch (swconfig), under any switch name; radios from UCI where b
   const renamed = read_("swconfig-archer-c50.board.json");
   renamed.switch = { rtl8367: renamed.switch.switch0 };
   t.is(parseDeviceFacts({ board: renamed, system: read_("swconfig-archer-c50.system.json") }).ports?.length, 6);
+});
+
+test("a switch board with the WAN on a NIC of its own: that NIC a port beside the switch's", (t) => {
+  const c7 = facts("swconfig-wan-nic");
+  t.true(c7.sw_config);
+  t.deepEqual(c7.ports, [
+    { name: "port0", switch_port: 0, sw_config_cpu_name: "eth1" },
+    { name: "port2", switch_port: 2, default_role: "lan" },
+    { name: "port3", switch_port: 3, default_role: "lan" },
+    { name: "port4", switch_port: 4, default_role: "lan" },
+    { name: "port5", switch_port: 5, default_role: "lan" },
+    { name: "eth0", default_role: "wan" },
+  ]);
 });
 
 test("one wiphy with several radios: one each, told apart by radio; a phy with its own name by phy", (t) => {

@@ -12,6 +12,4 @@ export const networkInterfaceSchema = z
   })
   .passthrough();
 
-export const oncNetworkInterfaceSchema = networkInterfaceSchema.extend({
-  name: nameValidation.optional(),
-});
+export const oncNetworkInterfaceSchema = networkInterfaceSchema;

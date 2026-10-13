@@ -59,9 +59,11 @@ export const persistDeviceReads = (queryClient: QueryClient) => {
   });
   queryClient.getQueryCache().subscribe((event) => {
     const queryKey = event.query.queryKey;
-    if (event.type !== "updated" || typeof queryKey[0] !== "string" || !kept.includes(queryKey[0])) return;
-    const { data, dataUpdatedAt, status } = event.query.state;
-    if (status !== "success" || data === undefined) return;
+    // Only a new read: not each fetch starting or failing, which would rewrite it all again.
+    if (event.type !== "updated" || event.action.type !== "success") return;
+    if (typeof queryKey[0] !== "string" || !kept.includes(queryKey[0])) return;
+    const { data, dataUpdatedAt } = event.query.state;
+    if (data === undefined) return;
     // Older reads are dropped, not only skipped: nothing of the network lingers past a day.
     const fresh = Object.fromEntries(Object.entries(read()).filter(([, v]) => Date.now() - v.updatedAt < maxAgeMs));
     write({ ...fresh, [queryKey.join(":")]: { data, updatedAt: dataUpdatedAt } });

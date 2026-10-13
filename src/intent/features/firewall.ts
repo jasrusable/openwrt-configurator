@@ -3,10 +3,10 @@
 // network's access, OpenWrt's stock rules, the router's services for
 // networks that get only those, then the user's rules in their order, and
 // port forwards (DNAT) into the zone of their target's network.
-import { portsApply } from "../choices";
-import { anywhere, fw4Ports, internet, isIpv6, router, Rule } from "../firewall";
+import { anywhere, fw4Ports, internet, isIpv6, portsApply, router, Rule } from "../firewall";
 import { ipv6Interface } from "../connections";
-import { Feature, onRouter } from "../fragment";
+import { networkHolding } from "../addresses";
+import { Feature, mainNetwork, onRouter, routerOnly } from "../fragment";
 import { named } from "../names";
 
 type Section = Record<string, unknown>;
@@ -93,9 +93,7 @@ const userRule = (rule: Rule): Section => {
 export const firewall: Feature = (intent) => {
   const { rules, port_forwards } = intent.firewall;
   const { networks } = intent;
-  const routerOnly = (sections: Section[]) =>
-    sections.map((section) => ({ ".if": onRouter, ...section }));
-  const main = networks.find((n) => n.vlan === undefined) ?? networks[0];
+  const main = mainNetwork(intent);
   // The interfaces the internet connection makes (features/internet.ts).
   const wanInterfaces = intent.internet.lines.flatMap((c, i) =>
     i === 0 && c.ipv6.enabled ? [c.id, ipv6Interface(c)] : [c.id]
@@ -113,11 +111,6 @@ export const firewall: Feature = (intent) => {
     const tunnel = intent.vpn.providers.find((t) => t.id === n.access.via);
     return tunnel && n.access.internet ? [{ network: n, tunnel }] : [];
   });
-  // The network an address is on: where a port forward lands.
-  const networkOf = (address: string) => {
-    const prefix = address.split(".").slice(0, 3).join(".");
-    return networks.find((n) => n.subnet.startsWith(`${prefix}.`))?.id;
-  };
 
   return {
     // fw4 loads its rules and exits: enabled, with nothing left running.
@@ -215,7 +208,7 @@ export const firewall: Feature = (intent) => {
               src_dport: forward.port,
               proto: forward.protocol === "tcp+udp" ? ["tcp", "udp"] : [forward.protocol],
               ...(forward.from_addresses?.length ? { src_ip: forward.from_addresses } : {}),
-              dest: networkOf(forward.to.address),
+              dest: networkHolding(networks, forward.to.address)?.id,
               dest_ip: forward.to.address,
               dest_port: forward.to.port ?? forward.port,
               family: "ipv4",

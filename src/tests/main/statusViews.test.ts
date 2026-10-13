@@ -1,14 +1,12 @@
 import test from "ava";
-import { readFileSync } from "fs";
-import { join } from "path";
+import { sampleIntent } from "../helpers/fixtures";
 import { DeviceStatus, parseHeardBy, parseTraffic } from "../../status/device";
 import { activityOf, attentionOf, clientsOf, devicesOf, internetCountersOf, keepActivity, restartable } from "../../status/views";
 import { compileIntent } from "../../intent/compile";
 import { neighboursOf, parseSpeed, parseSurvey } from "../../status/actions";
-import { intentSchema } from "../../intent/schema";
 
 const sample = () =>
-  intentSchema.parse(JSON.parse(readFileSync(join(__dirname, "../../../sampleConfigs/intent.json"), "utf8")));
+  sampleIntent();
 
 const device = (hostname: string, parts: Partial<DeviceStatus>): DeviceStatus => ({
   hostname,

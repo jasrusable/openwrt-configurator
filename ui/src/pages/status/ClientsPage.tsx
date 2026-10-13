@@ -29,7 +29,8 @@ import { useDraft, useDraftValue } from "../../form/draft";
 import { AreaChart, SignalBars, Tile } from "../../kit/charts";
 import { EmptyState, ItemIcon, Section, SettingRow, SettingsPage } from "../../kit/layout";
 import { bytes } from "../../kit/format";
-import { BandBadge, liveLine } from "./shared";
+import { BandBadge, liveLine, unread } from "./shared";
+import { bandLabels } from "../../../../src/intent/labels";
 
 /** What a device probably is, from the name it gives: only for its icon. */
 const kinds: [RegExp, typeof IconDevices, string][] = [
@@ -72,12 +73,12 @@ const ClientRow = ({ client }: { client: ClientView }) => {
   const draft = useDraft();
   const navigate = useNavigate();
   const intent: Intent = useDraftValue();
-  const network = intent.networks.findIndex((n) => n.name === client.network);
+  const network = intent.networks.findIndex((n) => n.id === client.network);
   // A fixed address: its current one, under its name, in the draft (Save shows it).
   const reserve = () => {
     const n = intent.networks[network];
     const name = (client.name ?? `device-${client.mac.slice(-5).replace(":", "")}`).toLowerCase().replace(/[^a-z0-9-]/g, "-");
-    draft.set(`networks.${network}.dhcp.reservations` as never, [...n.dhcp.reservations, { name, mac: client.mac, address: client.ipv4! }] as never);
+    draft.set(`networks.${network}.dhcp.reservations`, [...n.dhcp.reservations, { name, mac: client.mac, address: client.ipv4! }]);
     navigate(`/networks/${network}`);
   };
   const [, icon, color] = kindOf(client);
@@ -92,7 +93,7 @@ const ClientRow = ({ client }: { client: ClientView }) => {
               {client.name ?? client.mac}
             </Text>
             <Text size="xs" c="dimmed" truncate>
-              {[client.ipv4, client.network, how(client)].filter(Boolean).join(" · ")}
+              {[client.ipv4, intent.networks[network]?.name, how(client)].filter(Boolean).join(" · ")}
             </Text>
           </Stack>
         </Group>
@@ -141,7 +142,7 @@ export const ClientsPage = () => {
   const all = status.data?.clientList ?? [];
   const online = all.filter((c) => c.state === "online");
   const wifi = online.filter((c) => c.connection.kind === "wifi");
-  const bands = ["2.4 GHz", "5 GHz", "6 GHz"]
+  const bands = Object.values(bandLabels)
     .map((b) => [b, wifi.filter((c) => c.connection.kind === "wifi" && c.connection.band === b).length] as const)
     .filter(([, n]) => n);
   // Like with like: the router's monthly counts where it keeps them, else the access points'.
@@ -158,7 +159,7 @@ export const ClientsPage = () => {
     )
     .sort(sorts[sort]);
   return (
-    <SettingsPage title="Clients" description={liveLine(intent.system.name, status.dataUpdatedAt, status.isFetching, !!status.data)}>
+    <SettingsPage title="Clients" description={liveLine(intent.system.name, status)}>
       <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
         <Tile label="Online" value={status.data ? online.length : "—"} color="cyan" sub={status.data ? `${all.length} known` : undefined}>
           <AreaChart series={[history]} colors={["cyan"]} height={28} />
@@ -179,7 +180,7 @@ export const ClientsPage = () => {
       </SimpleGrid>
       <Group gap="sm">
         <TextInput placeholder="Name, address or MAC" leftSection={<IconSearch size={14} />} value={search} onChange={(e) => setSearch(e.currentTarget.value)} w={220} />
-        <Select placeholder="Every network" clearable data={intent.networks.map((n) => n.name)} value={network} onChange={setNetwork} w={160} />
+        <Select placeholder="Every network" clearable data={intent.networks.map((n) => ({ value: n.id, label: n.name || "Unnamed" }))} value={network} onChange={setNetwork} w={160} />
         <SegmentedControl size="xs" value={which} onChange={setWhich} data={[{ value: "online", label: "Online" }, { value: "all", label: "All" }]} />
         <Select
           size="xs"
@@ -196,7 +197,7 @@ export const ClientsPage = () => {
       </Group>
       <Section>
         {shown.length === 0 ? (
-          <EmptyState icon={IconDevices}>{status.data ? "No devices match." : "Reading the network…"}</EmptyState>
+          <EmptyState icon={IconDevices}>{status.data ? "No devices match." : unread(status, "Reading the network…")}</EmptyState>
         ) : (
           shown.map((c) => <ClientRow key={c.mac} client={c} />)
         )}

@@ -12,6 +12,7 @@ import {
   sha256File,
   writeFileAtomic,
   writeTextFile,
+  appendTextFile,
 } from "./files";
 import { http } from "./http";
 import { removeTmpDir, resolveArgv, spawn } from "./process";
@@ -32,6 +33,7 @@ export const qjsPlatform: Platform = {
 
   readTextFile,
   writeTextFile,
+  appendTextFile,
   mkdirp,
   fileMode,
   removeFile,

@@ -4,7 +4,7 @@
 // settings: what does not match them is shown, never hidden.
 import { meshMtu } from "../../../src/intent/features/mesh";
 import { where } from "../../../src/intent/places";
-import { weakMeshLinkMbps } from "../../../src/status/network";
+import { meshNodeState, peerState } from "../../../src/status/views";
 import { Anchor, Box, Button, Group, SimpleGrid, Stack, Text } from "@mantine/core";
 import { IconAccessPoint, IconChevronRight, IconRouter, IconWorld } from "@tabler/icons-react";
 import { ReactNode } from "react";
@@ -24,10 +24,9 @@ import { AreaChart, Tile } from "../kit/charts";
 import { ItemIcon, Section, SettingRow, SettingsPage, StatusDot } from "../kit/layout";
 import { applyStatus } from "../provision/status";
 import { AttentionSection, lineState, liveLine } from "./status/shared";
+import { bandLabels, lineTypeLabels, networkTypeLabels, shownName } from "../../../src/intent/labels";
 
-const connections: Record<string, string> = { dhcp: "DHCP", pppoe: "PPPoE", static: "Static IP" };
 const providers: Record<string, string> = { cloudflare: "Cloudflare", google: "Google", quad9: "Quad9" };
-const types: Record<string, string> = { home: "Home", guest: "Guest", iot: "IoT", custom: "Custom" };
 
 const Link = ({ to, children }: { to: string; children: ReactNode }) => {
   const navigate = useNavigate();
@@ -164,7 +163,7 @@ const Tiles = ({ intent }: { intent: Intent }) => {
   const reachedCount = views.filter((d) => d.reachable).length;
   const hottest = Math.max(-Infinity, ...views.flatMap((d) => (d.temperature !== undefined ? [d.temperature] : [])));
   const onAir = live?.ssids.filter((s) => s.accessPoints.length > 0).length ?? 0;
-  const bands = ["2.4 GHz", "5 GHz", "6 GHz"]
+  const bands = Object.values(bandLabels)
     .map((b) => [b, wifi.filter((c) => c.connection.kind === "wifi" && c.connection.band === b).length] as const)
     .filter(([, n]) => n);
   return (
@@ -219,7 +218,7 @@ export const OverviewPage = () => {
   return (
     <SettingsPage
       title="Overview"
-      description={liveLine(intent.system.name, status.dataUpdatedAt, status.isFetching, !!live)}
+      description={liveLine(intent.system.name, status)}
     >
       <AttentionSection items={live?.attention} />
       {/* Saved but not applied is in Needs attention; up to date says nothing. */}
@@ -253,7 +252,7 @@ export const OverviewPage = () => {
                   .join(" · ") || undefined
               }
             >
-              <State up={dot}>{word ?? connections[c.type]}</State>
+              <State up={dot}>{word ?? lineTypeLabels[c.type]}</State>
             </SettingRow>
           );
         })}
@@ -282,7 +281,7 @@ export const OverviewPage = () => {
             .map((d) => {
               const node = live.mesh!.find((m) => m.name === d.name);
               const links = node?.links ?? [];
-              const best = Math.max(0, ...links.map((l) => l.throughput));
+              const state = meshNodeState(node);
               return (
                 <SettingRow
                   key={d.name}
@@ -306,17 +305,7 @@ export const OverviewPage = () => {
                         : undefined
                   }
                 >
-                  <State up={links.length ? best >= weakMeshLinkMbps && !node?.fragmentsOverCable && !node?.dropsLargeFrames : false}>
-                    {node?.dropsLargeFrames
-                      ? "Cable drops large packets"
-                      : links.length
-                      ? best < weakMeshLinkMbps
-                        ? "Weak link"
-                        : node?.fragmentsOverCable
-                          ? "Linked, splitting over cable"
-                          : "Linked"
-                      : "No link"}
-                  </State>
+                  <State up={state.good}>{state.word}</State>
                 </SettingRow>
               );
             })}
@@ -328,17 +317,18 @@ export const OverviewPage = () => {
           {[
             ...live.vpn.clients.map((c) => ({ ...c, kind: "Remote client" })),
             ...live.vpn.sites.map((s) => ({ ...s, kind: "Linked site" })),
-          ].map(({ name, since, kind }) => (
-            <SettingRow
-              key={`${kind}-${name}`}
-              label={name}
-              description={`${kind} · ${since === undefined ? "never connected" : since < 180 ? "connected" : `last seen ${duration(since)} ago`}`}
-            >
-              <State up={since !== undefined && since < 180 ? true : undefined}>
-                {since !== undefined && since < 180 ? "Connected" : "Away"}
-              </State>
-            </SettingRow>
-          ))}
+          ].map(({ name, since, kind }) => {
+            const peer = peerState(since);
+            return (
+              <SettingRow
+                key={`${kind}-${name}`}
+                label={name}
+                description={`${kind} · ${peer.detail ?? `last seen ${duration(since!)} ago`}`}
+              >
+                <State up={peer.connected || undefined}>{peer.word}</State>
+              </SettingRow>
+            );
+          })}
           {live.vpn.tunnels.map((t) => (
             <SettingRow key={`tunnel-${t.name}`} label={t.name} description="VPN provider">
               <State up={t.up}>{t.up ? "Up" : "Down"}</State>
@@ -353,8 +343,8 @@ export const OverviewPage = () => {
           return (
             <SettingRow
               key={network.id}
-              label={network.name}
-              description={[network.subnet, types[templateOf(intent.networks, i)], now?.up === false ? "not up on the router" : undefined]
+              label={shownName(network.name)}
+              description={[network.subnet, networkTypeLabels[templateOf(intent.networks, i)], now?.up === false ? "not up on the router" : undefined]
                 .filter(Boolean)
                 .join(" · ")}
             >

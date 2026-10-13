@@ -2,8 +2,7 @@
 // keep themselves fresh: a page that shows them asks, as it opens, for the
 // stale ones to be read; the server decides which and how often (rests after
 // a failure, one read at a time). Never polled.
-import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { loadApplyDiff, loadDevices, refreshDevices } from "./api";
 
 const devicesKey = ["devices"] as const;
@@ -12,22 +11,30 @@ const diffKey = ["apply-diff"] as const;
 /** The facts as last read, without reading anything. */
 export const useDevices = () => useQuery({ queryKey: devicesKey, queryFn: loadDevices });
 
-/** The facts, and a read of the stale ones as the page opens. */
+/**
+ * The facts, and a read of the stale ones as the page opens. A query, not a
+ * mutation, so pages asking at once share one read; keyed by which devices
+ * are stale, and asked again for the same ones only after the server's rest
+ * for a failed read (10 minutes), as a page opens.
+ */
 export const useFreshDevices = () => {
   const devices = useDevices();
   const queryClient = useQueryClient();
-  const refresh = useMutation({
-    mutationFn: refreshDevices,
-    onSuccess: (fresh) => {
+  const stale = devices.data?.stale ?? [];
+  const refresh = useQuery({
+    queryKey: ["devices-refresh", ...stale],
+    enabled: stale.length > 0,
+    staleTime: 10 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+    queryFn: async () => {
+      const fresh = await refreshDevices();
       queryClient.setQueryData(devicesKey, fresh);
-      queryClient.invalidateQueries({ queryKey: diffKey });
+      void queryClient.invalidateQueries({ queryKey: diffKey });
+      return fresh;
     },
   });
-  const due = (devices.data?.stale.length ?? 0) > 0;
-  useEffect(() => {
-    if (due && refresh.isIdle) refresh.mutate();
-  }, [due, refresh]);
-  return { ...devices, reading: refresh.isPending };
+  return { ...devices, reading: refresh.isFetching };
 };
 
 /**

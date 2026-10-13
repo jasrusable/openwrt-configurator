@@ -4,7 +4,7 @@ import { ActionIcon, Button, Group, Text, TextInput } from "@mantine/core";
 import { IconPlus, IconWorldWww, IconX } from "@tabler/icons-react";
 import { useNavigate } from "react-router";
 import { Intent } from "../../../src/intent/schema";
-import { useDraft, useDraftValue, useFieldError } from "../form/draft";
+import { useDraftList, useDraftValue, useFieldError } from "../form/draft";
 import {
   SelectField,
   SwitchField,
@@ -15,14 +15,14 @@ import {
 } from "../form/fields";
 import { DataTable } from "../kit/DataTable";
 import { EmptyState, Section, SettingsPage } from "../kit/layout";
+import { poolStart } from "../../../src/intent/features/network";
+import { shownName } from "../../../src/intent/labels";
 
 type DnsRecord = { name: string; address: string };
 
 const LocalNames = () => {
-  const draft = useDraft();
-  const records: DnsRecord[] = useDraftValue("dns.hosts") ?? [];
+  const records = useDraftList("dns.hosts");
   const domain: string = useDraftValue("dns.domain") ?? "lan";
-  const set = (next: DnsRecord[]) => draft.set("dns.hosts", next);
   return (
     <Section
       title="Local names"
@@ -32,24 +32,22 @@ const LocalNames = () => {
           variant="subtle"
           size="compact-sm"
           leftSection={<IconPlus size={14} />}
-          onClick={() => set([...records, { name: "", address: "" }])}
+          onClick={() => records.add({ name: "", address: "" })}
         >
           Add name
         </Button>
       }
     >
-      {records.length === 0 ? (
+      {records.items.length === 0 ? (
         <EmptyState icon={IconWorldWww}>No local names.</EmptyState>
       ) : (
-        records.map((record, i) => (
+        records.items.map((record, i) => (
           <RecordRow
             key={i}
             index={i}
             record={record}
-            onChange={(next) =>
-              set(records.map((old, j) => (j === i ? next : old)))
-            }
-            onRemove={() => set(records.filter((_, j) => j !== i))}
+            onChange={(next) => records.update(i, next)}
+            onRemove={() => records.remove(i)}
           />
         ))
       )}
@@ -122,7 +120,7 @@ const DhcpOverview = () => {
   const networks: Intent["networks"] = useDraftValue("networks") ?? [];
   const pool = (n: Intent["networks"][number]) => {
     const prefix = n.subnet.split(".").slice(0, 3).join(".");
-    return `${prefix}.${255 - n.dhcp.pool_size} – ${prefix}.254`;
+    return `${prefix}.${poolStart(n)} – ${prefix}.254`;
   };
   return (
     <Section
@@ -139,7 +137,7 @@ const DhcpOverview = () => {
             header: "Network",
             cell: (i) => (
               <Text size="sm" fw={500}>
-                {networks[i].name}
+                {shownName(networks[i].name)}
               </Text>
             ),
           },
@@ -235,13 +233,9 @@ export const DnsPage = () => (
     <Section>
       <TextField
         name="dns.domain"
-        label="Local domain"
-        description="Devices are reachable as name.domain."
       />
       <SwitchField
         name="dns.rebind_protection"
-        label="Rebind protection"
-        description="Stops web pages from reaching devices at home."
       />
     </Section>
     <LocalNames />

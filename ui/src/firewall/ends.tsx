@@ -2,6 +2,7 @@
 // to (a network, the internet, the router, anywhere), and how a rule reads.
 import { useDraftValue } from "../form/draft";
 import { anywhere, internet, router } from "../../../src/intent/firewall";
+import { protocolLabels } from "../../../src/intent/labels";
 import { Intent } from "../../../src/intent/schema";
 import { SelectField } from "../form/fields";
 import { IntentField } from "../form/IntentForm";
@@ -9,14 +10,6 @@ import { IntentField } from "../form/IntentForm";
 export const actionOptions = [
   { value: "allow" as const, label: "Allow" },
   { value: "block" as const, label: "Block" },
-];
-
-export const protocolOptions = [
-  { value: "tcp+udp" as const, label: "TCP and UDP" },
-  { value: "tcp" as const, label: "TCP" },
-  { value: "udp" as const, label: "UDP" },
-  { value: "icmp" as const, label: "ICMP" },
-  { value: "any" as const, label: "Any" },
 ];
 
 /** The networks by name, with the internet, anywhere, and (as a destination) the router. */
@@ -51,7 +44,7 @@ export const useRuleSummary = (rule?: Intent["firewall"]["rules"][number]) => {
   const protocol =
     rule.protocol === "any"
       ? "Anything"
-      : protocolOptions.find((p) => p.value === rule.protocol)?.label;
+      : protocolLabels[rule.protocol];
   const ports = rule.ports ? `, port ${rule.ports}` : "";
   return `${protocol} from ${end(rule.from, rule.from_addresses)} to ${end(rule.to, rule.to_addresses)}${ports}`;
 };

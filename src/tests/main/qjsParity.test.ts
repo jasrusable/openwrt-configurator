@@ -1,9 +1,9 @@
 import test from "ava";
+import { tempDir } from "../helpers/tempDir";
 import { spawnSync } from "child_process";
 import { createHash } from "crypto";
 import { buildSync } from "esbuild";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { parityReport } from "../helpers/parityReport";
 import { nodePlatform } from "../../platforms/node";
@@ -22,8 +22,7 @@ if (process.env.CI && !hasQjs) {
 }
 
 const root = join(__dirname, "../../..");
-const work = mkdtempSync(join(tmpdir(), "onc-parity-"));
-test.after.always(() => rmSync(work, { recursive: true, force: true }));
+const work = tempDir("parity");
 
 // The QuickJS side is built exactly as `npm run bundle` builds it.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -53,11 +52,11 @@ const bundle = (entry: string, platform: "node" | "neutral") => {
   return outfile;
 };
 
-const run = (command: string[], args: string[]) => {
+const run = (command: string[], args: string[], env: Record<string, string> = {}) => {
   const result = spawnSync(command[0], [...command.slice(1), ...args], {
     cwd: root,
     encoding: "utf8",
-    env: { ...process.env, NODE_PATH: join(root, "node_modules") },
+    env: { ...process.env, NODE_PATH: join(root, "node_modules"), ...env },
   });
   return {
     status: result.status,
@@ -95,7 +94,19 @@ writeFileSync(
   ])
 );
 
-const cases: [string, string[]][] = [
+// What uhttpd runs on a router: one request per process, from CGI variables.
+const ui = join(work, "ui");
+mkdirSync(ui);
+writeFileSync(join(ui, "index.html"), "<!doctype html><title>onc</title>\n");
+const cgi = (path: string): Record<string, string> => ({
+  REQUEST_METHOD: "GET",
+  PATH_INFO: path,
+  HTTP_X_ONC: "1",
+  REMOTE_ADDR: "10.254.0.9",
+});
+const cgiArgs = ["cgi", "sampleConfigs/intent.json", "--ui-dir", ui];
+
+const cases: [string, string[], Record<string, string>?][] = [
   ["help", ["--help"]],
   ["version", ["--version"]],
   ["command help", ["provision", "--help"]],
@@ -110,11 +121,14 @@ const cases: [string, string[]][] = [
     ["build-images", "src/tests/main/config.json", "--dry-run"],
   ],
   ["verify-images", ["verify-images", "--out", images]],
+  ["compile an intent", ["compile", "sampleConfigs/intent.json"]],
+  ["cgi: the UI's page", cgiArgs, cgi("/")],
+  ["cgi: the API without a login", cgiArgs, cgi("/api/intent")],
 ];
 
-for (const [name, args] of cases) {
+for (const [name, args, env] of cases) {
   qjsTest(`cli: ${name}`, (t) => {
-    t.deepEqual(run(cli!.qjs, args), run(cli!.node, args));
+    t.deepEqual(run(cli!.qjs, args, env), run(cli!.node, args, env));
   });
 }
 

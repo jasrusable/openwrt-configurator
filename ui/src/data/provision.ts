@@ -1,6 +1,7 @@
 // Server state for provisioning: polled while a run is in progress.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { loadProvision, startProvision } from "./api";
+import { intentKey } from "./intent";
 
 export const provisionKey = ["provision"] as const;
 
@@ -17,5 +18,8 @@ export const useStartProvision = () => {
   return useMutation({
     mutationFn: startProvision,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: provisionKey }),
+    // Refused, perhaps as the file changed elsewhere (409): read it again, so
+    // the next try carries its new version rather than failing until a reload.
+    onError: () => queryClient.invalidateQueries({ queryKey: intentKey }),
   });
 };

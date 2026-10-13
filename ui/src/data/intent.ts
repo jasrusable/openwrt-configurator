@@ -4,7 +4,7 @@ import { loadIntent, SaveError, saveIntent } from "./api";
 import { prefetchApplyDiff } from "./devices";
 import { provisionKey } from "./provision";
 
-const intentKey = ["intent"] as const;
+export const intentKey = ["intent"] as const;
 
 export const useIntent = () =>
   useQuery({ queryKey: intentKey, queryFn: loadIntent });

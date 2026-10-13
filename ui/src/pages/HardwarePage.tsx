@@ -14,17 +14,16 @@ import { Intent } from "../../../src/intent/schema";
 import { rescueAddress, rescueAfterMinutes, rescueSsid } from "../../../src/intent/features/mesh";
 import { AddHardwarePage } from "./AddHardwarePage";
 import { useNetworkStatus } from "../data/status";
-import { ago, bandsOf, duration, modelOf, portsOf } from "../facts";
+import { ago, bandsOf, duration, meshAbility, modelOf, portsOf } from "../facts";
 import { ItemIcon, ItemName, Section, SettingRow, StatusDot } from "../kit/layout";
+import { bandLabels } from "../../../src/intent/labels";
+import { channelsOf } from "../../../src/intent/radios";
 
 // Unset is automatic, so it is offered by `emptyLabel`, not listed here.
 const channels = (numbers: number[]) =>
   numbers.map((n) => ({ value: n, label: `Channel ${n}` }));
-const channels2g = channels([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
-const channels5g = channels([
-  36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132,
-  136, 140, 149, 153, 157, 161, 165,
-]);
+const channels2g = channels([...channelsOf["2g"]]);
+const channels5g = channels([...channelsOf["5g"]]);
 
 const roles = [
   { value: "router" as const, label: "Router", icon: IconRouter, color: "blue" },
@@ -57,10 +56,13 @@ const useFactsOf = (index: number) => {
  */
 const useOnline = (index: number) => {
   const name: string | undefined = useDraftValue(`hardware.${index}.name`);
-  const now = useNetworkStatus().data?.devices.find((d) => d.name === name);
+  const status = useNetworkStatus("devices");
+  const now = status.data?.devices.find((d) => d.name === name);
   const health = now?.health;
   return !now
-    ? { color: "gray" as const, label: "Checking…" }
+    ? status.error && !status.isFetching
+      ? { color: "gray" as const, label: "Not read", detail: (status.error as Error).message }
+      : { color: "gray" as const, label: "Checking…" }
     : health
     ? {
         color: "green" as const,
@@ -156,20 +158,16 @@ const UplinkSection = ({ index }: { index: number }) => {
   const facts = useDevices().data?.facts;
   const device = intent.hardware[index];
   if (!intent.wifi.mesh.enabled || device?.role !== "access-point") return null;
-  const radios = facts?.[device.name]?.schema.radios?.filter((r) => r.band === intent.wifi.mesh.band);
-  const cannot =
-    radios === undefined
-      ? undefined
-      : !radios.length
-        ? `It has no ${{ "2g": "2.4", "5g": "5", "6g": "6" }[intent.wifi.mesh.band]} GHz radio.`
-        : !radios.some((r) => r.mesh !== false)
-          ? "Its radio cannot mesh."
-          : undefined;
+  const cannot = {
+    unknown: undefined,
+    can: undefined,
+    "no-radio": `It has no ${bandLabels[intent.wifi.mesh.band]} radio.`,
+    cannot: "Its radio cannot mesh.",
+  }[meshAbility(facts?.[device.name]?.schema, intent.wifi.mesh.band)];
   return (
     <Section>
       <SegmentedField
         name={`hardware.${index}.uplink`}
-        label="Connected"
         options={[
           { value: "cable", label: "Cable" },
           { value: "mesh", label: "Mesh", disabled: !!cannot && device.uplink !== "mesh", reason: cannot },
@@ -192,7 +190,6 @@ const hardware = defineList({
     "Your router and access points.",
   addLabel: "Add hardware",
   newPage: <AddHardwarePage />,
-  newItem: () => ({ name: "", role: "access-point" as const, uplink: "cable" as const }),
   itemTitle: (i) => <Value name={`hardware.${i}.name`} fallback="New access point" />,
   empty: "No hardware yet.",
   columns: [
@@ -227,8 +224,8 @@ const hardware = defineList({
             name={`hardware.${i}`}
             format={(device) =>
               device?.role === "access-point"
-                ? `${channel(device.wifi?.channel?.["2g"])} · ${channel(
-                    device.wifi?.channel?.["5g"],
+                ? `${channel(device.radios?.["2g"]?.channel)} · ${channel(
+                    device.radios?.["5g"]?.channel,
                   )}`
                 : "—"
             }
@@ -242,19 +239,13 @@ const hardware = defineList({
       <Section>
         <TextField
           name={`hardware.${i}.name`}
-          label="Name"
-          description="Also its hostname."
         />
         <SegmentedField
           name={`hardware.${i}.role`}
-          label="Role"
-          description="The router runs the networks; access points broadcast Wi-Fi."
           options={roles}
         />
         <TextField
           name={`hardware.${i}.location`}
-          label="Location"
-          description="Where it is, for you: shown in LuCI too."
           placeholder="Living room"
         />
       </Section>
@@ -266,13 +257,13 @@ const hardware = defineList({
         >
           <SelectField
             name={`hardware.${i}.radios.2g.channel`}
-            label="2.4 GHz channel"
+            label={`${bandLabels["2g"]} channel`}
             options={channels2g}
             emptyLabel="Automatic"
           />
           <SelectField
             name={`hardware.${i}.radios.5g.channel`}
-            label="5 GHz channel"
+            label={`${bandLabels["5g"]} channel`}
             options={channels5g}
             emptyLabel="Automatic"
           />

@@ -25,6 +25,8 @@ import {
   disarmWatchdog,
   installedPackages as installedPackagesProbe,
   managedFiles as managedFilesProbe,
+  markRecovered,
+  missingFiles,
   notRunning,
   pendingChanges as pendingChangesProbe,
   removalCascade as removalCascadeProbe,
@@ -42,13 +44,16 @@ import {
   getPrepareCommands,
   getStageCommands,
   managedFilesManifest,
+  packagesToAdd,
   revertPendingCommands,
+  seededConfigPaths,
 } from "./getDeviceScript";
 import { OpenWrtState } from "./openWrtConfigSchema";
 import { Session } from "./platform";
 import { declaredConfigs, isKept, unmatchedKeeps, verifyConfigs } from "./uci";
 import {
   armWatchdogCommands,
+  dropArmCommand,
   prepareRollbackCommands,
   rollBackNowCommand,
   RollbackMode,
@@ -102,7 +107,6 @@ export type DeviceRun = DeviceRunOptions & {
   deadline?: number;
 };
 
-/** A phase failed. `committed`: whether this device's change had been committed. */
 /**
  * A failing command, as the log says it: its first line, before any heredoc
  * (a uci batch's values, a file's content: Wi-Fi keys, VPN keys) and short.
@@ -111,24 +115,31 @@ export type DeviceRun = DeviceRunOptions & {
 export const commandLabel = (command: string) => {
   // Before a heredoc, a quoted value or an assignment: `uci set a.b.key='…'`
   // keeps its option's name and loses its value.
-  const first = command.split("\n")[0].split(/<<|'|=/)[0].trim();
+  // A file write is labelled by its leading comment (getDeviceScript's writeFileCommand).
+  const first = command.split("\n")[0].replace(/^# /, "").split(/<<|'|=/)[0].trim();
   return first.length > 120 ? `${first.slice(0, 117)}...` : first;
 };
 
+/** A phase failed, and what that leaves on the device. */
 export class ProvisionFailure extends Error {
+  /** This device's change had been committed (or may have been, in part). */
+  readonly committed: boolean;
+  /**
+   * Nothing committed, but packages or files already changed: its watchdog
+   * was left armed, as only it can undo those, so the run must roll it back
+   * rather than disarm it.
+   */
+  readonly leftArmed: boolean;
+  /** Reached, but its change cannot stand: roll it back now, not at its deadline. */
+  readonly rollBackNow: boolean;
   constructor(
     message: string,
-    readonly committed: boolean,
-    /**
-     * Nothing committed, but packages or files already changed: its watchdog
-     * was left armed, as only it can undo those, so the run must roll it back
-     * rather than disarm it.
-     */
-    readonly leftArmed = false,
-    /** Reached, but its change cannot stand: roll it back now, not at its deadline. */
-    readonly rollBackNow = false
+    { committed = false, leftArmed = false, rollBackNow = false }: { committed?: boolean; leftArmed?: boolean; rollBackNow?: boolean } = {}
   ) {
     super(message);
+    this.committed = committed;
+    this.leftArmed = leftArmed;
+    this.rollBackNow = rollBackNow;
   }
 }
 
@@ -159,12 +170,12 @@ export const planDevice = async (
     installedPackages: installedPackagesProbe,
     pendingChanges: pendingChangesProbe,
     managedFiles: managedFilesProbe(managedFilesManifest),
+    unseeded: missingFiles(seededConfigPaths(state)),
   });
-  const { boardJson, installedPackages, managedFiles } = facts;
+  const { boardJson, installedPackages, managedFiles, unseeded } = facts;
   if (deviceModelId !== undefined && boardJson.model?.id !== deviceModelId) {
     throw new ProvisionFailure(
-      `Mismatching device model id. Expected ${deviceModelId} but found ${boardJson.model?.id} in /etc/board.json`,
-      false
+      `Mismatching device model id. Expected ${deviceModelId} but found ${boardJson.model?.id} in /etc/board.json`
     );
   }
 
@@ -214,18 +225,60 @@ export const planDevice = async (
     postReloadCommands,
     servicesCommands: servicesCommands(state),
     servicesToCheck: (state.services || []).filter((s) => s.running).map((s) => s.name),
-    // `uci revert` undoes staged UCI changes and nothing else. Package
-    // removals and written files are already on disk, and only the watchdog
-    // can undo those.
-    // Only packages not installed yet count: the rest are not touched.
+    // `uci revert` undoes staged UCI changes and nothing else. Packages,
+    // written or removed files and configs seeded into /etc/config are on
+    // disk once done, and only the watchdog can undo those.
     hasIrreversibleSteps:
       packagesToRemove.length > 0 ||
-      (state.packagesToInstall || []).some((p) => !installedPackages.includes(p.packageName)) ||
-      (state.files || []).length > 0,
+      packagesToAdd({ state, installedPackages }).length > 0 ||
+      (state.files || []).length > 0 ||
+      managedFiles.length > 0 ||
+      unseeded.length > 0,
   };
 };
 
 // --- arm ---------------------------------------------------------------------
+
+/** Drop a staged or partly armed rollback from the device, best effort. */
+export const discardRollback = (run: DeviceRun) =>
+  run.ssh.execCommand(dropArmCommand(run.runId)).then(
+    () => {},
+    () => {}
+  );
+
+/** Stop an arm partway: what it put on the device goes, and the failure is said. */
+const failArm = async (run: DeviceRun, message: string): Promise<never> => {
+  await discardRollback(run);
+  throw new ProvisionFailure(message);
+};
+
+/**
+ * Keep what a rollback would need from the network: the packages this run
+ * removes, fetched while the link is up. Network-bound, so done for every
+ * device before any is armed: it would otherwise eat the windows of those
+ * armed before it. Changes no config.
+ */
+export const stageRollback = async (run: DeviceRun): Promise<DeviceRun> => {
+  const { ssh, hostname, runId } = run;
+  const prepared = await execScript({ ssh, commands: prepareRollbackCommands(runId) });
+  if (!prepared.ok) {
+    return failArm(run, `Failed to prepare the rollback directory on ${hostname}. Command: ${commandLabel(prepared.command)}\n${prepared.stderr}`);
+  }
+  const total = run.removalCascade.length;
+  if (total === 0) return run;
+  console.log(`Staging ${total} package(s) so a rollback can reinstall them offline...`);
+  const { staged } = await stagePackagesForRollback({ ssh, rollbackDir: runPaths(runId).rollbackDir, packages: run.removalCascade });
+  console.log(`Staged ${staged}/${total} package(s).`);
+  // Removing what a rollback could not put back is not a change this run
+  // can take back: refused, before anything is changed.
+  return staged < total
+    ? failArm(
+        run,
+        `${hostname}: ${total - staged} of the ${total} package(s) this run removes could not be kept for a rollback ` +
+          `(no room in /tmp, or the package feed unreachable), so they are not removed. Nothing was changed.`
+      )
+    : run;
+};
 
 /** Snapshot the device and start its rollback watchdog. Changes no config. */
 export const armRollback = async (
@@ -244,45 +297,9 @@ export const armRollback = async (
   const filesToDelete = newFilePaths.filter(
     (path) => !managedFiles.includes(path)
   );
-  const packagesToUninstallOnRollback = (state.packagesToInstall || [])
-    .map((p) => p.packageName)
-    .filter((name) => !run.installedPackages.includes(name));
-
-  const prepared = await execScript({
-    ssh,
-    commands: prepareRollbackCommands(runId),
-  });
-  if (!prepared.ok) {
-    throw new ProvisionFailure(
-      `Failed to prepare the rollback directory on ${hostname}. ` +
-        `Command: ${commandLabel(prepared.command)}\n${prepared.stderr}`,
-      false
-    );
-  }
-
-  // Staged before arming: `apk fetch` is network-bound and can take a while,
-  // and it would otherwise burn the rollback window it exists to protect.
-  if (run.removalCascade.length > 0) {
-    const total = run.removalCascade.length;
-    console.log(
-      `Staging ${total} package(s) so a rollback can reinstall them offline...`
-    );
-    const { staged } = await stagePackagesForRollback({
-      ssh,
-      rollbackDir: runPaths(runId).rollbackDir,
-      packages: run.removalCascade,
-    });
-    console.log(`Staged ${staged}/${total} package(s).`);
-    // Removing what a rollback could not put back is not a change this run
-    // can take back: refused, before anything is changed.
-    if (staged < total) {
-      throw new ProvisionFailure(
-        `${hostname}: ${total - staged} of the ${total} package(s) this run removes could not be kept for a rollback ` +
-          `(no room in /tmp, or the package feed unreachable), so they are not removed. Nothing was changed.`,
-        false
-      );
-    }
-  }
+  const packagesToUninstallOnRollback = packagesToAdd({ state, installedPackages: run.installedPackages }).map(
+    (p) => p.packageName
+  );
 
   console.log(
     `Arming rollback on ${hostname} [${rollbackMode}] (restores /etc/config` +
@@ -324,10 +341,7 @@ export const armRollback = async (
     }),
   });
   if (!armed.ok) {
-    throw new ProvisionFailure(
-      `Failed to arm rollback on ${hostname}. Command: ${commandLabel(armed.command)}\n${armed.stderr}`,
-      false
-    );
+    return failArm(run, `Failed to arm rollback on ${hostname}. Command: ${commandLabel(armed.command)}\n${armed.stderr}`);
   }
   // The watchdog counts from the moment it starts sleeping, so every deadline
   // is measured from here — not from whenever the configure phase ends.
@@ -407,12 +421,15 @@ const runOrRevert = async (run: DeviceRun, commands: string[]) => {
   }
 };
 
-const failConfigure = async (
-  run: DeviceRun,
-  message: string
-): Promise<never> => {
-  await revertStaged(run, { disarm: !run.hasIrreversibleSteps });
-  throw new ProvisionFailure(message, false, run.hasIrreversibleSteps);
+/**
+ * Revert what is staged and throw. `uncertain`: the failure was not a command
+ * saying no (a dropped session, an unreadable answer), so what the device did
+ * is unknown and only its watchdog can be trusted to put it back.
+ */
+const failConfigure = async (run: DeviceRun, message: string, { uncertain = false } = {}): Promise<never> => {
+  const leftArmed = uncertain || run.hasIrreversibleSteps;
+  await revertStaged(run, { disarm: !leftArmed });
+  throw new ProvisionFailure(message, { leftArmed });
 };
 
 /** The device's config, staged changes included; unreadable configs refused. */
@@ -438,7 +455,14 @@ const readConfigs = async (run: DeviceRun) => {
  * it and set the declared config in one batch, then read it back and check.
  * Nothing is committed here, so any failure is undone by a revert.
  */
-export const configureDevice = async (run: DeviceRun): Promise<DeviceRun> => {
+export const configureDevice = (run: DeviceRun): Promise<DeviceRun> =>
+  configureSteps(run).catch((e) =>
+    e instanceof ProvisionFailure
+      ? Promise.reject(e)
+      : failConfigure(run, `Failed to configure ${run.hostname}: ${(e as Error)?.message ?? e}`, { uncertain: true })
+  );
+
+const configureSteps = async (run: DeviceRun): Promise<DeviceRun> => {
   const { hostname, state, prepareCommands } = run;
   const keep = state.configsToNotReset || [];
 
@@ -491,15 +515,13 @@ export const configureDevice = async (run: DeviceRun): Promise<DeviceRun> => {
 };
 
 /**
- * Staging and configuring run inside the watchdog's window, so on a slow link
- * or a large config they can eat it. Committing with too little left would
- * let the watchdog fire mid-reconnect and roll back a good provision. Call
- * before committing: aborting then is still safe.
- */
-/**
- * Commit only with time left to confirm every device committed so far and this
- * one, before the earliest watchdog fires: none is disarmed until all are
- * confirmed, so that one sets the deadline for them all.
+ * Configuring runs inside the watchdog's window, so on a slow link or a large
+ * config it can eat it, and committing with too little left would let the
+ * watchdog fire mid-reconnect and roll back a good provision. So commit only
+ * with time left to confirm every device committed so far and this one,
+ * before the earliest watchdog fires: none is disarmed until all are
+ * confirmed, so that one sets the deadline for them all. Aborting here is
+ * still safe.
  */
 export const ensureTimeToConfirm = async (
   run: DeviceRun,
@@ -508,20 +530,17 @@ export const ensureTimeToConfirm = async (
 ) => {
   const { minimumConfirmWindowMs } = run.timing;
   if (earliestDeadline - run.now() >= minimumConfirmWindowMs * confirmsLeft) return;
-  await revertStaged(run, { disarm: !run.hasIrreversibleSteps });
-  throw new ProvisionFailure(
+  await failConfigure(
+    run,
     `Too little of the rollback window is left to confirm ${run.hostname} ` +
-      `(less than ${
-        minimumConfirmWindowMs / 1000
-      }s). Nothing was committed on it. ` +
-      `Re-run with a larger --confirm-timeout.`,
-    false,
-    run.hasIrreversibleSteps
+      `(less than ${minimumConfirmWindowMs / 1000}s). Nothing was committed on it. ` +
+      `Re-run with a larger --confirm-timeout.`
   );
 };
 
 export const commitDevice = async (run: DeviceRun) => {
-  const { ssh, hostname } = run;
+  const { ssh, hostname, finaliseCommands } = run;
+  if (!finaliseCommands) throw new Error(`${hostname}: commitDevice before configureDevice`);
   // Committing can drop the connection, since reload_config reconfigures the
   // network we are connected over. That is expected, not a failure — and it
   // does NOT surface as a thrown error: node-ssh removes its 'error' listener
@@ -532,13 +551,7 @@ export const commitDevice = async (run: DeviceRun) => {
   step(run, "committing");
   let commitFailed: string | undefined;
   try {
-    if (!run.finaliseCommands) {
-      throw new Error(`${hostname}: commitDevice before configureDevice`);
-    }
-    const finalised = await execScript({
-      ssh,
-      commands: run.finaliseCommands,
-    });
+    const finalised = await execScript({ ssh, commands: finaliseCommands });
     if (!finalised.ok) {
       if (finalised.disconnected) {
         console.log(
@@ -559,15 +572,26 @@ export const commitDevice = async (run: DeviceRun) => {
     // `uci revert` cannot undo a commit. Only the watchdog can, so leave it
     // armed regardless of what else this run touched.
     await revertStaged(run, { disarm: false });
-    throw new ProvisionFailure(
-      `Failed to commit configuration on ${hostname}.`,
-      true
-    );
+    throw new ProvisionFailure(`Failed to commit configuration on ${hostname}.`, { committed: true });
   }
   return run;
 };
 
 // --- confirm -----------------------------------------------------------------
+
+/**
+ * Enable and start (or stop and disable) the declared services, over a
+ * session after the commit. A failure is said, not thrown: what decides the
+ * run is whether the device can still be reached.
+ */
+export const startServices = async (run: DeviceRun, session: Session) => {
+  if (run.servicesCommands.length === 0) return;
+  const started = await execScript({ ssh: session, commands: run.servicesCommands }).catch((e: Error) => ({
+    ok: false as const,
+    stderr: e.message,
+  }));
+  if (!started.ok) console.warn(`${run.hostname}: starting its services: ${started.stderr.trim()}`);
+};
 
 /**
  * Reconnect after the commit, once the device's services have settled, and
@@ -588,15 +612,7 @@ export const confirmDevice = async (run: DeviceRun): Promise<Session> => {
       connect,
       // Started before the settle and the confirming reconnect: what they
       // change (a stopped firewall's rules) is then inside the rollback.
-      beforeSettle: async (session) => {
-        if (run.servicesCommands.length === 0) return;
-        // A failure here is not the verdict: the confirming reconnect is.
-        const started = await execScript({ ssh: session, commands: run.servicesCommands }).catch((e: Error) => ({
-          ok: false,
-          stderr: e.message,
-        }));
-        if (!started.ok) console.warn(`${hostname}: starting its services: ${started.stderr.trim()}`);
-      },
+      beforeSettle: (session) => startServices(run, session),
       confirmWith: reachableSession({ connect, host: ipAddress }),
       // Leave a margin so the last attempt still lands before the watchdog fires.
       deadline: (run.deadline ?? run.now()) - reconnectIntervalMs * 2,
@@ -604,29 +620,32 @@ export const confirmDevice = async (run: DeviceRun): Promise<Session> => {
       now: run.now,
     });
   } catch {
-    throw new ProvisionFailure(
-      `Could not reconnect to ${hostname} within its confirm window.`,
-      true
-    );
+    throw new ProvisionFailure(`Could not reconnect to ${hostname} within its confirm window.`, { committed: true });
   }
   // Reached: but did the commit finish? The link can drop before or during
   // the uci commits as well as during the reload after them.
   const committed = await runProbe(session, commitFinished(runPaths(run.runId).committedFlag)).catch(() => false);
   if (!committed) {
     session.dispose();
-    throw new ProvisionFailure(`The commit on ${hostname} did not complete before its connection dropped.`, true, false, true);
+    throw new ProvisionFailure(`The commit on ${hostname} did not complete before its connection dropped.`, {
+      committed: true,
+      rollBackNow: true,
+    });
   }
   return session;
 };
 
-/** Cancel the rollback: the device is reachable and its config stays. */
 /**
  * Cancel the rollback: the device is reachable and its config stays. False
  * when it came too late: the watchdog had already started restoring the old
  * config (or finished), so the device is not keeping this run's change.
  */
 export const disarmDevice = async (run: DeviceRun, session: Session, { untouched = false } = {}) => {
-  const result = await runProbe(session, disarmWatchdog(runPaths(run.runId)));
+  const paths = runPaths(run.runId);
+  const result = await runProbe(session, disarmWatchdog(paths));
+  // The marker a repeated disarm reads, once this one's answer is in hand:
+  // gone with it, so a run leaves nothing behind in /tmp.
+  if (result === "disarmed") await session.execCommand(`rm -f ${paths.disarmedFlag}`).catch(() => undefined);
   if (untouched) {
     step(run, "reverted");
     return result === "disarmed";
@@ -689,17 +708,24 @@ export const checkServices = async (run: DeviceRun, session: Session) => {
 /**
  * After the watchdog has rolled back (on its own, or via rollBackNow), wait for
  * the device to come back. Whether it has to reboot depends on whether the
- * restore actually brought access back — which only we can tell it — so on
- * reconnecting, touch the recovered flag: a reload that worked should not cost
- * a reboot. Returns whether the device came back.
+ * restore actually brought access back — which only we can tell it — so once
+ * it has restored, and a connection gets in, touch the recovered flag: a
+ * reload that worked should not cost a reboot. Returns whether it came back.
  */
 export const waitForRecovery = async (run: DeviceRun) => {
   const { connect, ipAddress, hostname, sleep, rollbackMode, recoverSeconds } =
     run;
   if (rollbackMode === "reboot") return false;
+  const reachable = reachableSession({ connect, host: ipAddress });
   try {
     const session = await reconnectUntil({
-      connect: reachableSession({ connect, host: ipAddress }),
+      // Each attempt a new connection, until one finds the restore done.
+      connect: async () => {
+        const session = await reachable();
+        if (await runProbe(session, markRecovered(runPaths(run.runId))).catch(() => false)) return session;
+        session.dispose();
+        throw new Error(`${hostname} has not restored its config yet`);
+      },
       sleep,
       now: run.now,
       // Its own wait starts only after its restore (a package reinstall can
@@ -707,7 +733,6 @@ export const waitForRecovery = async (run: DeviceRun) => {
       // device that comes back.
       deadline: run.now() + recoverSeconds * 1000 + 60_000,
     });
-    await session.execCommand(`touch ${runPaths(run.runId).recoveredFlag}`);
     session.dispose();
     console.error(`${hostname} rolled back and recovered without rebooting.`);
     step(run, "rolled-back");
@@ -732,21 +757,23 @@ export const waitForRecovery = async (run: DeviceRun) => {
 export const rollBackNow = async (run: DeviceRun, session?: Session) => {
   console.error(`Rolling back ${run.hostname}...`);
   step(run, "rolling-back");
-  try {
-    const live =
-      session ??
-      (await reconnectUntil({
-        connect: run.connect,
-        sleep: run.sleep,
-        now: run.now,
-        deadline: run.now() + 15000,
-      }));
-    await live.execCommand(rollBackNowCommand(run.runId));
-    live.dispose();
-  } catch {
-    console.error(
-      `Could not reach ${run.hostname} to start its rollback; its watchdog will at the deadline.`
-    );
+  const wake = async (live: Session) => {
+    try {
+      const { code } = await live.execCommand(rollBackNowCommand(run.runId));
+      return code === 0;
+    } finally {
+      live.dispose();
+    }
+  };
+  // Over the session given, else (gone: a later device's change can cut it) a new one.
+  const woken =
+    (session && (await wake(session).catch(() => false))) ||
+    (await reconnectUntil({ connect: run.connect, sleep: run.sleep, now: run.now, deadline: run.now() + 15000 })
+      .then(wake)
+      .catch(() => false));
+  if (!woken) {
+    console.error(`Could not reach ${run.hostname} to start its rollback; its watchdog will at the deadline.`);
+    await run.sleep(Math.max(0, (run.deadline ?? 0) - run.now()));
   }
   return waitForRecovery(run);
 };

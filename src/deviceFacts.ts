@@ -5,7 +5,6 @@
 // them as it reads the devices; never a timer. No config values are kept:
 // device UCI holds Wi-Fi keys. See CLAUDE.md, "Reading devices".
 import { DeviceSchema, deviceSchemaSchema } from "./deviceSchema";
-import { loadOncConfig } from "./loadConfig";
 import { parseJson } from "./parseJson";
 import { Platform } from "./platform";
 import { isAddress, Located, locateEach } from "./locate";
@@ -30,25 +29,37 @@ const dir = (intentPath: string) => `${intentPath}.state/devices`;
 const file = (intentPath: string, hostname: string) =>
   `${dir(intentPath)}/${hostname.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "_")}.json`;
 
-/** Every device whose facts were ever kept: Add hardware offers those no longer in Hardware. */
-const seenFile = (intentPath: string) => `${dir(intentPath)}/seen.json`;
-
-export const listSeen = (files: Pick<Platform, "readTextFile">, intentPath: string): string[] => {
+const readJson = <T>(files: Pick<Platform, "readTextFile">, path: string): T | undefined => {
   try {
-    const list = parseJson(files.readTextFile(seenFile(intentPath)), seenFile(intentPath));
-    return Array.isArray(list) ? list.filter((h): h is string => typeof h === "string") : [];
+    return parseJson(files.readTextFile(path), path) as T;
   } catch {
-    return [];
+    return undefined;
   }
 };
 
 /**
+ * Every device whose facts were ever kept: Add hardware offers those no longer
+ * in Hardware. A dot file, which no device's file name can be (`file`): as
+ * `seen.json` it was a device named "seen"'s facts too, overwritten by it.
+ */
+const seenFile = (intentPath: string) => `${dir(intentPath)}/.seen.json`;
+const formerSeenFile = (intentPath: string) => `${dir(intentPath)}/seen.json`;
+
+export const listSeen = (files: Pick<Platform, "readTextFile">, intentPath: string): string[] => {
+  const list = [seenFile(intentPath), formerSeenFile(intentPath)]
+    .map((path) => readJson<unknown>(files, path))
+    .find(Array.isArray);
+  return (list ?? []).filter((h): h is string => typeof h === "string");
+};
+
+/**
  * What facts files hold. Bumped when what is read from a device changes
- * (2: radios from board.json, with their modes; 3: whether each can mesh),
+ * (2: radios from board.json, with their modes; 3: whether each can mesh;
+ * 4: switch ports by number, and NICs beside the switch),
  * so older facts are read again; their address and host key are kept
  * meanwhile, to find the device.
  */
-const factsFormat = 3;
+const factsFormat = 4;
 
 export const writeFacts = (
   files: Pick<Platform, "mkdirp" | "writeTextFile" | "readTextFile">,
@@ -83,18 +94,8 @@ export const renameFacts = (
   from: string,
   to: string
 ) => {
-  let stored: Record<string, unknown>;
-  try {
-    stored = parseJson(files.readTextFile(file(intentPath, from)), file(intentPath, from)) as Record<string, unknown>;
-  } catch {
-    return;
-  }
-  try {
-    files.readTextFile(file(intentPath, to));
-    return;
-  } catch {
-    // Free.
-  }
+  const stored = readJson<Record<string, unknown>>(files, file(intentPath, from));
+  if (!stored || readJson(files, file(intentPath, to)) !== undefined) return;
   files.writeTextFile(file(intentPath, to), JSON.stringify({ ...stored, hostname: to }, null, 2) + "\n");
   files.removeFile(file(intentPath, from));
   files.removeFile(attemptFile(intentPath, from));
@@ -139,24 +140,12 @@ export const readFacts = (
 export const factsMaxAgeMs = 24 * 60 * 60 * 1000;
 /** After a failed read, a device is left alone this long. */
 export const retryAfterMs = 10 * 60 * 1000;
-/** How long one device's read may take before it counts as failed. */
-const refreshTimeoutMs = 30 * 1000;
-/** A read still marked running after this is taken to have died. */
-const lockTimeoutMs = 60 * 1000;
 
 export type ReadAttempt = { at: number; error: string };
 
 const attemptFile = (intentPath: string, hostname: string) =>
   file(intentPath, hostname).replace(/\.json$/, ".failed.json");
-const lockFile = (intentPath: string) => `${dir(intentPath)}/.reading`;
 
-const readJson = <T>(files: Pick<Platform, "readTextFile">, path: string): T | undefined => {
-  try {
-    return parseJson(files.readTextFile(path), path) as T;
-  } catch {
-    return undefined;
-  }
-};
 
 /** The last failed read of each of `hostnames`, if its last read failed. */
 export const readFailures = (
@@ -217,65 +206,6 @@ export const clearFailure = (files: Pick<Platform, "removeFile">, intentPath: st
     files.removeFile(attemptFile(intentPath, hostname));
   } catch {
     // It never failed: nothing to clear.
-  }
-};
-
-/**
- * Read the devices whose facts are stale, at most one read at a time (a
- * lock file, so the Node server and CGI requests agree). Each is found
- * first (src/locate.ts), the router too, as its leases help find the rest.
- * A failure is kept, so the device is not tried again for a while.
- */
-export const refreshStale = async ({
-  intentPath,
-  platform,
-  now = Date.now,
-}: {
-  intentPath: string;
-  platform: Platform;
-  now?: () => number;
-}) => {
-  const { oncConfig } = await loadOncConfig({ path: intentPath, platform });
-  const { ready } = provisionableDevices(oncConfig);
-  const hostnames = ready.map((d) => d.hostname);
-  const facts = readFacts(platform, intentPath, hostnames);
-  const stale = staleDevices({ facts, failures: readFailures(platform, intentPath, hostnames), now: now() });
-  const lock = readJson<{ at: number }>(platform, lockFile(intentPath));
-  if (stale.length === 0 || (lock && now() - lock.at < lockTimeoutMs)) return;
-  platform.mkdirp(dir(intentPath));
-  platform.writeTextFile(lockFile(intentPath), JSON.stringify({ at: now() }));
-  try {
-    const wanted = ready.filter((d) => stale.includes(d.hostname) || d.tags?.role === "router");
-    await Promise.all(
-      locateEach({ devices: wanted, facts, platform }).map((found, i) => {
-        const { hostname } = wanted[i];
-        const failed = (error: string) => {
-          if (stale.includes(hostname)) recordFailure(platform, intentPath, hostname, { at: now(), error });
-        };
-        // Within a time limit, as every read: one device that answers and
-        // then hangs must not hold the request (or a CGI process) open. A
-        // late answer is closed, not kept.
-        let done = false;
-        const attempt = found.then((f) => {
-          if (!("session" in f)) return done || failed(f.error);
-          try {
-            if (!done) {
-              rememberLocated(platform, intentPath, f, now());
-              clearFailure(platform, intentPath, f.hostname);
-            }
-          } finally {
-            f.session.dispose();
-          }
-        });
-        const late = platform.sleep(refreshTimeoutMs).then(() => {
-          done = true;
-          failed("did not answer in time");
-        });
-        return Promise.race([attempt, late]);
-      })
-    );
-  } finally {
-    platform.removeFile(lockFile(intentPath));
   }
 };
 

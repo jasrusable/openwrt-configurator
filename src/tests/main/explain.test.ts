@@ -1,4 +1,5 @@
 import test from "ava";
+import { sampleIntent } from "../helpers/fixtures";
 import { readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { deviceSchemaSchema } from "../../deviceSchema";
@@ -7,12 +8,12 @@ import { compileIntent } from "../../intent/compile";
 import { explainFor } from "../../intent/fields";
 import { places } from "../../intent/places";
 import { steeringLevels } from "../../intent/roaming";
-import { Intent, intentSchema } from "../../intent/schema";
+import { Intent } from "../../intent/schema";
 import { oncConfigSchema } from "../../oncConfigSchema";
 
 const root = join(__dirname, "..", "..", "..");
 const sample = (): Intent =>
-  intentSchema.parse(JSON.parse(readFileSync(join(root, "sampleConfigs", "intent.json"), "utf8")));
+  sampleIntent();
 
 /** usteer as the access point gets it. */
 const usteerOn = (intent: Intent) => {

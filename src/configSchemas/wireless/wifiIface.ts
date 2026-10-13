@@ -9,6 +9,8 @@ export const wirelessWifiIfaceSchema = z
     ssid: z.string().optional(),
     encryption: z.string().optional(),
     key: wifiPskSchema.optional(),
+    /** Its own device name (the mesh's mesh0): one interface, so on one radio only. */
+    ifname: z.string().optional(),
   })
   .passthrough();
 

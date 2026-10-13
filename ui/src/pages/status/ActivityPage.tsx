@@ -10,7 +10,7 @@ import type { ActivityKind } from "../../../../src/status/views";
 import { useNetworkStatus } from "../../data/status";
 import { useDraftValue } from "../../form/draft";
 import { EmptyState, Section, SettingRow, SettingsPage } from "../../kit/layout";
-import { liveLine } from "./shared";
+import { liveLine, unread } from "./shared";
 
 const day = (at: number) => new Date(at).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
 const time = (at: number) => new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
@@ -40,7 +40,7 @@ export const ActivityPage = () => {
   const events = all.filter((e) => (!device || e.device === device) && shows[which](e.kind ?? "note"));
   const days = [...new Set(events.map((e) => day(e.at)))];
   return (
-    <SettingsPage title="Activity" description={liveLine(intent.system.name, status.dataUpdatedAt, status.isFetching, !!status.data)}>
+    <SettingsPage title="Activity" description={liveLine(intent.system.name, status)}>
       <Group gap="sm">
         <SegmentedControl
           size="xs"
@@ -56,7 +56,7 @@ export const ActivityPage = () => {
       </Group>
       {events.length === 0 && (
         <Section>
-          <EmptyState>{status.data ? "Nothing to tell here." : "Reading the devices' logs…"}</EmptyState>
+          <EmptyState>{status.data ? "Nothing to tell here." : unread(status, "Reading the devices' logs…")}</EmptyState>
         </Section>
       )}
       {days.map((d) => (

@@ -42,7 +42,6 @@ const SteeringField = () => {
   return (
     <SegmentedField
       name="wifi.roaming.steering"
-      label="Steering"
       description={summary[0].toUpperCase() + summary.slice(1) + "."}
       options={steering}
     />
@@ -58,8 +57,6 @@ export const RoamingPage = () => (
       <SteeringField />
       <SwitchField
         name="wifi.roaming.prefer_5g"
-        label="Prefer 5 GHz"
-        description="Moves strong dual-band devices off 2.4 GHz."
       />
       <AppliesTo />
     </Section>

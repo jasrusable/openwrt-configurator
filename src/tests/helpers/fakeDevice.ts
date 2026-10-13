@@ -16,6 +16,8 @@ export type FakeDevice = {
   /** The committed UCI config. */
   committed: () => UciConfigs;
   reachable: boolean;
+  /** Every session open now dies (a later device's change cut them); new ones work. */
+  dropSessions: () => void;
   options: (clock: Clock) => DeviceRunOptions;
 };
 
@@ -127,7 +129,16 @@ export const fakeDevice = ({
   newPackages,
   slowReconnectMs,
   commitIncomplete = false,
+  onEvent,
+  removes,
+  firesBeforeDisarm = false,
 }: {
+  /** Told each event as it happens, to make something else happen then. */
+  onEvent?: (event: string) => void;
+  /** Packages the config removes (the device has them): staged for a rollback first. */
+  removes?: string[];
+  /** The watchdog fires just before the disarm lands. */
+  firesBeforeDisarm?: boolean;
   /** The link drops partway through the commits: the marker is never written. */
   commitIncomplete?: boolean;
   /** After its commit, each new connection takes this long (a slow device or link). */
@@ -154,7 +165,9 @@ export const fakeDevice = ({
   const record = (event: string) => {
     device.events.push(event);
     log.push(`${hostname}:${event}`);
+    onEvent?.(event);
   };
+  let generation = 0;
   let fireAt: number | undefined;
   let committed = clone(initialConfig);
   let staged = clone(initialConfig);
@@ -177,6 +190,9 @@ export const fakeDevice = ({
     changed: false,
     committed: () => committed,
     reachable: true,
+    dropSessions: () => {
+      generation += 1;
+    },
     options: (c) =>
       (clock = c) && {
         deviceModelId: "fake,device",
@@ -193,6 +209,7 @@ export const fakeDevice = ({
           config: { system: { system: [{ ".name": "s", hostname }] } } as any,
           ...(services ? { services } : {}),
           ...(newPackages ? { packagesToInstall: newPackages.map((packageName) => ({ packageName })) } : {}),
+          ...(removes ? { packagesToUninstall: removes } : {}),
         },
         rollbackMode: "reload-then-reboot",
         recoverSeconds: 30,
@@ -250,11 +267,12 @@ export const fakeDevice = ({
     return ok(stdout);
   };
 
-  const session = (): Session => ({
+  const session = (born = generation): Session => ({
     execCommand: async function execCommand(
       command,
       options
     ): Promise<ExecResult> {
+      if (born !== generation) throw new Error("Not connected");
       if (command.includes("__ONC_PROBE__") && device.reachable) {
         return probeBatch(command, (c) => execCommand(c, undefined));
       }
@@ -273,6 +291,12 @@ export const fakeDevice = ({
           })
         );
       if (command === "apk info") return ok("dnsmasq\n");
+      if (command.startsWith("apk del --simulate")) return ok((removes ?? []).map((p, i) => `(${i + 1}/${removes!.length}) Purging ${p} (1.0)`).join("\n"));
+      if (command.startsWith("apk fetch")) {
+        record("stage");
+        return ok();
+      }
+      if (command.includes("*.apk 2>/dev/null | wc -l")) return ok(`${(removes ?? []).length}\n`);
       if (command.includes("uci export")) return ok(formatUciExport(staged));
       if (command === "uci changes" || command === "true") return ok();
       if (command.includes("ubus call service list")) {
@@ -283,6 +307,10 @@ export const fakeDevice = ({
         command.includes("onc-confirmed-") &&
         command.includes("ONC_DISARMED")
       ) {
+        if (firesBeforeDisarm && fireAt !== undefined) {
+          fireAt = clock!.now();
+          watchdogTick();
+        }
         // Too late: the watchdog already restored the old config.
         if (device.events.includes("watchdog-fired")) return ok("ONC_FIRED\n");
         record("disarm");
@@ -307,6 +335,12 @@ export const fakeDevice = ({
       if (command.startsWith("touch /tmp/onc-recovered-")) {
         record("recovered");
         return ok();
+      }
+      // markRecovered: only once the watchdog has restored the old config.
+      if (command.startsWith("[ -f /tmp/onc-restored-")) {
+        if (!device.events.some((e) => e === "watchdog-fired" || e === "rollback-now")) return { stdout: "", stderr: "", code: 1 };
+        record("recovered");
+        return ok("ONC_RECOVERED\n");
       }
       return { stdout: "", stderr: "", code: 1 };
     },

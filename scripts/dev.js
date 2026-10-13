@@ -10,12 +10,24 @@ if (!intentPath) {
   process.exit(2);
 }
 
-const run = (command, args) =>
-  spawn(command, args, { stdio: "inherit" }).on("exit", (code) => {
-    // One half dying leaves a confusing half-working setup: stop both.
+const children = [];
+
+// One half dying leaves a confusing half-working setup: stop both, so the
+// other (the watcher, or a server holding the port) is not left behind.
+const stopAll = (code) => {
+  children.forEach((child) => child.exitCode === null && child.kill());
+  process.exit(code);
+};
+process.on("SIGINT", () => stopAll(130));
+process.on("SIGTERM", () => stopAll(143));
+
+const run = (command, args) => {
+  const child = spawn(command, args, { stdio: "inherit" }).on("exit", (code) => {
     console.error(`${command} exited (${code}); stopping.`);
-    process.exit(code ?? 1);
+    stopAll(code ?? 1);
   });
+  children.push(child);
+};
 
 run(process.execPath, ["scripts/build-ui.js", "--watch", "--dev"]);
 run(process.execPath, [

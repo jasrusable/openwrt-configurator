@@ -11,23 +11,25 @@ import { parseJson } from "../parseJson";
 import { Platform } from "../platform";
 import { provisionableDevices } from "../provisionConfig";
 import { readEach } from "../readEach";
-import { provisionStatus } from "../server/provisionJob";
+import { jobState } from "../server/provisionJob";
+import { withLock } from "../lock";
 import { shellQuote } from "../shell";
 import { restartable } from "./views";
+import { arr, bandOf, channelOf, obj } from "./values";
 
 /**
  * One device, found and logged in to as anywhere else (src/locate.ts), within
  * a time limit; the session closed after. Refused while an apply runs: a
  * restart or a scan then could cut the link it confirms over, and roll it back.
  */
-const onDevice = async <T>(
+export const onDevice = async <T>(
   intentPath: string,
   platform: Platform,
   hostname: string,
   timeoutMs: number,
-  work: (session: Parameters<typeof runProbe>[0], state: ReturnType<typeof getOpenWrtState>) => Promise<T>
+  work: (session: Parameters<typeof runProbe>[0], state: () => ReturnType<typeof getOpenWrtState>) => Promise<T>
 ): Promise<T | { error: string }> => {
-  if ((await provisionStatus({ intentPath, files: platform }).catch(() => undefined))?.state === "running") {
+  if ((await jobState({ intentPath, files: platform }).catch(() => undefined))?.state === "running") {
     return { error: "An apply is running: try again when it has finished." };
   }
   const { oncConfig } = await loadOncConfig({ path: intentPath, platform });
@@ -43,7 +45,7 @@ const onDevice = async <T>(
     devices: [deviceConfig],
     facts,
     timeoutMs,
-    read: (found) => work(found.session, getOpenWrtState({ oncConfig, deviceConfig, deviceSchema: schema })),
+    read: (found) => work(found.session, () => getOpenWrtState({ oncConfig, deviceConfig, deviceSchema: schema })),
     failed: (_, error) => ({ error: `${hostname}: ${error}` }),
   });
   return result;
@@ -52,25 +54,21 @@ const onDevice = async <T>(
 /**
  * One at a time, per action, across processes (a CGI request is one): a second
  * click while one runs is told so. A lock left by a process that died is
- * taken over after two minutes, longer than any action takes.
+ * taken over after a minute: every action ends sooner, inside uhttpd's 60 s
+ * CGI limit (`actionBudgetMs`).
  */
-const oneAtATime = async <T>(
+export const oneAtATime = async <T>(
   platform: Platform,
   intentPath: string,
   name: string,
   work: () => Promise<T | { error: string }>
 ): Promise<T | { error: string }> => {
-  platform.mkdirp(`${intentPath}.state`);
-  const lock = `${intentPath}.state/${name}.lock`;
-  const q = shellQuote(lock);
-  const taken = await platform.run(["sh", "-c", `mkdir ${q} 2>/dev/null || { find ${q} -prune -mmin +2 | grep -q . && touch ${q}; }`]);
-  if (taken.code !== 0) return { error: "One is already running: wait for it to finish." };
-  try {
-    return await work();
-  } finally {
-    await platform.run(["rmdir", lock]).catch(() => undefined);
-  }
+  const result = await withLock(platform, `${intentPath}.state/${name}.lock`, 1, work);
+  return result === "busy" ? { error: "One is already running: wait for it to finish." } : result;
 };
+
+/** What an action may take in all: uhttpd ends a CGI request at 60 s. */
+export const actionBudgetMs = 50_000;
 
 /** Restart `service` on `hostname`: only one the settings need running there, and never what the link itself depends on. */
 export const restartService = ({
@@ -85,7 +83,7 @@ export const restartService = ({
   service: string;
 }) =>
   onDevice(intentPath, platform, hostname, 20_000, async (session, state) => {
-    if (!(state.services ?? []).some((s) => s.name === service && restartable(s))) {
+    if (!(state().services ?? []).some((s) => s.name === service && restartable(s))) {
       return { error: `${service} is not a service this page restarts on ${hostname}.` };
     }
     const restarted = await runProbe(session, {
@@ -156,14 +154,10 @@ export type Survey = {
   neighbours: { ssid?: string; band: string; channel: number; signal: number; impostor?: boolean }[];
 };
 
-const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
-const list = (v: unknown) => (Array.isArray(v) ? v : []);
-const channelOf = (mhz: number) => (mhz === 2484 ? 14 : mhz < 2500 ? (mhz - 2407) / 5 : mhz >= 5955 ? (mhz - 5950) / 5 : (mhz - 5000) / 5);
-const bandOfMhz = (mhz: number) => (mhz < 3000 ? "2.4 GHz" : mhz < 5925 ? "5 GHz" : "6 GHz");
 /** A scanned network's band: iwinfo's own where it says (6 GHz channels reuse low numbers), else by channel. */
 const bandOfScan = (n: Record<string, unknown>, channel: number) => {
   const mhz = Number(n.mhz ?? n.frequency);
-  if (mhz > 0) return bandOfMhz(mhz);
+  if (mhz > 0) return bandOf(mhz)!;
   const band = Number(n.band);
   return band === 6 ? "6 GHz" : band === 5 ? "5 GHz" : band === 2 ? "2.4 GHz" : channel > 14 ? "5 GHz" : "2.4 GHz";
 };
@@ -173,19 +167,19 @@ export type SurveyRead = { accessPoint: string; own: string[]; channels: Survey[
 
 /** The survey probe's array: each radio's ifname, its own BSSID, iwinfo scan and survey. */
 export const parseSurvey = (accessPoint: string, value: unknown): SurveyRead => {
-  const radios = list(value).map(obj);
+  const radios = arr(value).map(obj);
   const seen = new Map<number, Survey["channels"][number]>();
   const heard: Heard[] = [];
   for (const radio of radios) {
-    for (const s of list(obj(radio.survey).results).map(obj)) {
+    for (const s of arr(obj(radio.survey).results).map(obj)) {
       const mhz = Number(s.mhz);
       const active = Number(s.active_time);
       const busy = Number(s.busy_time);
       if (!(mhz > 0) || !(active > 0) || !(busy >= 0)) continue;
-      const entry = { band: bandOfMhz(mhz), channel: channelOf(mhz), busy: Math.min(100, Math.round((busy / active) * 100)), ours: s.in_use === true };
+      const entry = { band: bandOf(mhz)!, channel: channelOf(mhz), busy: Math.min(100, Math.round((busy / active) * 100)), ours: s.in_use === true };
       if (!seen.has(mhz) || entry.ours) seen.set(mhz, entry);
     }
-    for (const n of list(obj(radio.scan).results).map(obj)) {
+    for (const n of arr(obj(radio.scan).results).map(obj)) {
       const channel = Number(n.channel);
       const signal = Number(n.signal);
       if (!(channel > 0) || !Number.isFinite(signal)) continue;
@@ -248,8 +242,14 @@ export const wifiSurvey = ({ intentPath, platform }: { intentPath: string; platf
     const hosts = provisionableDevices(oncConfig).ready.map((d) => d.hostname);
     const read: SurveyRead[] = [];
     const failed: { accessPoint: string; error: string }[] = [];
+    const deadline = Date.now() + actionBudgetMs;
     for (const hostname of hosts) {
-      const result = await onDevice(intentPath, platform, hostname, 30_000, (session) =>
+      const left = deadline - Date.now();
+      if (left < 5_000) {
+        failed.push({ accessPoint: hostname, error: "No time was left to survey it: try again." });
+        continue;
+      }
+      const result = await onDevice(intentPath, platform, hostname, Math.min(30_000, left), (session) =>
         runProbe(session, { command: surveyCommand, parse: ({ stdout }) => parseSurvey(hostname, parseJson(stdout || "[]", "survey")) } as Probe<SurveyRead>)
       ).catch((e: Error) => ({ error: e.message }));
       if ("error" in result) failed.push({ accessPoint: hostname, error: result.error });

@@ -1,19 +1,13 @@
 import test from "ava";
-import { join } from "path";
-import { readFileSync } from "fs";
+import { fixtureConfig } from "../helpers/fixtures";
 import { getDeviceSchema } from "../../getDeviceSchema";
 import { getOpenWrtConfig } from "../../getOpenWrtConfig";
 import { getUciCommands } from "../../getUciCommands";
-import { ONCConfig, oncConfigSchema } from "../../oncConfigSchema";
-import { parseJson, parseSchema } from "../../utils";
+import { oncConfigSchema } from "../../oncConfigSchema";
+import { parseSchema } from "../../utils";
 import { nodePlatform } from "../../platforms/node";
 
-const oncConfigString = readFileSync(join(__dirname, "./config.json"), "utf-8");
-const oncJson = parseJson(oncConfigString);
-const oncConfig: ONCConfig = parseSchema(oncConfigSchema, oncJson);
-const deviceConfigs = oncConfig.devices.filter(
-  (device) => device.enabled !== false
-);
+const { json: oncJson, oncConfig, deviceConfigs } = fixtureConfig("config.json");
 
 test("station PSK shorter than 8 characters is rejected", (t) => {
   const err = t.throws(() =>

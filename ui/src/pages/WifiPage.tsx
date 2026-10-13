@@ -22,12 +22,7 @@ import {
 } from "../form/fields";
 import { defineList, ListPage } from "../form/ListPage";
 import { ItemIcon, ItemName, Section } from "../kit/layout";
-
-const bandLabels: Record<string, string> = {
-  "2g": "2.4 GHz",
-  "5g": "5 GHz",
-  "6g": "6 GHz",
-};
+import { bandLabels, shownName } from "../../../src/intent/labels";
 
 const securityLabels: Record<string, string> = {
   wpa2: "WPA2",
@@ -107,9 +102,7 @@ const wifiNetworks = defineList({
         <Text size="sm" c="dimmed">
           <Value
             name={`wifi.networks.${i}.bands`}
-            format={(bands?: string[]) =>
-              bands ? bands.map((b) => bandLabels[b]).join(", ") : "All enabled"
-            }
+            format={(bands) => (bands ? bands.map((b) => bandLabels[b]).join(", ") : "All enabled")}
           />
         </Text>
       ),
@@ -118,16 +111,12 @@ const wifiNetworks = defineList({
   editor: (i) => (
     <>
       <Section>
-        <TextField name={`wifi.networks.${i}.ssid`} label="Name" />
+        <TextField name={`wifi.networks.${i}.ssid`} />
         <SwitchField
           name={`wifi.networks.${i}.enabled`}
-          label="Enabled"
-          description="Off: kept here, but no access point broadcasts it."
         />
         <ReferenceField
           name={`wifi.networks.${i}.network`}
-          label="Network"
-          description="Devices that join this Wi-Fi land on that network."
           to="networks"
           valueKey="id"
           labelKey="name"
@@ -144,27 +133,21 @@ const wifiNetworks = defineList({
             { value: "wpa3", label: "WPA3" },
           ]}
         />
-        <PasswordField name={`wifi.networks.${i}.password`} label="Password" />
+        <PasswordField name={`wifi.networks.${i}.password`} />
         <ExtraPasswordsField index={i} />
       </Section>
       <Section title="Broadcast">
         <BandsField index={i} />
         <SwitchField
           name={`wifi.networks.${i}.hidden`}
-          label="Hidden"
-          description="Not announced; devices must be told the name."
         />
         <SwitchField
           name={`wifi.networks.${i}.isolate_clients`}
-          label="Isolate clients"
-          description="Its devices cannot reach each other on the same access point."
         />
       </Section>
       <RoamingSection index={i}>
         <SwitchField
           name={`wifi.networks.${i}.roaming.fast`}
-          label="Fast roaming"
-          description="Seamless handover between access points."
         />
       </RoamingSection>
     </>
@@ -176,7 +159,8 @@ const NetworkName = ({ index }: { index: number }) => {
   const id = useDraftValue(`wifi.networks.${index}.network`);
   const networks: { id: string; name: string }[] =
     useDraftValue("networks") ?? [];
-  return <>{networks.find((n) => n.id === id)?.name ?? "—"}</>;
+  const network = networks.find((n) => n.id === id);
+  return <>{network ? shownName(network.name) : "—"}</>;
 };
 
 export const WifiPage = ({ sub }: { sub: string }) => <ListPage list={wifiNetworks} sub={sub} />;
@@ -199,8 +183,6 @@ const RoamingSection = ({ index, children }: { index: number; children: ReactNod
     >
       <SwitchField
         name={`wifi.networks.${index}.roaming.assisted`}
-        label="Roaming assistance"
-        description="Neighbour lists help devices find a better access point."
       />
       {children}
     </Section>
@@ -211,7 +193,6 @@ const RoamingSection = ({ index, children }: { index: number; children: ReactNod
 const BandsField = ({ index }: { index: number }) => (
   <MultiSelectField
     name={`wifi.networks.${index}.bands`}
-    label="Bands"
     description={`Empty: every band that is on.`}
     options={(Object.entries(bandLabels) as [Band, string][]).map(([value, label]) => ({
       value,
@@ -226,8 +207,6 @@ const BandsField = ({ index }: { index: number }) => (
 const ExtraPasswordsField = ({ index }: { index: number }) => (
   <PasswordListField
     name={`wifi.networks.${index}.extra_passwords`}
-    label="More passwords"
-    description="Each works on its own, e.g. one per person."
     addLabel="Add password"
   />
 );

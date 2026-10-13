@@ -4,6 +4,7 @@
 // these parsers stay and only the transport changes (CLAUDE.md, "Reading
 // devices"). Parsing is defensive: a field a release lacks is left out, never
 // an error. Nothing here prints a config value.
+import { arr, num, obj, str } from "./values";
 import { notRunning, Probe, runProbes } from "../deviceProbes";
 import { parseJson } from "../parseJson";
 import { Session } from "../platform";
@@ -160,11 +161,6 @@ export type LineStatus = {
   since: number;
 };
 
-const obj = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
-const str = (value: unknown) => (typeof value === "string" ? value : undefined);
-const arr = (value: unknown) => (Array.isArray(value) ? value : []);
 const json = (stdout: string, what: string) => (stdout.trim() ? parseJson(stdout, what) : undefined);
 
 /** `ubus call system info`: uptime, load (×65536 there), memory. */
@@ -538,11 +534,20 @@ const temperature = raw("cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null |
 const links = raw(
   'for d in /sys/class/net/*; do [ -e "$d/device" ] || [ -e "$d/phys_port_name" ] || continue; echo "${d##*/} $(cat "$d/carrier" 2>/dev/null || echo 0) $(cat "$d/speed" 2>/dev/null || echo -1)"; done'
 );
+/**
+ * Shell setting `$s` to where reads keep things in RAM between them: a
+ * directory of root's own (in /tmp anyone may make it first, or plant a
+ * symlink there), else a fresh one, which only forgets.
+ */
+const keptInRam =
+  's=/tmp/onc-status; (umask 077; mkdir -p $s 2>/dev/null); { [ -d $s ] && [ ! -L $s ] && [ -O $s ]; } || s=$(mktemp -d)';
+
 // The counts now, then those kept in the router's RAM from a read at least
 // two minutes ago (renewed once they are older than that), as "before <age>".
 const adverts = raw(
   [
-    'p=/tmp/onc-adverts; t=$(cut -d. -f1 /proc/uptime)',
+    keptInRam,
+    'p=$s/adverts; t=$(cut -d. -f1 /proc/uptime)',
     'for f in /proc/net/dev_snmp6/*; do awk -v n="${f##*/}" \'$1=="Icmp6OutRouterAdvertisements"{o=$2} $1=="Icmp6InRouterSolicits"{i=$2} END{if (o + i > 0) print n, o + 0, i + 0}\' "$f"; done > $p.now',
     'cat $p.now',
     'a=$(cat $p.at 2>/dev/null); [ -n "$a" ] && [ "$a" -le "$t" ] && { echo "before $((t - a))"; cat $p 2>/dev/null; }',
@@ -563,13 +568,16 @@ const ipv6Leases: Probe<unknown> = {
  * the time is up.
  */
 export const internetCheckSeconds = 6;
+/** Where latency is measured to, from the router. */
+export const latencyTarget = "1.1.1.1";
 const internetCheck = (shaped: string[]) =>
   raw(
     [
-      "d=/tmp/onc-check.$$; mkdir -p $d",
-      "ping -c 3 -W 2 1.1.1.1 >$d/ping 2>/dev/null & p1=$!",
+      "d=$(mktemp -d)",
+      `ping -c 3 -W 2 ${latencyTarget} >$d/ping 2>/dev/null & p1=$!`,
       // The public address, asked of ipify at most every 5 minutes (kept in the router's RAM), not every read.
-      "f=/tmp/onc-public-ip; p2=; fetched=",
+      keptInRam,
+      "f=$s/public-ip; p2=; fetched=",
       "if [ -s $f ] && find $f -mmin -5 2>/dev/null | grep -q .; then cp $f $d/ip; else fetched=1; uclient-fetch -q -T 4 -O $d/ip https://api.ipify.org >/dev/null 2>&1 & p2=$!; fi",
       "nslookup openwrt.org 127.0.0.1 >$d/dns 2>/dev/null & p3=$!",
       // busybox's sleep takes whole seconds only.
@@ -682,17 +690,4 @@ export const readDeviceStatus = async (
     ...(extras.internet ? { internet: parseInternetCheck(read.internetCheck) } : {}),
     ...(extras.log ? { log: parseLog(read.log) } : {}),
   };
-};
-
-/** The probes' commands, to record their output on a real image (src/tests/helpers/status/). */
-export const statusCommands = {
-  wifi: wifi.command,
-  storage: storage.command,
-  temperature: temperature.command,
-  links: links.command,
-  adverts: adverts.command,
-  neighbourTable: neighbourTable.command,
-  ipv6Leases: ipv6Leases.command,
-  internetCheck: internetCheck(["eth0"]).command,
-  log: logProbe.command,
 };

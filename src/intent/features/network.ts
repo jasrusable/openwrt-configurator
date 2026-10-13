@@ -8,9 +8,12 @@ import {
   everyDevice,
   Feature,
   gatewayOf,
+  isMain,
+  mainNetwork,
   Network,
   onAccessPoints,
   onRouter,
+  siteSeed,
 } from "../fragment";
 import { ipv6Interface, networkHasIpv6, primaryConnection } from "../connections";
 import { named } from "../names";
@@ -39,7 +42,6 @@ export const ulaPrefix = (siteName: string) => {
 /** The bridge VLAN a network rides on: 1 for the main network. */
 const vlanOf = (network: Network) => network.vlan ?? 1;
 export const deviceOf = (network: Network) => `br-lan.${vlanOf(network)}`;
-const isMain = (network: Network) => network.vlan === undefined;
 
 /** One per network, so each gets its own /64 of the delegated prefix. */
 const ip6hint = (network: Network) => vlanOf(network).toString(16);
@@ -53,10 +55,12 @@ const routerInterface = (network: Network, ipv6: boolean, ipv6Upstream: string) 
     : {}),
 });
 
+/** The DHCP pool's first host number: it ends at .254, so the low addresses stay free. */
+export const poolStart = (network: Pick<Network, "dhcp">) => 255 - network.dhcp.pool_size;
+
 const dhcpServer = (network: Network, ipv6: boolean, tunnelDns: string[] = []) => ({
   force: true,
-  // The pool ends at .254, so the low addresses stay free.
-  start: 255 - network.dhcp.pool_size,
+  start: poolStart(network),
   limit: network.dhcp.pool_size,
   leasetime: network.dhcp.lease,
   dhcpv4: "server",
@@ -92,13 +96,13 @@ const dhcpServer = (network: Network, ipv6: boolean, tunnelDns: string[] = []) =
 
 export const network: Feature = (intent) => {
   const { networks } = intent;
-  const main = networks.find(isMain)!;
-  // A network's IPv6 needs the internet's: without it there is only a
-  // local range, which would be announced as if it went somewhere.
+  const main = mainNetwork(intent);
   // A provider's tunnel a network goes out through (its Internet line).
   const tunnelOf = (n: Network) => intent.vpn.providers.find((t) => t.id === n.access.via);
-  // Not a network out through a provider's tunnel, or kept to a line other
-  // than the main one: its IPv6 would go around it, as IPv6 only has the main's.
+  // A network's IPv6 needs the internet's (without it there is only a local
+  // range, announced as if it went somewhere), and not a network out through
+  // a provider's tunnel or kept to a line other than the main one: its IPv6
+  // would go around it, as IPv6 only has the main's.
   const ipv6 = (n: Network) => networkHasIpv6(intent, n);
   // Prefixes from the main connection's IPv6 interface (wan6 for wan).
   const ipv6Upstream = ipv6Interface(primaryConnection(intent));
@@ -234,7 +238,7 @@ export const network: Feature = (intent) => {
                 ".if": onRouter,
                 override: {
                   ula_prefix: networks.some(ipv6)
-                    ? ulaPrefix(intent.system.name)
+                    ? ulaPrefix(siteSeed(intent))
                     : "",
                 },
               },

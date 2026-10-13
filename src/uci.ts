@@ -1,6 +1,7 @@
 // The device's UCI config as data: parsed from `uci export`, compared with
 // what the config file declares, and turned into the exact operations that
 // make one into the other.
+import { Redact } from "./secretOptions";
 import { OpenWrtConfig } from "./openWrtConfigSchema";
 import { shellQuote } from "./shell";
 
@@ -129,15 +130,15 @@ export const declaredConfigs = (config: OpenWrtConfig): UciConfigs =>
  * reads the same (verified on 25.12.5); `hide` stands in for a secret in a
  * dry run.
  */
-export const uciFileText = (sections: UciSection[], hide: (value: string) => string = (v) => v) =>
+export const uciFileText = (sections: UciSection[], hide: Redact = (v) => v) =>
   sections
     .map((section) =>
       [
         `config ${section.type}${section.name !== undefined ? ` ${shellQuote(section.name)}` : ""}`,
         ...Object.entries(section.options).flatMap(([option, value]) =>
           Array.isArray(value)
-            ? value.map((item) => `\tlist ${option} ${shellQuote(hide(item))}`)
-            : [`\toption ${option} ${shellQuote(hide(value))}`]
+            ? value.map((item) => `\tlist ${option} ${shellQuote(hide(item, { option }))}`)
+            : [`\toption ${option} ${shellQuote(hide(value, { option }))}`]
         ),
       ].join("\n")
     )

@@ -1,3 +1,4 @@
+import { Redact } from "./secretOptions";
 import { OpenWrtConfig } from "./openWrtConfigSchema";
 import { shellQuote } from "./shell";
 
@@ -26,14 +27,14 @@ export const getUciCommands = ({
   redact,
 }: {
   openWrtConfig: OpenWrtConfig;
-  /** Replace a resolved secret before it is quoted into the script. */
-  redact?: (value: string) => string;
+  /** Replace a secret before it is quoted into the script. */
+  redact?: Redact;
 }) => {
   // Booleans become 0/1 here. Only original strings are secrets, so a secret
   // whose text is "1" must not blank every flag.
-  const render = (value: unknown): string | number => {
+  const render = (value: unknown, option: string): string | number => {
     if (typeof value === "boolean") return value ? "1" : "0";
-    if (typeof value === "string" && redact) return redact(value);
+    if (typeof value === "string" && redact) return redact(value, { option });
     return value as string | number;
   };
   const configKeys = Object.keys(openWrtConfig);
@@ -73,12 +74,12 @@ export const getUciCommands = ({
                     ...value.map(
                       (item) =>
                         `uci add_list ${identifier}.${key}=${shellQuote(
-                          render(item)
+                          render(item, key)
                         )}`
                     ),
                   ]
                 : [
-                    `uci set ${identifier}.${key}=${shellQuote(render(value))}`,
+                    `uci set ${identifier}.${key}=${shellQuote(render(value, key))}`,
                   ]),
             ];
           }, []),

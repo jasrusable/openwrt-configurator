@@ -1,24 +1,14 @@
 // What the VPN's pages share: a zone's access, set as a network's is, and
 // a client's file and QR code, shown once.
 import { Alert, Box, Button, Group, Stack, Text } from "@mantine/core";
-import { ReactNode } from "react";
 import { IconDownload } from "@tabler/icons-react";
 import { renderSVG } from "uqr";
 import { vpnZones } from "../../../../src/intent/vpn";
 import { Intent } from "../../../../src/intent/schema";
 import { useDraftValue } from "../../form/draft";
 import { MultiSelectField, SegmentedField, SwitchField } from "../../form/fields";
-import { ExperimentalBadge, Section } from "../../kit/layout";
-
-const zoneLabels: Record<string, string> = { vpn: "Remote access clients", sites: "Linked sites" };
-
-/** A VPN page's title, marked experimental: tested in containers, not yet on real routers. */
-export const Experimental = ({ children }: { children: ReactNode }) => (
-  <Group gap={10}>
-    {children}
-    <ExperimentalBadge />
-  </Group>
-);
+import { Section } from "../../kit/layout";
+import { routerAccessOptions, zoneLabels } from "../../../../src/intent/labels";
 
 /** What a zone may reach: every network, and the VPN's other zone. */
 const useTargets = (self: "vpn" | "sites") => {
@@ -43,10 +33,7 @@ export const ZoneAccess = ({ base: zone }: { base: "vpn" | "sites" }) => {
       <SegmentedField
         name={`${base}.access.router`}
         label="Router access"
-        options={[
-          { value: "services", label: "Network services" },
-          { value: "full", label: "Full" },
-        ]}
+        options={routerAccessOptions}
       />
     </Section>
   );

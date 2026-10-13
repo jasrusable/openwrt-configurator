@@ -14,7 +14,8 @@ import { duration } from "../../facts";
 import { useDraftValue } from "../../form/draft";
 import { AreaChart, ChartCard, SignalBars, Tile } from "../../kit/charts";
 import { EmptyState, Section, SettingRow, SettingsPage, StatusDot } from "../../kit/layout";
-import { BandBadge, bandColor, lineState, liveLine, Muted } from "./shared";
+import { BandBadge, bandColor, lineState, liveLine, Muted, unread } from "./shared";
+import { latencyTarget } from "../../../../src/status/device";
 
 /** "HE80" as people say it: Wi-Fi 6, 80 MHz. */
 const modeWords = (htmode?: string) => {
@@ -41,7 +42,7 @@ const Internet = ({ intent }: { intent: Intent }) => {
           label="Latency"
           value={check?.latencyMs !== undefined ? `${Math.round(check.latencyMs)} ms` : check ? "No answer" : "—"}
           color={check?.latencyMs === undefined ? undefined : check.latencyMs < 30 ? "green" : check.latencyMs < 80 ? "yellow" : "red"}
-          sub="To 1.1.1.1, from the router"
+          sub={`To ${latencyTarget}, from the router`}
         />
       </SimpleGrid>
       <ChartCard title="Throughput" legend={[{ label: "Down", color: "blue" }, { label: "Up", color: "teal" }]} span={down[0]?.[0]}>
@@ -183,7 +184,7 @@ const Wifi = () => {
     <>
       {accessPoints.length === 0 && (
         <Section>
-          <EmptyState>{status.data ? "No access point is broadcasting." : "Reading the access points…"}</EmptyState>
+          <EmptyState>{status.data ? "No access point is broadcasting." : unread(status, "Reading the access points…")}</EmptyState>
         </Section>
       )}
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
@@ -291,7 +292,7 @@ export const PerformancePage = () => {
   const intent: Intent = useDraftValue();
   const status = useNetworkStatus("performance");
   return (
-    <SettingsPage title="Performance" description={liveLine(intent.system.name, status.dataUpdatedAt, status.isFetching, !!status.data)}>
+    <SettingsPage title="Performance" description={liveLine(intent.system.name, status)}>
       <Internet intent={intent} />
       <Text fw={600} size="lg" mt="md">
         Wi-Fi

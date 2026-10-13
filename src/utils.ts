@@ -1,4 +1,4 @@
-import { z, ZodObject, ZodRawShape, ZodSchema, ZodTypeAny } from "zod";
+import { z, ZodObject, ZodRawShape, ZodTypeAny } from "zod";
 
 export const parseSchema = <S extends ZodTypeAny>(
   schema: S,
@@ -87,6 +87,18 @@ export const oncSectionSchema = <T extends ZodRawShape>(
     )
     .optional();
 };
+
+/**
+ * A config's section types: those listed, or matching `pattern`; any other
+ * (`zones` for `zone`) is refused rather than written as a new type while
+ * the wipe deletes the real one's sections. Options stay open: UCI has far
+ * more than the schemas type.
+ */
+export const onlySectionTypes =
+  (types: string[], pattern?: RegExp) => (value: Record<string, unknown> | undefined, ctx: z.RefinementCtx) =>
+    Object.keys(value ?? {})
+      .filter((key) => ![...types, ".if", ".overrides"].includes(key) && !pattern?.test(key))
+      .forEach((key) => ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: "unknown section type" }));
 
 export const configSchema = <T extends ZodRawShape>(
   schema: ZodObject<T, any>

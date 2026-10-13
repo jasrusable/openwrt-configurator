@@ -1,7 +1,7 @@
 import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig, oncConfigSchema, ONCDeviceConfig } from "./oncConfigSchema";
 import { evaluateCondition } from "./condition";
-import { ExtensionSchema, Condition } from "./utils";
+import { ExtensionSchema, Condition, parseSchema } from "./utils";
 
 export const conditionMatches = ({
   condition,
@@ -60,55 +60,29 @@ export const resolveOncConfig = ({
   deviceSchema: DeviceSchema;
   oncConfig: ONCConfig;
 }) => {
-  const applyObject = <S extends Record<string, any>>(object: S) => {
-    const sectionConfig = object as ExtensionSchema | undefined;
-    const condition = sectionConfig?.[".if"];
-    const matches = conditionMatches({
-      condition: condition,
-      deviceConfig,
-      deviceSchema,
-    });
-    const overrides = (sectionConfig?.[".overrides"] || [])
-      .filter((override) => {
-        return conditionMatches({
-          condition: override[".if"],
-          deviceConfig,
-          deviceSchema,
-        });
-      })
-      .reduce((acc, override) => {
-        return { ...acc, ...override.override };
-      }, {});
-
-    // Strip off conditional things.
-    const data = Object.fromEntries(
-      Object.entries({ ...object, ...overrides }).filter(
-        (e) => ![".if", ".overrides"].includes(e[0])
-      )
-    );
-
-    return matches ? data : {};
+  const matches = (condition?: Condition) => conditionMatches({ condition, deviceConfig, deviceSchema });
+  // An object for this device: undefined where its .if does not match, else
+  // with each matching override applied and the conditions stripped (a
+  // section left with no options, all defaults, is still a section).
+  const applyObject = (object: Record<string, any> & ExtensionSchema): Record<string, any> | undefined => {
+    if (!matches(object[".if"])) return undefined;
+    const { ".if": _if, ".overrides": overrides, ...data } = object;
+    return (overrides || [])
+      .filter((override) => matches(override[".if"]))
+      .reduce((acc, override) => ({ ...acc, ...override.override }), data);
   };
 
-  const resolvedOncConfig = Object.keys(oncConfig.config).reduce(
-    (config, configKey) => {
-      const a = applyObject((oncConfig.config as any)[configKey]);
-      const resolvedConfig = Object.keys(a).reduce((section, sectionKey) => {
-        const sections: any[] = (a as any)[sectionKey] || [];
-        const resolvedSections = sections
-          .map((section) => {
-            const resolvedSection = applyObject(section);
-            return resolvedSection;
-          })
-          .filter((section) => Object.keys(section).length > 0);
-        return { ...section, [sectionKey]: resolvedSections };
-      }, {});
-      return { ...config, [configKey]: resolvedConfig };
-    },
-    {}
+  const resolved = Object.fromEntries(
+    Object.entries(oncConfig.config).map(([configKey, config]) => [
+      configKey,
+      Object.fromEntries(
+        Object.entries(applyObject(config as Record<string, any>) ?? {}).map(([sectionKey, sections]) => [
+          sectionKey,
+          ((sections as Record<string, any>[]) || []).flatMap((section) => applyObject(section) ?? []),
+        ])
+      ),
+    ])
   );
 
-  const parsedConfig = oncConfigSchema.shape.config.parse(resolvedOncConfig);
-
-  return parsedConfig;
+  return parseSchema(oncConfigSchema.shape.config, resolved);
 };

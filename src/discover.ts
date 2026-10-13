@@ -8,19 +8,18 @@
 // stock device's dropbear accepts with any password). Picking it is the
 // trust-on-first-use moment: its host key is recorded then, and taking it on
 // keeps its address, MACs and key as facts, so it is found by identity after.
-import { leasesCommand } from "./status/device";
 import { DeviceFacts, listSeen, readFacts, writeFacts } from "./deviceFacts";
 import { Probe, runProbes } from "./deviceProbes";
 import { DeviceSchema } from "./deviceSchema";
-import { getDeviceSchema } from "./getDeviceSchema";
+import { deviceSchemaOf, deviceSchemaProbes } from "./getDeviceSchema";
 import type { Intent } from "./intent/schema";
 import { loadOncConfig } from "./loadConfig";
-import { knownKey, Located, locateEach, Neighbour, parseNeighbours } from "./locate";
+import { knownKey, Located, locateEach, macsProbe, Neighbour } from "./locate";
 import { ONCDeviceConfig } from "./oncConfigSchema";
 import { Platform } from "./platform";
 import { provisionableDevices, sshConnectOptions } from "./provisionConfig";
 import { shellQuote } from "./shell";
-import { Lease, parseLeases } from "./status/device";
+import { Lease } from "./status/device";
 
 export type Candidate = {
   address: string;
@@ -113,10 +112,7 @@ export const discover = async ({ intentPath, platform }: { intentPath: string; p
   const r = await found;
   if (!("session" in r)) return { candidates: [], error: `The router could not be reached: ${r.error}` };
   try {
-    const tables = await runProbes(r.session, {
-      leases: { command: leasesCommand, parse: ({ stdout }) => parseLeases(stdout) } as Probe<Lease[]>,
-      neighbours: { command: "ip -4 neigh show 2>/dev/null || true", parse: ({ stdout }) => parseNeighbours(stdout) } as Probe<Neighbour[]>,
-    });
+    const tables = r.tables ?? { leases: [], neighbours: [] };
     const known = {
       names,
       addresses: [...ready.map((d) => d.ipaddr), ...Object.values(facts).flatMap((f) => (f?.address ? [f.address] : []))],
@@ -166,18 +162,6 @@ const hostnameProbe: Probe<string> = {
   command: "cat /proc/sys/kernel/hostname",
   parse: ({ stdout }) => stdout.trim(),
 };
-const macsProbe: Probe<string[]> = {
-  command: "cat /sys/class/net/*/address 2>/dev/null || true",
-  parse: ({ stdout }) => [
-    ...new Set(
-      stdout
-        .split("\n")
-        .map((m) => m.trim().toLowerCase())
-        .filter((m) => /^[0-9a-f:]{17}$/.test(m) && m !== "00:00:00:00:00:00")
-    ),
-  ],
-};
-
 /**
  * Read the device at `address`, read-only: with this app's key, else with
  * OpenWrt's default. Never the admin password.
@@ -204,8 +188,8 @@ export const inspect = async ({
     try {
       const session = await platform.connect({ ...options, readyTimeout: 5000 });
       try {
-        const schema = await getDeviceSchema({ deviceConfig: at, ssh: session });
-        const read = await runProbes(session, { hostname: hostnameProbe, macs: macsProbe });
+        const read = await runProbes(session, { ...deviceSchemaProbes, hostname: hostnameProbe, macs: macsProbe });
+        const schema = deviceSchemaOf(address, read);
         const key = knownKey(platform, options.knownHostsFile!, address);
         const role = suggestRole(schema);
         return {

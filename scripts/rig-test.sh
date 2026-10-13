@@ -17,7 +17,7 @@
 #
 # Uses native arm64 images on Apple Silicon and x86-64 elsewhere, and a 15 s
 # confirm window (ONC_TEST_MIN_CONFIRM_WINDOW) so rollbacks do not wait out
-# the real 60 s one.
+# the real 90 s default.
 #
 # Needs docker (privileged containers), jq, openssl and `npm ci` done.
 # Usage: scripts/rig-test.sh [job ...]   (default: dbclient openssh node network)
@@ -27,9 +27,11 @@
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+# The controller's Node, exactly the repo's.
+node_image="node:$(cat "$root/.node-version")-alpine"
 case "$(uname -m)" in
   # The arm64 rootfs is labelled linux/aarch64_generic, which no --platform
-  # matches, so it runs with none; node:24-alpine is a normal multi-arch image.
+  # matches, so it runs with none; the node image is a normal multi-arch one.
   arm64 | aarch64) image=openwrt/rootfs:armsr-armv8-v25.12.5 platform='' node_platform=linux/arm64 ;;
   *) image=openwrt/rootfs:x86-64-v25.12.5 platform=linux/amd64 node_platform=linux/amd64 ;;
 esac
@@ -117,7 +119,7 @@ run_client() {
       ;;
     node)
       docker run -d --platform "$node_platform" --name "$ctl" -v "$work:/work" -v "$root/node_modules:/nm:ro" \
-        -e NODE_PATH=/nm node:24-alpine sleep infinity >/dev/null
+        -e NODE_PATH=/nm "$node_image" sleep infinity >/dev/null
       hosts=/root/.config/openwrt-configurator/known_hosts
       ;;
     *) echo "unknown client $client" >&2; return 2 ;;

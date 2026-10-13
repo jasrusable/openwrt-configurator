@@ -2,9 +2,9 @@
 // 25.12.5 in Docker (src/tests/helpers/status/; the public address replaced),
 // or written to their documented layout where Docker has none (ports, adverts).
 import test from "ava";
+import { tempDir } from "../helpers/tempDir";
 import { spawnSync } from "child_process";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { chmodSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import type { Session } from "../../platform";
 import {
@@ -93,7 +93,7 @@ test("ports, adverts and temperature, as the kernel prints them", (t) => {
 
 /** A session running the real batched probes in a local sh, with stub commands first on PATH. */
 const stubbedSession = (stubs: Record<string, string>): Session => {
-  const dir = mkdtempSync(join(tmpdir(), "onc-status-"));
+  const dir = tempDir("status");
   Object.entries(stubs).forEach(([name, body]) => {
     writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`);
     chmodSync(join(dir, name), 0o755);

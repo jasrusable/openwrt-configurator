@@ -28,7 +28,7 @@ import {
   parseKnownHosts,
 } from "../knownHosts";
 import { dirname } from "../paths";
-import { NetworkError, Platform, SshTarget } from "../platform";
+import { loopbackHosts, NetworkError, Platform, SshTarget } from "../platform";
 
 const transientCodes = new Set([
   "ECONNRESET",
@@ -141,6 +141,8 @@ export const nodePlatform: Platform = {
   readTextFile: (path) => withPath(path, () => readFileSync(path, "utf-8")),
   writeTextFile: (path, data) =>
     withPath(path, () => writeFileSync(path, data)),
+  appendTextFile: (path, data) =>
+    withPath(path, () => appendFileSync(path, data)),
   mkdirp: (path) => {
     mkdirSync(path, { recursive: true });
   },
@@ -286,10 +288,13 @@ export const nodePlatform: Platform = {
       // DNS rebinding: a web page whose name now resolves to 127.0.0.1 is
       // same-origin with this server, so only answer requests addressed to
       // it by a local name, and refuse writes from any other origin.
-      const loopback = ["127.0.0.1", "localhost", "[::1]"];
       const allowedHosts = new Set(
-        (loopback.includes(host) ? loopback : [host]).map((h) => `${h}:${port}`)
+        ["127.0.0.1", "localhost", "[::1]"].map((h) => `${h}:${port}`)
       );
+      if (!loopbackHosts.includes(host)) {
+        reject(new Error(`${host}: only a loopback address is served`));
+        return;
+      }
       const server = createServer((req, res) => {
         const origin = req.headers.origin;
         const crossOrigin =

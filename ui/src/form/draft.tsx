@@ -9,6 +9,7 @@ import {
   useContext,
   useSyncExternalStore,
 } from "react";
+import { canonical, merge3 } from "../../../src/intent/merge";
 import { Intent, intentSchema } from "../../../src/intent/schema";
 
 /** Every dotted path into T: "networks", "networks.1", "networks.1.name"... */
@@ -75,14 +76,6 @@ export const setIn = <T,>(value: T, path: string, next: unknown): T => {
   return (child === undefined ? others : { ...others, [head]: child }) as T;
 };
 
-/** JSON with sorted keys: equal drafts compare equal however they were built. */
-const canonical = (value: unknown): string =>
-  JSON.stringify(value, (_, v) =>
-    v && typeof v === "object" && !Array.isArray(v)
-      ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]]))
-      : v
-  );
-
 /** The schema's problems with an intent, by dotted path. Cached per value. */
 const checked = new WeakMap<object, Issue[]>();
 export const issuesOf = (intent: Intent): Issue[] => {
@@ -102,18 +95,41 @@ const belongsTo = (issue: Issue, path: string) =>
   issue.path === path ||
   (issue.path.startsWith(`${path}.`) && isIndex(issue.path.slice(path.length + 1)));
 
+const keyOf = (issue: Issue) => `${issue.path}\u0000${issue.message}`;
+
+/**
+ * Whether an edit at `touched` shows a problem: the field's own, or one of
+ * the object it is in (a network's, when its name was edited). Not one of a
+ * group just switched on: its settings say what is missing once edited, or
+ * on Save.
+ */
+const shownBy = (touched: string) => (issue: Issue) =>
+  belongsTo(issue, touched) || touched.startsWith(`${issue.path}.`);
+
+/** Remembers its last answer while `deps` are the same objects, as a subscription needs. */
+const memo = <T,>(compute: (...deps: unknown[]) => T) => {
+  let last: { deps: unknown[]; value: T } | undefined;
+  return (...deps: unknown[]): T => {
+    if (!last || deps.some((dep, i) => dep !== last!.deps[i])) last = { deps, value: compute(...deps) };
+    return last.value;
+  };
+};
+
 export class Draft {
   private listeners = new Set<() => void>();
-  private touched = new Set<string>();
-  private changedCache?: { value: Intent; saved: Intent; changed: boolean };
+  /** Fields edited since the last save, as an immutable set: a new one per edit. */
+  private touched: ReadonlySet<string> = new Set();
   /** What the server said was wrong with the last save, until the next edit. */
   private serverIssues: Issue[] = [];
 
   constructor(
     public saved: Intent,
     public value: Intent = saved,
-    /** Show every problem, or only those of fields edited so far (a new item's page). */
-    private revealAll = true
+    /**
+     * Show every problem; else only those already in the saved file and
+     * those of fields edited since, until Save or Add is tried (`reveal`).
+     */
+    private revealAll = false
   ) {}
 
   subscribe = (listener: () => void) => {
@@ -127,11 +143,21 @@ export class Draft {
     this.listeners.forEach((listener) => listener());
   }
 
+  /** A clean start over `saved`: nothing edited, problems hidden again. */
+  private settle(saved: Intent, value: Intent) {
+    this.saved = saved;
+    this.value = value;
+    this.touched = new Set();
+    this.revealAll = false;
+    this.serverIssues = [];
+    this.emit();
+  }
+
   get = (path?: string) => getIn(this.value, path);
 
   set = (path: string, next: unknown) => {
     this.value = setIn(this.value, path, next);
-    this.touched.add(path);
+    if (!this.touched.has(path)) this.touched = new Set([...this.touched, path]);
     this.serverIssues = [];
     this.emit();
   };
@@ -144,40 +170,32 @@ export class Draft {
   };
 
   /** Back to the saved file; or a newly saved one becomes the saved file. */
-  reset = (saved: Intent = this.saved) => {
-    this.saved = saved;
-    this.value = saved;
-    this.touched.clear();
-    this.serverIssues = [];
-    this.emit();
-  };
+  reset = (saved: Intent = this.saved) => this.settle(saved, saved);
 
   /**
    * `sent` was saved as `stored`. Edits made while it was on its way are
    * kept: the draft becomes the stored file only if it is still what was sent.
    */
   savedAs = (sent: Intent, stored: Intent) => {
+    if (this.value === sent) return this.settle(stored, stored);
     this.saved = stored;
-    if (this.value === sent) {
-      this.value = stored;
-      this.touched.clear();
-    }
     this.serverIssues = [];
     this.emit();
   };
 
   /**
    * The saved file changed elsewhere (another tab, the CLI, a login read it
-   * again): follow it when there are no edits; with edits, keep them, now
-   * compared with the new file.
+   * again): the edits made over the old file are replayed onto the new one,
+   * so saving keeps the other change too (`merge3`).
    */
-  rebase = (saved: Intent) => {
-    if (saved === this.saved) return;
-    if (canonical(this.value) === canonical(this.saved)) return this.reset(saved);
+  rebase = (saved: Intent, base: Intent = this.saved) => {
+    if (saved === this.saved && base === this.saved) return;
+    this.value = merge3(base, this.value, saved);
     this.saved = saved;
     this.emit();
   };
 
+  /** Every problem shows, as when Save or Add is tried. */
   reveal = () => {
     this.revealAll = true;
     this.emit();
@@ -188,34 +206,32 @@ export class Draft {
     this.emit();
   };
 
-  private combined?: { own: Issue[]; server: Issue[]; all: Issue[] };
+  private all = memo((own, server) =>
+    (server as Issue[]).length ? [...(own as Issue[]), ...(server as Issue[])] : (own as Issue[])
+  );
 
-  /** The same array while nothing changed, as a subscription needs. */
-  issues = (): Issue[] => {
-    const own = issuesOf(this.value);
-    if (!this.serverIssues.length) return own;
-    const c = this.combined;
-    if (c?.own !== own || c.server !== this.serverIssues) {
-      this.combined = { own, server: this.serverIssues, all: [...own, ...this.serverIssues] };
-    }
-    return this.combined!.all;
-  };
+  /** Every problem, shown or not: what Save checks. The same array while nothing changed. */
+  issues = (): Issue[] => this.all(issuesOf(this.value), this.serverIssues);
+
+  private visible = memo((all, saved, touched, revealAll) => {
+    if (revealAll) return all as Issue[];
+    const before = new Set(issuesOf(saved as Intent).map(keyOf));
+    const edited = [...(touched as ReadonlySet<string>)].map(shownBy);
+    return (all as Issue[]).filter(
+      (issue) => before.has(keyOf(issue)) || edited.some((shows) => shows(issue))
+    );
+  });
+
+  /** The problems to show: the header's list, the sidebar's counts, the red marks. */
+  shownIssues = (): Issue[] => this.visible(this.issues(), this.saved, this.touched, this.revealAll);
 
   /** The message to show on a field, if it has a problem and may show it. */
-  errorFor = (path: string): string | undefined => {
-    const shown =
-      this.revealAll ||
-      [...this.touched].some((t) => t === path || t.startsWith(`${path}.`) || path.startsWith(`${t}.`));
-    return shown ? this.issues().find((issue) => belongsTo(issue, path))?.message : undefined;
-  };
+  errorFor = (path: string): string | undefined =>
+    this.shownIssues().find((issue) => belongsTo(issue, path))?.message;
 
-  changed = (): boolean => {
-    const cache = this.changedCache;
-    if (cache?.value === this.value && cache.saved === this.saved) return cache.changed;
-    const changed = canonical(this.value) !== canonical(this.saved);
-    this.changedCache = { value: this.value, saved: this.saved, changed };
-    return changed;
-  };
+  private differs = memo((value, saved) => canonical(value) !== canonical(saved));
+
+  changed = (): boolean => this.differs(this.value, this.saved);
 }
 
 const DraftContext = createContext<Draft | null>(null);
@@ -230,16 +246,38 @@ export const useDraft = () => {
   return draft;
 };
 
-const useDerived = <T,>(read: (draft: Draft) => T): T => {
+/**
+ * Something read off the draft, re-rendering only when it changes: `read`
+ * must give the same value (a string, or the same object) while what it
+ * reads is unchanged.
+ */
+export const useDerived = <T,>(read: (draft: Draft) => T): T => {
   const draft = useDraft();
   return useSyncExternalStore(draft.subscribe, () => read(draft));
 };
 
 /** The draft's value at a path (or the whole draft), re-rendering when it changes. */
-export const useDraftValue = (path?: IntentField): any => useDerived((d) => d.get(path));
+export function useDraftValue(): Intent;
+export function useDraftValue<P extends IntentField>(path: P): ValueAt<Intent, P> | undefined;
+export function useDraftValue(path?: string): unknown {
+  return useDerived((d) => d.get(path));
+}
 
-/** Every problem with the draft. */
-export const useIssues = () => useDerived((d) => d.issues());
+/** A list in the draft and its edits: add an item, change or remove one by its place. */
+export const useDraftList = <N extends ListPath>(path: N) => {
+  const draft = useDraft();
+  const items: ItemOf<N>[] = useDerived((d) => d.get(path)) ?? [];
+  const set = (next: ItemOf<N>[]) => draft.set(path, next);
+  return {
+    items,
+    add: (item: ItemOf<N>) => set([...items, item]),
+    update: (index: number, item: ItemOf<N>) => set(items.map((old, i) => (i === index ? item : old))),
+    remove: (index: number) => set(items.filter((_, i) => i !== index)),
+  };
+};
+
+/** The problems to show (see Draft.shownIssues). */
+export const useIssues = () => useDerived((d) => d.shownIssues());
 
 /** The problem to show on a field, if any. */
 export const useFieldError = (path: string) => useDerived((d) => d.errorFor(path));

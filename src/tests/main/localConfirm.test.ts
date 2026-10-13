@@ -1,7 +1,7 @@
 import test from "ava";
+import { tempDir } from "../helpers/tempDir";
 import { spawn, spawnSync } from "child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { chmodSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { createServer, Server } from "net";
 import { reachableSession, reconnectSettled } from "../../confirm";
@@ -96,38 +96,39 @@ const hasNc = spawnSync("sh", ["-c", "command -v nc"]).status === 0;
 );
 
 // A fake `ubus` whose service list changes on each of the first `changes`
-// calls and is stable after that, standing in for procd reloading services.
+// calls and is stable after that, standing in for procd reloading services,
+// and a `sleep` that returns at once: the loop is counted in calls, not timed.
 const withFakeUbus = (changes: number) => {
-  const dir = mkdtempSync(join(tmpdir(), "onc-ubus-"));
+  const dir = tempDir("ubus");
   writeFileSync(
     join(dir, "ubus"),
     `#!/bin/sh\nn=$(cat ${dir}/n 2>/dev/null || echo 0); echo $((n+1)) > ${dir}/n\n` +
       `[ $n -lt ${changes} ] && echo "changing $n" || echo stable\n`
   );
+  writeFileSync(join(dir, "sleep"), "#!/bin/sh\n");
   chmodSync(join(dir, "ubus"), 0o755);
+  chmodSync(join(dir, "sleep"), 0o755);
   return dir;
 };
 
-const runSettle = (dir: string, maxSeconds: number) => {
-  const started = Date.now();
-  const result = spawnSync("sh", ["-c", servicesSettled(maxSeconds).command], {
-    env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+/** How the settle loop ended, and how many times it asked procd. */
+const runSettle = (dir: string, maxSeconds: number) =>
+  new Promise<{ status: number | null; calls: number }>((resolve) => {
+    spawn("sh", ["-c", servicesSettled(maxSeconds).command], {
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+      stdio: "ignore",
+    }).on("close", (status) =>
+      resolve({ status, calls: Number(readFileSync(join(dir, "n"), "utf8")) })
+    );
   });
-  rmSync(dir, { recursive: true });
-  return { status: result.status, seconds: (Date.now() - started) / 1000 };
-};
 
-test("settling waits for three unchanged seconds after the last change", (t) => {
-  const { status, seconds } = runSettle(withFakeUbus(3), 20);
-  t.is(status, 0);
-  // Changes on calls 1–3, then three equal comparisons: about 6 s.
-  t.true(seconds >= 5 && seconds < 9, `${seconds}s`);
+test("settling waits for three unchanged reads after the last change", async (t) => {
+  // Changes on calls 1–3, the 4th differs from the 3rd, then three equal: 7.
+  t.deepEqual(await runSettle(withFakeUbus(3), 20), { status: 0, calls: 7 });
 });
 
-test("settling gives up at its cap if services keep changing", (t) => {
-  const { status, seconds } = runSettle(withFakeUbus(1000), 4);
-  t.is(status, 0);
-  t.true(seconds >= 3.5 && seconds < 6, `${seconds}s`);
+test("settling gives up at its cap if services keep changing", async (t) => {
+  t.deepEqual(await runSettle(withFakeUbus(1000), 4), { status: 0, calls: 4 });
 });
 
 test("reconnectSettled settles on one session and confirms on a fresh one", async (t) => {

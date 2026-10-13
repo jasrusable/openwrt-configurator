@@ -95,7 +95,9 @@ const parse = (source: string): Node => {
 
   const value = (): Value => {
     const token = tokens[pos++];
-    if (token.type === "string" || token.type === "number") return token.value;
+    if (token.type === "string") return token.value;
+    // As written, since values compare by text: 25.10 is not 25.1, nor 01 1.
+    if (token.type === "number") return token.text;
     if (isKeyword(token, "TRUE")) return true;
     if (isKeyword(token, "FALSE")) return false;
     throw new ConditionError(`expected a value ${where(token)}`);

@@ -3,6 +3,7 @@ import {
   configSchema,
   makeOncConfigSchema,
   oncSectionSchema,
+  onlySectionTypes,
   sectionSchema,
 } from "../../utils";
 import {
@@ -20,12 +21,10 @@ import {
 // Policy routing (a network out through a VPN tunnel) and WireGuard's peers,
 // whose section type is the interface's name after "wireguard_": as written.
 const anySection = z.object({}).passthrough();
-const peerSections = /^wireguard_[A-Za-z0-9_]+$/;
-const onlyPeerSections = (value: Record<string, unknown> | undefined, ctx: z.RefinementCtx) =>
-  Object.keys(value ?? {})
-    .filter((key) => !known.includes(key) && !peerSections.test(key))
-    .forEach((key) => ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: "unknown section type" }));
-const known = ["switch", "switch_vlan", "device", "bridge-vlan", "interface", "rule", "route", "globals", ".if", ".overrides"];
+const onlyPeerSections = onlySectionTypes(
+  ["switch", "switch_vlan", "switch_port", "device", "bridge-vlan", "interface", "rule", "rule6", "route", "route6", "globals"],
+  /^wireguard_[A-Za-z0-9_]+$/
+);
 
 export const networkSchema = configSchema(
   z

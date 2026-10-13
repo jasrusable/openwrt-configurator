@@ -9,13 +9,20 @@ import { where } from "../../../../src/intent/places";
 import { Intent } from "../../../../src/intent/schema";
 import { decodeInvite, encodeInvite, inviteOf, vpnEndpoint } from "../../../../src/intent/vpn";
 import { newPrivateKey } from "../../../../src/wireguard";
-import { useDraft, useDraftValue } from "../../form/draft";
+import { setIn, useDraft, useDraftValue } from "../../form/draft";
 import { NumberField, TagsField, TextField, Value } from "../../form/fields";
-import { defineList, ListPage } from "../../form/ListPage";
-import { ItemIcon, ItemName, Section, SettingRow, SettingsPage } from "../../kit/layout";
-import { Experimental, ZoneAccess } from "./shared";
+import { addChecked, defineList, ListPage } from "../../form/ListPage";
+import { Experimental, ItemIcon, ItemName, Section, SettingRow, SettingsPage } from "../../kit/layout";
+import { ZoneAccess } from "./shared";
 
 type Site = Intent["vpn"]["sites"]["peers"][number];
+
+/** Ranges typed comma-separated, as a list. */
+const subnetsOf = (typed: string) =>
+  typed
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
 const NewSitePage = () => {
   const navigate = useNavigate();
@@ -24,6 +31,8 @@ const NewSitePage = () => {
   const [code, setCode] = useState("");
   const [site, setSite] = useState<Omit<Site, "id">>({ name: "", public_key: "", subnets: [] });
   const [error, setError] = useState<string>();
+  // As typed, so a comma can be typed; read as a list when added.
+  const [subnets, setSubnets] = useState("");
   const back = () => navigate("/vpn/sites");
   const read = (text: string) => {
     setCode(text);
@@ -31,6 +40,7 @@ const NewSitePage = () => {
     try {
       const invite = decodeInvite(text);
       setSite({ name: invite.name, public_key: invite.public_key, subnets: invite.subnets, ...(invite.endpoint ? { endpoint: invite.endpoint } : {}) });
+      setSubnets(invite.subnets.join(", "));
       setError(undefined);
     } catch (e) {
       setError((e as Error).message);
@@ -38,7 +48,9 @@ const NewSitePage = () => {
   };
   const add = () => {
     const id = `s${Math.max(0, ...intent.vpn.sites.peers.map((p) => Number(p.id.slice(1)))) + 1}`;
-    draft.replace({ ...intent, vpn: { ...intent.vpn, sites: { ...intent.vpn.sites, peers: [...intent.vpn.sites.peers, { id, ...site }] } } });
+    const peers = [...intent.vpn.sites.peers, { id, ...site, subnets: subnetsOf(subnets) }];
+    const problem = addChecked(draft, setIn(intent, "vpn.sites.peers", peers), `vpn.sites.peers.${peers.length - 1}`);
+    if (problem) return setError(problem);
     back();
   };
   return (
@@ -49,7 +61,7 @@ const NewSitePage = () => {
           <Button variant="default" onClick={back}>
             Cancel
           </Button>
-          <Button onClick={add} disabled={!site.name || !site.public_key || !site.subnets.length}>
+          <Button onClick={add} disabled={!site.name || !site.public_key || !subnetsOf(subnets).length}>
             Add site
           </Button>
         </>
@@ -77,11 +89,7 @@ const NewSitePage = () => {
           />
         </SettingRow>
         <SettingRow label="Its networks" description="Comma-separated ranges, like 192.168.50.0/24.">
-          <TextInput
-            value={site.subnets.join(", ")}
-            onChange={(e) => setSite({ ...site, subnets: e.currentTarget.value.split(",").map((s) => s.trim()).filter(Boolean) })}
-            w={260}
-          />
+          <TextInput value={subnets} onChange={(e) => setSubnets(e.currentTarget.value)} w={260} />
         </SettingRow>
       </Section>
     </SettingsPage>
@@ -115,10 +123,10 @@ const sitesList = defineList({
   ],
   editor: (i) => (
     <Section>
-      <TextField name={`vpn.sites.peers.${i}.name`} label="Name" />
-      <TextField name={`vpn.sites.peers.${i}.public_key`} label="Its key" />
-      <TextField name={`vpn.sites.peers.${i}.endpoint`} label="Its address" placeholder="cabin.example.com:51821" />
-      <TagsField name={`vpn.sites.peers.${i}.subnets`} label="Its networks" placeholder="Add a range" />
+      <TextField name={`vpn.sites.peers.${i}.name`} />
+      <TextField name={`vpn.sites.peers.${i}.public_key`} />
+      <TextField name={`vpn.sites.peers.${i}.endpoint`} placeholder="cabin.example.com:51821" />
+      <TagsField name={`vpn.sites.peers.${i}.subnets`} placeholder="Add a range" />
     </Section>
   ),
 });
@@ -162,7 +170,7 @@ const ThisSite = () => {
             </CopyButton>
           </Group>
         </SettingRow>
-        <NumberField name="vpn.sites.port" label="Port" min={1} max={65535} integer />
+        <NumberField name="vpn.sites.port" min={1} max={65535} integer />
       </Section>
       <ZoneAccess base="sites" />
     </>

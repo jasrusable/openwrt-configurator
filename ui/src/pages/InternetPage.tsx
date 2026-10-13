@@ -2,10 +2,11 @@
 // its own smart queueing), and how several are used together. The first is
 // the main one: the networks' IPv6 comes from it, and in failover it carries
 // everything while it works.
-import { Button, Group, Text } from "@mantine/core";
+import { Button, Text } from "@mantine/core";
 import { IconWorld } from "@tabler/icons-react";
 import { useLocation, useNavigate } from "react-router";
-import { portTakenBy, withMain, withoutConnection } from "../../../src/intent/connections";
+import { lineRole, portTakenBy, withMain } from "../../../src/intent/connections";
+import { withoutLine } from "../../../src/intent/edits";
 import { Intent, netmask } from "../../../src/intent/schema";
 import { useDevices } from "../data/devices";
 import { modelOf, portsOf, routerFacts } from "../facts";
@@ -24,7 +25,8 @@ import {
   When,
 } from "../form/fields";
 import { defineList, ListPage } from "../form/ListPage";
-import { ExperimentalBadge, ItemIcon, ItemName, Section, SettingRow } from "../kit/layout";
+import { Experimental, ItemIcon, ItemName, Section, SettingRow } from "../kit/layout";
+import { lineTypeLabels } from "../../../src/intent/labels";
 
 const address = /[\d.]/;
 
@@ -48,7 +50,6 @@ const lines = [
   { value: "adsl", label: "ADSL" },
 ] as const;
 
-const types: Record<string, string> = { dhcp: "DHCP", pppoe: "PPPoE", static: "Static IP" };
 
 type Connection = Intent["internet"]["lines"][number];
 
@@ -66,19 +67,11 @@ const usePortLabel = () => {
 };
 
 /** Its place: the main one, a backup in order, or its share of traffic. */
-const useRole = (index: number) => {
-  const intent: Intent = useDraftValue();
-  const connections = intent.internet.lines;
-  if (connections.length < 2) return "Main";
-  if (intent.internet.use_lines.mode === "balance") return `Share ${connections[index]?.failover.weight ?? 1}`;
-  // Failover tries a metered line after all the others.
-  if (connections[index]?.failover.metered) return "Last resort";
-  return index === 0 ? "Main" : connections.length > 2 ? `Backup ${index}` : "Backup";
-};
+const useRole = (index: number) => lineRole(useDraftValue(), index);
 
 const RoleText = ({ index }: { index: number }) => (
   <Text size="sm" c="dimmed">
-    {useRole(index)}
+    {useRole(index).label}
   </Text>
 );
 
@@ -157,11 +150,9 @@ const PriorityRow = ({ index }: { index: number }) => {
     draft.replace({ ...intent, internet: { ...intent.internet, lines: withMain(connections, index) } });
     navigate("/internet/0");
   };
-  return index === 0 ? (
-    <SettingRow label="Main connection" description="Used first; your networks get IPv6 from it." />
-  ) : (
-    <SettingRow label={role} description="Used when the ones above it fail.">
-      {!adding && (
+  return (
+    <SettingRow label={role.label} description={role.description}>
+      {index > 0 && !adding && (
         <Button variant="default" size="xs" onClick={makeMain}>
           Make main
         </Button>
@@ -183,7 +174,6 @@ const connections = defineList({
   name: "internet.lines",
   title: "Connections",
   addLabel: "Add connection",
-  newItem: newConnection,
   // On a free port: the WAN port if no connection has it, else the first
   // port of the router's no other connection uses.
   useNewItem: () => {
@@ -200,18 +190,7 @@ const connections = defineList({
   },
   canRemove: (_, items) => items.length > 1,
   // Networks keeping to it go back to Automatic.
-  onRemove: (intent, index) => {
-    const gone = intent.internet.lines[index];
-    return {
-      ...intent,
-      internet: { ...intent.internet, lines: withoutConnection(intent.internet.lines, index) },
-      networks: intent.networks.map((network) => {
-        if (network.access.via !== gone?.id) return network;
-        const { via: _, ...access } = network.access;
-        return { ...network, access };
-      }),
-    };
-  },
+  onRemove: withoutLine,
   itemTitle: (i) => <Value name={`internet.lines.${i}.name`} fallback="New connection" />,
   empty: "No connections.",
   columns: [
@@ -228,7 +207,7 @@ const connections = defineList({
       header: "Type",
       cell: (i) => (
         <Text size="sm" c="dimmed">
-          <Value name={`internet.lines.${i}.type`} format={(t) => types[t as string] ?? t} />
+          <Value name={`internet.lines.${i}.type`} format={(t) => t && lineTypeLabels[t]} />
         </Text>
       ),
     },
@@ -249,11 +228,11 @@ const connections = defineList({
             label="Type"
             within
             variants={[
-              { value: "dhcp", label: "DHCP", initial: { type: "dhcp" } },
-              { value: "pppoe", label: "PPPoE", initial: { type: "pppoe", pppoe: { username: "", password: "" } } },
+              { value: "dhcp", label: lineTypeLabels.dhcp, initial: { type: "dhcp" } },
+              { value: "pppoe", label: lineTypeLabels.pppoe, initial: { type: "pppoe", pppoe: { username: "", password: "" } } },
               {
                 value: "static",
-                label: "Static IP",
+                label: lineTypeLabels.static,
                 initial: { type: "static", static: { address: "", prefix_length: 24, gateway: "" } },
               },
             ]}
@@ -336,48 +315,40 @@ const Together = () => {
         <Section>
           <SegmentedField
             name="internet.use_lines.mode"
-            label="Using several"
             options={[
               { value: "failover", label: "Failover" },
               { value: "balance", label: "Share traffic" },
             ]}
           />
           {intent.internet.use_lines.mode === "balance" && (
-            <SwitchField name="internet.use_lines.sticky_per_device" label="Keep each device on one line" />
+            <SwitchField name="internet.use_lines.sticky_per_device" />
           )}
         </Section>
       )}
       <Section
-        title={
-          <Group gap={8}>
-            Name on the internet
-            <ExperimentalBadge />
-          </Group>
-        }
+        title={<Experimental>Name on the internet</Experimental>}
       >
         <OptionalField
           name="internet.dynamic_dns"
-          label="Name on the internet"
           initial={{ provider: "duckdns", hostname: "", token: "" }}
         >
           <SelectField
             name="internet.dynamic_dns.provider"
-            label="Provider"
             options={[
               { value: "duckdns", label: "Duck DNS" },
               { value: "cloudflare", label: "Cloudflare" },
               { value: "dynv6", label: "dynv6" },
             ]}
           />
-          <TextField name="internet.dynamic_dns.hostname" label="Name" placeholder="myhome.duckdns.org" />
-          <PasswordField name="internet.dynamic_dns.token" label="API token" />
+          <TextField name="internet.dynamic_dns.hostname" placeholder="myhome.duckdns.org" />
+          <PasswordField name="internet.dynamic_dns.token" />
           <When name="internet.dynamic_dns.provider" is="cloudflare">
-            <TextField name="internet.dynamic_dns.zone" label="Zone" placeholder="example.com" />
+            <TextField name="internet.dynamic_dns.zone" placeholder="example.com" />
           </When>
         </OptionalField>
       </Section>
       <Section description="Main network only; devices open ports for themselves.">
-        <SwitchField name="internet.upnp" label="UPnP and NAT-PMP" description="Lets games and apps open the ports they need." />
+        <SwitchField name="internet.upnp" />
       </Section>
     </>
   );

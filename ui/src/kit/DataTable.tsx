@@ -10,8 +10,6 @@ export type Column = {
   /** The cell for row `index`. */
   cell: (index: number) => ReactNode;
   width?: number | string;
-  /** Holds a control (edited in place): clicking it does not open the row. */
-  interactive?: boolean;
 };
 
 export const DataTable = ({
@@ -60,11 +58,7 @@ export const DataTable = ({
                 style={{ cursor: "pointer", transition: "background 120ms" }}
               >
                 {columns.map((column, c) => (
-                  <Table.Td
-                    key={column.header}
-                    onClick={column.interactive ? (e) => e.stopPropagation() : undefined}
-                    style={column.interactive ? { cursor: "default" } : undefined}
-                  >
+                  <Table.Td key={column.header}>
                     <Group gap={8} wrap="nowrap">
                       {c === 0 && rowMarker?.(index)}
                       {column.cell(index)}

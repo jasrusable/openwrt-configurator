@@ -1,6 +1,6 @@
 import test from "ava";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { tempDir } from "../helpers/tempDir";
+import { writeFileSync } from "fs";
 import { join } from "path";
 import { loadOncConfig } from "../../loadConfig";
 import {
@@ -248,7 +248,7 @@ test("assertSecretName rejects spaces and empty", (t) => {
 });
 
 test("loadOncConfig resolves refs then validates the schema", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "onc-secrets-"));
+  const dir = tempDir("secrets");
   const path = join(dir, "config.json");
   writeFileSync(
     path,
@@ -292,26 +292,22 @@ test("loadOncConfig resolves refs then validates the schema", async (t) => {
       },
     })
   );
-  try {
-    const { oncConfig, secrets } = await loadOncConfig({
-      path,
-      platform: nodePlatform,
-      lookup: lookupFrom({
-        "ssh/root": "ssh-pass-ok",
-        "wifi/home": "testpsk1",
-        pppoe: "pppoe-pass",
-      }),
-    });
-    t.is(
-      oncConfig.devices[0].provisioning_config?.ssh_auth.password,
-      "ssh-pass-ok"
-    );
-    t.is((oncConfig.config as any).wireless["wifi-iface"][0].key, "testpsk1");
-    t.is((oncConfig.config as any).network.interface[0].password, "pppoe-pass");
-    t.is(secrets.get("wifi/home"), "testpsk1");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  const { oncConfig, secrets } = await loadOncConfig({
+    path,
+    platform: nodePlatform,
+    lookup: lookupFrom({
+      "ssh/root": "ssh-pass-ok",
+      "wifi/home": "testpsk1",
+      pppoe: "pppoe-pass",
+    }),
+  });
+  t.is(
+    oncConfig.devices[0].provisioning_config?.ssh_auth.password,
+    "ssh-pass-ok"
+  );
+  t.is((oncConfig.config as any).wireless["wifi-iface"][0].key, "testpsk1");
+  t.is((oncConfig.config as any).network.interface[0].password, "pppoe-pass");
+  t.is(secrets.get("wifi/home"), "testpsk1");
 });
 
 test("findPlaintextSecrets ignores a key that is a file path", (t) => {

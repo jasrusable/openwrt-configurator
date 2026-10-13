@@ -3,32 +3,14 @@
 Open work, roughly in priority order. Remove an item when it is done; the
 commit that does it is the record.
 
-## Services: enabled at boot and running, as declared
+## Services without a reload trigger
 
-Config alone does not guarantee a service runs. A provision should make each
-service's boot state and running state follow the config, not just its UCI.
-
-Checked on 25.12.5 (the rig, and read-only on jaculu-router and jaculu-ap-1):
-
-- **Fine today: services with a procd reload trigger, e.g. `sqm`.**
-  Installing the package enables it (`S50sqm`). Because of the baseline
-  refresh, a config change fires its `procd_add_reload_trigger` and restarts it.
-  On the router: enabled, trigger registered, cake on `eth1`.
-- **Gap: services without a reload trigger, e.g. `ubihealthd`.** Its init
-  script has no `service_triggers`, so `reload_config` never restarts it. A
-  changed `ubihealthd` config only takes effect at the next reboot or a
-  manual `/etc/init.d/ubihealthd restart`. Find which other packages in use
-  (`irqbalance`, `https-dns-proxy`, `usteer`, ...) are in the same position.
-- **Gap: boot state is not declared.** A service someone disabled
-  (`/etc/init.d/x disable`) stays disabled after a provision, since nothing
-  re-enables it. A package that does not enable itself on install never
-  starts at boot.
-
-Likely shape: a declared set of services, each `enabled` or not. Every run
-`enable`s or `disable`s each one, and restarts those whose config changed but
-that have no reload trigger, or starts/stops them to match. Check
-`ubus call service list '{"name":"<svc>","verbose":true}'` for triggers rather
-than guessing. Cover it in the rig.
+Each feature declares its services, enabled and started on every apply
+(`servicesCommands`). A service whose init script has no `service_triggers`
+still ignores a config change until restarted: ubihealthd has a patch that
+restarts it; find which others in use are in the same position (`ubus call
+service list '{"name":"<svc>","verbose":true}'` shows triggers) and restart
+those whose config changed. Cover boot state and running state in the rig.
 
 ## Intent layer and web UI
 
@@ -46,9 +28,8 @@ and the React UI in `ui/`.
 - [ ] **No invalid configuration, by construction.** Started: cross-setting
       rules live in the schema's superRefine (one main network, unique VLANs
       and ranges, Wi-Fi on an existing network) and inputs are constrained.
-      Still to do: channels legal in the chosen country, the LAN not
-      overlapping the WAN's range, and the choices the UI offers served from
-      the same rules. Device-only facts (a missing 5 GHz radio) fail at plan
+      Still to do: channels legal in the chosen country, and the LAN not
+      overlapping the WAN's range. Device-only facts (a missing 5 GHz radio) fail at plan
       time, before any change.
 - [ ] **Reading devices** (CLAUDE.md, "Reading devices"; the app replaces
       LuCI, status included). Done: device facts that keep themselves fresh
@@ -61,17 +42,14 @@ and the React UI in `ui/`.
       are, identity checked (`src/locate.ts`: last address, settings, router
       leases by name and MAC; pinned host key and board). Done also:
       guided Add hardware (`src/discover.ts`) and login access from the
-      intent (authorized keys, password login off). Next, in order: a
-      read-only
-      rpcd "monitor" login compiled
-      onto every device (status objects only, never UCI; its own reviewed
-      step: hashed password with a stable salt); `/api/status` and a live
-      Overview plus a Clients page (leases, Wi-Fi stations, reservations),
-      with realtime graphs kept only in the browser; logs per device (drift shows
-      on Apply, read live); actions
-      (reboot, restart Wi-Fi, ping) over SSH with a confirmation; then LuCI
-      off the devices (uhttpd and rpcd stay; `rpcd-mod-iwinfo` explicit);
-      long-term history last.
+      intent (authorized keys, password login off), and the Status pages
+      (Overview, Clients, Devices, Performance, Activity; graphs kept only in
+      the browser; restart a service, speed test, Wi-Fi survey). Next, in
+      order: a read-only rpcd "monitor" login compiled onto every device
+      (status objects only, never UCI; its own reviewed step: hashed
+      password with a stable salt); actions (reboot, restart Wi-Fi, ping)
+      with a confirmation; then LuCI off the devices (uhttpd and rpcd stay;
+      `rpcd-mod-iwinfo` explicit); long-term history last.
 - [ ] Per-port network assignment (today every LAN port carries every
       network: the main one untagged, the others tagged). Also a security
       fix: a wired device can tag its frames into any network's VLAN, which
@@ -106,7 +84,7 @@ and the React UI in `ui/`.
 ## Mesh
 
 - Run it on real hardware (two access points), then drop "Experimental".
-- Mesh over cables (`mesh.wired`) on swconfig nodes: there the VLAN is only carried, not used.
+- Mesh over cables (`wifi.mesh.over_cable`) on swconfig nodes: there the VLAN is only carried, not used.
 - Tri-band access points with two 5 GHz radios: the mesh uses the first; a dedicated second 5 GHz radio needs each radio's channels in the facts.
 - A QEMU OpenWrt VM with `kmod-mac80211-hwsim` for an end-to-end mesh test in CI.
 - The wired mesh's MTU and path check on real switches (verified only in Docker, and a 1500-only Docker bridge as the bad switch).
@@ -121,14 +99,13 @@ and the React UI in `ui/`.
 
 ## From the settings and apply review (2026-10-13)
 
-- swconfig boards whose WAN is outside the switch (a separate ethN): `@wan_port` throws; facts should add that device as a port.
-- A second radio in one band (tri-band) gets no SSID or mesh: SSIDs and the mesh pick radios by band name.
 - Ordering: the access point the workstation is on (by Wi-Fi) is not put last, only the gateway and a local device.
 - Adopting (Hardware › Add): show the host key's fingerprint and the MAC before adopting, and take addresses only, not names.
 - One root password is sent to every device: prefer keys only, the password only with password login on and no key.
 - `<intent>.state` is made 0755 and only tightened to 0700 when an apply starts; make it 0700 when first made.
 - `ports: "*t"` (string) means every bridge port, `["*t"]` only the free physical ones: one bracket changes what a VLAN carries.
 - Access points get `dhcp` sections though dnsmasq and odhcpd are removed there; harmless, but noise in the apply diff.
-- 18 section schemas are `.passthrough()`, so a mistyped option reaches the device (verify then compares against the declaration).
+- Section schemas leave options open (UCI has far more than they type), so a mistyped option reaches the device; section types are refused when unknown. A misspelled config (`firwall`) is not: `uci batch` fails on a config the device lacks, unless prepare seeds it (packages changing), and then the real one is wiped as undeclared. Check declared configs against the device's at plan.
+- swconfig: the switch is `switch0` in the compiler and engine; facts drop board.json's switch name (a board whose switch is named otherwise, or with two, is wrong).
 - The IPv6-follows-the-line hook (mwan3 `disconnected`/`connected`) is from mwan3's source: watch a real failover.
 - The SSH transports have no connect time limit: a login that stalls before authentication (seen once in the rig, dbclient path) holds an apply until the watchdog. Give each connect one, as locate's 4 s handshake does.

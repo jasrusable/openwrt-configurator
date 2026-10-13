@@ -1,5 +1,5 @@
 import test from "ava";
-import { diffIntent } from "../../intent/diff";
+import { describePath, diffIntent } from "../../intent/diff";
 
 const base = {
   system: { name: "Home", timezone: "Europe/Zurich", country: "CH" },
@@ -72,4 +72,10 @@ test("a list item removed from the middle is one removal, not every later item c
   t.deepEqual(removed.map((c) => [c.kind, c.path]), [["removed", "wifi.networks.0"]]);
   const renamed = diffIntent(wifi([ssid("Home"), ssid("IoT")]), wifi([ssid("House"), ssid("IoT")]));
   t.deepEqual(renamed.map((c) => [c.kind, c.path, c.before, c.after]), [["changed", "wifi.networks.0.ssid", "Home", "House"]]);
+});
+
+test("each band's radio settings are named by their band, 2.4 GHz included", (t) => {
+  const intent = { wifi: { radios: {} } };
+  t.deepEqual(describePath(["wifi", "radios", "2g", "power"], intent).slice(-2), ["2.4 GHz", "Transmit power"]);
+  t.deepEqual(describePath(["wifi", "radios", "6g", "power"], intent).slice(-2), ["6 GHz", "Transmit power"]);
 });

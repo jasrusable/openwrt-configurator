@@ -1,25 +1,21 @@
 import test from "ava";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { sampleIntentText } from "../helpers/fixtures";
+import { tempDir } from "../helpers/tempDir";
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
 import { writeFacts } from "../../deviceFacts";
 import { nodePlatform } from "../../platforms/node";
 import { rpcdAuth } from "../../server/auth";
-import { uiHandler } from "../../server/handlers";
+import { clientOf, uiHandler } from "../../server/handlers";
 
-const root = join(__dirname, "../../..");
 
 const withServer = async (
   run: (handle: ReturnType<typeof uiHandler>, intentPath: string) => Promise<void>
 ) => {
-  const dir = mkdtempSync(join(tmpdir(), "onc-server-"));
+  const dir = tempDir("server");
   const intentPath = join(dir, "intent.json");
-  writeFileSync(intentPath, readFileSync(join(root, "sampleConfigs/intent.json")));
-  try {
-    await run(uiHandler({ intentPath, uiRoot: dir, platform: nodePlatform }), intentPath);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  writeFileSync(intentPath, sampleIntentText());
+  await run(uiHandler({ intentPath, uiRoot: dir, platform: nodePlatform }), intentPath);
 };
 
 const request = (method: string, path: string, body = "", headers: Record<string, string> = { "x-onc": "1" }) => ({
@@ -127,9 +123,9 @@ test("adopting a box already in Hardware under another name is refused: its key 
 });
 
 test("on a router, the API needs a session from the root password; the UI's files do not", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "onc-auth-"));
+  const dir = tempDir("auth");
   const intentPath = join(dir, "intent.json");
-  writeFileSync(intentPath, readFileSync(join(__dirname, "../../../sampleConfigs/intent.json")));
+  writeFileSync(intentPath, sampleIntentText());
   const sid = "0123456789abcdef0123456789abcdef";
   const other = "fedcba9876543210fedcba9876543210";
   const calls: unknown[] = [];
@@ -166,9 +162,9 @@ test("on a router, the API needs a session from the root password; the UI's file
 });
 
 test("wrong passwords sent side by side are counted together: after five in a minute, logins pause", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "onc-auth-"));
+  const dir = tempDir("auth");
   const intentPath = join(dir, "intent.json");
-  writeFileSync(intentPath, readFileSync(join(__dirname, "../../../sampleConfigs/intent.json")));
+  writeFileSync(intentPath, sampleIntentText());
   const run = async (argv: string[], options?: { stdin?: string }) =>
     argv[0] === "ucode" ? { code: 0, stdout: JSON.stringify({ result: null }), stderr: "" } : nodePlatform.run(argv, options);
   const platform = { ...nodePlatform, run, sleep: async () => {} };
@@ -231,9 +227,9 @@ test("no page can frame the app: every answer says so", async (t) => {
 });
 
 test("an IPv6 client is counted by its /64, and everyone together has a ceiling", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "onc-auth6-"));
+  const dir = tempDir("auth6");
   const intentPath = join(dir, "intent.json");
-  writeFileSync(intentPath, readFileSync(join(__dirname, "../../../sampleConfigs/intent.json")));
+  writeFileSync(intentPath, sampleIntentText());
   const run = async (argv: string[], options?: { stdin?: string }) =>
     argv[0] === "ucode" ? { code: 0, stdout: JSON.stringify({ result: null }), stderr: "" } : nodePlatform.run(argv, options);
   const platform = { ...nodePlatform, run, sleep: async () => {} };
@@ -244,12 +240,42 @@ test("an IPv6 client is counted by its /64, and everyone together has a ceiling"
   const statuses = [];
   for (let i = 1; i <= 7; i++) statuses.push((await guess(`2001:db8:1:2::${i.toString(16)}`)).status);
   t.true(statuses.includes(429), JSON.stringify(statuses));
+  // Written short, its /64 is still read in full: 2001:db8:0:0.
+  const short = [];
+  for (let i = 1; i <= 7; i++) short.push((await guess(`2001:db8::${i}:2:3:4`)).status);
+  t.true(short.includes(429), JSON.stringify(short));
+});
+
+test("a login client: an IPv4 address, or an IPv6 one's /64 written in full", (t) => {
+  t.is(clientOf("10.0.0.5"), "10.0.0.5");
+  t.is(clientOf("::ffff:10.0.0.5"), "10.0.0.5");
+  t.is(clientOf("2001:db8::1:2:3:4"), "2001:db8:0:0");
+  t.is(clientOf("2001:0db8:0001:0002:0:0:0:9"), "2001:db8:1:2");
+  t.is(clientOf("fe80::1%br-lan"), "fe80:0:0:0");
+  t.is(clientOf("::1"), "0:0:0:0");
+});
+
+test("logins are off while the attempts folder is not this app's own", async (t) => {
+  const dir = tempDir("authdir");
+  const intentPath = join(dir, "intent.json");
+  writeFileSync(intentPath, sampleIntentText());
+  const attempts = join(dir, "attempts");
+  mkdirSync(attempts, { mode: 0o777 });
+  chmodSync(attempts, 0o777);
+  const run = async (argv: string[], options?: { stdin?: string }) =>
+    argv[0] === "ucode" ? { code: 0, stdout: JSON.stringify({ result: null }), stderr: "" } : nodePlatform.run(argv, options);
+  const platform = { ...nodePlatform, run, sleep: async () => {} };
+  const handle = uiHandler({ intentPath, uiRoot: dir, platform, auth: rpcdAuth(platform), loginAttemptsDir: attempts });
+  const login = () => handle({ method: "POST", path: "/api/login", body: JSON.stringify({ password: "nope" }), headers: { "x-onc": "1" } });
+  t.is((await login()).status, 500);
+  chmodSync(attempts, 0o700);
+  t.is((await login()).status, 401);
 });
 
 test("one client hammering past its limit cannot lock everyone out: refused attempts do not fill the ceiling", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "onc-authdos-"));
+  const dir = tempDir("authdos");
   const intentPath = join(dir, "intent.json");
-  writeFileSync(intentPath, readFileSync(join(__dirname, "../../../sampleConfigs/intent.json")));
+  writeFileSync(intentPath, sampleIntentText());
   const run = async (argv: string[], options?: { stdin?: string }) =>
     argv[0] === "ucode" ? { code: 0, stdout: JSON.stringify({ result: null }), stderr: "" } : nodePlatform.run(argv, options);
   const platform = { ...nodePlatform, run, sleep: async () => {} };
@@ -259,4 +285,15 @@ test("one client hammering past its limit cannot lock everyone out: refused atte
   for (let i = 0; i < 40; i++) await guess("10.0.0.66");
   t.is((await guess("10.0.0.66")).status, 429, "the hammering client stays paused");
   t.is((await guess("10.0.0.77")).status, 401, "the owner can still try");
+});
+
+test("a body that is not a JSON object is refused as such, not a server error", async (t) => {
+  await withServer(async (handle) => {
+    for (const path of ["/api/fix", "/api/mesh/speed", "/api/discover/inspect", "/api/intent"]) {
+      for (const body of ["null", "[1]", "{"]) {
+        const r = await handle(request(path === "/api/intent" ? "PUT" : "POST", path, body));
+        t.is(r.status, 400, `${path} ${body}`);
+      }
+    }
+  });
 });

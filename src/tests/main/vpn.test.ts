@@ -1,6 +1,5 @@
 import test from "ava";
-import { readFileSync } from "fs";
-import { join } from "path";
+import { sampleIntent } from "../helpers/fixtures";
 import { protocolRefreshCommands } from "../../getDeviceScript";
 import { OpenWrtState } from "../../openWrtConfigSchema";
 import { availability } from "../../intent/choices";
@@ -15,7 +14,7 @@ import { newPrivateKey, publicKeyOf } from "../../wireguard";
 import { parseWgConf } from "../../wireguardConf";
 
 const sample = () =>
-  intentSchema.parse(JSON.parse(readFileSync(join(__dirname, "../../../sampleConfigs/intent.json"), "utf8")));
+  sampleIntent();
 
 test("a provider's .conf, read: its key, address, DNS and server", (t) => {
   const conf = parseWgConf(

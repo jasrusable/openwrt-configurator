@@ -7,7 +7,7 @@
 // stay on the main one, and without "use the others when it is down" an
 // unreachable rule after it is the kill switch. Zones and the WAN rules are
 // the firewall feature's.
-import { Feature, onRouter, serviceWhen } from "../fragment";
+import { Feature, onRouter, routerOnly, serviceWhen } from "../fragment";
 import { ovpnOption, ovpnSafeLines } from "../ovpn";
 import { clientAddresses, vpnRouterAddresses } from "../vpn";
 import type { Intent } from "../schema";
@@ -51,7 +51,6 @@ const endpoint = (hostPort: string) => {
 };
 
 export const vpn: Feature = (intent) => {
-  const routerOnly = (sections: Record<string, unknown>[]) => sections.map((s) => ({ ".if": onRouter, ...s }));
   const { remote_access: remote, sites, providers: tunnels } = intent.vpn;
   const { networks } = intent;
   const wgTunnels = tunnels.filter((t): t is WgTunnel => t.type === "wireguard");

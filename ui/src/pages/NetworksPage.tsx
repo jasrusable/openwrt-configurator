@@ -4,7 +4,6 @@ import {
   Group,
   NumberInput,
   SegmentedControl,
-  Select,
   Text,
   TextInput,
 } from "@mantine/core";
@@ -17,7 +16,7 @@ import {
   IconUsers,
   IconX,
 } from "@tabler/icons-react";
-import { useDraft, useDraftValue, useFieldError } from "../form/draft";
+import { useDraft, useDraftList, useDraftValue, useFieldError } from "../form/draft";
 import { withNetworkAdded, withoutNetwork } from "../../../src/intent/edits";
 import {
   availability,
@@ -36,12 +35,12 @@ import { where } from "../../../src/intent/places";
 import { Intent, parseSubnet } from "../../../src/intent/schema";
 import {
   DurationField,
-  FieldRow,
   MultiSelectField,
   NumberField,
   OptionalField,
   segments,
   SegmentedField,
+  SelectField,
   SubnetField,
   SwitchField,
   TagsField,
@@ -51,6 +50,7 @@ import {
 } from "../form/fields";
 import { defineList, ListPage } from "../form/ListPage";
 import { EmptyState, ItemIcon, ItemName, Section, SettingRow } from "../kit/layout";
+import { networkTypeLabels, routerAccessOptions, zoneLabels } from "../../../src/intent/labels";
 
 /** Each template, and Custom for a network that follows none (networkTemplates.ts). */
 const types: {
@@ -59,10 +59,10 @@ const types: {
   color: string;
   icon: typeof IconHome;
 }[] = [
-  { value: "home", label: "Home", color: "blue", icon: IconHome },
-  { value: "guest", label: "Guest", color: "orange", icon: IconUsers },
-  { value: "iot", label: "IoT", color: "grape", icon: IconBulb },
-  { value: "custom", label: "Custom", color: "gray", icon: IconAdjustmentsHorizontal },
+  { value: "home", label: networkTypeLabels.home, color: "blue", icon: IconHome },
+  { value: "guest", label: networkTypeLabels.guest, color: "orange", icon: IconUsers },
+  { value: "iot", label: networkTypeLabels.iot, color: "grape", icon: IconBulb },
+  { value: "custom", label: networkTypeLabels.custom, color: "gray", icon: IconAdjustmentsHorizontal },
 ];
 
 /** Which template network `index` follows, read off its settings. */
@@ -180,16 +180,15 @@ const networks = defineList({
         </When>
         <VlanField index={i} />
         <SubnetField name={`networks.${i}.subnet`} label="Router address" />
-        <Ipv6Field index={i} />
+        <SwitchField name={`networks.${i}.ipv6`} />
       </Section>
       <Section title="Handing out addresses (DHCP)">
         <NumberField
           name={`networks.${i}.dhcp.pool_size`}
-          label="Addresses for devices"
           min={1}
           max={253}
         />
-        <DurationField name={`networks.${i}.dhcp.lease`} label="Lease time" />
+        <DurationField name={`networks.${i}.dhcp.lease`} />
         <OptionalField
           name={`networks.${i}.dhcp.dns_servers`}
           label="Hand out other DNS servers"
@@ -215,7 +214,7 @@ const useReachable = (index: number) => {
   return [
     ...networks.filter((n) => ids.includes(n.id)).map((n) => ({ value: n.id, label: n.name || "Unnamed" })),
     // Remote access's clients and the linked sites, when there are any.
-    ...vpnZones(intent).map((z) => ({ value: z, label: z === "vpn" ? "Remote access clients" : "Linked sites" })),
+    ...vpnZones(intent).map((z) => ({ value: z, label: zoneLabels[z] })),
   ];
 };
 
@@ -225,7 +224,6 @@ const NameField = ({ index }: { index: number }) => {
   return (
     <TextField
       name={`networks.${index}.name`}
-      label="Name"
       openwrt={network?.id ? `interface ${network.id} on ${deviceOf(network)}` : undefined}
     />
   );
@@ -288,11 +286,9 @@ const AccessSection = ({ index }: { index: number }) => {
     >
       <SwitchField
         name={`networks.${index}.access.internet`}
-        label="Internet"
       />
       <SwitchField
         name={`networks.${index}.share_devices`}
-        label="Share devices with other networks"
         description={
           networks[index]?.share_devices &&
           !networks.some((n, i) => i !== index && n.share_devices)
@@ -302,28 +298,16 @@ const AccessSection = ({ index }: { index: number }) => {
       />
       <MultiSelectField
         name={`networks.${index}.access.networks`}
-        label="Can reach"
-        description="Other networks its devices may connect to."
         options={reachable}
         placeholder={reachable.length ? "None" : "No other networks"}
       />
       <SegmentedField
         name={`networks.${index}.access.router`}
-        label="Router access"
-        description="Services: addresses, DNS and time. Full: also admin and SSH."
-        options={[
-          { value: "services", label: "Network services" },
-          { value: "full", label: "Full" },
-        ]}
+        options={routerAccessOptions}
       />
     </Section>
   );
 };
-
-/** Greyed out without the internet's IPv6, or when its prefix is full, with why (choices.ts). */
-const Ipv6Field = ({ index }: { index: number }) => (
-  <SwitchField name={`networks.${index}.ipv6`} label="IPv6" />
-);
 
 /** 12 hex digits, however typed (AA-BB-..., aabb...), as aa:bb:cc:dd:ee:ff. */
 const tidyMac = (typed: string) => {
@@ -334,13 +318,12 @@ const tidyMac = (typed: string) => {
 
 /** Devices that always get the same address on this network, and a name in DNS. */
 const ReservationsSection = ({ index }: { index: number }) => {
-  const draft = useDraft();
-  const base = `networks.${index}.dhcp.reservations`;
-  const reservations: Reservation[] = useDraftValue(base as never) ?? [];
+  const base = `networks.${index}.dhcp.reservations` as const;
+  const list = useDraftList(base);
+  const reservations = list.items;
   const subnet: string = useDraftValue(`networks.${index}.subnet`) ?? "";
   const prefix = subnet.split(".").slice(0, 3).join(".");
   const domain: string = useDraftValue("dns.domain") ?? "lan";
-  const set = (next: Reservation[]) => draft.set(base, next);
   const used = reservations.map((r) => Number(r.address.split(".")[3]));
   return (
     <Section
@@ -356,10 +339,7 @@ const ReservationsSection = ({ index }: { index: number }) => {
               Array.from({ length: 235 }, (_, i) => i + 20).find(
                 (h) => !used.includes(h),
               ) ?? 2;
-            set([
-              ...reservations,
-              { name: "", mac: "", address: `${prefix}.${host}` },
-            ]);
+            list.add({ name: "", mac: "", address: `${prefix}.${host}` });
           }}
         >
           Add device
@@ -394,10 +374,8 @@ const ReservationsSection = ({ index }: { index: number }) => {
               path={`${base}.${j}`}
               reservation={r}
               prefix={prefix}
-              onChange={(next) =>
-                set(reservations.map((old, k) => (k === j ? next : old)))
-              }
-              onRemove={() => set(reservations.filter((_, k) => k !== j))}
+              onChange={(next) => list.update(j, next)}
+              onRemove={() => list.remove(j)}
             />
           ))}
         </>
@@ -498,41 +476,21 @@ const ReservationRow = ({
  * when it is down.
  */
 const LineSection = ({ index }: { index: number }) => {
-  const draft = useDraft();
-  const intent: Intent = useDraftValue();
-  const path = `networks.${index}.access` as const;
-  const access = intent.networks[index]?.access;
-  const error = useFieldError(`${path}.via`);
-  const connections = intent.internet.lines;
-  if (connections.length < 2 && !intent.vpn.providers.length) return null;
-  const automatic = "\u0000";
+  const lines = useDraftValue("internet.lines") ?? [];
+  const providers = useDraftValue("vpn.providers") ?? [];
+  const via = useDraftValue(`networks.${index}.access.via`);
+  if (lines.length < 2 && !providers.length) return null;
   return (
     <Section title="Internet">
-      <FieldRow name={path} label="Internet line" description="Which connection or VPN provider its devices use." error={error}>
-        <Select
-          data={[
-            { value: automatic, label: "Automatic" },
-            ...connections.map((c) => ({ value: c.id, label: c.name || "Unnamed" })),
-            ...intent.vpn.providers.map((t) => ({ value: t.id, label: `${t.name || "Unnamed"} (VPN)` })),
-          ]}
-          value={access?.via ?? automatic}
-          onChange={(value) => {
-            const { via: _, ...rest } = access ?? { fallback: true };
-            draft.set(
-              path,
-              value === null || value === automatic
-                ? { ...rest, fallback: true }
-                : // A VPN provider never falls back: its kill switch.
-                  { ...rest, via: value, fallback: !intent.vpn.providers.some((t) => t.id === value) && (access?.fallback ?? true) }
-            );
-          }}
-          allowDeselect={false}
-          error={!!error}
-          aria-label="Internet line"
-          w={220}
-        />
-      </FieldRow>
-      {access?.via && <SwitchField name={`${path}.fallback`} label="Use the others when it is down" />}
+      <SelectField
+        name={`networks.${index}.access.via`}
+        emptyLabel="Automatic"
+        options={[
+          ...lines.map((c) => ({ value: c.id, label: c.name || "Unnamed" })),
+          ...providers.map((t) => ({ value: t.id, label: `${t.name || "Unnamed"} (VPN)` })),
+        ]}
+      />
+      {via && <SwitchField name={`networks.${index}.access.fallback`} />}
     </Section>
   );
 };
@@ -545,8 +503,6 @@ const VlanField = ({ index }: { index: number }) => (
       vlan !== undefined && (
         <NumberField
           name={`networks.${index}.vlan`}
-          label="VLAN"
-          description="Any switch between your devices must carry it."
           min={2}
           max={4094}
           integer

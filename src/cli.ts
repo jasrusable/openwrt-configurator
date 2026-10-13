@@ -1,5 +1,9 @@
 import { ApplyEvent } from "./applyEvents";
 import { rpcdAuth } from "./server/auth";
+import { routerNames } from "./server/hosts";
+import { redactor } from "./secretOptions";
+import { cgiRequest } from "./server/cgi";
+import { loopbackHosts } from "./platform";
 import { AppliedWithProblems, appliedWithProblemsExit } from "./devicePhases";
 import { assertSupportedRelease } from "./release";
 import { DeviceBuildPlan } from "./getBuildPlan";
@@ -46,7 +50,6 @@ import {
 } from "./buildImage";
 
 /** The largest request body the CGI program reads. */
-const maxCgiBody = 2 * 1024 * 1024;
 
 /**
  * Every device located (src/locate.ts) before any is touched; one that cannot
@@ -67,9 +70,12 @@ const locatedOrRefused = async (oncConfig: ONCConfig, intentPath: string, platfo
 export const main = async ({
   argv,
   platform,
+  uiDir = "dist/ui",
 }: {
   argv: string[];
   platform: Platform;
+  /** Where the built web UI is, unless --ui-dir says: the entry point knows. */
+  uiDir?: string;
 }) => {
   const timing = confirmTiming(platform.env("ONC_TEST_MIN_CONFIRM_WINDOW"));
   const { minimumConfirmTimeoutSeconds } = timing;
@@ -154,13 +160,10 @@ export const main = async ({
       const { oncConfig, hostKeys } = factsFor
         ? await locatedOrRefused(loaded.oncConfig, factsFor, platform)
         : { oncConfig: loaded.oncConfig, hostKeys: {} };
-      // Appended a line at a time: read by the UI while the run goes.
+      // Appended a line at a time, from empty: read by the UI while the run goes.
+      if (options.events) platform.writeTextFile(options.events as string, "");
       const report = options.events
-        ? (event: ApplyEvent) => {
-            const path = options.events as string;
-            const before = platform.fileMode(path) === undefined ? "" : platform.readTextFile(path);
-            platform.writeTextFile(path, `${before}${JSON.stringify(event)}\n`);
-          }
+        ? (event: ApplyEvent) => platform.appendTextFile(options.events as string, `${JSON.stringify(event)}\n`)
         : undefined;
       await provisionConfig({
         oncConfig,
@@ -221,7 +224,7 @@ export const main = async ({
     {
       flags: "--ui-dir <dir>",
       description: "the built web UI (npm run ui:build)",
-      default: "dist/ui",
+      default: uiDir,
     },
   ];
 
@@ -235,7 +238,7 @@ export const main = async ({
       { flags: "--port <port>", description: "port to listen on", default: "8080" },
       {
         flags: "--host <host>",
-        description: "address to listen on; the API returns passwords, so keep it local",
+        description: "loopback address to listen on: 127.0.0.1 or ::1 (the API has no login here)",
         default: "127.0.0.1",
       },
     ],
@@ -245,7 +248,12 @@ export const main = async ({
           "This runtime cannot listen on a port. On a router, have uhttpd run `cgi`."
         );
       }
-      console.log(`Serving ${intentPath} at http://${options.host}:${options.port}/`);
+      // No login on this machine: anyone who can reach it could read every
+      // password and apply. A router's own UI (`cgi`) has one.
+      if (!loopbackHosts.includes(options.host)) {
+        throw new Error(`--host ${options.host}: the UI listens on this machine only (127.0.0.1, ::1 or localhost); it has no login here.`);
+      }
+      console.log(`Serving ${intentPath} at http://${options.host.includes(":") ? `[${options.host}]` : options.host}:${options.port}/`);
       await platform.serve(
         uiHandler({ intentPath, uiRoot: options.uiDir, platform }),
         { host: options.host, port: Number(options.port) }
@@ -260,36 +268,32 @@ export const main = async ({
     args: [{ name: "intent-file", description: "the intent file to edit" }],
     options: uiOptions,
     action: async ([intentPath], options) => {
-      const length = Number(platform.env("CONTENT_LENGTH") || 0);
-      // Read before any login is checked, so bounded: an intent, VPN files
-      // and all, is far smaller; more is refused unread.
-      if (length > maxCgiBody) {
-        console.log(
-          cgiResponse({ status: 413, headers: { "content-type": "application/json; charset=utf-8" }, body: JSON.stringify({ error: "Too large." }) })
-        );
-        platform.exit(0);
-        return;
-      }
-      const response = await uiHandler({
-        intentPath,
-        uiRoot: options.uiDir,
-        platform,
-        // On a router, reachable from the network: log in with its root password.
-        auth: rpcdAuth(platform),
-        // Counted in RAM, not flash: every attempt is a file.
-        loginAttemptsDir: "/tmp/onc-login-attempts",
-      })({
-        method: platform.env("REQUEST_METHOD") || "GET",
-        path: platform.env("PATH_INFO") || "/",
-        body: length > 0 ? platform.readStdin() : "",
-        ...(platform.env("REMOTE_ADDR") ? { remoteAddress: platform.env("REMOTE_ADDR")! } : {}),
-        // CGI passes request headers as HTTP_<NAME> variables.
-        headers: {
-          "x-onc": platform.env("HTTP_X_ONC") ?? "",
-          cookie: platform.env("HTTP_COOKIE") ?? "",
-          ...(platform.env("HTTP_X_ONC_VERSION") ? { "x-onc-version": platform.env("HTTP_X_ONC_VERSION")! } : {}),
-        },
-      });
+      const names = routerNames(
+        (() => {
+          try {
+            return JSON.parse(platform.readTextFile(intentPath));
+          } catch {
+            return undefined;
+          }
+        })()
+      );
+      const request = cgiRequest(platform.env, names, platform.readStdin);
+      const response =
+        "refused" in request
+          ? {
+              status: request.refused,
+              headers: { "content-type": "application/json; charset=utf-8" },
+              body: JSON.stringify({ error: request.error }),
+            }
+          : await uiHandler({
+              intentPath,
+              uiRoot: options.uiDir,
+              platform,
+              // On a router, reachable from the network: log in with its root password.
+              auth: rpcdAuth(platform),
+              // Counted in RAM, not flash: every attempt is a file.
+              loginAttemptsDir: "/tmp/onc-login-attempts",
+            })(request);
       console.log(cgiResponse(response));
       // Answered: a timer still pending (a device read's time limit) must not
       // keep this process, and so the response, open. exit flushes first.
@@ -315,7 +319,7 @@ export const main = async ({
       {
         flags: "--show-secrets",
         description:
-          "print resolved secret values (default: redact as { $secret: name })",
+          "print passwords and keys (default: redact)",
       },
     ],
     action: async ([configPath], options) => {
@@ -381,7 +385,7 @@ export const main = async ({
             current: facts.uciConfigs.configs,
             redact: options.showSecrets
               ? undefined
-              : (value) => redactValue(value, secrets),
+              : redactor((value) => redactValue(value, secrets)),
           });
           console.log(`#device ${deviceConfig.hostname}`);
           console.log(commands.join("\n"));
@@ -685,7 +689,7 @@ export const main = async ({
   commands.push({
     name: "capture-device-schema",
     description:
-      "record each device's hardware schema (ports, radios, section types, version; no option values) as a test fixture",
+      "record each device's hardware schema (ports, radios, version; no option values) as a test fixture",
     args: [
       { name: "config-file", description: "config file naming the devices" },
     ],
@@ -701,7 +705,11 @@ export const main = async ({
       },
     ],
     action: async ([configPath], options) => {
-      const { oncConfig } = await loadOncConfig({ path: configPath, platform });
+      const loaded = await loadOncConfig({ path: configPath, platform });
+      // Found and held to their keys as an apply would: it logs in as root.
+      const { oncConfig, hostKeys } = loaded.intent
+        ? await locatedOrRefused(loaded.oncConfig, configPath, platform)
+        : { oncConfig: loaded.oncConfig, hostKeys: {} as Record<string, { type: string; key: string }> };
       const { ready, skipped } = provisionableDevices(oncConfig);
       reportSkipped(skipped);
       platform.mkdirp(options.out);
@@ -709,6 +717,7 @@ export const main = async ({
         const ssh = await connectToDevice({
           deviceConfig,
           identityPath: options.identity,
+          hostKey: hostKeys[deviceConfig.hostname],
           platform,
         });
         try {
@@ -810,18 +819,12 @@ export const main = async ({
 };
 
 /** Run the CLI on the given platform, exiting when done. */
-export const run = ({
-  argv,
-  platform,
-}: {
-  argv: string[];
-  platform: Platform;
-}) =>
-  main({ argv, platform })
-    .then(() => platform.exit(0))
+export const run = (options: Parameters<typeof main>[0]) =>
+  main(options)
+    .then(() => options.platform.exit(0))
     .catch((e) => {
       // Without this a failure surfaces as an unhandled rejection and a stack
       // trace rather than a readable message.
       console.error(`\nError: ${(e as Error)?.message ?? e}`);
-      platform.exit(e instanceof AppliedWithProblems ? appliedWithProblemsExit : 1);
+      options.platform.exit(e instanceof AppliedWithProblems ? appliedWithProblemsExit : 1);
     });

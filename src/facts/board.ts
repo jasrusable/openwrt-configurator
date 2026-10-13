@@ -17,7 +17,10 @@ const object = (value: unknown): Json => (value && typeof value === "object" && 
 const strings = (value: unknown) => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []);
 const string = (value: unknown) => (typeof value === "string" && value ? value : undefined);
 
-/** Older switches (swconfig): the switch's ports, named eth<num> as the engine expects. */
+/**
+ * Older switches (swconfig): the switch's ports by number, named `port<num>`
+ * (not eth<num>, a real NIC's name on boards with one beside the switch).
+ */
 const switchPorts = (board: Json): Port[] | undefined => {
   const switches = Object.values(object(board.switch)).filter((s) => Array.isArray(object(s).ports));
   if (switches.length === 0) return undefined;
@@ -27,7 +30,8 @@ const switchPorts = (board: Json): Port[] | undefined => {
     const role = port.role === "lan" || port.role === "wan" ? port.role : undefined;
     return [
       {
-        name: `eth${port.num}`,
+        name: `port${port.num}`,
+        switch_port: port.num,
         ...(role ? { default_role: role } : {}),
         ...(string(port.device) ? { sw_config_cpu_name: port.device } : {}),
       },
@@ -44,6 +48,12 @@ const networkPorts = (board: Json): Port[] => {
     const names = ports.length ? ports : string(net.device) ? [net.device as string] : [];
     return names.map((name) => ({ name, default_role: role }));
   });
+};
+
+/** On a switch board, a network on a NIC of its own (ath79's WAN on eth0, the LAN on the switch's eth1): a port as on DSA. */
+const portsBesideSwitch = (board: Json, onSwitch: Port[]): Port[] => {
+  const cpus = onSwitch.flatMap((p) => (p.sw_config_cpu_name ? [p.sw_config_cpu_name] : []));
+  return networkPorts(board).filter((p) => !cpus.includes(p.name.replace(/\.\d+$/, "")));
 };
 
 const bandOrder = ["60G", "6G", "5G", "2G"];
@@ -138,7 +148,7 @@ export const parseDeviceFacts = ({
   if (!version) throw new Error(`${name} reports no OpenWrt release (ubus system board).`);
 
   const fromSwitch = switchPorts(board);
-  const ports = fromSwitch ?? networkPorts(board);
+  const ports = fromSwitch ? [...fromSwitch, ...portsBesideSwitch(board, fromSwitch)] : networkPorts(board);
   if (ports.length === 0) {
     throw new Error(
       `${name}: board.json lists no ports (network.lan and network.wan have neither ports nor a device, and there is no switch).`

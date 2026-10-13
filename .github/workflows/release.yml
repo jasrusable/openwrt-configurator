@@ -17,9 +17,9 @@ jobs:
     needs: tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: ".node-version"
           cache: "npm"
@@ -40,6 +40,9 @@ jobs:
 
       - run: npm run build
 
+      # The binaries carry the web UI (pkg assets), for `ui`.
+      - run: npm run ui:build
+
       - run: npm run package
 
       - run: npm run bundle
@@ -53,7 +56,7 @@ jobs:
           done
           ls -la
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
             artifacts/openwrt-configurator-linux
@@ -65,6 +68,38 @@ jobs:
             artifacts/openwrt-configurator.mjs
             artifacts/openwrt-configurator.mjs.sha256
           generate_release_notes: true
+          fail_on_unmatched_files: true
+
+  # pkg cannot sign a macOS arm64 binary from Linux, and Apple Silicon will
+  # not run an unsigned one: built on a Mac, ad-hoc signed by codesign.
+  macos-arm64:
+    needs: release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: ".node-version"
+          cache: "npm"
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: npm run ui:build
+
+      - run: npx pkg . --targets node24-macos-arm64 --output artifacts/openwrt-configurator-macos-arm64
+
+      - name: Checksum
+        working-directory: artifacts
+        run: shasum -a 256 openwrt-configurator-macos-arm64 > openwrt-configurator-macos-arm64.sha256
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: |
+            artifacts/openwrt-configurator-macos-arm64
+            artifacts/openwrt-configurator-macos-arm64.sha256
           fail_on_unmatched_files: true
 
   # A signed apk feed on GitHub Pages. Devices trust it by the key, so the
@@ -81,9 +116,9 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: ".node-version"
           cache: "npm"
@@ -93,7 +128,7 @@ jobs:
       - run: npm run bundle
 
       # The web UI ships in the package (served at /cgi-bin/onc/).
-      - run: node scripts/build-ui.js
+      - run: npm run ui:build
 
       - name: Build the package and signed index
         env:
@@ -106,18 +141,18 @@ jobs:
           rm -f "$key"
           mv site/openwrt/public-key.pem site/openwrt/openwrt-configurator.pem
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: site
 
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
 
   homebrew:
     needs: release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Render the formula from the released bundle
         env:

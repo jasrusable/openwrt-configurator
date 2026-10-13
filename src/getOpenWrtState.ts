@@ -31,19 +31,9 @@ export const getOpenWrtState = ({
       return [...new Set([...acc, ...packageProfile.packages])];
     }, []);
 
-  const packagesToInstall = packages
-    .filter((packageName) => !packageName.startsWith("-"))
-    .map((packageLine) => {
-      const [packageName, version] = packageLine.split("@");
-      return {
-        packageName,
-        version,
-      };
-    });
-
-  const packagesToUninstall = packages
-    .filter((packageName) => packageName.startsWith("-"))
-    .map((name) => name.slice(1));
+  // A leading "-" removes; the schema allows nothing else (no version pins).
+  const packagesToInstall = packages.filter((name) => !name.startsWith("-")).map((packageName) => ({ packageName }));
+  const packagesToUninstall = packages.filter((name) => name.startsWith("-")).map((name) => name.slice(1));
 
   // What the wipe leaves alone. The rest is worked out against the device's
   // actual config, read after the package step (see getStageCommands).

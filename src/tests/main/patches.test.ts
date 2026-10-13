@@ -1,14 +1,14 @@
 import test from "ava";
+import { sampleIntent } from "../helpers/fixtures";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { evaluateCondition } from "../../condition";
 import { patches } from "../../intent/patches";
 import { applyPatches, Patch, patchesFor, targetCondition } from "../../intent/patches/patch";
-import { intentSchema } from "../../intent/schema";
 
 const root = join(__dirname, "..", "..", "..");
 const sample = () =>
-  intentSchema.parse(JSON.parse(readFileSync(join(root, "sampleConfigs", "intent.json"), "utf8")));
+  sampleIntent();
 
 const knownModels = readdirSync(join(root, "deviceSchemas")).map(
   (f) => JSON.parse(readFileSync(join(root, "deviceSchemas", f), "utf8")).name as string

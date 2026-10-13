@@ -1,7 +1,8 @@
 import test from "ava";
+import { sampleIntentJson } from "../helpers/fixtures";
+import { tempDir } from "../helpers/tempDir";
 import { spawnSync } from "child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { deviceSchemaSchema } from "../../deviceSchema";
 import { getOpenWrtConfig } from "../../getOpenWrtConfig";
@@ -17,7 +18,7 @@ import { oncConfigSchema } from "../../oncConfigSchema";
 
 const root = join(__dirname, "../../..");
 const sample = () =>
-  JSON.parse(readFileSync(join(root, "sampleConfigs/intent.json"), "utf8"));
+  sampleIntentJson();
 const compile = (intent = sample()) =>
   oncConfigSchema.parse(compileIntent(intentSchema.parse(intent)));
 
@@ -241,6 +242,9 @@ test("internet: IPv6 asks for the prefix size; PPPoE gets an explicit wan6", (t)
   });
   t.like(iface(config, "wan"), { proto: "pppoe", ipv6: "1" });
   t.like(iface(config, "wan6"), { device: "@wan", proto: "dhcpv6", reqprefix: "56" });
+  // Shaped on PPPoE's own device: on the port, cake cannot read the NAT inside PPPoE frames to be fair per device.
+  t.like(config.sqm.queue[0], { interface: "pppoe-wan", overhead: "46" });
+  t.not(router(() => {}).sqm.queue[0].interface, "pppoe-wan");
   t.false("reqprefix" in iface(router(() => {}), "wan6"), "automatic asks for nothing");
 
   const intent = sample();
@@ -741,9 +745,12 @@ test("two internet connections: a line on a LAN port, mwan3 over both, queueing 
   t.is(pinnedConfig.network.interface.find((i: any) => i[".name"] === "lan").ip6assign, undefined);
   t.truthy(availability(intentSchema.parse(pinned), "networks.0.ipv6").option(true).unavailable);
 
-  // A metered line, even listed first, is failover's last resort.
+  // A metered line, even listed first, is failover's last resort (without
+  // IPv6: that goes out the first line alone, so it is refused with it).
   const meteredFirst = twoLines("failover");
   meteredFirst.internet.lines[0].failover = { ...meteredFirst.internet.lines[0].failover, metered: true };
+  t.false(intentSchema.safeParse(meteredFirst).success);
+  meteredFirst.internet.lines[0].ipv6 = { ...meteredFirst.internet.lines[0].ipv6, enabled: false };
   const last = onDevice("home-router", "friendlyarm,nanopi-r6s", meteredFirst);
   t.deepEqual(last.mwan3.policy[0].use_member, ["wan_m2", "wanb_m1"]);
 
@@ -786,6 +793,11 @@ test("connections: one per port, the WAN port once, ids of their own", (t) => {
     ["internet.lines.1.port: Fibre uses it."]
   );
   t.true(issues((i) => (i.networks[1].id = "wanx")).some((m) => m.endsWith("reserved")));
+  // Names a section of the compiler's or the engine's has: they would merge.
+  for (const id of ["mesh0", "dnsmasq0", "device1", "defaults0"]) {
+    t.true(issues((i) => (i.networks[1].id = id)).some((m) => m.endsWith("reserved")), id);
+  }
+  t.false(issues((i) => (i.networks[1].id = "net2")).some((m) => m.endsWith("reserved")), "the UI's ids stay free");
 });
 
 test("several lines: a network keeps to one, a metered line is a last resort, a slow line counts as down, devices keep to a line", (t) => {
@@ -816,6 +828,12 @@ test("several lines: a network keeps to one, a metered line is a last resort, a 
   intent.networks[1].access = { ...intent.networks[1].access, via: "wanb", fallback: true };
   const fallback = onDevice("home-router", "friendlyarm,nanopi-r6s", intent).mwan3;
   t.deepEqual(fallback.policy.find((p: any) => p[".name"] === "via_guest").use_member, ["wanb_m1", "wan_m2"]);
+
+  // Kept to the main line: its fallback takes the unmetered line before the metered one.
+  intent.internet.lines.push({ ...intent.internet.lines[0], id: "wanc", name: "Cable", port: "eth0", failover: { weight: 1, metered: false, down_when_slow: false } });
+  intent.networks[1].access = { ...intent.networks[1].access, via: "wan", fallback: true };
+  const kept = onDevice("home-router", "friendlyarm,nanopi-r6s", intent).mwan3;
+  t.deepEqual(kept.policy.find((p: any) => p[".name"] === "via_guest").use_member, ["wan_m1", "wanc_m2", "wanb_m3"]);
 
   intent.networks[1].access = { ...intent.networks[1].access, via: "wanz", fallback: true };
   t.true(
@@ -1017,7 +1035,7 @@ test("mesh rescue watcher: on once after the quiet, off once when the mesh is ba
   const script = state.files!.find((f) => f.path === "/usr/libexec/onc/mesh-rescue")!.content;
   const quiet = rescueAfterMinutes * 2;
   // Each pass (one sleep): quiet, then the mesh back, then the network gone.
-  const dir = mkdtempSync(join(tmpdir(), "onc-rescue-"));
+  const dir = tempDir("rescue");
   const stub = (name: string, body: string) => writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
   stub("sleep", `n=$(cat ${dir}/n 2>/dev/null || echo 0); echo $((n + 1)) > ${dir}/n; [ $n -lt ${quiet + 6} ]`);
   stub("batctl", `[ $(cat ${dir}/n) -gt ${quiet + 2} ] && echo node`);
@@ -1048,7 +1066,7 @@ test("an internet line on a swconfig router: a switch VLAN of its own, out of th
   const intent = sample();
   // The WAN port: OpenWrt's own layout (VLAN 2, the CPU tagged).
   t.deepEqual(vlans(intent), { switch: ["1: 6t 1 2 3 4", "20: 6t 1t 2t 3t 4t", "2: 6t 0"], wan: "eth0.2" });
-  intent.internet.lines[0].port = "eth2";
+  intent.internet.lines[0].port = "port2";
   t.deepEqual(vlans(intent), { switch: ["1: 6t 0 1 3 4", "20: 6t 0t 1t 3t 4t", "2: 6t 2"], wan: "eth0.2" });
   delete intent.internet.lines[0].port;
   intent.internet.lines[0].vlan = 7;
@@ -1144,7 +1162,7 @@ test("odhcpd is re-bound when a network comes up, and restarted after a rollback
   t.like(state.services!.find((s) => s.name === "odhcpd"), { restart_after_rollback: true });
   const hook = state.files!.find((f) => f.path === "/etc/hotplug.d/iface/30-odhcpd-ra-fix")!.content;
   // Run it as netifd would, with odhcpd's init script and pidof stubbed.
-  const dir = mkdtempSync(join(tmpdir(), "onc-hook-"));
+  const dir = tempDir("hook");
   const stub = (name: string, body: string) => writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
   stub("pidof", "exit 0");
   stub("logger", "true");
@@ -1241,4 +1259,59 @@ test("the router's mesh radio is as wide as the access points' in the mesh's ban
     const widths = new Set(devices.map((d: any) => d.htmode));
     t.is(widths.size, 1, `${band}: ${[...widths].join(", ")}`);
   }
+});
+
+test("firewall addresses and ports are real ones; a port forward never targets the router", (t) => {
+  const issuesOf = (edit: (intent: any) => void) => {
+    const intent = sample();
+    edit(intent);
+    return intentSchema.safeParse(intent).error?.issues.map((i) => i.path.join(".")) ?? [];
+  };
+  t.deepEqual(issuesOf((i) => (i.firewall.rules[0].to_addresses = ["10.0.0.5/99"])), ["firewall.rules.0.to_addresses.0"]);
+  t.deepEqual(issuesOf((i) => (i.firewall.rules[0].ports = "80 99999")), ["firewall.rules.0.ports"]);
+  t.deepEqual(issuesOf((i) => (i.firewall.port_forwards[0].from_addresses = ["300.1.1.1"])), ["firewall.port_forwards.0.from_addresses.0"]);
+  t.deepEqual(issuesOf((i) => (i.firewall.port_forwards[0].to.address = "10.0.0.999")), ["firewall.port_forwards.0.to.address"]);
+  t.deepEqual(issuesOf((i) => (i.firewall.port_forwards[0].to.address = "10.0.0.1")), ["firewall.port_forwards.0.to.address"]);
+  t.deepEqual(issuesOf((i) => (i.firewall.rules[0].to_addresses = ["2001:db8::/48"])), []);
+});
+
+test("an SSID broadcast on no band is refused, the mesh's reserved band included", (t) => {
+  const intent = intentSchema.parse(sample());
+  intent.wifi.radios["2g"].enabled = false;
+  intent.wifi.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", band_reserved: true, over_cable: false, large_frames: true };
+  const paths = intentSchema.safeParse(intent).error?.issues.map((i) => i.path.join(".")) ?? [];
+  t.true(paths.length > 0 && paths.every((p) => /^wifi\.networks\.\d+\.bands$/.test(p)), paths.join(", "));
+  // And the UI greys out what would get there.
+  intent.wifi.mesh.band_reserved = false;
+  t.regex(String(availability(intent, "wifi.mesh.band_reserved").option(true).unavailable), /broadcast nowhere/);
+  intent.wifi.radios["2g"].enabled = true;
+  intent.wifi.mesh.band_reserved = true;
+  t.regex(String(availability(intent, "wifi.radios.2g.enabled").option(false).unavailable), /broadcast nowhere/);
+});
+
+test("pinned channels: each band's own, the odd UNII-3 ones included", (t) => {
+  const pin = (band: "2g" | "5g", channel: number) => {
+    const intent = sample();
+    intent.hardware[1].radios = { [band]: { channel } };
+    return intentSchema.safeParse(intent).success;
+  };
+  t.true(pin("5g", 149));
+  t.true(pin("5g", 165));
+  t.true(pin("5g", 144));
+  t.false(pin("5g", 38));
+  t.false(pin("5g", 6));
+  t.true(pin("2g", 13));
+  t.false(pin("2g", 36));
+});
+
+test("the local domain may be one label or several, like home.arpa", (t) => {
+  const withDomain = (domain: string) => {
+    const intent = sample();
+    intent.dns = { ...(intent.dns ?? {}), domain };
+    return intent;
+  };
+  t.true(intentSchema.safeParse(withDomain("home.arpa")).success);
+  t.false(intentSchema.safeParse(withDomain("home..arpa")).success);
+  t.false(intentSchema.safeParse(withDomain("Home.arpa")).success);
+  t.like((compile(withDomain("home.arpa")).config as any).dhcp.dnsmasq[0], { local: "/home.arpa/", domain: "home.arpa" });
 });

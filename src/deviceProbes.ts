@@ -152,23 +152,33 @@ export const managedFiles = (manifestPath: string): Probe<string[]> => ({
  * Everything `apk del --rdepends` would actually take with it.
  *
  * The named packages are only the start: `--rdepends` also removes whatever
- * depends on them. Removing `firewall4` on a stock image pulls 21 packages,
- * `uhttpd` and the whole LuCI stack among them. Reporting only what the config
- * names would understate that badly, so ask apk to simulate it.
+ * depends on them (removing `firewall4` takes LuCI's firewall app and the
+ * `luci` meta-packages with it on 25.12.5). Reporting only what the config
+ * names would understate that, so ask apk to simulate it. A simulation that
+ * fails or cannot be read is an error, never the named packages alone: the
+ * cascade is what gets staged for a rollback, and a removal that cannot be
+ * staged is refused.
  */
 export const removalCascade = (packages: string[]): Probe<string[]> => ({
   command: `apk del --simulate --rdepends ${packages
     .map(shellQuote)
     .join(" ")}`,
-  parse: ({ stdout }) => {
+  parse: ({ stdout, code }) => {
     const cascade = stdout
       .split("\n")
       .map((line) => line.match(/^\(\s*\d+\/\d+\)\s+Purging\s+(\S+)\s/))
       .flatMap((match) => (match ? [match[1]] : []));
-    // If the simulation could not be parsed, fall back to the named packages
-    // rather than reporting an empty, falsely reassuring list.
-    return cascade.length > 0 ? cascade : packages;
+    if (code !== 0 || cascade.length === 0) {
+      throw new Error(`Could not work out what removing ${packages.join(", ")} would take with it (apk del --simulate).`);
+    }
+    return cascade;
   },
+});
+
+/** Files of `paths` the device does not have. */
+export const missingFiles = (paths: string[]): Probe<string[]> => ({
+  command: paths.length ? `for f in ${paths.map(shellQuote).join(" ")}; do [ -e "$f" ] || echo "$f"; done` : "true",
+  parse: ({ stdout }) => lines(stdout).filter((path) => paths.includes(path)),
 });
 
 /**
@@ -257,16 +267,6 @@ export const notRunning = (names: string[]): Probe<{ name: string; missing: bool
     }),
 });
 
-/**
- * Stand the rollback watchdog down; true if it is verifiably stopped.
- *
- * Touch the flag first so the watchdog disarms even if the kill fails, then
- * kill it outright: the flag is only read after its sleep ends, which leaves a
- * window where it could fire between the check and the touch. Killing it
- * mid-sleep is decisive rather than advisory. The staged script is normally
- * removed by the run that executes it, but a run cut short by the commit
- * severing the connection leaves it behind, and it embeds config values.
- */
 /** Whether a run's commit finished: its marker, written after every `uci commit` (rollback.ts). */
 export const commitFinished = (committedFlag: string): Probe<boolean> => ({
   command: `[ -f ${committedFlag} ] && echo ONC_COMMITTED`,
@@ -285,15 +285,21 @@ export const disarmWatchdog = ({
   confirmFlag,
   pidFile,
   sleepPidFile,
+  watchdogPath,
   rollbackDir,
   bootDir,
+  disarmedFlag,
 }: {
   confirmFlag: string;
   pidFile: string;
+  /** What the watchdog runs: its pid is checked to still be this run's watchdog. */
+  watchdogPath: string;
   sleepPidFile: string;
   rollbackDir: string;
   /** The boot-time copy (rollback.ts): gone with the disarm, or a restart would restore it. */
   bootDir: string;
+  /** There once the watchdog stood down: a disarm repeated after one that went through. */
+  disarmedFlag: string;
 }): Probe<"disarmed" | "fired"> => {
   const gone = 'i=0; while kill -0 "$p" 2>/dev/null && [ $i -lt 5 ]; do sleep 1; i=$((i+1)); done';
   // Confirmed: this config is the one a restart must keep, so every earlier
@@ -305,7 +311,9 @@ export const disarmWatchdog = ({
       `rm -f ${stagedScriptPath}`,
       // Saved pids, checked to still be what they were (a pid is reused once its process ends).
       `p=$(cat ${pidFile} 2>/dev/null); s=$(cat ${sleepPidFile} 2>/dev/null)`,
-      `if [ -z "$p" ] || ! grep -q onc-watchdog /proc/$p/cmdline 2>/dev/null; then echo ONC_FIRED`,
+      `if [ -f ${disarmedFlag} ]; then rm -rf ${bootRoot}; echo ONC_DISARMED`,
+      // This run's watchdog by its script, an argument of its own (cmdline is NUL-separated).
+      `elif [ -z "$p" ] || ! tr '\\0' '\\n' < /proc/$p/cmdline 2>/dev/null | grep -qxF ${watchdogPath}; then echo ONC_FIRED`,
       `else touch ${confirmFlag}`,
       `  if [ -n "$s" ] && [ "$(cat /proc/$s/comm 2>/dev/null)" = sleep ] && kill "$s" 2>/dev/null; then ${gone}; rm -rf ${bootRoot}; echo ONC_DISARMED`,
       // Its sleep had just ended: it either saw the flag (and exits) or is restoring.
@@ -316,3 +324,13 @@ export const disarmWatchdog = ({
     parse: ({ stdout }) => (stdout.includes("ONC_DISARMED") ? "disarmed" : "fired"),
   };
 };
+
+/**
+ * Once a rollback has restored the old config (the watchdog marks that), tell
+ * it access came back, so it need not reboot. Before then, reaching the device
+ * proves nothing: it is still on the config being rolled back.
+ */
+export const markRecovered = ({ restoredFlag, recoveredFlag }: { restoredFlag: string; recoveredFlag: string }): Probe<boolean> => ({
+  command: `[ -f ${restoredFlag} ] && touch ${recoveredFlag} && echo ONC_RECOVERED`,
+  parse: ({ stdout }) => stdout.includes("ONC_RECOVERED"),
+});

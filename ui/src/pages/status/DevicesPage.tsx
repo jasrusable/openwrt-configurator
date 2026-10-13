@@ -12,7 +12,7 @@ import { duration } from "../../facts";
 import { useDraftValue } from "../../form/draft";
 import { AreaChart, PortFace, Ring } from "../../kit/charts";
 import { EmptyState, ItemIcon, Section, SettingsPage, StatusDot } from "../../kit/layout";
-import { liveLine } from "./shared";
+import { liveLine, unread } from "./shared";
 
 const heat = (c: number) => (c >= 85 ? "red" : c >= 70 ? "orange" : c >= 55 ? "yellow" : "teal");
 
@@ -99,10 +99,10 @@ export const DevicesPage = () => {
   const latest = useLatestRelease().data?.version;
   const devices = status.data?.deviceViews ?? [];
   return (
-    <SettingsPage title="Devices" description={liveLine(intent.system.name, status.dataUpdatedAt, status.isFetching, !!status.data)}>
+    <SettingsPage title="Devices" description={liveLine(intent.system.name, status)}>
       {devices.length === 0 && (
         <Section>
-          <EmptyState>{status.data ? "No devices in Hardware." : "Reading the devices…"}</EmptyState>
+          <EmptyState>{status.data ? "No devices in Hardware." : unread(status, "Reading the devices…")}</EmptyState>
         </Section>
       )}
       {devices.map((d) => (

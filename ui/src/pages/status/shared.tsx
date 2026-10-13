@@ -10,9 +10,25 @@ import { useRestartService } from "../../data/status";
 import { ago } from "../../facts";
 import { Section, SettingRow } from "../../kit/layout";
 
-/** "live, read from the devices 5 s ago", or that it is reading. */
-export const liveLine = (site: string, updatedAt: number, fetching: boolean, has: boolean) =>
-  has ? `${site} · live, read from the devices ${ago(updatedAt)}` : fetching ? `${site} · reading the devices…` : site;
+/** A status read, as a page has it from React Query. */
+type Read = { data?: unknown; dataUpdatedAt: number; isFetching: boolean; error: unknown };
+
+const failure = (read: Read) =>
+  read.error && !read.isFetching ? `could not read the devices: ${(read.error as Error).message ?? read.error}` : undefined;
+
+/** "live, read from the devices 5 s ago", that it is reading, or why it could not. */
+export const liveLine = (site: string, read: Read) => {
+  const failed = failure(read);
+  const when = read.data ? `read from the devices ${ago(read.dataUpdatedAt)}` : undefined;
+  if (failed) return `${site} · ${failed}${when ? `; showing what was ${when}` : ""}`;
+  return when ? `${site} · live, ${when}` : read.isFetching ? `${site} · reading the devices…` : site;
+};
+
+/** An empty list's words while nothing is read: `reading`, or why it could not be. */
+export const unread = (read: Read, reading: string) => {
+  const failed = failure(read);
+  return failed ? `${failed[0].toUpperCase()}${failed.slice(1)}.` : reading;
+};
 
 const tone = { problem: "red", warning: "orange", info: "blue" } as const;
 const icon = { problem: IconAlertTriangle, warning: IconAlertTriangle, info: IconInfoCircle } as const;

@@ -2,6 +2,9 @@ import test from "ava";
 import { DeviceSchema, deviceSchemaSchema } from "../../deviceSchema";
 import { getOpenWrtConfig } from "../../getOpenWrtConfig";
 import { oncConfigSchema } from "../../oncConfigSchema";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { parseDeviceFacts } from "../../facts/board";
 
 // The hardware abstraction, one rule at a time, against small made-up devices.
 const device = { model_id: "test,device", hostname: "box", tags: {} };
@@ -27,9 +30,9 @@ const dsa = {
 const swconfig = {
   sw_config: true,
   ports: [
-    { name: "eth0", sw_config_cpu_name: "eth0" },
-    { name: "eth1" },
-    { name: "eth2" },
+    { name: "port0", switch_port: 0, sw_config_cpu_name: "eth0" },
+    { name: "port1", switch_port: 1 },
+    { name: "port2", switch_port: 2 },
   ],
 };
 const twoRadios = {
@@ -334,8 +337,8 @@ test("swconfig: an untagged line never takes a VLAN another line has tagged; one
     {
       network: {
         interface: [
-          { ".name": "wan", device: "@port:eth1", proto: "dhcp" },
-          { ".name": "wanb", device: "@port:eth2.2", proto: "dhcp" },
+          { ".name": "wan", device: "@port:port1", proto: "dhcp" },
+          { ".name": "wanb", device: "@port:port2.2", proto: "dhcp" },
         ],
       },
     },
@@ -353,13 +356,119 @@ test("swconfig: an untagged line never takes a VLAN another line has tagged; one
         {
           network: {
             interface: [
-              { ".name": "wan", device: "@port:eth1.7", proto: "dhcp" },
-              { ".name": "wanb", device: "@port:eth2.7", proto: "dhcp" },
+              { ".name": "wan", device: "@port:port1.7", proto: "dhcp" },
+              { ".name": "wanb", device: "@port:port2.7", proto: "dhcp" },
             ],
           },
         },
         swconfig
       ),
-    { message: /VLAN 7 is on both eth1 and eth2/ }
+    { message: /VLAN 7 is on both port1 and port2/ }
   );
+});
+
+test("swconfig with the WAN on a NIC beside the switch: a line there is that NIC, out of every switch VLAN", (t) => {
+  const board = (file: string) => JSON.parse(readFileSync(join(__dirname, "../helpers/boards", file), "utf8"));
+  const c7 = parseDeviceFacts({ board: board("swconfig-wan-nic.board.json"), system: board("swconfig-wan-nic.system.json") });
+  const config = build(
+    {
+      network: {
+        switch_vlan: [
+          { device: "switch0", vlan: 1, ports: "*" },
+          { device: "switch0", vlan: 20, ports: "*t" },
+        ],
+        device: [{ name: "br-lan.1", type: "bridge", ports: ["@cpu_port.1"] }],
+        interface: [
+          { ".name": "wan", device: "@wan_port", proto: "dhcp" },
+          { ".name": "wanb", device: "@port:port5.7", proto: "dhcp" },
+        ],
+      },
+    },
+    c7
+  );
+  const device = (name: string) => config.network.interface.find((i: any) => i[".name"] === name).device;
+  t.is(device("wan"), "eth0");
+  t.is(device("wanb"), "eth1.7", "a line on a switch port is still the CPU's VLAN");
+  t.deepEqual(
+    config.network.switch_vlan.map((v: any) => `${v.vlan}: ${v.ports}`),
+    ["1: 0t 2 3 4", "20: 0t 2t 3t 4t", "7: 0t 5t"]
+  );
+  t.deepEqual(config.network.device[0].ports, ["eth1.1"]);
+});
+
+test("@cpu_port is expanded wherever it is a whole value, an interface's device included", (t) => {
+  const config = build({ network: { interface: [{ ".name": "lan", device: "@cpu_port.3", proto: "none" }] } }, swconfig);
+  t.is(config.network.interface[0].device, "eth0.3");
+});
+
+test('switch_vlan and bridge-vlan read "*t" the same alone or in a list; either without ports is refused', (t) => {
+  const sw = build({ network: { switch_vlan: [{ device: "switch0", vlan: 2, ports: ["*t"] }] } }, swconfig);
+  t.is(sw.network.switch_vlan[0].ports, "0t 1t 2t");
+  t.throws(() => build({ network: { switch_vlan: [{ device: "switch0", vlan: 2 }] } }, swconfig), {
+    message: /switch_vlan without ports/,
+  });
+  t.throws(
+    () =>
+      build(
+        { network: { device: [{ name: "br-lan", type: "bridge", ports: "*" }], "bridge-vlan": [{ device: "br-lan", vlan: 1 }] } },
+        dsa
+      ),
+    { message: /bridge-vlan without ports/ }
+  );
+});
+
+const triBand = {
+  radios: [
+    { name: "radio0", type: "mac80211" as const, path: "p0", band: "2g" as const },
+    { name: "radio1", type: "mac80211" as const, path: "p1", band: "5g" as const },
+    { name: "radio2", type: "mac80211" as const, path: "p2", band: "5g" as const },
+  ],
+};
+
+test("tri-band: an SSID on a band is on each of its radios; a pinned channel and an interface of its own name on the first only", (t) => {
+  const config = build(
+    {
+      wireless: {
+        "wifi-device": [
+          { ".name": "radio2g", band: "2g" },
+          { ".name": "radio5g", band: "5g", channel: 36 },
+        ],
+        "wifi-iface": [
+          { ".name": "home", ssid: "home", mode: "ap", network: "lan", device: ["radio2g", "radio5g"] },
+          { ".name": "mesh", mode: "mesh", ifname: "mesh0", network: "batmesh", device: ["radio5g"] },
+        ],
+      },
+    },
+    triBand
+  );
+  t.deepEqual(
+    config.wireless["wifi-device"].map((d: any) => [d[".name"], d.channel]),
+    [
+      ["radio2g", 11],
+      ["radio5g", 36],
+      ["radio5g2", "auto"],
+    ]
+  );
+  t.deepEqual(
+    config.wireless["wifi-iface"].map((i: any) => [i[".name"], i.device]),
+    [
+      ["home_radio2g", "radio2g"],
+      ["home_radio5g", "radio5g"],
+      ["home_radio5g2", "radio5g2"],
+      ["mesh_radio5g", "radio5g"],
+    ]
+  );
+});
+
+test("a radio nothing declares or uses is off; one an interface uses stays on", (t) => {
+  const off = build({ wireless: { "wifi-device": [{ ".name": "radio2g", band: "2g" }] } }, twoRadios);
+  t.deepEqual(
+    off.wireless["wifi-device"].map((d: any) => [d.band, d.disabled]),
+    [
+      ["2g", undefined],
+      ["5g", true],
+    ]
+  );
+  const used = build({ wireless: { "wifi-iface": [{ ssid: "x", mode: "ap", network: "lan", device: "*" }] } }, twoRadios);
+  t.true(used.wireless["wifi-device"].every((d: any) => d.disabled === undefined));
 });

@@ -1,7 +1,7 @@
 import test from "ava";
+import { tempDir } from "../helpers/tempDir";
 import { spawnSync } from "child_process";
-import { existsSync, mkdtempSync, readFileSync, statSync } from "fs";
-import { tmpdir } from "os";
+import { existsSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import {
   getDeviceScript,
@@ -37,7 +37,7 @@ test("getDeviceScript writes managed files + manifest before commit", async (t) 
   t.true(commitIdx > -1, "the touched config is committed");
 
   const writeCmd = commands.find(
-    (c) => c.includes("'/etc/hotplug.d/net/20-aql'") && c.startsWith("mkdir -p")
+    (c) => c.includes("'/etc/hotplug.d/net/20-aql'") && c.startsWith("# write /etc/hotplug.d/net/20-aql\nmkdir -p")
   );
   t.truthy(writeCmd);
 
@@ -141,7 +141,7 @@ test("getDeviceScript emits no file commands when there are no files", async (t)
 });
 
 test("a file is replaced, and its run_after run, only when its content changed", (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "onc-write-"));
+  const dir = tempDir("write");
   const path = join(dir, "x.conf");
   const state = (content: string): OpenWrtState => ({
     config: {} as any,

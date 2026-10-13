@@ -9,7 +9,7 @@ import { Platform } from "../platform";
 import { provisionableDevices } from "../provisionConfig";
 import { readEach } from "../readEach";
 import { getOpenWrtState } from "../getOpenWrtState";
-import { provisionStatus } from "../server/provisionJob";
+import { jobProgress, jobState, liveState } from "../server/provisionJob";
 import { readDeviceStatus } from "./device";
 import { NetworkStatus, networkStatus, Reachability } from "./network";
 import { ActivityView, activityOf, attentionOf, clientsOf, devicesOf, internetCountersOf, internetOf, keepActivity, radiosOf } from "./views";
@@ -17,9 +17,9 @@ import { parseJson } from "../parseJson";
 
 /** This app's own last run, as an event: applied, or rolled back. */
 const appliesOf = async (intentPath: string, platform: Platform): Promise<ActivityView[]> => {
-  const run = await provisionStatus({ intentPath, files: platform }).catch(() => undefined);
+  const run = await jobState({ intentPath, files: platform }).catch(() => undefined);
   if (!run?.startedAt || run.state === "running" || run.state === "idle") return [];
-  const outcome = run.progress.outcome;
+  const outcome = jobProgress(intentPath, platform).outcome;
   const text =
     run.state === "succeeded"
       ? "Settings applied"
@@ -120,7 +120,7 @@ export const readNetworkStatus = async ({
   const facts = readFacts(platform, intentPath, ready.map((d) => d.hostname));
   const counters = internetCountersOf(intent, read);
   const check = view === "performance" ? internetOf(intent, read) : undefined;
-  const applied = (await provisionStatus({ intentPath, files: platform }).catch(() => undefined))?.live;
+  const applied = liveState(intentPath, platform);
   return {
     ...networkStatus(intent, read, Object.fromEntries(Object.entries(facts).map(([name, f]) => [name, f?.macs]))),
     attention: attentionOf({ intent, devices: read, facts, ...(applied ? { applied } : {}) }),

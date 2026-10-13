@@ -1,14 +1,14 @@
 import test from "ava";
-import { readFileSync } from "fs";
-import { join } from "path";
-import { withNetworkAdded, withoutNetwork } from "../../intent/edits";
+import { sampleIntent } from "../helpers/fixtures";
+import { keepSiteSeed, withNetworkAdded, withoutLine, withoutNetwork, withoutProvider } from "../../intent/edits";
+import { compileIntent } from "../../intent/compile";
+import { meshId } from "../../intent/features/mesh";
+import { lineRole } from "../../intent/connections";
 import { templateOf, templateSettings, withTemplate } from "../../intent/networkTemplates";
 import { intentSchema } from "../../intent/schema";
 
 const sample = () =>
-  intentSchema.parse(
-    JSON.parse(readFileSync(join(__dirname, "../../../sampleConfigs/intent.json"), "utf8"))
-  );
+  sampleIntent();
 
 const withIot = () => {
   const intent = sample();
@@ -75,4 +75,52 @@ test("removing a network removes the port forwards into it", (t) => {
   intent.firewall.port_forwards[0].to.address = "10.0.20.9";
   t.deepEqual(withoutNetwork(intent, 1).firewall.port_forwards, []);
   t.is(withoutNetwork(sample(), 1).firewall.port_forwards.length, 1, "others stay");
+});
+
+const twoLines = () => {
+  const intent = sample();
+  const [main] = intent.internet.lines;
+  intent.internet.lines = [
+    main,
+    { ...main, id: "wanb", name: "LTE", port: "lan4", failover: { ...main.failover, metered: true } },
+    { ...main, id: "wanc", name: "Fibre", port: "lan3" },
+  ];
+  intent.networks[0].access = { ...intent.networks[0].access, via: "wanc", fallback: false };
+  return intent;
+};
+
+test("removing a line or a provider puts its networks back on Automatic, with fallback", (t) => {
+  const without = withoutLine(twoLines(), 2);
+  t.deepEqual(without.internet.lines.map((l) => l.id), ["wan", "wanb"]);
+  t.is(without.networks[0].access.via, undefined);
+  t.true(without.networks[0].access.fallback);
+
+  const intent = sample();
+  intent.vpn.providers = [{ id: "tun1", name: "P", type: "openvpn", config: "client\n" }];
+  intent.networks[0].access = { ...intent.networks[0].access, via: "tun1", fallback: false };
+  const gone = withoutProvider(intent, 0);
+  t.deepEqual(gone.vpn.providers, []);
+  t.is(gone.networks[0].access.via, undefined);
+  t.true(gone.networks[0].access.fallback);
+});
+
+test("a line's role follows failover's order: a metered line is last, backups numbered past it", (t) => {
+  const intent = twoLines();
+  t.deepEqual([0, 1, 2].map((i) => lineRole(intent, i).label), ["Main", "Last resort", "Backup"]);
+  intent.internet.use_lines.mode = "balance";
+  t.deepEqual([0, 1, 2].map((i) => lineRole(intent, i).label), ["Share 1", "Last resort", "Share 1"]);
+});
+
+test("renaming the site keeps its derived ids: the first name stays their seed", (t) => {
+  const saved = sampleIntent();
+  const renamed = { ...saved, system: { ...saved.system, name: "Elsewhere" } };
+  const kept = keepSiteSeed(saved, renamed);
+  t.is(kept.system.site_id, saved.system.name);
+  t.is(keepSiteSeed(kept, { ...kept, system: { ...kept.system, name: "Again" } }).system.site_id, saved.system.name, "a second rename keeps the first");
+  t.is(keepSiteSeed(saved, saved), saved, "no rename, nothing added");
+  const ula = (intent: typeof saved) => JSON.stringify(compileIntent(intent)).match(/fd[0-9a-f]{2}:[0-9a-f]{4}:[0-9a-f]{4}::\/48/)?.[0];
+  t.truthy(ula(saved));
+  t.is(ula(kept), ula(saved), "the ULA prefix is as it was");
+  t.is(meshId(kept), meshId(saved), "and the mesh id");
+  t.not(ula(renamed), ula(saved), "where nothing kept it, the rename would have moved it");
 });

@@ -5,10 +5,11 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "strict": true,
+    "noUnusedLocals": true,
     "skipLibCheck": true,
     "rootDir": "./",
     "outDir": "./dist"
   },
   "include": ["./bin", "./src"],
-  "exclude": ["**/*.test.ts"]
+  "exclude": ["**/*.test.ts", "src/tests/**"]
 }

@@ -117,10 +117,11 @@ export const reconnectSettled = async ({
   now?: () => number;
 }) => {
   const first = await reconnectUntil({ connect, deadline, sleep, now });
-  // Leave at least ten seconds of the window for the second reconnect.
-  const budget = Math.min(20, (deadline - now()) / 1000 - 10);
   try {
     await beforeSettle?.(first);
+    // Leave at least ten seconds of the window for the second reconnect,
+    // counted after beforeSettle, which takes its own share.
+    const budget = Math.min(20, (deadline - now()) / 1000 - 10);
     if (budget >= 3) await runProbe(first, servicesSettled(budget));
   } catch {
     // The first session dropped (services restarting the network): skipped

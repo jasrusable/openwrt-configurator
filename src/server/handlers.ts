@@ -2,11 +2,14 @@
 // Transport-free, so the Node server (`ui`) and CGI under uhttpd on a router
 // (`cgi`) answer every request with the same code. The UI uses relative URLs,
 // so it works wherever it is mounted: / on a Mac, /cgi-bin/onc/ on a router.
-import { Auth, sessionSetCookie } from "./auth";
+import { keepSiteSeed } from "../intent/edits";
+import { shellQuote } from "../shell";
+import { Auth, LoginResult, sessionSetCookie } from "./auth";
 import { readApplyDiff } from "../applyDiff";
 import { measureLink } from "../meshSpeed";
 import { adopt, discover, Inspected, inspect } from "../discover";
-import { readFacts, readFailures, refreshStale, renameFacts, staleDevices } from "../deviceFacts";
+import { readFacts, readFailures, renameFacts, staleDevices } from "../deviceFacts";
+import { refreshStale } from "../readEach";
 import { compileIntent } from "../intent/compile";
 import { lockoutReason, ownPublicKey } from "../loginAccess";
 import { readNetworkStatus, StatusView, statusViews } from "../status/read";
@@ -17,7 +20,7 @@ import { intentSchema, namePattern } from "../intent/schema";
 import { oncConfigSchema } from "../oncConfigSchema";
 import { parseConfigJson } from "../parseJson";
 import { HttpHandler, HttpRequest, HttpResponse, Platform } from "../platform";
-import { jobPaths, provisionStatus, startProvision } from "./provisionJob";
+import { jobPaths, jobState, provisionStatus, startProvision } from "./provisionJob";
 
 type Files = Pick<Platform, "readTextFile" | "writeFileAtomic" | "sha256">;
 
@@ -46,6 +49,17 @@ const json = (status: number, body: unknown): HttpResponse => ({
   headers: { "content-type": "application/json; charset=utf-8" },
   body: JSON.stringify(body),
 });
+
+/** A request's body as a JSON object ({} when empty); undefined when it is not one. */
+const jsonObject = (body: string): Record<string, unknown> | undefined => {
+  try {
+    const value: unknown = JSON.parse(body || "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+const notJsonObject = () => json(400, { error: "The body is not a JSON object." });
 
 const issues = (error: { issues: { path: (string | number)[]; message: string }[] }) =>
   error.issues.map((issue) => ({
@@ -79,20 +93,18 @@ export const intentApi =
       }
     }
     if (method === "PUT") {
-      let input: unknown;
-      try {
-        input = JSON.parse(body);
-      } catch {
-        return json(400, { error: "The body is not JSON." });
-      }
+      const input = jsonObject(body);
+      if (!input) return notJsonObject();
       if (changedElsewhere(files, intentPath, headers)) {
         return json(409, {
           error: "The settings were changed elsewhere since this page read them: yours are kept, check them, then save again.",
           changedElsewhere: true,
         });
       }
-      const intent = intentSchema.safeParse(input);
-      if (!intent.success) return json(400, { issues: issues(intent.error) });
+      const parsed = intentSchema.safeParse(input);
+      if (!parsed.success) return json(400, { issues: issues(parsed.error) });
+      const before = intentSchema.safeParse(readIntent(files, intentPath));
+      const intent = { data: before.success ? keepSiteSeed(before.data, parsed.data) : parsed.data };
       // Never save what would not provision: a compiler bug shows up here,
       // not halfway through a run.
       const compiled = oncConfigSchema.safeParse(compileIntent(intent.data));
@@ -104,7 +116,6 @@ export const intentApi =
       }
       // A device renamed in place (same position in Hardware, its old name
       // gone, its new one new) keeps its facts, pinned host key and all.
-      const before = intentSchema.safeParse(readIntent(files, intentPath));
       if (before.success) {
         const oldNames = before.data.hardware.map((d) => d.name);
         const newNames = intent.data.hardware.map((d) => d.name);
@@ -279,12 +290,8 @@ export const discoverApi =
   async ({ method, path, body }) => {
     if (method === "GET" && path === "/api/discover") return json(200, await discover({ intentPath, platform }));
     if (method !== "POST") return json(405, { error: "GET or POST" });
-    let input: { address?: unknown; name?: unknown };
-    try {
-      input = JSON.parse(body || "{}");
-    } catch {
-      return json(400, { error: "The body is not JSON." });
-    }
+    const input = jsonObject(body);
+    if (!input) return notJsonObject();
     const address = typeof input.address === "string" ? input.address.trim() : "";
     if (!addressPattern.test(address)) return json(400, { error: "Give an address, like 10.0.0.143 or ap.lan." });
     if (path === "/api/discover/inspect") {
@@ -355,12 +362,8 @@ export const fixApi =
   ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
   async ({ method, body }) => {
     if (method !== "POST") return json(405, { error: "POST" });
-    let input: { device?: unknown; service?: unknown };
-    try {
-      input = JSON.parse(body || "{}");
-    } catch {
-      return json(400, { error: "The body is not JSON." });
-    }
+    const input = jsonObject(body);
+    if (!input) return notJsonObject();
     if (typeof input.device !== "string" || typeof input.service !== "string" || !/^[A-Za-z0-9_-]+$/.test(input.service)) {
       return json(400, { error: "Give a device and a service." });
     }
@@ -401,7 +404,7 @@ export const applyDiffApi =
     if (method !== "GET") return json(405, { error: "GET" });
     if (!compiled(platform, intentPath)) return json(409, { error: "The saved settings are not valid." });
     // Not while an apply runs: it would log in to devices mid-change.
-    if ((await provisionStatus({ intentPath, files: platform })).state === "running") {
+    if ((await jobState({ intentPath, files: platform })).state === "running") {
       return json(409, { error: "Settings are being applied." });
     }
     return json(200, { devices: await readApplyDiff({ intentPath, platform }) });
@@ -412,12 +415,8 @@ export const meshSpeedApi =
   ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
   async ({ method, body }) => {
     if (method !== "POST") return json(405, { error: "POST" });
-    let input: { from?: unknown; to?: unknown };
-    try {
-      input = JSON.parse(body || "{}");
-    } catch {
-      return json(400, { error: "The body is not JSON." });
-    }
+    const input = jsonObject(body);
+    if (!input) return notJsonObject();
     if (typeof input.from !== "string" || typeof input.to !== "string" || input.from === input.to) {
       return json(400, { error: "Give two devices: from and to." });
     }
@@ -429,6 +428,26 @@ const withCookie = (response: HttpResponse, sid: string | undefined): HttpRespon
   ...response,
   headers: { ...response.headers, "set-cookie": sessionSetCookie(sid) },
 });
+
+/**
+ * A client as logins are counted: an IPv4 address (also one an IPv6 socket
+ * reports as `::ffff:a.b.c.d`), or an IPv6 address's /64, written out in
+ * full first, as one device can take any address in it.
+ */
+export const clientOf = (remote: string) => {
+  const address = remote.replace(/%.*$/, "").toLowerCase().replace(/^::ffff:(?=\d+\.)/, "");
+  if (!address.includes(":")) return address;
+  const groups = (part: string) => (part ? part.split(":") : []);
+  const [head, tail] = address.split("::");
+  const full =
+    tail === undefined
+      ? groups(head)
+      : [...groups(head), ...Array(Math.max(0, 8 - groups(head).length - groups(tail).length)).fill("0"), ...groups(tail)];
+  return full
+    .slice(0, 4)
+    .map((g) => g.replace(/^0+(?=.)/, ""))
+    .join(":");
+};
 
 /** POST {password}: a session (cookie) for the router's root password; or ends it. */
 /** Wrong passwords allowed within the window, from one client, before its logins pause. */
@@ -446,7 +465,7 @@ const sessionApi =
     now = Date.now,
   }: {
     auth: Auth;
-    platform: Pick<Platform, "sleep" | "writeTextFile" | "mkdirp" | "removeFile" | "run">;
+    platform: Pick<Platform, "sleep" | "writeTextFile" | "removeFile" | "run">;
     intentPath: string;
     /** Where attempts are counted: RAM on a router (/tmp), as each one is a file written. */
     attemptsDir?: string;
@@ -458,12 +477,9 @@ const sessionApi =
       await auth.logout(request);
       return withCookie(json(200, { ok: true }), undefined);
     }
-    let password: unknown;
-    try {
-      password = JSON.parse(request.body || "{}").password;
-    } catch {
-      return json(400, { error: "The body is not JSON." });
-    }
+    const input = jsonObject(request.body);
+    if (!input) return notJsonObject();
+    const password = input.password;
     // Every attempt is a file of its own, made before the password is
     // checked and then counted with the others of the last minute: under CGI
     // each request is its own process, and attempts sent side by side must
@@ -472,14 +488,25 @@ const sessionApi =
     // Counted per client, so one on the network guessing cannot keep the
     // owner out; named "<time>-<client>-<random>".
     const dir = attemptsDir ?? `${intentPath}.state/login-attempts`;
-    platform.mkdirp(dir);
-    // An IPv6 client by its /64: one device can take any address in it.
-    const remote = request.remoteAddress ?? "any";
-    const prefix = remote.includes(":") ? remote.split(":").slice(0, 4).join(":") : remote;
-    const client = prefix.replace(/[^A-Za-z0-9]/g, "_");
+    const client = clientOf(request.remoteAddress ?? "any").replace(/[^A-Za-z0-9]/g, "_");
     const mine = `${now()}-${client}-${Math.random().toString(36).slice(2, 10)}`;
-    platform.writeTextFile(`${dir}/${mine}`, "");
-    const listed = await platform.run(["ls", dir]).catch(() => ({ stdout: "" }));
+    // The directory must be this program's alone (in /tmp, anyone may make
+    // it first): another owner could plant attempts, locking the owner out,
+    // or remove them, beating the count.
+    const q = shellQuote;
+    const listed = await platform
+      .run([
+        "sh",
+        "-c",
+        [
+          `umask 077; mkdir -p ${q(dir)}`,
+          `set -- $(ls -ld ${q(dir)}); case "$1" in drwx------*) ;; *) exit 9 ;; esac; [ -O ${q(dir)} ] || exit 9`,
+          `: > ${q(`${dir}/${mine}`)}`,
+          `ls ${q(dir)}`,
+        ].join("\n"),
+      ])
+      .catch(() => ({ code: 1, stdout: "" }));
+    if (listed.code !== 0) return json(500, { error: `Logins are off: ${dir} is not this app's own (owned by it, mode 700).` });
     const recent = listed.stdout
       .split("\n")
       .map((name) => name.trim())
@@ -503,13 +530,19 @@ const sessionApi =
       platform.removeFile(`${dir}/${mine}`);
       return json(429, { error: "Too many wrong passwords: wait a minute and try again." });
     }
-    const sid = typeof password === "string" && password ? await auth.login(password) : undefined;
-    if (!sid) {
+    const result: LoginResult =
+      typeof password === "string" && password ? await auth.login(password) : { refused: "wrong" };
+    if ("refused" in result) {
       await platform.sleep(1000);
-      return json(401, { error: "That is not the router's password." });
+      return result.refused === "unprotected"
+        ? json(403, {
+            error:
+              "This router has no root password, so any password would log in. Set one first: run passwd on the router (or set this app's password and apply from a computer).",
+          })
+        : json(401, { error: "That is not the router's password." });
     }
     platform.removeFile(`${dir}/${mine}`);
-    return withCookie(json(200, { ok: true }), sid);
+    return withCookie(json(200, { ok: true }), result.sid);
   };
 
 export const uiHandler = ({
@@ -568,9 +601,26 @@ export const uiHandler = ({
 };
 
 /** A response in CGI's format: a Status header, the headers, then the body. */
+const reasons: Record<number, string> = {
+  200: "OK",
+  304: "Not Modified",
+  400: "Bad Request",
+  401: "Unauthorized",
+  403: "Forbidden",
+  404: "Not Found",
+  405: "Method Not Allowed",
+  409: "Conflict",
+  413: "Payload Too Large",
+  429: "Too Many Requests",
+  500: "Internal Server Error",
+  503: "Service Unavailable",
+};
+
+// uhttpd takes a status only as "<3 digits> <reason>": a bare code is
+// ignored and the answer goes out as 200 (verified on 25.12.5).
 export const cgiResponse = (response: HttpResponse) =>
   [
-    `Status: ${response.status}`,
+    `Status: ${response.status} ${reasons[response.status] ?? "Status"}`,
     ...Object.entries(response.headers).map(([name, value]) => `${name}: ${value}`),
     "",
     response.body,

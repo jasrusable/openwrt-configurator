@@ -1,6 +1,6 @@
 import { DeviceSchema } from "./deviceSchema";
 import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
-import { conditionMatches } from "./resolveOncConfig";
+import { conditionMatches, resolveOncConfig } from "./resolveOncConfig";
 import { utf8ByteLength } from "./utf8";
 import { shellQuote } from "./shell";
 
@@ -10,8 +10,9 @@ type BuildDevice = ONCDeviceConfig & { model_id: string };
 const requireModelId = (deviceConfig: ONCDeviceConfig): BuildDevice => {
   if (!deviceConfig.model_id) {
     throw new Error(
-      `${deviceConfig.hostname} has no model_id. build-images needs one per ` +
-        `device: there is no live device to read it from.`
+      `${deviceConfig.hostname} has no model_id. build-images needs a config with ` +
+        `each device's model_id and a "version": there is no live device to read ` +
+        `them from (an intent file reads both from the devices, so it cannot build images).`
     );
   }
   return { ...deviceConfig, model_id: deviceConfig.model_id };
@@ -20,37 +21,15 @@ const requireModelId = (deviceConfig: ONCDeviceConfig): BuildDevice => {
 const BOOTSTRAP_MARKER = "/etc/openwrt-configurator-bootstrapped";
 const UCI_DEFAULTS_MAX_BYTES = 20480;
 
-export const buildModeDeviceSchema = (
-  deviceConfig: BuildDevice
-): DeviceSchema => ({
+/** The device as far as an image knows it: its model, and the release once chosen (so `.if`s on releases hold). */
+export const buildModeDeviceSchema = (deviceConfig: BuildDevice, version = "build-time"): DeviceSchema => ({
   name: deviceConfig.model_id,
-  version: "build-time",
+  version,
   ports: [],
 });
 
-const matches = (
-  condition: string | undefined,
-  deviceConfig: BuildDevice,
-  deviceSchema: DeviceSchema
-) => conditionMatches({ condition, deviceConfig, deviceSchema });
-
-const applyOverridesScalar = <T>({
-  base,
-  overrides,
-  deviceConfig,
-  deviceSchema,
-  pick,
-}: {
-  base: T;
-  overrides?: Array<{ ".if": string; override: any }>;
-  deviceConfig: BuildDevice;
-  deviceSchema: DeviceSchema;
-  pick: (override: any) => T;
-}): T => {
-  return (overrides || [])
-    .filter((o) => matches(o[".if"], deviceConfig, deviceSchema))
-    .reduce<T>((acc, o) => pick(o.override) ?? acc, base);
-};
+const matches = (condition: string | undefined, deviceConfig: BuildDevice, deviceSchema: DeviceSchema) =>
+  conditionMatches({ condition, deviceConfig, deviceSchema });
 
 export const resolveVersion = ({
   oncConfig,
@@ -68,94 +47,34 @@ export const resolveVersion = ({
     return oncConfig.version;
   }
   const deviceSchema = buildModeDeviceSchema(deviceConfig);
-  return applyOverridesScalar({
-    base: oncConfig.version[".value"],
-    overrides: oncConfig.version[".overrides"],
-    deviceConfig,
-    deviceSchema,
-    pick: (o) => o[".value"],
-  });
+  return (oncConfig.version[".overrides"] || [])
+    .filter((o) => matches(o[".if"], deviceConfig, deviceSchema))
+    .reduce((acc, o) => o.override[".value"] ?? acc, oncConfig.version[".value"]);
 };
 
 export const resolvePackages = ({
   oncConfig,
   deviceConfig,
+  deviceSchema,
 }: {
   oncConfig: ONCConfig;
   deviceConfig: BuildDevice;
-}): string[] => {
-  const deviceSchema = buildModeDeviceSchema(deviceConfig);
-  return (oncConfig.package_profiles || [])
+  deviceSchema: DeviceSchema;
+}): string[] =>
+  (oncConfig.package_profiles || [])
     .filter((p) => matches(p[".if"], deviceConfig, deviceSchema))
     .reduce<string[]>((acc, p) => [...new Set([...acc, ...p.packages])], [])
     .map((entry) => entry.split("@")[0]);
-};
 
-const resolveSection = ({
-  section,
-  deviceConfig,
-  deviceSchema,
-}: {
-  section: any;
-  deviceConfig: BuildDevice;
-  deviceSchema: DeviceSchema;
-}) => {
-  if (!matches(section?.[".if"], deviceConfig, deviceSchema)) {
-    return undefined;
-  }
-  const overridden = (section?.[".overrides"] || [])
-    .filter((o: any) => matches(o[".if"], deviceConfig, deviceSchema))
-    .reduce((acc: any, o: any) => ({ ...acc, ...o.override }), {});
-  return Object.fromEntries(
-    Object.entries({ ...section, ...overridden }).filter(
-      ([k]) => ![".if", ".overrides"].includes(k)
-    )
-  );
-};
-
-export const resolveLanInterface = ({
-  oncConfig,
-  deviceConfig,
-}: {
-  oncConfig: ONCConfig;
-  deviceConfig: BuildDevice;
-}) => {
-  const deviceSchema = buildModeDeviceSchema(deviceConfig);
-  const interfaces: any[] = (oncConfig.config?.network as any)?.interface || [];
-  const lan = interfaces.find((iface) => iface[".name"] === "lan");
-  if (!lan) {
-    return undefined;
-  }
-  const resolved = resolveSection({
-    section: lan,
-    deviceConfig,
-    deviceSchema,
-  });
-  if (!resolved) return undefined;
-  delete (resolved as any)[".name"];
-  return resolved as {
-    proto?: string;
-    ipaddr?: string;
-    netmask?: string;
-  } & Record<string, unknown>;
-};
-
-export const resolveTimezone = ({
-  oncConfig,
-  deviceConfig,
-}: {
-  oncConfig: ONCConfig;
-  deviceConfig: BuildDevice;
-}): { timezone?: string; zonename?: string } => {
-  const deviceSchema = buildModeDeviceSchema(deviceConfig);
-  const systemSections: any[] = (oncConfig.config?.system as any)?.system || [];
-  const merged = systemSections
-    .map((s) => resolveSection({ section: s, deviceConfig, deviceSchema }))
-    .filter((s): s is Record<string, unknown> => !!s)
-    .reduce((acc, s) => ({ ...acc, ...s }), {} as Record<string, unknown>);
+/** What the bootstrap sets from the config as resolved for the device: the LAN interface and the timezone. */
+const resolveBootstrap = (config: ReturnType<typeof resolveOncConfig>) => {
+  const { ".name": _name, ...lan } = (config.network?.interface || []).find((iface) => iface[".name"] === "lan") ?? {};
+  const system = (config.system?.system || []).reduce<Record<string, unknown>>((acc, s) => ({ ...acc, ...s }), {});
+  const text = (value: unknown) => (typeof value === "string" ? value : undefined);
   return {
-    timezone: typeof merged.timezone === "string" ? merged.timezone : undefined,
-    zonename: typeof merged.zonename === "string" ? merged.zonename : undefined,
+    lan: Object.keys(lan).length > 0 ? (lan as Record<string, unknown>) : undefined,
+    timezone: text(system.timezone),
+    zonename: text(system.zonename),
   };
 };
 
@@ -243,9 +162,9 @@ export const getDeviceBuildPlan = ({
 }): DeviceBuildPlan => {
   const deviceConfig = requireModelId(unchecked);
   const version = resolveVersion({ oncConfig, deviceConfig });
-  const packages = resolvePackages({ oncConfig, deviceConfig });
-  const lan = resolveLanInterface({ oncConfig, deviceConfig });
-  const { timezone, zonename } = resolveTimezone({ oncConfig, deviceConfig });
+  const deviceSchema = buildModeDeviceSchema(deviceConfig, version);
+  const packages = resolvePackages({ oncConfig, deviceConfig, deviceSchema });
+  const { lan, timezone, zonename } = resolveBootstrap(resolveOncConfig({ oncConfig, deviceConfig, deviceSchema }));
   const uciDefaults = getUciDefaultsScript({
     timezone,
     zonename,

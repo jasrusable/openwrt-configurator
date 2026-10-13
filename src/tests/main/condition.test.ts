@@ -98,3 +98,11 @@ test("releases compare as releases", (t) => {
   t.true(on("25.12.5", "device.version >= '25.12' AND device.version < '25.12.6'"));
   t.throws(() => check("device.version < true"), { message: /expected a release/ });
 });
+
+test("an unquoted number compares as written", (t) => {
+  const tagged = (value: string): Lookup => (name) => (name === "device.tag.x" ? { value } : { value: undefined });
+  t.true(evaluateCondition("device.tag.x == 25.10", tagged("25.10")));
+  t.false(evaluateCondition("device.tag.x == 25.10", tagged("25.1")));
+  t.true(evaluateCondition("device.tag.x in [01, 2]", tagged("01")));
+  t.false(evaluateCondition("device.tag.x == 01", tagged("1")));
+});

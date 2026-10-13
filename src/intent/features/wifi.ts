@@ -4,6 +4,7 @@
 // (6 GHz on most) is skipped there; the intent only pins channels per device.
 import { Feature, mainNetwork, onAccessPoints, onDevice, serviceWhen } from "../fragment";
 import { uniqueNames } from "../names";
+import { broadcastBands } from "../radios";
 import { Band, Intent } from "../schema";
 import {
   bandSteering,
@@ -36,7 +37,7 @@ export const radioWidth = (intent: Intent, band: Band) => {
 };
 
 /** dBm. The driver still caps it at what the country allows. */
-const txpower = { low: 10, medium: 15, high: 20 } as const;
+export const txpower = { low: 10, medium: 15, high: 20 } as const;
 const cellDensity = { off: 0, normal: 1, high: 2, very_high: 3 } as const;
 
 /** OpenWrt's encryption, by security mode; PMF follows (optional in mixed, required in WPA3). */
@@ -72,10 +73,8 @@ export const wifi: Feature = (intent) => {
     ".if": onAccessPoints,
     ...section,
   });
-  const enabled = radios.filter(({ band }) => intent.wifi.radios[band].enabled);
   const ssidNames = uniqueNames("wifi", intent.wifi.networks, (ssid) => ssid.ssid);
   const meshBand = intent.wifi.mesh.enabled ? intent.wifi.mesh.band : undefined;
-  const dedicatedBand = intent.wifi.mesh.enabled && intent.wifi.mesh.band_reserved ? intent.wifi.mesh.band : undefined;
 
   return {
     package_profiles: [
@@ -115,10 +114,7 @@ export const wifi: Feature = (intent) => {
           });
         }),
         "wifi-iface": intent.wifi.networks.flatMap((ssid, i) => {
-          // Not the mesh's band when it has it to itself.
-          const on = enabled.filter(
-            ({ band }) => (!ssid.bands || ssid.bands.includes(band)) && !(dedicatedBand === band)
-          );
+          const on = radios.filter(({ band }) => broadcastBands(intent.wifi, ssid).includes(band));
           const common = {
             // Named by the SSID, per radio (the engine adds the radio), so
             // adding or removing another SSID renames none of these.

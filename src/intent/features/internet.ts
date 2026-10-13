@@ -1,11 +1,12 @@
 // The router's internet side: each connection (a line on a port), smart
 // queueing on each line whose speed is known, and with several lines mwan3
 // using them together. The firewall is its own feature (firewall.ts).
-import { Feature, mainNetwork, onRouter, serviceWhen } from "../fragment";
+import { Feature, mainNetwork, onRouter, routerOnly, serviceWhen, siteSeed } from "../fragment";
 import { checkOf, Connection, failoverOrder, ipv6Interface, multiWan, primaryConnection, slowLine, stickySeconds } from "../connections";
 import { named } from "../names";
 import { fnv } from "./network";
-import { Intent, lineTypes, netmask } from "../schema";
+import { netmask } from "../addresses";
+import { Intent, lineTypes } from "../schema";
 
 /**
  * Per-packet overhead by line, as OpenWrt's SQM guidance gives it: fibre is
@@ -43,12 +44,17 @@ const upnpUuid = (siteName: string) => {
   ].join("-");
 };
 
-/** A connection's line: its port (unset, the board's WAN port), tagged with its VLAN. */
-/** Placeholders the engine resolves: on swconfig, a switch VLAN of the line's own. */
+/**
+ * A line's port (unset, the board's WAN port), as a placeholder the engine
+ * resolves: on swconfig, a switch VLAN of the line's own.
+ */
 const portOf = (connection: Connection) => (connection.port ? `@port:${connection.port}` : "@wan_port");
 
 /** Each provider's ddns-scripts service name. */
 const ddnsServices = { cloudflare: "cloudflare.com-v4", duckdns: "duckdns.org", dynv6: "dynv6.com" } as const;
+
+/** How often dynamic DNS checks the address. */
+export const ddnsCheckMinutes = 10;
 
 /** Where the public address is read from: the web, as the WAN may be behind another NAT. */
 const ddnsIpUrl = "https://api.ipify.org";
@@ -77,7 +83,7 @@ export const ddnsService = (ddns: NonNullable<Intent["internet"]["dynamic_dns"]>
     // The main connection's: ddns-scripts restarts with it.
     interface: wan,
     use_ipv6: false,
-    check_interval: 10,
+    check_interval: ddnsCheckMinutes,
     check_unit: "minutes",
     force_interval: 72,
     force_unit: "hours",
@@ -91,8 +97,6 @@ export const internet: Feature = (intent) => {
   const several = multiWan(intent);
   // Only with the provider's DNS are the resolvers it hands out used.
   const peerdns = intent.dns.upstream.type === "provider";
-  const routerOnly = (sections: Record<string, unknown>[]) =>
-    sections.map((section) => ({ ".if": onRouter, ...section }));
 
   const interfaces = connections.flatMap((c, i) => {
     const { vlan } = c;
@@ -141,6 +145,11 @@ export const internet: Feature = (intent) => {
     ];
   });
 
+  // Where a line is shaped: its port, so the overhead counts every header on
+  // it; PPPoE's own device for PPPoE, as cake reads the NAT (for fairness
+  // per device) only of plain IP frames, never of PPPoE's (sch_cake.c,
+  // cake_update_flowkeys), and the overhead adds the 8 bytes it takes.
+  const shapedOn = (c: Connection) => (c.type === "pppoe" ? `pppoe-${c.id}` : portOf(c));
   const queue = (c: Connection) => {
     const { shaping: speed, vlan, id } = c;
     const ptm = speed?.medium === "vdsl" ? " ptm" : "";
@@ -148,8 +157,7 @@ export const internet: Feature = (intent) => {
       ? {
           ".name": id,
           enabled: true,
-          // The port itself, so the overhead counts every header on it.
-          interface: portOf(c),
+          interface: shapedOn(c),
           download: String(Math.round(speed.down_mbps * 1000)),
           upload: String(Math.round(speed.up_mbps * 1000)),
           qdisc: "cake",
@@ -164,7 +172,7 @@ export const internet: Feature = (intent) => {
           iqdisc_opts: `nat dual-dsthost ingress${ptm}`,
           eqdisc_opts: `nat dual-srchost${ptm}`,
         }
-      : { ".name": id, enabled: false, interface: portOf(c) };
+      : { ".name": id, enabled: false, interface: shapedOn(c) };
   };
 
   // Several lines: mwan3 pings out of each and routes IPv4 over those that
@@ -184,7 +192,8 @@ export const internet: Feature = (intent) => {
   const byNetwork = intent.networks.flatMap((n) => {
     const line = n.access.via && connections.find((c) => c.id === n.access.via);
     if (!line) return [];
-    const others = connections.filter((c) => c !== line);
+    // The rest as fallback, metered last, as for the internet's own failover.
+    const others = failoverOrder(connections.filter((c) => c !== line));
     return [
       {
         network: n,
@@ -340,7 +349,7 @@ esac
             port: 5000,
             upnp_lease_file: "/var/run/miniupnpd.leases",
             igdv1: true,
-            uuid: upnpUuid(intent.system.name),
+            uuid: upnpUuid(siteSeed(intent)),
           },
         ]),
         perm_rule: routerOnly(named("perm", [

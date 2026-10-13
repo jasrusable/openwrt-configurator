@@ -2,7 +2,7 @@
 // It is not stored. Which template a network follows is read off its own
 // settings, so the label never disagrees with what the network does; one
 // that follows none is Custom.
-import { Access } from "./firewall";
+import { Access, vpnZoneIds } from "./firewall";
 import type { Intent } from "./schema";
 
 export const networkTemplates = ["home", "guest", "iot"] as const;
@@ -30,10 +30,7 @@ export const templateSettings = (
 
 const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
 
-/** The template network `index` follows, or "custom". */
-/** Remote access and linked sites: reachable like networks, but no template's business. */
-const vpnZoneIds = ["vpn", "sites"];
-
+/** The template network `index` follows, or "custom". Remote access and linked sites are reachable like networks, but no template's business. */
 export const templateOf = (networks: Network[], index: number): NetworkTemplate | "custom" => {
   const network = networks[index];
   if (!network) return "custom";

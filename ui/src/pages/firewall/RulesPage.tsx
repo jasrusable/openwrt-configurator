@@ -6,7 +6,6 @@ import { Text } from "@mantine/core";
 import {
   actionOptions,
   EndSelectField,
-  protocolOptions,
   useRuleSummary,
 } from "../../firewall/ends";
 import {
@@ -16,10 +15,10 @@ import {
   TagsField,
   TextField,
   Value,
-  When,
 } from "../../form/fields";
 import { defineList, ListPage } from "../../form/ListPage";
 import { Section } from "../../kit/layout";
+import { protocolOptions } from "../../../../src/intent/labels";
 
 const RuleMatch = ({ index }: { index: number }) => {
   const summary = useRuleSummary(useDraftValue(`firewall.rules.${index}`));
@@ -77,46 +76,31 @@ const rules = defineList({
         </Text>
       ),
     },
-    {
-      header: "Enabled",
-      width: 90,
-      cell: (i) => (
-        <Text size="sm" c="dimmed">
-          <Value name={`firewall.rules.${i}.enabled`} format={(on) => (on ? "Yes" : "No")} />
-        </Text>
-      ),
-    },
   ],
   editor: (i) => (
     <>
       <Section>
-        <TextField name={`firewall.rules.${i}.name`} label="Name" />
-        <SegmentedField name={`firewall.rules.${i}.action`} label="Action" options={actionOptions} />
-        <SwitchField name={`firewall.rules.${i}.enabled`} label="Enabled" />
+        <TextField name={`firewall.rules.${i}.name`} />
+        <SegmentedField name={`firewall.rules.${i}.action`} options={actionOptions} />
+        <SwitchField name={`firewall.rules.${i}.enabled`} />
       </Section>
       <Section title="Traffic">
         <EndSelectField name={`firewall.rules.${i}.from`} label="From" />
         <TagsField
           name={`firewall.rules.${i}.from_addresses`}
-          label="From devices"
-          description="Addresses or ranges, like 10.0.0.20 or 10.0.0.0/28."
           placeholder="Any"
         />
         <EndSelectField name={`firewall.rules.${i}.to`} label="To" destination />
         <TagsField
           name={`firewall.rules.${i}.to_addresses`}
-          label="To devices"
           placeholder="Any"
         />
         <SelectField
           name={`firewall.rules.${i}.protocol`}
-          label="Protocol"
           options={protocolOptions}
         />
         <TextField
           name={`firewall.rules.${i}.ports`}
-          label="Ports"
-          description="Like 443, 8000-8100 or 80 443."
           placeholder="Any"
           chars={/[\d ,-]/}
         />

@@ -4,6 +4,7 @@ import {
   makeOncConfigSchema,
   oncSectionSchema,
   sectionSchema,
+  onlySectionTypes,
 } from "../../utils";
 import { firewallDefaultsSchema, oncFirewallDefaultsSchema } from "./default";
 import {
@@ -17,6 +18,9 @@ import {
 import { firewallRuleSchema, oncFirewallRuleSchema } from "./rule";
 import { firewallZoneSchema, oncFirewallZoneSchema } from "./zone";
 
+// OpenWrt's firewall section types.
+const knownTypes = onlySectionTypes(["defaults", "zone", "forwarding", "rule", "redirect", "include", "ipset", "nat"]);
+
 export const firewallSchema = configSchema(
   z
     .object({
@@ -27,7 +31,7 @@ export const firewallSchema = configSchema(
       redirect: sectionSchema(firewallRedirectSchema),
     })
     .passthrough()
-);
+).superRefine(knownTypes);
 
 export const oncFirewallSchema = makeOncConfigSchema(
   z
@@ -39,5 +43,5 @@ export const oncFirewallSchema = makeOncConfigSchema(
       redirect: oncSectionSchema(oncFirewallRedirectSchema),
     })
     .passthrough()
-);
+).superRefine(knownTypes);
 

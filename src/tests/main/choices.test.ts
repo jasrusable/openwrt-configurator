@@ -1,14 +1,12 @@
 import test from "ava";
-import { readFileSync } from "fs";
-import { join } from "path";
-import { availability, choiceIssues, choices, meshChannels } from "../../intent/choices";
+import { sampleIntent } from "../helpers/fixtures";
+import { availability, choiceIssues, choices } from "../../intent/choices";
+import { meshChannels } from "../../intent/radios";
 import { fieldInfo } from "../../intent/fields";
 import { Intent, intentSchema } from "../../intent/schema";
 
 const sample = (): Intent =>
-  intentSchema.parse(
-    JSON.parse(readFileSync(join(__dirname, "..", "..", "..", "sampleConfigs", "intent.json"), "utf8"))
-  );
+  sampleIntent();
 
 const issues = (intent: unknown) => {
   const parsed = intentSchema.safeParse(intent);
@@ -93,7 +91,7 @@ test("why a value is not available, in words the UI and the schema share", (t) =
   t.is(availability(intent, "wifi.radios.5g.width").option("80").unavailable, undefined);
 
   intent.wifi.networks[0].bands = ["5g"];
-  t.regex(availability(intent, "wifi.radios.5g.enabled").option(false).unavailable!, /only on 5 GHz: give it another band first/);
+  t.regex(availability(intent, "wifi.radios.5g.enabled").option(false).unavailable!, /would be broadcast nowhere: give it another band first/);
   t.is(availability(intent, "wifi.radios.2g.enabled").option(false).unavailable, undefined);
 
   intent.internet.lines[0].ipv6.enabled = false;
@@ -127,4 +125,13 @@ test("mesh dead ends: 6 GHz moves the channel, turning the mesh off or making a 
   const swapped = availability(intent, `hardware.${ap}.role`).option("router").swap!.apply(intent);
   t.is(swapped.hardware[ap].uplink, "cable");
   t.deepEqual(issues(swapped), []);
+});
+
+test("a metered line is never the first while it carries IPv6: IPv6 goes out the first line alone", (t) => {
+  const intent = intentSchema.parse(sample());
+  intent.internet.lines.push({ ...intent.internet.lines[0], id: "wanb", name: "Cable", port: "eth2" });
+  t.regex(String(availability(intent, "internet.lines.0.failover.metered").option(true).unavailable), /carries all your IPv6/);
+  t.is(availability(intent, "internet.lines.1.failover.metered").option(true).unavailable, undefined);
+  intent.internet.lines[0].ipv6.enabled = false;
+  t.is(availability(intent, "internet.lines.0.failover.metered").option(true).unavailable, undefined);
 });

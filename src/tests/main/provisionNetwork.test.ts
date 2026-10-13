@@ -239,4 +239,62 @@ test("a failing command is logged by its first words only: never a batch's value
   t.is(commandLabel("umask 077; cat > '/etc/x' <<'D'\nprivate\nD"), "umask 077; cat >");
   t.is(commandLabel("uci set wireless.wifinet0.key='secret\nmore'"), "uci set wireless.wifinet0.key");
   t.is(commandLabel("apk add --update-cache nlbwmon"), "apk add --update-cache nlbwmon");
+  t.is(commandLabel("# write /etc/x\nmkdir -p '/etc'\n(umask 077; cat > '/etc/x.onc-new') <<'D'\nprivate\nD"), "write /etc/x");
+});
+
+test.serial("a session dropping mid-configure after a package change rolls the device back, never disarms it", async (t) => {
+  const dropping = fakeDevice({
+    hostname: "ap2",
+    newPackages: ["nlbwmon"],
+    onEvent: (e) => e === "packages" && dropping.dropSessions(),
+  });
+  const error = await t.throwsAsync(run([dropping]));
+  t.regex(error!.message, /Not connected[\s\S]*No device keeps a change/);
+  t.true(dropping.events.includes("rollback-now"));
+  t.false(dropping.events.includes("disarm"));
+});
+
+test.serial("a dropped session at disarm time is reconnected, not a failed run", async (t) => {
+  const a = fakeDevice({ hostname: "a" });
+  // Confirming b (its services) cuts the session a was confirmed over.
+  const b = fakeDevice({ hostname: "b", services: [{ name: "firewall", running: false }], onEvent: (e) => e === "services" && a.dropSessions() });
+  await run([a, b]);
+  t.true(a.events.includes("disarm") && b.events.includes("disarm"));
+  t.true(a.changed && b.changed);
+});
+
+test.serial("a device found to have fired at disarm is told it recovered once restored, so it does not reboot", async (t) => {
+  const device = fakeDevice({ hostname: "ap", firesBeforeDisarm: true });
+  const error = await t.throwsAsync(run([device]));
+  t.regex(error!.message, /rolled itself back before it could be confirmed/);
+  t.true(device.events.indexOf("recovered") > device.events.indexOf("watchdog-fired"));
+  t.false(device.changed);
+});
+
+test.serial("a rollback is told it recovered only once its restore is done", async (t) => {
+  const [a, b] = [fakeDevice({ hostname: "a" }), fakeDevice({ hostname: "b", failOn: "configure" })];
+  await t.throwsAsync(run([a, b]));
+  t.true(a.events.indexOf("recovered") > a.events.indexOf("rollback-now"));
+});
+
+test.serial("every device's packages are staged before any watchdog is armed: fetching eats no window", async (t) => {
+  const log: string[] = [];
+  const devices = ["a", "b"].map((hostname) => fakeDevice({ hostname, log, removes: ["dnsmasq"] }));
+  await run(devices);
+  const lastStage = Math.max(...devices.map((d) => log.indexOf(`${d.hostname}:stage`)));
+  const firstArm = log.findIndex((e) => e.endsWith(":arm"));
+  t.true(lastStage >= 0 && lastStage < firstArm);
+});
+
+test.serial("--no-confirm still starts the declared services, over a new session after the commit", async (t) => {
+  const device = fakeDevice({
+    hostname: "ap",
+    services: [{ name: "firewall", running: false }],
+    onEvent: (e) => e === "commit" && device.dropSessions(),
+  });
+  const clock = virtualClock();
+  await quietly(() => provisionNetwork({ devices: [device.options(clock)], confirm: false, confirmTimeoutSeconds: 60 }));
+  const events = device.events.filter((e) => e !== "revert");
+  t.true(events.indexOf("services") > events.indexOf("commit"));
+  t.true(device.changed);
 });

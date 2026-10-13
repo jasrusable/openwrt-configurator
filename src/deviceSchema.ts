@@ -13,6 +13,8 @@ export const deviceSchemaSchema = z.object({
         name: z.string(),
         default_role: z.enum(["lan", "wan"]).optional(),
         sw_config_cpu_name: z.string().optional(),
+        /** swconfig: its number on the switch; absent for a port beside the switch (a NIC of its own). */
+        switch_port: z.number().int().optional(),
       })
     )
     .optional(),

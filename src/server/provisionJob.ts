@@ -10,6 +10,7 @@
 import { ApplyProgress, parseEvents, progressOf } from "../applyEvents";
 import { Platform } from "../platform";
 import { appliedWithProblemsExit } from "../devicePhases";
+import { olderThan, takeLockCommand } from "../lock";
 import { shellQuote } from "../shell";
 
 type Files = Pick<
@@ -94,18 +95,19 @@ const jobChecks = (paths: ReturnType<typeof jobPaths>) => {
   return [
     "boot() { cat /proc/sys/kernel/random/boot_id 2>/dev/null || sysctl -n kern.boottime 2>/dev/null; }",
     `alive() { [ -f ${q(paths.pid)} ] && read -r p b < ${q(paths.pid)} && [ "$b" = "$(boot)" ] && kill -0 "$p" 2>/dev/null; }`,
-    `starting() { [ -d ${q(paths.lock)} ] && ! [ -f ${q(paths.pid)} ] && ! find ${q(paths.lock)} -prune -mmin +1 | grep -q .; }`,
+    `starting() { [ -d ${q(paths.lock)} ] && ! [ -f ${q(paths.pid)} ] && ! ${olderThan(paths.lock, 1)}; }`,
     `stale() { [ -d ${q(paths.lock)} ] && ! alive && ! starting; }`,
   ].join("\n");
 };
 
-export const provisionStatus = async ({
+/** Where the job is, from its small files alone: what a status poll needs, without the log. */
+export const jobState = async ({
   intentPath,
   files,
 }: {
   intentPath: string;
   files: Files;
-}): Promise<ProvisionStatus> => {
+}): Promise<Pick<ProvisionStatus, "state" | "startedAt" | "exitCode">> => {
   const paths = jobPaths(intentPath);
   const started = read(files, paths.started);
   // Alive first, then the exit file: the job writes its exit before it ends,
@@ -114,8 +116,6 @@ export const provisionStatus = async ({
   // Or just starting: the lock taken, its pid not yet written.
   const running = !!started && (await files.run(["sh", "-c", `${jobChecks(paths)}\nalive || starting`])).code === 0;
   const exit = running ? undefined : read(files, paths.exit);
-  const draft = read(files, intentPath);
-  const live = read(files, paths.live);
   const exitCode = exit === undefined ? undefined : Number(exit.trim());
   return {
     state: !started
@@ -131,13 +131,33 @@ export const provisionStatus = async ({
       : "failed",
     startedAt: started ? Number(started) : undefined,
     exitCode,
-    log: (read(files, paths.log) ?? "").split("\n").slice(-400).join("\n"),
-    progress: started ? progressOf(parseEvents(read(files, paths.events) ?? "")) : { devices: {} },
-    live: !live
-      ? "none"
-      : draft && canonical(draft) === canonical(live)
-      ? "matches"
-      : "differs",
+  };
+};
+
+/** Where each device is in the last run, and how it ended, as the run reported it. */
+export const jobProgress = (intentPath: string, files: Files): ApplyProgress =>
+  progressOf(parseEvents(read(files, jobPaths(intentPath).events) ?? ""));
+
+/** Whether the saved intent is what was last applied. */
+export const liveState = (intentPath: string, files: Files): ProvisionStatus["live"] => {
+  const draft = read(files, intentPath);
+  const live = read(files, jobPaths(intentPath).live);
+  return !live ? "none" : draft && canonical(draft) === canonical(live) ? "matches" : "differs";
+};
+
+export const provisionStatus = async ({
+  intentPath,
+  files,
+}: {
+  intentPath: string;
+  files: Files;
+}): Promise<ProvisionStatus> => {
+  const job = await jobState({ intentPath, files });
+  return {
+    ...job,
+    log: (read(files, jobPaths(intentPath).log) ?? "").split("\n").slice(-400).join("\n"),
+    progress: job.state === "idle" ? { devices: {} } : jobProgress(intentPath, files),
+    live: liveState(intentPath, files),
   };
 };
 
@@ -153,8 +173,7 @@ export const startProvision = async ({
   files: Files;
   now: () => number;
 }) => {
-  const status = await provisionStatus({ intentPath, files });
-  if (status.state === "running") {
+  if ((await jobState({ intentPath, files })).state === "running") {
     return { started: false as const, reason: "Settings are already being applied." };
   }
   const paths = jobPaths(intentPath);
@@ -168,12 +187,12 @@ export const startProvision = async ({
   // renamed into place: read half-written, an empty exit file is "exit 0". A non-interactive shell's
   // background jobs ignore SIGINT, so it also survives a Ctrl-C of the server.
   // The lock is taken first and given back by the job as it ends. One left
-  // by a job that was killed is taken over: its pid, written after the lock,
-  // is no longer running.
+  // by a job that was killed is taken over (src/lock.ts): its pid, written
+  // after the lock, is no longer running.
   const script = [
     `mkdir -p ${q(paths.dir)} && chmod 700 ${q(paths.dir)}`,
     jobChecks(paths),
-    `mkdir ${q(paths.lock)} 2>/dev/null || { stale && touch ${q(paths.lock)}; } || exit ${alreadyRunning}`,
+    `${takeLockCommand(paths.lock, "stale")} || exit ${alreadyRunning}`,
     // Its pid is written once spawned: until then there is none, which reads as starting.
     `rm -f ${q(paths.pid)}`,
     `echo ${now()} > ${q(paths.started)}`,
@@ -188,7 +207,7 @@ export const startProvision = async ({
         ` if [ $code -eq 0 ] || [ $code -eq ${appliedWithProblemsExit} ]; then mv ${q(paths.snapshot)} ${q(paths.live)}; fi;` +
         ` echo $code > ${q(paths.exit)}.tmp; mv ${q(paths.exit)}.tmp ${q(paths.exit)}; rmdir ${q(paths.lock)}`
     )} < /dev/null > /dev/null 2>&1 &`,
-    `echo "$! $(boot)" > ${q(paths.pid)}.tmp; mv ${q(paths.pid)}.tmp ${q(paths.pid)}`,
+    `echo "$! $(boot)" > ${q(paths.pid)}.$$; mv ${q(paths.pid)}.$$ ${q(paths.pid)}`,
   ].join("\n");
   const result = await files.run(["sh", "-c", script]);
   if (result.code === alreadyRunning) return { started: false as const, reason: "Settings are already being applied." };

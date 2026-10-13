@@ -1,15 +1,15 @@
 import test from "ava";
-import { mkdtempSync, readFileSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { sampleIntent, sampleIntentJson } from "../helpers/fixtures";
+import { tempDir } from "../helpers/tempDir";
+import { writeFileSync } from "fs";
 import { join } from "path";
 import { compileIntent } from "../../intent/compile";
 import { Intent, intentSchema } from "../../intent/schema";
 import { lockoutReason } from "../../loginAccess";
 import { nodePlatform } from "../../platforms/node";
 
-const root = join(__dirname, "..", "..", "..");
 const sample = (): Intent =>
-  intentSchema.parse(JSON.parse(readFileSync(join(root, "sampleConfigs", "intent.json"), "utf8")));
+  sampleIntent();
 const key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA you@mac";
 const other = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB someone@else";
 
@@ -29,7 +29,7 @@ test("keys and password login compile to dropbear's authorized_keys and options"
 
 test("password login off needs a key; a key must look like one", (t) => {
   const issues = (ssh: object) => {
-    const sample = JSON.parse(readFileSync(join(root, "sampleConfigs", "intent.json"), "utf8"));
+    const sample = sampleIntentJson();
     const r = intentSchema.safeParse({ ...sample, system: { ...sample.system, ssh } });
     return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
   };
@@ -39,7 +39,7 @@ test("password login off needs a key; a key must look like one", (t) => {
 });
 
 test("an apply that would lock this app out is refused, and says why", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "onc-key-"));
+  const dir = tempDir("key");
   const keyPath = join(dir, "id_ed25519");
   writeFileSync(`${keyPath}.pub`, `${key}\n`);
   // A key (this app's login) and the login rules, as one flat set for the cases below.

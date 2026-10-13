@@ -6,8 +6,10 @@
 // exactly one router), choosing the value instead swaps: it also changes
 // what else it must, so the settings never pass through a broken state.
 // Free-text values (an address, a name) are checked by the schema alone.
-import { internetIpv6, multiWan, primaryConnection } from "./connections";
-import { internet } from "./firewall";
+import { internetIpv6, multiWan, networkHasIpv6, primaryConnection } from "./connections";
+import { internet, portsApply } from "./firewall";
+import { isMain } from "./fragment";
+import { bandLabels, broadcastBands, MeshBand, meshBands, meshChannels } from "./radios";
 import { newPrivateKey } from "../wireguard";
 import { where } from "./places";
 import { steeringLabels } from "./roaming";
@@ -17,36 +19,12 @@ type Networks = Pick<Intent["networks"][number], "id" | "vlan">[];
 
 /** The main network: the one untagged network, which devices are managed over. */
 export const isMainNetwork = (networks: Networks, index: number) =>
-  networks.filter((n) => n.vlan === undefined).length === 1 &&
-  networks[index]?.vlan === undefined;
+  networks.filter(isMain).length === 1 && !!networks[index] && isMain(networks[index]);
 
 /** The networks network `index` may be given access to: every other one. */
 export const reachableNetworks = (networks: Networks, index: number) =>
   networks.filter((_, i) => i !== index).map((n) => n.id);
 
-/** A network's IPv6 applies only with the internet's: alone it would be local-only. */
-export const networkIpv6Applies = (internetIpv6: boolean) => internetIpv6;
-
-/** Ports only mean something for TCP and UDP. */
-export const portsApply = (protocol: string | undefined) =>
-  ["tcp+udp", "tcp", "udp"].includes(protocol ?? "tcp+udp");
-
-export const channelWidths = ["auto", "20", "40", "80", "160"] as const;
-
-/** The VLAN that carries the mesh over cables (wifi.mesh.over_cable): no network may use it. */
-export const meshWiredVlan = 4000;
-
-/** The bands a mesh can use, and their channels no radar (DFS) can move it off. */
-export const meshBands = ["2g", "5g", "6g"] as const;
-type MeshBand = (typeof meshBands)[number];
-export const meshChannels: Record<MeshBand, number[]> = {
-  "2g": [1, 6, 11],
-  "5g": [36, 40, 44, 48],
-  // 6 GHz has no radar channels: its preferred (PSC) ones, which devices scan first.
-  "6g": [37, 53, 69, 85],
-};
-
-const bandLabels: Record<Band, string> = { "2g": "2.4 GHz", "5g": "5 GHz", "6g": "6 GHz" };
 
 /** A mesh key: 32 random letters and digits, from the platform's strong random source. */
 export const newMeshKey = () => {
@@ -54,6 +32,12 @@ export const newMeshKey = () => {
   const bytes = new Uint8Array(32);
   globalThis.crypto.getRandomValues(bytes);
   return [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
+};
+
+/** Why these Wi-Fi settings may not be: an SSID broadcast now would be on no band. */
+const strandedReason = (intent: Intent, wifi: Pick<Intent["wifi"], "radios" | "mesh">) => {
+  const stranded = intent.wifi.networks.find((w) => broadcastBands(intent.wifi, w).length && !broadcastBands(wifi, w).length);
+  return stranded && `“${stranded.ssid || "Unnamed"}” would be broadcast nowhere: give it another band first (${where("ssids")}).`;
 };
 
 /** How many /64s a delegated prefix of this length holds. */
@@ -142,15 +126,9 @@ export const choices: Choice[] = [
     // Off would leave an SSID that only uses this band broadcasting nowhere.
     path: "wifi.radios.*.enabled",
     values: [false],
-    unavailable: (intent, [band]) => {
-      const stranded = intent.wifi.networks.find(
-        (w) => w.bands && !w.bands.some((b) => b !== band && intent.wifi.radios[b]?.enabled)
-      );
-      return (
-        stranded &&
-        `“${stranded.ssid || "Unnamed"}” is only on ${bandLabels[band as Band]}: give it another band first (${where("ssids")}).`
-      );
-    },
+    unavailable: (intent, [band]) =>
+      strandedReason(intent, { ...intent.wifi, radios: { ...intent.wifi.radios, [band]: { ...intent.wifi.radios[band as Band], enabled: false } } }),
+    // The schema reports an SSID on no band.
     refuses: false,
   },
   {
@@ -187,7 +165,7 @@ export const choices: Choice[] = [
   {
     path: "networks.*.ipv6",
     unavailable: (intent) =>
-      !networkIpv6Applies(internetIpv6(intent)) &&
+      !internetIpv6(intent) &&
       `Turn on IPv6 for ${primaryConnection(intent).name || "the main connection"} under ${where("internet")} first.`,
     // Ignored without the internet's IPv6, and kept for when it is back.
     refuses: false,
@@ -197,8 +175,10 @@ export const choices: Choice[] = [
     values: [true],
     unavailable: (intent, [i]) => {
       const prefix = primaryConnection(intent).ipv6.prefix;
-      if (!internetIpv6(intent) || prefix === "auto") return undefined;
-      const others = intent.networks.filter((n, j) => n.ipv6 && j !== Number(i)).length;
+      const network = intent.networks[Number(i)];
+      // Only networks that get IPv6 take a /64: not one kept to another line or a tunnel.
+      if (prefix === "auto" || !network || !networkHasIpv6(intent, { ...network, ipv6: true })) return undefined;
+      const others = intent.networks.filter((n, j) => j !== Number(i) && networkHasIpv6(intent, n)).length;
       const room = roomIn(prefix);
       return (
         others + 1 > room &&
@@ -212,7 +192,7 @@ export const choices: Choice[] = [
     path: "internet.lines.*.ipv6.prefix",
     values: ["48", "56", "60", "64"],
     unavailable: (intent, [c], prefix) => {
-      const want = intent.networks.filter((n) => n.ipv6).length;
+      const want = intent.networks.filter((n) => networkHasIpv6(intent, n)).length;
       const room = roomIn(prefix as string);
       return (
         c === "0" &&
@@ -324,7 +304,7 @@ export const choices: Choice[] = [
                     private_key: newPrivateKey(),
                     access: remote.access.networks.length
                       ? remote.access
-                      : { ...remote.access, networks: next.networks.filter((n) => n.vlan === undefined).map((n) => n.id) },
+                      : { ...remote.access, networks: next.networks.filter(isMain).map((n) => n.id) },
                   },
                 },
               };
@@ -335,6 +315,17 @@ export const choices: Choice[] = [
     path: "internet.lines.*.failover.metered",
     unavailable: (intent) => !multiWan(intent) && "With one line it is used for everything anyway.",
     refuses: false,
+  },
+  {
+    // IPv6 goes out the first line alone: a metered one would carry all of
+    // it, all the time, never only as a last resort.
+    path: "internet.lines.*.failover.metered",
+    values: [true],
+    unavailable: (intent, [c]) =>
+      c === "0" &&
+      multiWan(intent) &&
+      internetIpv6(intent) &&
+      "The first line carries all your IPv6, so it would never be only a backup: put another line first, or turn its IPv6 off.",
   },
   {
     path: "internet.lines.*.failover.down_when_slow",
@@ -402,10 +393,22 @@ export const choices: Choice[] = [
     // An SSID only on the mesh's band would be broadcast nowhere.
     path: "wifi.mesh.band_reserved",
     values: [true],
-    unavailable: (intent) => {
-      const only = intent.wifi.networks.find((w) => w.bands?.length && w.bands.every((b) => b === intent.wifi.mesh.band));
-      return only && `“${only.ssid || "An SSID"}” only uses this band (${where("ssids")}).`;
-    },
+    unavailable: (intent) => strandedReason(intent, { ...intent.wifi, mesh: { ...intent.wifi.mesh, band_reserved: true } }),
+    // The schema reports an SSID on no band.
+    refuses: false,
+  },
+  {
+    // With the band the mesh's alone, moving or starting the mesh can leave an SSID nowhere too.
+    path: "wifi.mesh.enabled",
+    values: [true],
+    unavailable: (intent) => strandedReason(intent, { ...intent.wifi, mesh: { ...intent.wifi.mesh, enabled: true } }),
+    refuses: false,
+  },
+  {
+    path: "wifi.mesh.band",
+    values: [...meshBands],
+    unavailable: (intent, _, band) => strandedReason(intent, { ...intent.wifi, mesh: { ...intent.wifi.mesh, band: band as MeshBand } }),
+    refuses: false,
   },
   {
     // Only over cables: the Wi-Fi links always take them.

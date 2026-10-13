@@ -1,3 +1,4 @@
+import { Redact } from "./secretOptions";
 import { getUciCommands } from "./getUciCommands";
 import {
   changedConfigs,
@@ -236,6 +237,8 @@ const writeFileCommand = (path: string, content: string, mode?: string, runAfter
   const body = content.endsWith("\n") ? content : `${content}\n`;
   const [file, next] = [shellQuote(path), shellQuote(`${path}.onc-new`)];
   return [
+    // Its label, for a log that names the file without its content (commandLabel).
+    `# write ${path.replace(/\n/g, " ")}`,
     `mkdir -p ${shellQuote(dirname(path))}`,
     `(umask 077; cat > ${next}) <<'${delimiter}'`,
     `${body}${delimiter}`,
@@ -255,9 +258,9 @@ const writeFileCommand = (path: string, content: string, mode?: string, runAfter
  * escaping is layered on top of the quoting `getUciCommands` already applies.
  *
  * `uci batch` reports failures on stderr but still exits 0, so the exit status
- * cannot be trusted — any stderr output is treated as a failure instead. Only
- * `set`/`add_list` go through here; the tolerant delete loops stay outside,
- * where a missing section is expected rather than an error.
+ * cannot be trusted — any stderr output is treated as a failure instead. The
+ * wipe's deletes go through it too: each names a section read from the device
+ * after the prepare step, so a missing one is a real error.
  *
  * The batch is line-oriented, so an operation carrying an embedded newline
  * would be split across lines and misparsed. Those are issued as standalone
@@ -303,36 +306,20 @@ const uciBatchCommands = (uciCommands: string[]) => {
   return commands;
 };
 
-const packageCommands = ({
-  state,
-  installedPackages,
-}: {
-  state: OpenWrtState;
-  installedPackages?: string[];
-}) => {
-  const packagesToUninstall = installedPackages
-    ? (state.packagesToUninstall || []).filter((p) =>
-        installedPackages.includes(p)
-      )
-    : state.packagesToUninstall;
+/** The packages a run installs: those the state names that the device lacks (all of them, unread). */
+export const packagesToAdd = ({ state, installedPackages }: { state: OpenWrtState; installedPackages?: string[] }) =>
+  (state.packagesToInstall || []).filter((p) => !installedPackages?.includes(p.packageName));
 
-  const packagesToInstall = installedPackages
-    ? (state.packagesToInstall || []).filter(
-        (p) => !installedPackages.includes(p.packageName)
-      )
-    : state.packagesToInstall;
+/** The packages a run removes: those the state removes that the device has (all of them, unread). */
+export const getPackagesToRemove = ({ state, installedPackages }: { state: OpenWrtState; installedPackages?: string[] }) =>
+  (state.packagesToUninstall || []).filter((p) => !installedPackages || installedPackages.includes(p));
 
+const packageCommands = (packages: { state: OpenWrtState; installedPackages?: string[] }) => {
+  const remove = getPackagesToRemove(packages);
+  const add = packagesToAdd(packages).map((p) => p.packageName);
   return [
-    ...(packagesToUninstall && packagesToUninstall.length > 0
-      ? [`apk del --rdepends ${packagesToUninstall.map(shellQuote).join(" ")}`]
-      : []),
-    ...(packagesToInstall && packagesToInstall.length > 0
-      ? [
-          `apk add --update-cache ${packagesToInstall
-            .map((p) => shellQuote(p.packageName))
-            .join(" ")}`,
-        ]
-      : []),
+    ...(remove.length > 0 ? [`apk del --rdepends ${remove.map(shellQuote).join(" ")}`] : []),
+    ...(add.length > 0 ? [`apk add --update-cache ${add.map(shellQuote).join(" ")}`] : []),
   ];
 };
 
@@ -351,7 +338,7 @@ export const getPrepareCommands = ({
   state: OpenWrtState;
   /** From the installedPackages probe. */
   installedPackages?: string[];
-  redact?: (value: string) => string;
+  redact?: Redact;
 }) => {
   const packages = packageCommands({ state, installedPackages });
   return [
@@ -389,7 +376,7 @@ export const seedCommands = ({
   redact,
 }: {
   state: OpenWrtState;
-  redact?: (value: string) => string;
+  redact?: Redact;
 }) =>
   ownedConfigs(state).map(([configKey, sections]) => {
     const path = shellQuote(`/etc/config/${configKey}`);
@@ -399,6 +386,9 @@ export const seedCommands = ({
     // a new file would otherwise take the shell's umask.
     return [`if [ ! -e ${path} ]; then`, `(umask 077; cat > ${path}) <<'${delimiter}'`, `${text}${delimiter}`, "fi"].join("\n");
   });
+
+/** Where seedCommands writes: a file it finds missing is a change only the watchdog can undo. */
+export const seededConfigPaths = (state: OpenWrtState) => ownedConfigs(state).map(([configKey]) => `/etc/config/${configKey}`);
 
 /** The stock configs apk set aside for an owned config: never used. */
 const stockConfigCleanup = (state: OpenWrtState) => {
@@ -423,8 +413,8 @@ export const getStageCommands = ({
   current: UciConfigs;
   /** From the managedFiles probe: what the previous provision wrote. */
   managedFiles?: string[];
-  /** Replace a resolved secret before it is written into the script. */
-  redact?: (value: string) => string;
+  /** Replace a secret before it is written into the script. */
+  redact?: Redact;
 }) => {
   const hide = (value: string) => (redact ? redact(value) : value);
   const wipe = wipeOperations(current, state.configsToNotReset || []).map(
@@ -451,7 +441,12 @@ export const getStageCommands = ({
           // Each with its optional command, run right after the file is
           // written when it changed (e.g. trigger a new hotplug script now).
           ...files.map((file) =>
-            writeFileCommand(file.path, hide(file.content), file.mode, file.run_after && hide(file.run_after))
+            writeFileCommand(
+              file.path,
+              redact ? redact(file.content, { file }) : file.content,
+              file.mode,
+              file.run_after && hide(file.run_after)
+            )
           ),
           writeFileCommand(
             managedFilesManifest,
@@ -484,7 +479,7 @@ export const getDeviceScript = ({
   installedPackages?: string[];
   managedFiles?: string[];
   current?: UciConfigs;
-  redact?: (value: string) => string;
+  redact?: Redact;
 }) => [
   ...getPrepareCommands({ state, installedPackages, redact }),
   ...getStageCommands({ state, current, managedFiles, redact }),
@@ -495,15 +490,3 @@ export const getDeviceScript = ({
     redact ? redact(command) : command
   ),
 ];
-
-/** The packages a provision would remove from this device, for reporting. */
-export const getPackagesToRemove = ({
-  state,
-  installedPackages,
-}: {
-  state: OpenWrtState;
-  installedPackages: string[];
-}) =>
-  (state.packagesToUninstall || []).filter((p) =>
-    installedPackages.includes(p)
-  );

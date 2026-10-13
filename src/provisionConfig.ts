@@ -4,6 +4,7 @@ import { DeviceSchema } from "./deviceSchema";
 import { getDeviceSchema } from "./getDeviceSchema";
 import { getOpenWrtState } from "./getOpenWrtState";
 import { ONCConfig, ONCDeviceConfig } from "./oncConfigSchema";
+import { OpenWrtState } from "./openWrtConfigSchema";
 import { join } from "./paths";
 import { Platform, Session, SshTarget } from "./platform";
 import { runProbe } from "./deviceProbes";
@@ -134,13 +135,10 @@ export const reportSkipped = (
  * are those the config does not ask to go early. Read-only.
  */
 const meshDepthsOf = async (
-  ready: { deviceConfig: ONCDeviceConfig; deviceSchema: DeviceSchema; ssh: Session }[],
-  oncConfig: ONCConfig
+  ready: { deviceConfig: ONCDeviceConfig; state: OpenWrtState; ssh: Session }[]
 ): Promise<Record<string, number>> => {
-  const nodes = ready.filter(({ deviceConfig, deviceSchema }) =>
-    (getOpenWrtState({ oncConfig, deviceConfig, deviceSchema }).config.network?.interface ?? []).some(
-      (i: { ".name": string }) => i[".name"] === "bat0"
-    )
+  const nodes = ready.filter(({ state }) =>
+    (state.config.network?.interface ?? []).some((i: { ".name": string }) => i[".name"] === "bat0")
   );
   if (nodes.length < 2) return {};
   const views = Object.fromEntries(
@@ -232,17 +230,19 @@ export const provisionConfig = async ({
     );
   }
 
-  const depths = await meshDepthsOf(ready, oncConfig);
+  const planned = ready.map((device) => ({ ...device, state: getOpenWrtState({ oncConfig, ...device }) }));
+  const depths = await meshDepthsOf(planned);
   const devices = provisioningOrder(
-    ready.map(({ deviceConfig, deviceSchema, ssh }) => ({
+    planned.map(({ deviceConfig, state, ssh }) => ({
       deviceModelId: deviceConfig.model_id,
       ipAddress: deviceConfig.ipaddr,
       hostname: deviceConfig.hostname,
-      // Deepest in the mesh first, as measured; else the config's hint.
-      order: depths[deviceConfig.hostname] !== undefined ? -depths[deviceConfig.hostname] : deviceConfig.provision_order,
+      // Deepest in the mesh first, as measured; cabled nodes (depth 0) and
+      // those not measured keep the config's order.
+      order: depths[deviceConfig.hostname] ? -depths[deviceConfig.hostname] : deviceConfig.provision_order,
       ssh,
       connect: () => connect(deviceConfig),
-      state: getOpenWrtState({ oncConfig, deviceConfig, deviceSchema }),
+      state,
       rollbackMode,
       recoverSeconds: 60,
       sleep: platform.sleep,

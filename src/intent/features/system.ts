@@ -22,6 +22,23 @@ const ntpPool = [
   "3.openwrt.pool.ntp.org",
 ];
 
+/**
+ * Root's password, the one this app logs in with. A stock device has none,
+ * and then rpcd (LuCI, and this app on a router) takes any password, so
+ * setting it is what closes the web logins. passwd reads it twice from the
+ * file, never from a command line; the file changes only with the password,
+ * so an apply that keeps it runs nothing. Not rewound by a rollback: it is
+ * the password the app then logs back in with.
+ */
+const rootPasswordFile = "/etc/onc/root-password";
+const rootPassword = (password: string) => ({
+  ".if": everyDevice,
+  path: rootPasswordFile,
+  mode: "0600",
+  content: `${password}\n${password}\n`,
+  run_after: `passwd root < ${rootPasswordFile} > /dev/null`,
+});
+
 export const system: Feature = (intent) => {
   const router = routerAddress(intent);
   const main = mainNetwork(intent).id;
@@ -35,16 +52,19 @@ export const system: Feature = (intent) => {
     ],
     // Who may log in as root. Listed keys replace the device's file; none
     // leaves a hand-installed one alone. dropbear reads it at each login.
-    files: intent.system.ssh.authorized_keys.length
-      ? [
-          {
-            ".if": everyDevice,
-            path: "/etc/dropbear/authorized_keys",
-            mode: "0600",
-            content: intent.system.ssh.authorized_keys.join("\n") + "\n",
-          },
-        ]
-      : [],
+    files: [
+      ...(intent.system.ssh.authorized_keys.length
+        ? [
+            {
+              ".if": everyDevice,
+              path: "/etc/dropbear/authorized_keys",
+              mode: "0600",
+              content: intent.system.ssh.authorized_keys.join("\n") + "\n",
+            },
+          ]
+        : []),
+      ...(intent.system.app_login.password ? [rootPassword(intent.system.app_login.password)] : []),
+    ],
     configs_to_not_reset: [
       {
         ".if": everyDevice,

@@ -3,12 +3,12 @@
   "sw_config": true,
   "version": "21.02.4",
   "ports": [
-    { "name": "eth0", "default_role": "wan" },
-    { "name": "eth1", "default_role": "lan" },
-    { "name": "eth2", "default_role": "lan" },
-    { "name": "eth3", "default_role": "lan" },
-    { "name": "eth4", "default_role": "lan" },
-    { "name": "eth6", "sw_config_cpu_name": "eth0" }
+    { "name": "port0", "switch_port": 0, "default_role": "wan" },
+    { "name": "port1", "switch_port": 1, "default_role": "lan" },
+    { "name": "port2", "switch_port": 2, "default_role": "lan" },
+    { "name": "port3", "switch_port": 3, "default_role": "lan" },
+    { "name": "port4", "switch_port": 4, "default_role": "lan" },
+    { "name": "port6", "switch_port": 6, "sw_config_cpu_name": "eth0" }
   ],
   "radios": [
     {

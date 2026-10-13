@@ -1,13 +1,17 @@
-import { z, ZodObject, ZodRawShape, ZodSchema } from "zod";
+import { z } from "zod";
 import {
   configSchema,
   makeOncConfigSchema,
   oncSectionSchema,
   sectionSchema,
+  onlySectionTypes,
 } from "../../utils";
 import { dhcpDhcpSchema, oncDhcpDhcpSchema } from "./dhcp";
 import { dhcpDnsmasqSchema, oncDhcpDnsmasqSchema } from "./dnsmasq";
 import { dhcpOdhcpdSchema, oncDhcpOdhcpdSchema } from "./odhcpd";
+
+// OpenWrt's dhcp section types.
+const knownTypes = onlySectionTypes(["dnsmasq", "dhcp", "odhcpd", "host", "domain", "boot", "mac", "tag", "vendorclass", "userclass", "match", "subscrid", "relay", "cname", "hostrecord", "srvhost", "mxhost", "ipset"]);
 
 export const dhcpSchema = configSchema(
   z
@@ -17,7 +21,7 @@ export const dhcpSchema = configSchema(
       odhcpd: sectionSchema(dhcpOdhcpdSchema),
     })
     .passthrough()
-);
+).superRefine(knownTypes);
 
 export const oncDhcpSchema = makeOncConfigSchema(
   z
@@ -27,5 +31,5 @@ export const oncDhcpSchema = makeOncConfigSchema(
       odhcpd: oncSectionSchema(oncDhcpOdhcpdSchema),
     })
     .passthrough()
-);
+).superRefine(knownTypes);
 

@@ -8,7 +8,7 @@ import { bands } from "../schema";
  * category). Lower keeps less queued in the radio, so a call stays snappy
  * while something downloads; higher fills the air better.
  */
-const aqlLimits = {
+export const aqlLimits = {
   balanced: [5000, 12000], // the kernel's own
   latency: [2000, 4000],
   throughput: [8000, 20000],

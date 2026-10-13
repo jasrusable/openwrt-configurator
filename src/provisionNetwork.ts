@@ -2,7 +2,7 @@
 // every device is rolled back.
 //
 //   1. plan every device (verify, read state)          — nothing changes
-//   2. arm every device's rollback watchdog             — snapshots only
+//   2. stage, then arm, every device's rollback          — snapshots only
 //   3. configure and commit each, gateway and self last
 //   4. confirm every device; only then disarm them all
 //
@@ -12,6 +12,7 @@ import { Reporter, silent } from "./applyEvents";
 import {
   armRollback,
   commitDevice,
+  discardRollback,
   configureDevice,
   confirmDevice,
   DeviceRun,
@@ -23,10 +24,13 @@ import {
   rollBackNow,
   runPostReloadHooks,
   checkServices,
+  stageRollback,
+  startServices,
   waitForRecovery,
   AppliedWithProblems,
   RolledBack,
 } from "./devicePhases";
+import { reconnectUntil } from "./confirm";
 import { Session } from "./platform";
 
 /** Services that should be running and are not: said plainly, not fatal. */
@@ -72,6 +76,35 @@ const withLiveSession = async (run: DeviceRun): Promise<DeviceRun> => {
   return { ...run, ssh: await run.connect() };
 };
 
+/** A new session, retried for a while: the change just made can take the network down briefly. */
+const reconnect = (run: DeviceRun, seconds: number) =>
+  reconnectUntil({ connect: run.connect, sleep: run.sleep, now: run.now, deadline: run.now() + seconds * 1000 });
+
+/** Its watchdog fires at its deadline: wait for that, then see whether it came back. */
+const recoverAfterDeadline = async (run: DeviceRun) => {
+  await run.sleep(Math.max(0, (run.deadline ?? 0) - run.now()));
+  return waitForRecovery(run);
+};
+
+/**
+ * Disarm over the confirming session, else over a new one: confirming the
+ * devices after it can cut that session. "unreached": neither got in, so its
+ * watchdog fires at its deadline.
+ */
+const disarmLive = async (run: DeviceRun, session: Session) => {
+  const attempt = async (live: Session) => ({
+    result: (await disarmDevice(run, live)) ? ("disarmed" as const) : ("fired" as const),
+    session: live,
+  });
+  return attempt(session).catch(async () => {
+    session.dispose();
+    const fresh = await reconnect(run, 15).catch(() => undefined);
+    return fresh
+      ? attempt(fresh).catch(() => (fresh.dispose(), { result: "unreached" as const, session: undefined }))
+      : { result: "unreached" as const, session: undefined };
+  });
+};
+
 type Outcome = "confirmed" | "rolled back" | "rolling back" | "untouched";
 
 const summary = (outcomes: [DeviceRun, Outcome][]) =>
@@ -99,24 +132,23 @@ const abort = async ({
     ]);
   }
   for (const run of unreachable) {
-    // Its watchdog fires at the deadline; then see whether it came back.
-    await run.sleep(Math.max(0, (run.deadline ?? 0) - run.now()));
-    outcomes.push([
-      run,
-      (await waitForRecovery(run)) ? "rolled back" : "rolling back",
-    ]);
+    outcomes.push([run, (await recoverAfterDeadline(run)) ? "rolled back" : "rolling back"]);
   }
+  // Never changed: each watchdog is stood down, and the device reported as
+  // reverted (nothing kept), not confirmed. One that fired already, or cannot
+  // be reached, restores its unchanged snapshot: told it recovered once it
+  // has, so it does not reboot as well.
   for (const run of untouched) {
-    try {
-      const live = await withLiveSession(run);
-      // Never changed: its watchdog is stood down, and it is reported as
-      // reverted (nothing kept), not confirmed.
-      await disarmDevice(live, live.ssh, { untouched: true });
-      live.ssh.dispose();
-    } catch {
-      // Unreachable: its watchdog restores the snapshot, which is unchanged.
-    }
-    outcomes.push([run, "untouched"]);
+    const disarmed = await withLiveSession(run)
+      .then(async (live) => {
+        try {
+          return (await disarmDevice(live, live.ssh, { untouched: true })) || waitForRecovery(live);
+        } finally {
+          live.ssh.dispose();
+        }
+      })
+      .catch(() => recoverAfterDeadline(run));
+    outcomes.push([run, disarmed ? "untouched" : "rolling back"]);
   }
   return outcomes;
 };
@@ -166,27 +198,34 @@ const runNetwork = async ({
     for (const planned of runs) {
       const run = await configureDevice(await withLiveSession(planned));
       await commitDevice(run);
-      // The commit may have severed this session. That is the trade-off
-      // --no-confirm asks for; the hooks still cannot fail silently.
+      run.ssh.dispose();
+      // The commit may have severed that session: what follows runs over a
+      // new one, as a confirmed run's does.
+      const session = await reconnect(run, 60);
       try {
-        await runPostReloadHooks(run, run.ssh);
-        warnAbout(await checkServices(run, run.ssh));
+        await startServices(run, session);
+        await runPostReloadHooks(run, session);
+        warnAbout(await checkServices(run, session));
       } finally {
-        run.ssh.dispose();
+        session.dispose();
       }
       console.log(`Provisioned ${run.hostname} (unconfirmed).`);
     }
     return;
   }
 
-  // 2. Arm every device before changing any, so all can be rolled back.
+  // 2. Stage every device's rollback, then arm each, before changing any, so
+  // all can be rolled back. Staging fetches packages, which can take a while:
+  // done for all first, it eats no device's window.
   const timeoutSeconds = confirmTimeoutSeconds * runs.length;
+  const staged: DeviceRun[] = [];
   const armed: DeviceRun[] = [];
   try {
-    for (const run of runs)
-      armed.push(await armRollback(run, { timeoutSeconds }));
+    for (const run of runs) staged.push(await stageRollback(run));
+    for (const run of staged) armed.push(await armRollback(run, { timeoutSeconds }));
   } catch (e) {
     await abort({ committed: [], untouched: armed });
+    await Promise.all(staged.slice(armed.length).map(discardRollback));
     throw e;
   }
   const earliestDeadline = Math.min(...armed.map((run) => run.deadline!));
@@ -201,7 +240,7 @@ const runNetwork = async ({
       await commitDevice(run);
       committed.push(run);
     } catch (e) {
-      const failure = e as ProvisionFailure;
+      const failure = e instanceof ProvisionFailure ? e : new ProvisionFailure((e as Error)?.message ?? String(e));
       // A failed commit may have persisted part of the change, and a failed
       // configure may have changed packages or files and left its watchdog
       // armed for them: either way roll it back with the rest, never disarm it.
@@ -252,23 +291,38 @@ const runNetwork = async ({
   }
 
   // In arming order, which is deadline order: the one likeliest to have fired
-  // first. One that fired is rolling back already: undo the rest with it.
-  for (let i = 0; i < confirmed.length; i++) {
-    const { run, session } = confirmed[i];
-    if (await disarmDevice(run, session)) continue;
-    const kept = confirmed.slice(0, i).map((c) => c.run.hostname);
-    const outcomes = await abort({ committed: confirmed.slice(i + 1), untouched: [] });
+  // first. One that fired is rolling back already, and one that cannot be
+  // reached will at its deadline: undo the rest with it.
+  const live: { run: DeviceRun; session: Session }[] = [];
+  for (const [i, { run, session }] of confirmed.entries()) {
+    const disarmed = await disarmLive(run, session);
+    if (disarmed.result === "disarmed") {
+      live.push({ run, session: disarmed.session });
+      continue;
+    }
+    const kept = live.map((c) => c.run.hostname);
+    live.forEach((c) => c.session.dispose());
+    const rest = confirmed.slice(i + 1);
+    const outcomes =
+      disarmed.result === "fired"
+        ? [
+            [run, (await waitForRecovery(run)) ? "rolled back" : "rolling back"] as [DeviceRun, Outcome],
+            ...(await abort({ committed: rest, untouched: [] })),
+          ]
+        : await abort({ committed: rest, untouched: [], unreachable: [run] });
     throw new RolledBack(
-      `${run.hostname} rolled itself back before it could be confirmed (its rollback window ran out).` +
+      (disarmed.result === "fired"
+        ? `${run.hostname} rolled itself back before it could be confirmed (its rollback window ran out).`
+        : `${run.hostname} could not be reached to confirm it, so it rolls itself back.`) +
         (kept.length ? ` Already confirmed, and keeping the change: ${kept.join(", ")}.` : "") +
-        `\n${summary([[run, "rolled back"], ...outcomes])}`
+        `\n${summary(outcomes)}`
     );
   }
 
   // After disarming: the config is live everywhere, which is what the hooks
   // need, and a hook failing should not roll back a healthy network.
   const hookFailures: string[] = [];
-  for (const { run, session } of confirmed) {
+  for (const { run, session } of live) {
     try {
       await runPostReloadHooks(run, session);
       warnAbout(await checkServices(run, session));
@@ -284,6 +338,6 @@ const runNetwork = async ({
     );
   }
   console.log(
-    `Provisioning completed: ${confirmed.length} device(s) confirmed.`
+    `Provisioning completed: ${live.length} device(s) confirmed.`
   );
 };

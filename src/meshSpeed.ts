@@ -1,12 +1,9 @@
 // A mesh link's real speed: batman-adv's throughput meter, run from one node
 // to another for a few seconds. On request only (a button), as it sends test
 // traffic over the link; it changes nothing.
-import { readFacts } from "./deviceFacts";
 import { Probe, runProbe } from "./deviceProbes";
-import { loadOncConfig } from "./loadConfig";
-import { locateEach } from "./locate";
 import { Platform } from "./platform";
-import { provisionableDevices } from "./provisionConfig";
+import { onDevice, oneAtATime } from "./status/actions";
 
 /** How long the meter sends for. */
 export const meterMs = 5000;
@@ -41,7 +38,11 @@ const meter = (mac: string): Probe<string> => ({
   parse: ({ stdout }) => stdout,
 });
 
-export const measureLink = async ({
+/**
+ * `from`'s throughput to `to`, like any action (src/status/actions.ts): one at
+ * a time, refused while an apply runs, each device within a time limit.
+ */
+export const measureLink = ({
   intentPath,
   platform,
   from,
@@ -51,23 +52,13 @@ export const measureLink = async ({
   platform: Platform;
   from: string;
   to: string;
-}): Promise<{ mbps: number } | { error: string }> => {
-  const { oncConfig } = await loadOncConfig({ path: intentPath, platform });
-  const { ready } = provisionableDevices(oncConfig);
-  const devices = [from, to].map((name) => ready.find((d) => d.hostname === name));
-  if (devices.some((d) => !d)) return { error: "Both must be devices in Hardware." };
-  const facts = readFacts(platform, intentPath, [from, to]);
-  const [a, b] = await Promise.all(locateEach({ devices: devices as typeof ready, facts, platform }));
-  try {
-    if (!("session" in a)) return { error: `${from} could not be reached: ${a.error}` };
-    if (!("session" in b)) return { error: `${to} could not be reached: ${b.error}` };
-    const mac = await runProbe(b.session, meshAddress);
+}): Promise<{ mbps: number } | { error: string }> =>
+  oneAtATime(platform, intentPath, "mesh-speed", async () => {
+    const mac = await onDevice(intentPath, platform, to, 15_000, (session) => runProbe(session, meshAddress));
+    if (typeof mac === "object") return mac;
     if (!mac) return { error: `${to} is not in the mesh.` };
-    const output = await runProbe(a.session, meter(mac));
+    const output = await onDevice(intentPath, platform, from, meterMs + 20_000, (session) => runProbe(session, meter(mac)));
+    if (typeof output === "object") return output;
     const mbps = parseThroughput(output);
     return mbps === undefined ? { error: "The meter gave no result (is batctl installed?)." } : { mbps };
-  } finally {
-    if ("session" in a) a.session.dispose();
-    if ("session" in b) b.session.dispose();
-  }
-};
+  });

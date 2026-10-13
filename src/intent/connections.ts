@@ -59,6 +59,29 @@ export const failoverOrder = <C extends Pick<Connection, "failover">>(connection
 ];
 
 /**
+ * What line `index` is for, in people's words, as the compiler uses it: the
+ * main line, a backup in failover's order, a last resort (metered), or its
+ * share when the lines share traffic.
+ */
+export const lineRole = (intent: Pick<Intent, "internet">, index: number) => {
+  const lines = intent.internet.lines;
+  const line = lines[index];
+  const ipv6 = index === 0 ? "; your networks get IPv6 from it" : "";
+  if (!line || lines.length < 2) return { label: "Main", description: "The only connection." };
+  if (line.failover.metered) return { label: "Last resort", description: `Used only when every other line is down${ipv6}.` };
+  if (intent.internet.use_lines.mode === "balance") {
+    return { label: `Share ${line.failover.weight}`, description: `Shares traffic with the others, by weight${ipv6}.` };
+  }
+  const backups = failoverOrder(lines).filter((c) => c !== lines[0] && !c.failover.metered);
+  if (index === 0) return { label: "Main", description: `Used first${ipv6}.` };
+  const n = backups.indexOf(line) + 1;
+  return {
+    label: backups.length > 1 ? `Backup ${n}` : "Backup",
+    description: n > 1 ? "Used when the lines before it are down." : "Used when the main line is down.",
+  };
+};
+
+/**
  * When a slow line counts as down: worse than `failMs` or `failLossPct` over
  * a check; back up once better than `recoverMs` and `recoverLossPct`. Each
  * check then sends `count` pings to each address, to measure loss.

@@ -1,7 +1,7 @@
 import test from "ava";
+import { tempDir } from "../helpers/tempDir";
 import { spawnSync } from "child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
-import { tmpdir } from "os";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { getDeviceScript } from "../../getDeviceScript";
 import { getUciCommands } from "../../getUciCommands";
@@ -21,19 +21,15 @@ const hostile = [
 ];
 
 test("shellQuote round-trips every hostile string through a real sh", (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "onc-shell-"));
-  try {
-    for (const value of hostile) {
-      const out = spawnSync("sh", ["-c", `printf %s ${shellQuote(value)}`], {
-        cwd: dir,
-        encoding: "utf8",
-      });
-      t.is(out.stdout, value, JSON.stringify(value));
-    }
-    t.false(existsSync(join(dir, "PWNED")), "nothing was executed");
-  } finally {
-    rmSync(dir, { recursive: true });
+  const dir = tempDir("shell");
+  for (const value of hostile) {
+    const out = spawnSync("sh", ["-c", `printf %s ${shellQuote(value)}`], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    t.is(out.stdout, value, JSON.stringify(value));
   }
+  t.false(existsSync(join(dir, "PWNED")), "nothing was executed");
 });
 
 test("UCI values are quoted the way uci batch accepts", (t) => {
@@ -60,30 +56,26 @@ test("UCI names that cannot be quoted are rejected with a clear error", (t) => {
 });
 
 test("a file with a hostile path is written exactly, by a real sh", (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "onc-files-"));
+  const dir = tempDir("files");
   const path = join(dir, "it's $(touch PWNED); a`b`\nc");
-  try {
-    const commands = getDeviceScript({
-      state: {
-        config: {} as any,
-        files: [{ path, content: "x'y $(z)\n", mode: "0600" }],
-      },
-    });
-    // Only this file's write: its mkdir line names the test dir. The manifest
-    // lists the path in its content, but goes to /etc/onc on a device.
-    const writes = commands.filter(
-      (c) => c.includes("cat >") && c.split("\n")[0].includes(dir)
-    );
-    const result = spawnSync("sh", ["-c", writes.join("\n")], {
-      cwd: dir,
-      encoding: "utf8",
-    });
-    t.is(result.status, 0, result.stderr);
-    t.is(readFileSync(path, "utf8"), "x'y $(z)\n");
-    t.false(existsSync(join(dir, "PWNED")), "nothing was executed");
-  } finally {
-    rmSync(dir, { recursive: true });
-  }
+  const commands = getDeviceScript({
+    state: {
+      config: {} as any,
+      files: [{ path, content: "x'y $(z)\n", mode: "0600" }],
+    },
+  });
+  // Only this file's write: its mkdir line names the test dir. The manifest
+  // lists the path in its content, but goes to /etc/onc on a device.
+  const writes = commands.filter(
+    (c) => c.includes("cat >") && c.split("\n")[0].includes(dir)
+  );
+  const result = spawnSync("sh", ["-c", writes.join("\n")], {
+    cwd: dir,
+    encoding: "utf8",
+  });
+  t.is(result.status, 0, result.stderr);
+  t.is(readFileSync(path, "utf8"), "x'y $(z)\n");
+  t.false(existsSync(join(dir, "PWNED")), "nothing was executed");
 });
 
 test("package names, file modes and paths are validated up front", (t) => {

@@ -3,8 +3,20 @@
 // are read from the devices when they are provisioned. The UI edits this file
 // and nothing else; src/intent/compile.ts turns it into the low-level config.
 import { z } from "zod";
-import { choiceIssues, meshBands, meshChannels, meshWiredVlan } from "./choices";
+import {
+  isIpAddress,
+  isIpv6,
+  isIpv6Address,
+  isPort,
+  networkHolding,
+  overlaps,
+  parseCidr,
+  parseIpv4,
+} from "./addresses";
+import { choiceIssues } from "./choices";
+import { bands, broadcastBands, channelsOf, channelWidths, meshBands, meshChannels, meshWiredVlan } from "./radios";
 import { countries } from "./countries";
+import { gatewayOf } from "./fragment";
 import { ovpnUnsafe } from "./ovpn";
 import { where } from "./places";
 import { steeringLevels } from "./roaming";
@@ -13,10 +25,10 @@ import {
   anywhere,
   firewallSchema,
   internet,
-  isIpv6,
   networkAccessSchema,
   reservedIds,
   router,
+  vpnZoneIds,
 } from "./firewall";
 import { timezones } from "./timezones";
 import { wireguardKey } from "../wireguard";
@@ -26,13 +38,18 @@ export const namePattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 const name = z.string().regex(namePattern, "lowercase letters, digits and -, like a hostname");
 
-const channel = z.union([z.literal("auto"), z.number().int().positive()]);
+/** A radio's channel on a device: one of its band's, or "auto" (the default) to let it choose. */
+const pinnedChannel = (band: keyof typeof channelsOf) =>
+  z
+    .object({
+      channel: z
+        .union([z.literal("auto"), z.number().refine((c) => channelsOf[band].includes(c), channelHint[band])])
+        .optional(),
+    })
+    .strict()
+    .optional();
+const channelHint = { "2g": "a 2.4 GHz channel, 1 to 13", "5g": "a 5 GHz channel, like 36 or 149" };
 
-/** Each band's channel numbers (hostapd will not start on another band's). */
-const channelsOf = {
-  "2g": (c: number) => c >= 1 && c <= 14,
-  "5g": (c: number) => c >= 32 && c <= 177 && c % 2 === 0,
-} as const;
 
 const wifiPassword = z
   .string()
@@ -65,32 +82,12 @@ const leaseTime = z
     "at least 2 minutes"
   );
 
-/** An IPv4 address as a number, or undefined if it is not one. */
-export const parseIpv4 = (address: string) => {
-  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(address);
-  const octets = match?.slice(1).map(Number);
-  return octets && octets.every((o) => o <= 255)
-    ? octets.reduce((n, o) => n * 256 + o, 0)
-    : undefined;
-};
-
-/** A prefix length as a netmask: 24 -> 255.255.255.0. */
-export const netmask = (length: number) => {
-  const bits = 2 ** 32 - 2 ** (32 - length);
-  return [24, 16, 8, 0].map((shift) => Math.floor(bits / 2 ** shift) % 256).join(".");
-};
-
 const ipv4 = z
   .string()
   .refine((a) => parseIpv4(a) !== undefined, "an IPv4 address, like 203.0.113.10");
 
-/** A DNS server: IPv4, or IPv6 (hex and colons). */
-const dnsServer = z
-  .string()
-  .refine(
-    (a) => parseIpv4(a) !== undefined || (a.includes(":") && /^[0-9a-f:]+$/i.test(a)),
-    "an IP address, like 9.9.9.9"
-  );
+/** A DNS server: IPv4 or IPv6. */
+const dnsServer = z.string().refine(isIpAddress, "an IP address, like 9.9.9.9");
 
 /**
  * Smart queueing's per-packet overhead, by the kind of line: what the line
@@ -105,11 +102,11 @@ export const ipv6Prefixes = ["auto", "48", "56", "60", "64"] as const;
 
 export const securityModes = ["wpa2", "wpa2-wpa3", "wpa3"] as const;
 
+export { netmask, overlaps, parseCidr, parseIpv4 } from "./addresses";
+
 export const intentVersion = 1;
 
-export const bands = ["2g", "5g", "6g"] as const;
-
-export type Band = (typeof bands)[number];
+export { bands, type Band } from "./radios";
 
 /** One band's radios, on every access point. */
 const radio = (defaults: { enabled: boolean }) =>
@@ -117,7 +114,7 @@ const radio = (defaults: { enabled: boolean }) =>
     .object({
       enabled: z.boolean().default(defaults.enabled),
       /** MHz; "auto" picks the band's usual width. */
-      width: z.enum(["auto", "20", "40", "80", "160"]).default("auto"),
+      width: z.enum(channelWidths).default("auto"),
       /** Transmit power. Auto is the most the country allows. */
       power: z.enum(["auto", "low", "medium", "high"]).default("auto"),
       /** Fewer, faster clients near each access point; less range. */
@@ -140,10 +137,15 @@ const tunnelName = z.string().min(1, "required").max(32);
 /** A WireGuard key, as `wg` prints it. */
 const wgKey = z.string().regex(wireguardKey, "a WireGuard key (44 characters, ending in =)");
 
+/** A host name, or an IP address. */
+const hostName = /^[A-Za-z0-9.-]+$/;
+const isHost = (host: string) => hostName.test(host) || isIpv6Address(host);
+
 /** host:port, a name or an address ([…] for IPv6). */
-const hostPort = z
-  .string()
-  .regex(/^(\[[0-9A-Fa-f:]+\]|[A-Za-z0-9.-]+):\d{1,5}$/, "like vpn.example.com:51820");
+const hostPort = z.string().refine((value) => {
+  const [, ipv6, name, port] = /^(?:\[([^\]]+)\]|([^:]+)):(\d+)$/.exec(value) ?? [];
+  return (ipv6 !== undefined ? isIpv6Address(ipv6) : name !== undefined && hostName.test(name)) && isPort(port ?? "");
+}, "like vpn.example.com:51820");
 
 /** A private IPv4 range of any size, as a remote site's: 10.1.0.0/16. */
 const ipv4Cidr = z
@@ -155,22 +157,6 @@ const ipv4WithPrefix = z
   .string()
   .regex(/^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/, "like 10.64.0.2/32")
   .refine((a) => parseIpv4(a.split("/")[0]) !== undefined && Number(a.split("/")[1]) <= 32, "like 10.64.0.2/32");
-
-/** A range as numbers: its first address and its size; undefined if it is not one. */
-export const parseCidr = (cidr: string) => {
-  const [address, length] = cidr.split("/");
-  const start = parseIpv4(address ?? "");
-  const bits = Number(length);
-  if (start === undefined || !Number.isInteger(bits) || bits < 8 || bits > 32) return undefined;
-  const size = 2 ** (32 - bits);
-  return start % size === 0 ? { start, size } : undefined;
-};
-
-/** Whether two IPv4 ranges share any address. */
-export const overlaps = (a: string, b: string) => {
-  const [x, y] = [parseCidr(a), parseCidr(b)];
-  return !!x && !!y && x.start < y.start + y.size && y.start < x.start + x.size;
-};
 
 /** Private and shared (CGNAT) ranges: what another site may claim. */
 const privateRanges = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"];
@@ -259,7 +245,7 @@ const internetLine = z.discriminatedUnion("type", [
           address: ipv4,
           prefix_length: z.number().int().min(8).max(30),
           gateway: ipv4,
-          /** Needed unless encrypted DNS is on. */
+          /** Needed while DNS is the provider's (dns.upstream): there is none to learn from it. */
           dns: z.array(dnsServer).optional(),
         })
         .strict(),
@@ -296,9 +282,13 @@ export const sshPublicKey = z
  * share a section with one (the engine refuses two of one name), so refused here.
  */
 const fixedSectionNames = [
-  "vpn", "sites", "loopback", "globals", "bat0", "batmesh", "batwired", "rescue", "odhcpd", "mesh", "meshport",
+  ...vpnZoneIds, "loopback", "globals", "bat0", "batmesh", "batwired", "rescue", "odhcpd", "mesh", "mesh0", "meshport",
   "meshwired", "client", "config", "default", "defaults", "global", "https", "main", "nlbwmon", "ntp", "usteer",
 ];
+
+/** The names the engine gives a section the compiler leaves unnamed: its type and its place (dnsmasq0, device1). */
+const engineSectionName =
+  /^(device|interface|switch|dnsmasq|dhcp|odhcpd|host|domain|defaults|zone|forwarding|rule|redirect|route|system|timeserver|wifidevice|wifinet|wifistation|radio)\d+$/;
 
 const network = z
   .object({
@@ -312,7 +302,8 @@ const network = z
       // Not "wan…", "tun…", "vpn" or "sites": the internet connections' and
       // the VPN's interfaces are named so.
       .refine(
-        (id) => !reservedIds.includes(id) && !/^(wan|tun\d)/.test(id) && !fixedSectionNames.includes(id),
+        (id) =>
+          !reservedIds.includes(id) && !/^(wan|tun\d)/.test(id) && !fixedSectionNames.includes(id) && !engineSectionName.test(id),
         "reserved"
       ),
     name: z.string().min(1, "required").max(32),
@@ -356,6 +347,13 @@ export const intentSchema = z
     system: z
       .object({
         name: z.string().min(1, "required"),
+        /**
+         * What the site's derived ids grow from (the ULA prefix, the mesh id,
+         * the UPnP UUID, remote clients' IPv6): its first name, kept when it
+         * is renamed (`keepSiteSeed`), so a rename re-keys none of them.
+         * Unset, the name.
+         */
+        site_id: z.string().min(1).optional(),
         timezone: z
           .string()
           .refine((zone) => zone in timezones, "an IANA zone, like Europe/Zurich"),
@@ -368,13 +366,19 @@ export const intentSchema = z
           .object({
             /** The private key on this computer; else the agent's. */
             key: z.string().optional(),
-            password: z.string().optional(),
+            /** Also set as root's password on every device (features/system.ts). */
+            password: z
+              .string()
+              .max(128, "at most 128 characters")
+              .refine((p) => !/[\r\n]/.test(p), "one line")
+              .optional(),
           })
           .strict()
           .default({}),
         /**
          * Who may log in as root at all: the compiler installs
-         * authorized_keys and can turn password login off, so a device fresh
+         * authorized_keys and can turn password login off (root's password,
+         * app_login.password, closes the web logins), so a device fresh
          * from stock (which lets root in with any password) is closed by its
          * first apply.
          */
@@ -537,12 +541,8 @@ export const intentSchema = z
           port: z.number().int().min(1).max(65535).default(51820),
           /** The clients' addresses. */
           subnet: ipv4Subnet.default("10.0.99.0/24"),
-          /** Where clients connect to: a name or an address; unset, the dynamic DNS name. */
-          /** A name or an address, without a port (the port is its own setting). */
-          endpoint: z
-            .string()
-            .regex(/^([A-Za-z0-9.-]+|[0-9A-Fa-f]*:[0-9A-Fa-f:]*:[0-9A-Fa-f:]*)$/, "a name or an address, without a port")
-            .optional(),
+          /** Where clients connect to: a name or an address, without a port (its own setting); unset, the dynamic DNS name. */
+          endpoint: z.string().refine(isHost, "a name or an address, without a port").optional(),
           /** The router's; made when remote access is turned on. */
           private_key: wgKey.optional(),
           access: accessSchema.default({ internet: true, networks: [], router: "full" }),
@@ -664,8 +664,11 @@ export const intentSchema = z
               .strict(),
           ])
           .default({ type: "provider" }),
-        /** Devices are reachable as <name>.<domain>. */
-        domain: name.default("lan"),
+        /** Devices are reachable as <name>.<domain>: one label (lan) or more (home.arpa, RFC 8375). */
+        domain: z
+          .string()
+          .refine((d) => d.length <= 200 && d.split(".").every((label) => namePattern.test(label)), "like lan or home.arpa")
+          .default("lan"),
         /**
          * Refuse answers from the internet that point at your own addresses
          * (DNS rebinding), so a web page cannot reach devices inside.
@@ -692,16 +695,7 @@ export const intentSchema = z
             uplink: z.enum(["cable", "mesh"]).default("cable"),
             /** Its own radios: a channel pinned per band; "auto" (the default) lets it choose. */
             radios: z
-              .object({
-                "2g": z
-                  .object({ channel: channel.optional().refine((c) => c === undefined || c === "auto" || channelsOf["2g"](c), "a 2.4 GHz channel is 1 to 14") })
-                  .strict()
-                  .optional(),
-                "5g": z
-                  .object({ channel: channel.optional().refine((c) => c === undefined || c === "auto" || channelsOf["5g"](c), "a 5 GHz channel, like 36 or 149") })
-                  .strict()
-                  .optional(),
-              })
+              .object({ "2g": pinnedChannel("2g"), "5g": pinnedChannel("5g") })
               .strict()
               .optional(),
           })
@@ -786,8 +780,8 @@ export const intentSchema = z
     });
     intent.wifi.networks.forEach((wifi, i) => {
       // The UI cannot get here (choices.ts); a hand-edited file can.
-      if (wifi.bands && !wifi.bands.some((band) => intent.wifi.radios[band].enabled)) {
-        issue(["wifi", "networks", i, "bands"], `none of its bands is on (${where("radios")})`);
+      if (!broadcastBands(intent.wifi, wifi).length) {
+        issue(["wifi", "networks", i, "bands"], `broadcast on no band: none of its radios is on, or the mesh has the band to itself (${where("radios")})`);
       }
     });
     const ids = intent.networks.map((n) => n.id);
@@ -798,7 +792,7 @@ export const intentSchema = z
     // The VPN's zones, as targets of an access: its clients, the linked sites.
     // Remote access and sites stay valid targets while off: access to them
     // is kept for when they are back, and compiles to nothing meanwhile.
-    const zones = ["vpn", "sites"];
+    const zones = vpnZoneIds;
     const { remote_access: remote, sites, providers } = intent.vpn;
     if (remote.enabled && !remote.private_key) issue(["vpn", "remote_access", "private_key"], "required");
     if (sites.peers.length && !sites.private_key) issue(["vpn", "sites", "private_key"], "required");
@@ -844,7 +838,7 @@ export const intentSchema = z
     });
 
     intent.dns.hosts.forEach((record, i) => {
-      if (parseIpv4(record.address) === undefined && !(record.address.includes(":") && /^[0-9a-f:]+$/i.test(record.address))) {
+      if (!isIpAddress(record.address)) {
         issue(["dns", "hosts", i, "address"], "an IP address, like 10.0.0.20");
       }
       if (intent.dns.hosts.slice(0, i).some((r) => r.name === record.name)) {
@@ -860,7 +854,7 @@ export const intentSchema = z
       network.dhcp.reservations.forEach((r, j) => {
         const at = (key: string) => ["networks", i, "dhcp", "reservations", j, key];
         const host = Number(r.address.split(".")[3]);
-        if (parseIpv4(r.address) === undefined || !r.address.startsWith(`${prefix}.`)) {
+        if (!networkHolding([network], r.address)) {
           issue(at("address"), `an address in ${prefix}.x`);
         } else if (host < 2 || host > 254) {
           issue(at("address"), `${prefix}.2 to ${prefix}.254 (.1 is the router)`);
@@ -897,28 +891,27 @@ export const intentSchema = z
         issue(at("to_addresses"), "IPv4 and IPv6 addresses cannot share a rule");
       }
     });
-    const inANetwork = (address: string) =>
-      intent.networks.some(
-        (n) => address.split(".").slice(0, 3).join(".") === n.subnet.split(".").slice(0, 3).join(".")
-      );
     // A DNS server it hands out on another network must be one it may reach.
     intent.networks.forEach((network, i) =>
       (network.dhcp.dns_servers ?? []).forEach((server, j) => {
-        const on = intent.networks.find((n) => n.id !== network.id && overlaps(n.subnet, `${server}/32`));
-        if (on && !network.access.networks.includes(on.id)) {
+        const on = networkHolding(intent.networks, server);
+        if (on && on.id !== network.id && !network.access.networks.includes(on.id)) {
           issue(["networks", i, "dhcp", "dns_servers", j], `on ${on.name}, which this network cannot reach: give it access, or pick another`);
         }
       })
     );
     port_forwards.forEach((forward, i) => {
       const toAddress = ["firewall", "port_forwards", i, "to", "address"];
-      if (!inANetwork(forward.to.address)) {
-        issue(toAddress, "not on any of your networks");
+      const target = networkHolding(intent.networks, forward.to.address);
+      // An address that is none is reported at its field.
+      if (!target && parseIpv4(forward.to.address) !== undefined) issue(toAddress, "not on any of your networks");
+      // The router's own: its admin pages and SSH, open to the internet.
+      if (target && forward.to.address === gatewayOf(target)) {
+        issue(toAddress, "the router's own address: forward to a device on the network");
       }
       // Into a network that goes out through a VPN provider's tunnel: its
       // replies would take the tunnel (policy routing by source), never
       // reaching whoever called in over the line.
-      const target = intent.networks.find((n) => overlaps(n.subnet, `${forward.to.address}/32`));
       if (target?.access.via && providers.some((t) => t.id === target.access.via)) {
         issue(
           toAddress,
@@ -954,5 +947,3 @@ export const intentSchema = z
   });
 
 export type Intent = z.infer<typeof intentSchema>;
-/** What a file or the UI supplies: defaults not yet applied. */
-export type IntentInput = z.input<typeof intentSchema>;

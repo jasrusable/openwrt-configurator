@@ -6,11 +6,10 @@
 import type { DeviceFacts } from "../deviceFacts";
 import { networkHasIpv6 } from "../intent/connections";
 import { bands, type Intent } from "../intent/schema";
-import type { DeviceStatus, InternetCheck, PortLink } from "./device";
+import type { InternetCheck, PortLink } from "./device";
+import { networkOfAddress, type NetworkStatus, Reachability, reached, routerOf, weakMeshLinkMbps } from "./network";
+import { bandOf } from "./values";
 
-type Reached = DeviceStatus;
-type Reachability = DeviceStatus | { hostname: string; error: string };
-const reached = (r: Reachability | undefined): r is Reached => !!r && !("error" in r);
 
 export type Attention = {
   /** Stable, for keys and for remembering one was seen. */
@@ -29,7 +28,7 @@ export type ClientView = {
   name?: string;
   ipv4?: string;
   ipv6: string[];
-  /** The network it is on, by name. */
+  /** The network it is on, by id: a page names it from the settings it shows. */
   network?: string;
   connection:
     | { kind: "wifi"; accessPoint: string; ssid?: string; band?: string; signal?: number; connected?: number }
@@ -89,12 +88,6 @@ export type ActivityView = { at: number; device: string; text: string; kind?: Ac
 export const restartable = (s: { name: string; running?: boolean; enabled?: boolean }) =>
   !!s.running && s.enabled !== false && !["network", "firewall", "dropbear"].includes(s.name);
 
-/** The band a frequency is in. */
-export const bandOf = (freq?: number) =>
-  freq === undefined ? undefined : freq < 3000 ? "2.4 GHz" : freq < 5925 ? "5 GHz" : "6 GHz";
-
-const networkOfAddress = (intent: Intent, address: string) =>
-  intent.networks.find((n) => address.startsWith(n.subnet.split(".").slice(0, 3).join(".") + "."));
 
 /** Who is on the network: the router's leases and neighbours, and every access point's Wi-Fi clients; our own devices left out. */
 export const clientsOf = (
@@ -102,8 +95,7 @@ export const clientsOf = (
   devices: Reachability[],
   facts: Record<string, DeviceFacts | undefined>
 ): ClientView[] => {
-  const routerName = intent.hardware.find((d) => d.role === "router")?.name;
-  const router = devices.find((d) => d.hostname === routerName);
+  const router = routerOf(intent, devices);
   const ours = new Set(Object.values(facts).flatMap((f) => f?.macs ?? []));
   const reservations = intent.networks.flatMap((n) => n.dhcp.reservations.map((r) => ({ ...r, mac: r.mac.toLowerCase() })));
   const wifi = devices.filter(reached).flatMap((d) =>
@@ -150,7 +142,7 @@ export const clientsOf = (
             };
           })
       );
-      const network = ipv4 ? networkOfAddress(intent, ipv4)?.name : undefined;
+      const network = ipv4 ? networkOfAddress(intent, ipv4)?.id : undefined;
       return {
         mac,
         ...(reservation?.name ?? lease?.name ?? v6.find((l) => l.mac === mac)?.hostname
@@ -227,8 +219,7 @@ export const radiosOf = (devices: Reachability[]): RadioView[] =>
 
 /** The router's Internet checks, when the Performance view read them. */
 export const internetOf = (intent: Intent, devices: Reachability[]): InternetCheck | undefined => {
-  const routerName = intent.hardware.find((d) => d.role === "router")?.name;
-  const router = devices.find((d) => d.hostname === routerName);
+  const router = routerOf(intent, devices);
   return reached(router) ? router.internet : undefined;
 };
 
@@ -281,8 +272,7 @@ export const attentionOf = ({
   applied?: "none" | "matches" | "differs";
 }): Attention[] => {
   const out: Attention[] = [];
-  const routerName = intent.hardware.find((d) => d.role === "router")?.name;
-  const router = devices.find((d) => d.hostname === routerName);
+  const router = routerOf(intent, devices);
   for (const d of intent.hardware) {
     const status = devices.find((s) => s.hostname === d.name);
     if (!reached(status)) {
@@ -401,8 +391,7 @@ export const attentionOf = ({
 
 /** Each internet line's byte counters now, on the router, and when (the server's clock): throughput comes from two reads. */
 export const internetCountersOf = (intent: Intent, devices: Reachability[]) => {
-  const routerName = intent.hardware.find((d) => d.role === "router")?.name;
-  const router = devices.find((d) => d.hostname === routerName);
+  const router = routerOf(intent, devices);
   if (!reached(router)) return undefined;
   const lines = Object.fromEntries(
     intent.internet.lines.flatMap((c) => {
@@ -419,3 +408,29 @@ export const keepActivity = (kept: ActivityView[], fresh: ActivityView[], limit 
     .filter((e, i, all) => i === all.findIndex((o) => o.device === e.device && o.text === e.text && Math.abs(o.at - e.at) < 2000))
     .sort((a, b) => b.at - a.at)
     .slice(0, limit);
+
+type MeshNode = NonNullable<NetworkStatus["mesh"]>[number];
+
+/** A mesh node's state in a few words, and whether it is as it should be. */
+export const meshNodeState = (node: MeshNode | undefined) => {
+  const links = node?.links ?? [];
+  const best = Math.max(0, ...links.map((l) => l.throughput));
+  if (node?.dropsLargeFrames) return { word: "Cable drops large packets", good: false };
+  if (!links.length) return { word: "No link", good: false };
+  if (best < weakMeshLinkMbps) return { word: "Weak link", good: false };
+  if (node?.fragmentsOverCable) return { word: "Linked, splitting over cable", good: false };
+  return { word: "Linked", good: true };
+};
+
+/** A WireGuard peer counts as connected within this long of its last handshake (one every 2 minutes while in use). */
+export const peerConnectedSeconds = 180;
+
+/** A VPN client's or site's state, from seconds since its last handshake. */
+export const peerState = (since: number | undefined) => {
+  const connected = since !== undefined && since < peerConnectedSeconds;
+  return {
+    connected,
+    word: connected ? "Connected" : "Away",
+    detail: since === undefined ? "never connected" : connected ? "connected" : undefined,
+  };
+};

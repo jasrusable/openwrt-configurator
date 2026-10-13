@@ -17,12 +17,12 @@ import {
   TextInput,
   Tooltip,
 } from "@mantine/core";
-import { ReactNode, useMemo, useRef, useState } from "react";
-import { SettingRow } from "../kit/layout";
+import { cloneElement, isValidElement, ReactNode, useRef, useState } from "react";
+import { SettingRow, useRowAria } from "../kit/layout";
 import { availability, Availability, inUse } from "../../../src/intent/choices";
 import { explainFor, fieldInfo } from "../../../src/intent/fields";
-import { parseSubnet } from "../../../src/intent/schema";
-import { IntentField, useDraft, useDraftValue, useFieldError } from "./draft";
+import { Intent, parseSubnet } from "../../../src/intent/schema";
+import { IntentField, useDerived, useDraft, useDraftValue, useFieldError, ValueAt } from "./draft";
 
 /** Control widths: fixed in a wide row, shrinking to fit a narrow one. */
 const control = {
@@ -32,12 +32,19 @@ const control = {
 
 type RowProps = {
   name: IntentField;
-  label: ReactNode;
+  /** Its name and line of description, when not the ones src/intent/fields.ts gives it. */
+  label?: ReactNode;
   /** What OpenWrt calls it, when not the same for every item (src/intent/fields.ts has the rest). */
   openwrt?: string;
   description?: ReactNode;
   /** Just the control, e.g. in a table cell; the label becomes its name. */
   inline?: boolean;
+};
+
+/** What src/intent/fields.ts calls a setting, as a row's label (a list item's is its name, not this). */
+const labelOf = (name: string) => {
+  const label = fieldInfo(name.split("."))?.label;
+  return typeof label === "string" ? label : undefined;
 };
 
 /** A setting's row, with its ⓘ: what it does and what OpenWrt calls it (src/intent/fields.ts). */
@@ -46,18 +53,34 @@ export const FieldRow = ({
   unavailable,
   children,
   ...props
-}: Parameters<typeof SettingRow>[0] & { name: IntentField; unavailable?: string }) => {
+}: Omit<Parameters<typeof SettingRow>[0], "label"> & {
+  name: IntentField;
+  label?: ReactNode;
+  unavailable?: string;
+}) => {
   const path = name.split(".");
-  const intent = useDraftValue();
+  const info = fieldInfo(path);
+  // A string, so only a change to the explainer itself re-renders the row.
+  const explain = useDerived((d) => explainFor(path, d.value));
   return (
     <SettingRow
       {...props}
-      openwrt={props.openwrt ?? fieldInfo(path)?.openwrt}
-      explain={explainFor(path, intent)}
+      label={props.label ?? labelOf(name)}
+      description={props.description ?? info?.description}
+      openwrt={props.openwrt ?? info?.openwrt}
+      explain={explain}
     >
-      <Because reason={unavailable}>{children}</Because>
+      <Because reason={unavailable}>
+        <Named>{children}</Named>
+      </Because>
     </SettingRow>
   );
+};
+
+/** The control, named by its row's label and described by its text, for screen readers. */
+const Named = ({ children }: { children: ReactNode }) => {
+  const aria = useRowAria();
+  return isValidElement(children) ? cloneElement(children, aria) : <>{children}</>;
 };
 
 /**
@@ -79,7 +102,7 @@ export const Because = ({ reason, children }: { reason?: string; children: React
   );
 
 /** Options with the rules applied (src/intent/choices.ts): greyed out with why, or what else choosing one changes. */
-const ruled = <T,>(options: Option<T>[], option: Availability["option"]) =>
+const withRules = <T,>(options: Option<T>[], option: Availability["option"]) =>
   options.map((o) => {
     const { unavailable, swap } = option(o.value);
     return { ...o, disabled: o.disabled || !!unavailable, reason: unavailable ?? swap?.note ?? o.reason };
@@ -142,28 +165,50 @@ const Row = ({
     </FieldRow>
   );
 
-/** The rules for a setting, given the draft (or the intent passed in). */
-const useAvailability = (path: string, given?: unknown) => {
-  const draftValue = useDraftValue();
-  const intent = given ?? draftValue;
-  return useMemo(() => availability(intent, path), [intent, path]);
+/** The rules for a setting (src/intent/choices.ts), worked out once per draft value and path. */
+const ruled = new WeakMap<object, Map<string, Availability>>();
+const rulesOf = (intent: Intent, path: string): Availability => {
+  const byPath = ruled.get(intent) ?? new Map<string, Availability>();
+  ruled.set(intent, byPath);
+  if (!byPath.has(path)) byPath.set(path, availability(intent, path));
+  return byPath.get(path)!;
+};
+
+/**
+ * The rules for a setting, re-rendering only when what they say about it
+ * changes: as a whole, and for each value in `shown` (the choices on screen).
+ * Typing elsewhere then re-renders no other field.
+ */
+const useRules = (path: string, shown: unknown[] = []) => {
+  const draft = useDraft();
+  useDerived((d) => {
+    const rules = rulesOf(d.value, path);
+    return JSON.stringify([
+      rules.unavailable,
+      shown.map((value) => {
+        const { unavailable, swap } = rules.option(value);
+        return [unavailable, swap?.note];
+      }),
+    ]);
+  });
+  return rulesOf(draft.value, path);
 };
 
 /**
  * A setting's value, its problem, how to change it, and what the rules
  * (src/intent/choices.ts) allow: choosing a value that swaps applies the
- * whole swap, so the draft never passes through a broken state.
+ * whole swap, so the draft never passes through a broken state. `shown`:
+ * the values whose rules the control shows, given its value.
  */
-const useField = (name: IntentField) => {
+const useField = (name: IntentField, shown?: (value: any) => unknown[]) => {
   const draft = useDraft();
-  const intent = useDraftValue();
-  const value = useDraftValue(name);
-  const rules = useAvailability(name, intent);
+  const value: any = useDerived((d) => d.get(name));
+  const rules = useRules(name, shown?.(value));
   const whole = rules.unavailable;
   return {
     value,
     onChange: (next: unknown) => {
-      const swap = rules.option(next).swap;
+      const swap = rulesOf(draft.value, name).option(next).swap;
       if (swap) draft.replace(swap.apply(draft.get()));
       else draft.set(name, next);
     },
@@ -275,7 +320,7 @@ export const SwitchField = ({
   /** Greyed out and shown off, its value kept for when it applies again. */
   disabled?: boolean;
 }) => {
-  const field = useField(row.name);
+  const field = useField(row.name, (value) => [!value]);
   // Off when ignored; otherwise its value, and whether flipping it is allowed.
   const off = disabled || field.ignored;
   const reason = field.unavailable ?? (off ? undefined : field.option(!field.value).unavailable);
@@ -309,9 +354,9 @@ export const SelectField = <T extends string | number>({
   emptyLabel?: string;
   searchable?: boolean;
 }) => {
-  const field = useField(row.name);
+  const field = useField(row.name, () => [undefined, ...options.map((o) => o.value)]);
   const empty = "\u0000";
-  const choices = ruled(options, field.option);
+  const choices = withRules(options, field.option);
   // The unset choice is ruled like any other (the WAN port another connection has).
   const unset = field.option(undefined).unavailable;
   const data = [
@@ -353,11 +398,11 @@ export const SegmentedField = <T extends string>({
   options,
   ...row
 }: RowProps & { options: Option<T>[] }) => {
-  const field = useField(row.name);
+  const field = useField(row.name, () => options.map((o) => o.value));
   return (
     <Row row={row} error={field.error} unavailable={field.unavailable}>
       <SegmentedControl
-        data={segments(ruled(options, field.option))}
+        data={segments(withRules(options, field.option))}
         disabled={!!field.unavailable}
         value={field.value}
         onChange={field.onChange}
@@ -392,11 +437,14 @@ export const VariantField = <T extends { type: string }>({
       ? { ...Object.fromEntries(Object.entries(field.value ?? {}).filter(([key]) => !variantKeys.has(key))), ...initial }
       : initial;
   // The rules are about the variant's type (e.g. dns.upstream.type).
-  const types = useAvailability(`${row.name}.type`);
+  const types = useRules(
+    `${row.name}.type`,
+    variants.map((v) => v.value)
+  );
   return (
     <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
       <SegmentedControl
-        data={segments(ruled(variants.map(({ value, label }) => ({ value, label })), types.option))}
+        data={segments(withRules(variants.map(({ value, label }) => ({ value, label })), types.option))}
         disabled={!!field.unavailable}
         value={field.value?.type}
         onChange={(type) =>
@@ -503,25 +551,20 @@ export const When = ({
  * The live value of a setting, e.g. in a table cell or a title. `format`
  * turns it into something to read; empty values show `fallback`.
  */
-export const Value = ({
+export const Value = <P extends IntentField>({
   name,
   fallback,
   format,
 }: {
-  name: IntentField;
+  name: P;
   fallback?: ReactNode;
-  format?: (value: any) => ReactNode;
+  format?: (value: ValueAt<Intent, P> | undefined) => ReactNode;
 }) => {
   const value = useDraftValue(name);
-  const shown = format ? format(value) : value;
+  const shown = format ? format(value) : (value as ReactNode);
   return <>{shown === undefined || shown === "" ? fallback : shown}</>;
 };
 
-
-/**
- * A private IPv4 /24 ("10.0.0.0/24"): pick one of the three private ranges,
- * then only the parts it leaves free, each limited to what is valid there.
- */
 /**
  * A network's addresses, set the way people know them: by the router's
  * address (10.0.20.1), as UniFi does. Stored as the /24 it is in
@@ -570,36 +613,45 @@ export const SubnetField = (row: RowProps) => {
   );
 };
 
-/** A duration like "12h": a whole number and a unit. */
+/** A duration like "12h": a whole number and a unit, each unit with its least (a lease is 2 minutes at least). */
 const units = [
-  { value: "m", label: "minutes" },
-  { value: "h", label: "hours" },
-  { value: "d", label: "days" },
+  { value: "m", label: "minutes", min: 2 },
+  { value: "h", label: "hours", min: 1 },
+  { value: "d", label: "days", min: 1 },
 ];
 
 export const DurationField = (row: RowProps) => {
   const field = useField(row.name);
+  // What is typed, while it is typed: cleared then retyped is "24", not "124".
+  const [typing, setTyping] = useState<string | number>();
   const match = /^(\d+)([mhd])$/.exec(String(field.value ?? ""));
   const amount = match ? Number(match[1]) : 12;
-  const unit = match ? match[2] : "h";
+  const unit = units.find((u) => u.value === (match ? match[2] : "h"))!;
   return (
     <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
       <Group gap={6} wrap="nowrap">
         <NumberInput
           disabled={!!field.unavailable}
-          value={amount}
-          min={1}
+          value={typing ?? amount}
+          min={unit.min}
           allowDecimal={false}
           allowNegative={false}
-          onChange={(n) => field.onChange(`${Number(n) || 1}${unit}`)}
+          onChange={(n) => {
+            setTyping(n);
+            if (n !== "") field.onChange(`${Number(n)}${unit.value}`);
+          }}
+          onBlur={() => setTyping(undefined)}
           w={90}
         />
         <Select
           disabled={!!field.unavailable}
           data={units}
-          value={unit}
+          value={unit.value}
           allowDeselect={false}
-          onChange={(next) => field.onChange(`${amount}${next}`)}
+          onChange={(next) => {
+            const to = units.find((u) => u.value === next)!;
+            field.onChange(`${Math.max(amount, to.min)}${to.value}`);
+          }}
           w={110}
         />
       </Group>
@@ -617,7 +669,7 @@ export const ReferenceField = ({
   labelKey,
   ...row
 }: RowProps & { to: IntentField; valueKey: string; labelKey: string }) => {
-  const items: Record<string, any>[] = useDraftValue(to) ?? [];
+  const items: Record<string, any>[] = useDerived((d) => d.get(to)) ?? [];
   return (
     <SelectField
       {...row}
@@ -641,8 +693,8 @@ export const MultiSelectField = ({
   /** Nothing chosen leaves the setting out (e.g. "every band"). */
   emptyIsUnset?: boolean;
 }) => {
-  const field = useField(row.name);
-  const choices = ruled(options, field.option);
+  const field = useField(row.name, () => options.map((o) => o.value));
+  const choices = withRules(options, field.option);
   return (
     <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
       <MultiSelect

@@ -1,5 +1,7 @@
-// What each intent setting is called and what it does, for people: the
-// provision page explains a change with it. Patterns use * for a list index;
+// What each intent setting is called and what it does, for people: a bound
+// field's row shows its label and description (a page passes its own only
+// where the context calls for other words), and the provision page explains
+// a change with them. Patterns use * for a list index;
 // a pattern for a list item names the item from its value. Where a setting's
 // effect depends on others (roaming assistance on Steering), its explainer
 // is a function of the intent, and its numbers come from where the compiler
@@ -7,7 +9,10 @@
 import { tunnelDefaultDns } from "./vpn";
 import { lineCheck, meteredCheck, monthlyMegabytes, secondsToDown, slowLine, stickySeconds } from "./connections";
 import { meshHopPenalty, meshMtu } from "./features/mesh";
-import { meshWiredVlan } from "./choices";
+import { aqlLimits } from "./features/airtime";
+import { ddnsCheckMinutes } from "./features/internet";
+import { radios, txpower } from "./features/wifi";
+import { bandLabels, bands, meshWiredVlan } from "./radios";
 import { where } from "./places";
 import {
   describePrefer5g,
@@ -16,6 +21,9 @@ import {
   steeringLabels,
 } from "./roaming";
 import type { Intent } from "./schema";
+
+/** AQL's limits (µs) as milliseconds: [2000, 4000] → "2–4 ms". */
+const ms = ([low, high]: readonly [number, number]) => `${low / 1000}–${high / 1000} ms`;
 
 export type FieldInfo = {
   path: string;
@@ -38,15 +46,21 @@ export const fields: FieldInfo[] = [
   { path: "system", label: "System" },
   { path: "system.name", label: "Name" },
   {
+    path: "system.site_id",
+    label: "Site id",
+    explain:
+      "What the site's own addresses and ids are derived from: its IPv6 local prefix, the mesh id, remote access clients' IPv6. Kept from the first name when the site is renamed, so a rename changes none of them.",
+  },
+  {
     path: "system.timezone",
     label: "Time zone",
-    description: "Access points also broadcast it, so clients can set their clocks (802.11v).",
+    description: "Wi-Fi devices can set their clocks from it.",
   },
   {
     path: "system.country",
     label: "Country",
-    description:
-      "Sets which Wi-Fi channels and power levels are allowed; access points announce it to clients (802.11d).",
+    description: "Sets the Wi-Fi channels and power allowed.",
+    explain: "Sets which Wi-Fi channels and power levels are allowed; access points announce it to clients (802.11d).",
   },
   { path: "system.app_login", label: "This app's login" },
   {
@@ -62,7 +76,7 @@ export const fields: FieldInfo[] = [
     secret: true,
     openwrt: "root password",
     explain:
-      "The devices' root password, used to log in over SSH when there is no key. The app only logs in with it; it never changes the password on the devices.",
+      "Root's password on every device: each apply sets it, so the web logins (LuCI, and this app on a router) need it. A device fresh from OpenWrt has none, and then any password logs in. The app also logs in with it over SSH when there is no key. A rollback leaves it set.",
   },
   { path: "system.ssh", label: "SSH" },
   {
@@ -76,10 +90,10 @@ export const fields: FieldInfo[] = [
   {
     path: "system.ssh.password_login",
     label: "Password login",
-    description: "Whether root may log in with a password.",
+    description: "Off: only the authorized keys can log in. Recommended.",
     openwrt: "dropbear PasswordAuth, RootPasswordAuth",
     explain:
-      "A device fresh from OpenWrt has no root password and lets root in with any password, so anyone on your network could log in. Off, only the authorized keys can, which closes that on the first apply.",
+      `Off, only the authorized keys can log in over SSH. The web logins are closed by root's password (${where("system", "Administration", "Password")}), which each apply sets when there is one.`,
   },
 
   { path: "hardware", label: "Hardware" },
@@ -95,11 +109,12 @@ export const fields: FieldInfo[] = [
   {
     path: "hardware.*.role",
     label: "Role",
-    description: "A router connects to the internet; an access point broadcasts Wi-Fi.",
+    description: "The router runs the networks; access points broadcast Wi-Fi.",
   },
   {
     path: "hardware.*.location",
     label: "Location",
+    description: "Where it is, for you: shown in LuCI too.",
     openwrt: "system description",
     explain:
       "Shown as the device's description on LuCI's status page, to tell access points apart.",
@@ -231,7 +246,7 @@ export const fields: FieldInfo[] = [
     description: "A name that follows your internet address, for remote access.",
     openwrt: "ddns-scripts",
     explain:
-      "Keeps a name (home.example.com) pointing at your internet address as it changes, at your DNS provider, checked every 10 minutes. The address is read from the web, so it works behind another router too. Remote access and other sites use the name.",
+      `Keeps a name (home.example.com) pointing at your internet address as it changes, at your DNS provider, checked every ${ddnsCheckMinutes} minutes. The address is read from the web, so it works behind another router too. Remote access and other sites use the name.`,
   },
   { path: "internet.dynamic_dns.provider", label: "Provider" },
   { path: "internet.dynamic_dns.hostname", label: "Name" },
@@ -245,7 +260,7 @@ export const fields: FieldInfo[] = [
   {
     path: "internet.upnp",
     label: "UPnP and NAT-PMP",
-    description: "Games and apps on the main network open ports for themselves.",
+    description: "Lets games and apps open the ports they need.",
     openwrt: "miniupnpd",
     explain:
       "Lets devices on the main network open ports on the router for themselves (game consoles, some apps), over UPnP IGD and NAT-PMP. Secure mode is on: a device can only open ports to itself.",
@@ -387,7 +402,7 @@ export const fields: FieldInfo[] = [
     secret: true,
     description: "The .ovpn your provider gives you.",
     explain:
-      "Used as given, with three lines set last: its own device name, and route-nopull, so the provider can never take the router's default route; the router sends only the networks you choose through it. Kept root's alone on the router.",
+      "Used as given, with the router's own lines set last: its own device name; route-nopull, so the provider can never take the router's default route (the router sends only the networks you choose through it); no scripts; and its login file, with a username. Kept root's alone on the router.",
   },
   { path: "vpn.providers.*.username", label: "Username" },
   { path: "vpn.providers.*.password", label: "Password", secret: true },
@@ -443,7 +458,7 @@ export const fields: FieldInfo[] = [
     path: "networks.*.access.via",
     label: "Internet line",
     description: "Which internet connection or VPN provider its devices use.",
-    openwrt: "mwan3 policy and rule",
+    openwrt: "mwan3 policy and rule; for a VPN provider, netifd rules",
     explain:
       "Unset, its devices go out as the internet's setting says (failover or sharing). Set, they go out the connection or VPN provider chosen. A connection: when it is down they use the others, or have no internet until it is back; IPv4 only, IPv6 always uses the first one. A VPN provider: when it is down they have no internet (a kill switch), the network has no IPv6, which would go around the tunnel, and its DNS goes through the tunnel too. The router itself, and other networks, are not affected.",
   },
@@ -451,7 +466,7 @@ export const fields: FieldInfo[] = [
   {
     path: "networks.*.vlan",
     label: "VLAN",
-    description: "Switches between your devices must carry it.",
+    description: "Any switch between your devices must carry it.",
     openwrt: "bridge-vlan",
     explain:
       "The VLAN ID this network uses. The router and access points tag it on their ports for you; a managed switch between them must carry the same VLAN, tagged.",
@@ -528,7 +543,7 @@ export const fields: FieldInfo[] = [
   {
     path: "networks.*.access.router",
     label: "Router access",
-    description: "Full: anything on the router. Services: addresses, DNS and time only.",
+    description: "Services: addresses, DNS and time. Full: also admin and SSH.",
     openwrt: "zone input",
     explain:
       "Full lets devices reach everything on the router, the admin pages and SSH included. Network services rejects everything but DHCP, DNS, NTP and the IPv6 essentials, which suits guests and IoT.",
@@ -550,12 +565,13 @@ export const fields: FieldInfo[] = [
   {
     path: "wifi.networks.*.extra_passwords",
     label: "More passwords",
+    description: "Each works on its own, e.g. one per person.",
     secret: true,
     openwrt: "wifi-station keys (multi-PSK)",
     explain:
       "More passwords for the same SSID, each with the same access. Hand one out (to a guest, a smart plug) and remove it later without changing the main one. WPA2 only: WPA3 allows a single password.",
   },
-  { path: "wifi.networks.*.enabled", label: "Enabled" },
+  { path: "wifi.networks.*.enabled", label: "Enabled", description: "Off: kept here, but no access point broadcasts it." },
   {
     path: "wifi.networks.*.security",
     label: "Security",
@@ -564,11 +580,11 @@ export const fields: FieldInfo[] = [
     explain:
       "WPA2/WPA3 lets newer devices use WPA3 (SAE) while older ones use WPA2. WPA3 only is the most secure but locks out older devices. WPA3 always brings protected management frames.",
   },
-  { path: "wifi.networks.*.hidden", label: "Hidden" },
+  { path: "wifi.networks.*.hidden", label: "Hidden", description: "Not announced; devices must be told the name." },
   {
     path: "wifi.networks.*.roaming.assisted",
     label: "Roaming assistance",
-    description: "Access points tell devices about their neighbours (802.11k/v).",
+    description: "Neighbour lists help devices find a better access point.",
     openwrt: "802.11k/v · usteer ssid_list",
     explain: (intent, [i]) => {
       const level = intent.wifi.roaming?.steering ?? "advise";
@@ -582,7 +598,7 @@ export const fields: FieldInfo[] = [
   {
     path: "wifi.networks.*.roaming.fast",
     label: "Fast roaming",
-    description: "Devices move between access points without a pause (802.11r).",
+    description: "Seamless handover between access points.",
     openwrt: "802.11r (fast transition)",
     explain:
       "Moving between access points takes milliseconds instead of a full reconnect, so calls do not drop. A few old devices cannot join an SSID with it on; turn it off if one will not connect.",
@@ -591,7 +607,7 @@ export const fields: FieldInfo[] = [
   {
     path: "wifi.networks.*.isolate_clients",
     label: "Isolate clients",
-    description: "Whether devices on it, on the same access point and band, are kept from reaching each other.",
+    description: "Its devices cannot reach each other on the same access point.",
     openwrt: "wifi-iface isolate",
     explain:
       "Devices on this SSID cannot reach each other directly on the same access point and band, only the internet and what the network's access allows. Good for guests.",
@@ -608,27 +624,27 @@ export const fields: FieldInfo[] = [
   {
     path: "wifi.roaming.prefer_5g",
     label: "Prefer 5 GHz",
-    description: "Moves dual-band devices with a strong signal off 2.4 GHz.",
+    description: "Moves strong dual-band devices off 2.4 GHz.",
     openwrt: "usteer band steering",
     explain: (intent) => describePrefer5g(intent.wifi.roaming?.steering ?? "advise"),
   },
 
-  { path: "wifi.radios.5g", label: "5 GHz" },
-  { path: "wifi.radios.6g", label: "6 GHz" },
+  ...bands.map((band) => ({ path: `wifi.radios.${band}`, label: bandLabels[band] })),
   { path: "wifi.radios.*.enabled", label: "Enabled" },
   {
     path: "wifi.radios.*.width",
     label: "Channel width",
-    openwrt: "wifi-device htmode (HE20 to HE160)",
-    explain:
-      "Wider channels are faster, but there are fewer of them, so they overlap neighbours more. Auto is 20 MHz on 2.4 GHz, 80 MHz on 5 GHz and 160 MHz on 6 GHz, at Wi-Fi 6 rates.",
+    openwrt: "wifi-device htmode (EHT, HE, VHT or HT)",
+    explain: `Wider channels are faster, but there are fewer of them, so they overlap neighbours more. Auto is ${radios
+      .map((r) => `${r.width} MHz on ${bandLabels[r.band]}`)
+      .join(", ")}, at the newest standard each radio supports (Wi-Fi 7, 6, 5 or 4).`,
   },
   {
     path: "wifi.radios.*.power",
     label: "Transmit power",
     openwrt: "wifi-device txpower",
     explain:
-      "Auto transmits at the most your country allows. Low, Medium and High are 10, 15 and 20 dBm, still capped by the country's limit.",
+      `Auto transmits at the most your country allows. Low, Medium and High are ${txpower.low}, ${txpower.medium} and ${txpower.high} dBm, still capped by the country's limit.`,
   },
   {
     path: "wifi.radios.*.cell_density",
@@ -643,12 +659,12 @@ export const fields: FieldInfo[] = [
     description: "What the band's Wi-Fi queues favour: latency, balance or throughput.",
     openwrt: "AQL, aql_txq_limit",
     explain:
-      "How much each radio queues per device, in airtime. Low latency queues little (2–4 ms), keeping calls responsive while someone downloads; Throughput queues more (8–20 ms) to keep the air full; Balanced is the kernel's 5–12 ms.",
+      `How much each radio queues per device, in airtime. Low latency queues little (${ms(aqlLimits.latency)}), keeping calls responsive while someone downloads; Throughput queues more (${ms(aqlLimits.throughput)}) to keep the air full; Balanced is the kernel's ${ms(aqlLimits.balanced)}.`,
   },
   {
     path: "wifi.networks.*.network",
     label: "Network",
-    description: "Devices joining this Wi-Fi land on that network.",
+    description: "Devices that join this Wi-Fi land on that network.",
   },
 
   { path: "firewall", label: "Firewall" },
@@ -664,10 +680,10 @@ export const fields: FieldInfo[] = [
   { path: "firewall.rules.*.enabled", label: "Enabled" },
   { path: "firewall.rules.*.from", label: "From" },
   { path: "firewall.rules.*.to", label: "To" },
-  { path: "firewall.rules.*.from_addresses", label: "Only from" },
-  { path: "firewall.rules.*.to_addresses", label: "Only to" },
+  { path: "firewall.rules.*.from_addresses", label: "From devices", description: "Addresses or ranges, like 10.0.0.20 or 10.0.0.0/28." },
+  { path: "firewall.rules.*.to_addresses", label: "To devices" },
   { path: "firewall.rules.*.protocol", label: "Protocol" },
-  { path: "firewall.rules.*.ports", label: "Ports" },
+  { path: "firewall.rules.*.ports", label: "Ports", description: "Like 443, 8000-8100 or 80 443." },
   {
     path: "firewall.rules.*.action",
     label: "Action",
@@ -686,13 +702,14 @@ export const fields: FieldInfo[] = [
   { path: "firewall.port_forwards.*.name", label: "Name" },
   { path: "firewall.port_forwards.*.enabled", label: "Enabled" },
   { path: "firewall.port_forwards.*.protocol", label: "Protocol" },
-  { path: "firewall.port_forwards.*.port", label: "External port" },
-  { path: "firewall.port_forwards.*.to.address", label: "Internal address" },
-  { path: "firewall.port_forwards.*.to.port", label: "Internal port" },
-  { path: "firewall.port_forwards.*.from_addresses", label: "Only from" },
+  { path: "firewall.port_forwards.*.port", label: "External port", description: "A port or a range, like 27015 or 6881-6889." },
+  { path: "firewall.port_forwards.*.to.address", label: "To address", description: "A device on one of your networks." },
+  { path: "firewall.port_forwards.*.to.port", label: "To port", description: "Empty: the same as the external port." },
+  { path: "firewall.port_forwards.*.from_addresses", label: "Only from", description: "Empty: from anywhere." },
   {
     path: "firewall.port_forwards.*.reflection",
     label: "NAT loopback",
+    description: "Reachable from inside, by your public address, too.",
     openwrt: "redirect reflection",
     explain:
       "Lets devices at home reach the forward at your internet address too, so the same address works at home and away.",
@@ -721,7 +738,7 @@ export const fields: FieldInfo[] = [
   {
     path: "dns.rebind_protection",
     label: "Rebind protection",
-    description: "Answers from the internet may not point at your own addresses.",
+    description: "Stops web pages from reaching devices at home.",
     openwrt: "dnsmasq rebind_protection",
     explain:
       "Refuses answers from the internet that point at private addresses, which blocks DNS rebinding attacks on devices at home. Turn it off if a service you use resolves to a local address on purpose.",
