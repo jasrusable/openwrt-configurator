@@ -1,24 +1,33 @@
 // What the Status graphs draw, kept by the server: a few numbers per read
 // (throughput, latency, clients online, each device's load and
-// temperature), averaged into one point a minute, a day of them. Pure: the
-// collector (collector.ts) holds it and saves it; pages read it whole once
-// and then only what is new (`since`).
+// temperature), averaged into points: one a minute for a day, and one every
+// 15 minutes for 30 days. Pure: the collector (collector.ts) holds both and
+// saves them; pages read a range whole once and then only what is new (`since`).
 import { NetworkStatus } from "./network";
 
-/** [minute's start, its mean, how many reads made it]. */
+/** [the bucket's start, its mean, how many reads made it]. */
 export type Point = [number, number, number];
 export type History = Record<string, Point[]>;
 
-export const bucketMs = 60_000;
-export const keepMs = 24 * 3600_000;
+/** How finely each range is kept, and for how long. */
+export const ranges = {
+  day: { bucketMs: 60_000, keepMs: 24 * 3600_000 },
+  month: { bucketMs: 15 * 60_000, keepMs: 30 * 24 * 3600_000 },
+} as const;
+export type Range = keyof typeof ranges;
+export type Histories = Record<Range, History>;
+type RangeRule = (typeof ranges)[Range];
+
+export const bucketMs = ranges.day.bucketMs;
+export const keepMs = ranges.day.keepMs;
 /** Two byte counts further apart than this say nothing about the rate now. */
 export const maxRateGapMs = 120_000;
 
-/** A reading at `at`, averaged into its minute; points older than a day dropped. */
-export const withSample = (history: History, key: string, at: number, value: number): History => {
+/** A reading at `at`, averaged into its bucket; points older than the range keeps dropped. */
+export const withSample = (history: History, key: string, at: number, value: number, range: RangeRule = ranges.day): History => {
   if (!Number.isFinite(value)) return history;
-  const bucket = at - (at % bucketMs);
-  const points = (history[key] ?? []).filter(([t]) => t > at - keepMs);
+  const bucket = at - (at % range.bucketMs);
+  const points = (history[key] ?? []).filter(([t]) => t > at - range.keepMs);
   const last = points[points.length - 1];
   const next: Point[] =
     last && last[0] === bucket
@@ -29,21 +38,21 @@ export const withSample = (history: History, key: string, at: number, value: num
   return { ...history, [key]: next };
 };
 
-/** The points of each series from `since` on (a minute still filling comes again, updated). */
-export const historySince = (history: History, since: number): History =>
+/** The points of each series from `since` on (a bucket still filling comes again, updated). */
+export const historySince = (history: History, since: number, range: RangeRule = ranges.day): History =>
   Object.fromEntries(
     Object.entries(history)
-      .map(([key, points]) => [key, points.filter(([t]) => t >= since - (since % bucketMs))] as const)
+      .map(([key, points]) => [key, points.filter(([t]) => t >= since - (since % range.bucketMs))] as const)
       .filter(([, points]) => points.length)
   );
 
-/** What was held, with what is new in place of the minutes it repeats. */
-export const mergeHistory = (kept: History, fresh: History, now = Date.now()): History =>
+/** What was held, with what is new in place of the buckets it repeats. */
+export const mergeHistory = (kept: History, fresh: History, now = Date.now(), range: RangeRule = ranges.day): History =>
   Object.fromEntries(
     [...new Set([...Object.keys(kept), ...Object.keys(fresh)])].map((key) => {
       const update = fresh[key] ?? [];
       const from = update[0]?.[0] ?? Infinity;
-      return [key, [...(kept[key] ?? []).filter(([t]) => t < from && t > now - keepMs), ...update]];
+      return [key, [...(kept[key] ?? []).filter(([t]) => t < from && t > now - range.keepMs), ...update]];
     })
   );
 
@@ -99,10 +108,22 @@ export const readingsOf = (status: NetworkStatus, throughput: { down?: number; u
   ),
 });
 
-/** One read's numbers added; a device no longer in the settings keeps no history. */
-export const withReadings = (history: History, at: number, readings: Record<string, number>, devices: string[]): History => {
+/** One read's numbers added to a range; a device no longer in the settings keeps no history. */
+export const withReadings = (
+  history: History,
+  at: number,
+  readings: Record<string, number>,
+  devices: string[],
+  range: RangeRule = ranges.day
+): History => {
   const kept = Object.fromEntries(
     Object.entries(history).filter(([key]) => !/^(load|temperature):/.test(key) || devices.includes(key.slice(key.indexOf(":") + 1)))
   );
-  return Object.entries(readings).reduce((h, [key, value]) => withSample(h, key, at, value), kept);
+  return Object.entries(readings).reduce((h, [key, value]) => withSample(h, key, at, value, range), kept);
 };
+
+/** One read's numbers added to every range. */
+export const withReadingsEverywhere = (histories: Histories, at: number, readings: Record<string, number>, devices: string[]): Histories => ({
+  day: withReadings(histories.day, at, readings, devices, ranges.day),
+  month: withReadings(histories.month, at, readings, devices, ranges.month),
+});

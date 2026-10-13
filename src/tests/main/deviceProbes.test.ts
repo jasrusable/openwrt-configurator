@@ -112,3 +112,43 @@ test("runProbes copes with a session that trims its output", async (t) => {
   t.is(answers.last.stdout, "y");
   t.is(answers.last.code, 0);
 });
+
+test("package space: apk 3's totals before and after, against the overlay's free space (recorded on 25.12.5)", (t) => {
+  const { apkTotalKb, packageSpace } = require("../../deviceProbes") as typeof import("../../deviceProbes");
+  t.is(apkTotalKb("OK: 12.8 MiB in 155 packages"), 12.8 * 1024);
+  t.is(apkTotalKb("OK: 900 KiB in 3 packages"), 900);
+  t.is(apkTotalKb("ERROR: unable to select packages"), undefined);
+  const probe = packageSpace({ add: ["mwan3"], remove: ["wpad-basic-mbedtls"] });
+  const parse = (stdout: string) => probe.parse({ stdout, stderr: "", code: 0 });
+  t.deepEqual(
+    parse("OK: 10.6 MiB in 131 packages\nOK: 10.1 MiB in 130 packages\nOK: 12.8 MiB in 155 packages\noverlayfs:/overlay 5120 3072 2048 60% /overlay\n"),
+    { needKb: Math.max(0, (12.8 - 10.6 + (10.1 - 10.6)) * 1024), freeKb: 2048 }
+  );
+  t.is(parse("ERROR: no index\nOK: 10.6 MiB in 131 packages\nOK: 1 MiB in 1 packages\nx 1 1 1 1 /\n"), undefined, "apk could not say: not checked");
+});
+
+test("Wi-Fi stations: each client's MAC from iwinfo's assoclist, lower case, once", (t) => {
+  const { wifiStations } = require("../../deviceProbes") as typeof import("../../deviceProbes");
+  const stdout = [
+    "AA:BB:CC:DD:EE:01  -45 dBm / -95 dBm (SNR 50)  120 ms ago",
+    "\tRX: 866.7 MBit/s, VHT-MCS 9, 80MHz, VHT-NSS 2                    1234 Pkts.",
+    "\tTX: 780.0 MBit/s, VHT-MCS 8, 80MHz, VHT-NSS 2                     987 Pkts.",
+    "\texpected throughput: 500.0 MBit/s",
+    "",
+    "aa:bb:cc:dd:ee:02  -60 dBm / -95 dBm (SNR 35)  2000 ms ago",
+    "AA:BB:CC:DD:EE:01  -45 dBm / -95 dBm (SNR 50)  120 ms ago",
+    "No station connected",
+  ].join("\n");
+  t.deepEqual(wifiStations.parse({ stdout, stderr: "", code: 0 }), ["aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"]);
+});
+
+test("service triggers: the configs each service's reload triggers watch, as procd lists them (recorded on 25.12.5)", (t) => {
+  const { serviceTriggers } = require("../../deviceProbes") as typeof import("../../deviceProbes");
+  const stdout = JSON.stringify({
+    dnsmasq: { instances: {}, triggers: [["config.change", ["if", ["eq", "package", "dhcp"], ["run_script", "/etc/init.d/dnsmasq", "reload"]]], ["config.change", ["if", ["eq", "package", "system"], ["run_script", "/etc/init.d/dnsmasq", "reload"]]]] },
+    cron: { instances: { instance1: { running: true } } },
+    dropbear: { triggers: [["config.change", ["if", ["eq", "package", "dropbear"], ["run_script", "/etc/init.d/dropbear", "reload"]]]] },
+  });
+  t.deepEqual(serviceTriggers.parse({ stdout, stderr: "", code: 0 }), { dnsmasq: ["dhcp", "system"], cron: [], dropbear: ["dropbear"] });
+  t.deepEqual(serviceTriggers.parse({ stdout: "not json", stderr: "", code: 1 }), {});
+});

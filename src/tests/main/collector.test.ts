@@ -39,6 +39,12 @@ test("history is answered whole, or from a time on", async (t) => {
   t.deepEqual(JSON.parse((await handle(get("/api/history"))).body).down.length, 2);
   t.deepEqual(JSON.parse((await handle(get("/api/history/130000"))).body), { down: [[120_000, 2, 1]] });
   t.is((await handle(get("/api/history/soon"))).status, 404);
+  // 30 days at 15 minutes, beside the day.
+  const quarter = 15 * 60_000;
+  writeFileSync(join(dir, "history-month.json"), JSON.stringify({ format: 1, value: { down: [[quarter, 1, 4], [2 * quarter, 2, 3]] } }));
+  t.deepEqual(JSON.parse((await handle(get("/api/history/month"))).body).down.length, 2);
+  t.deepEqual(JSON.parse((await handle(get("/api/history/month/" + (2 * quarter + 60_000)))).body), { down: [[2 * quarter, 2, 3]] }, "the quarter hour still filling comes again");
+  t.is((await handle(get("/api/history/month/soon"))).status, 404);
 });
 
 test.serial("the collector reads fast only while someone looks, and says a lasting failure once", async (t) => {

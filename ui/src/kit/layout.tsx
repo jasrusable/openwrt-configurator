@@ -1,7 +1,7 @@
 // Page structure, in the style of macOS System Settings: a page is a title
 // and grouped sections; a section is a card of rows; a row is a label (and
 // an explanation) on the left, its control on the right.
-import { Anchor, Badge, Box, Group, Stack, Text, ThemeIcon, Title, Tooltip } from "@mantine/core";
+import { Anchor, Badge, Box, Group, HoverCard, Stack, Text, ThemeIcon, Title, Tooltip } from "@mantine/core";
 import { IconInbox, IconInfoCircle } from "@tabler/icons-react";
 import { createContext, ReactNode, useContext, useId } from "react";
 import "./kit.css";
@@ -147,12 +147,25 @@ export const useRowAria = () => {
   return ids ? { "aria-labelledby": ids.label, "aria-describedby": ids.description } : {};
 };
 
+/** An explainer's text with each URL (a patch's reference) as a short "why" link. */
+const withWhyLinks = (text: string) =>
+  text.split(/(https:\/\/\S+?)(?=[.,;)]?(?:\s|$))/).map((part, i) =>
+    /^https:\/\//.test(part) ? (
+      <Anchor key={i} href={part} target="_blank" rel="noreferrer" size="xs">
+        why ↗
+      </Anchor>
+    ) : (
+      part
+    )
+  );
+
 export const SettingRow = ({
   label,
   description,
   error,
   openwrt,
   explain,
+  marks,
   children,
 }: {
   label: ReactNode;
@@ -162,6 +175,8 @@ export const SettingRow = ({
   openwrt?: string;
   /** What it does on the devices, in more depth than the description: the tooltip's body. */
   explain?: string;
+  /** Beside the label: what overrides it now (a fix's chip, src/intent/patches/marks.ts). */
+  marks?: ReactNode;
   children?: ReactNode;
 }) => {
   const id = useId();
@@ -175,35 +190,33 @@ export const SettingRow = ({
             {label}
           </Text>
           {(explain || openwrt) && (
-            <Tooltip
-              label={
+            // A card that stays open while the pointer is on it, so a patch's
+            // "why" link in the explainer can be followed.
+            <HoverCard width={320} withArrow openDelay={150} closeDelay={200} shadow="md">
+              <HoverCard.Target>
+                <ThemeIcon
+                  variant="transparent"
+                  size={16}
+                  c="var(--onc-label-2)"
+                  tabIndex={0}
+                  aria-label={[explain, openwrt && `OpenWrt: ${openwrt}`].filter(Boolean).join(" ")}
+                >
+                  <IconInfoCircle size={14} stroke={1.6} />
+                </ThemeIcon>
+              </HoverCard.Target>
+              <HoverCard.Dropdown>
                 <Stack gap={6}>
-                  {explain && <Text size="xs">{explain}</Text>}
+                  {explain && <Text size="xs">{withWhyLinks(explain)}</Text>}
                   {openwrt && (
-                    // The tooltip's own text colour, dimmed: it is dark on light in dark mode.
-                    <Text size="xs" ff="monospace" style={{ opacity: 0.7 }}>
+                    <Text size="xs" ff="monospace" c="dimmed">
                       OpenWrt: {openwrt}
                     </Text>
                   )}
                 </Stack>
-              }
-              multiline
-              w={320}
-              withArrow
-              openDelay={150}
-              events={{ hover: true, focus: true, touch: true }}
-            >
-              <ThemeIcon
-                variant="transparent"
-                size={16}
-                c="var(--onc-label-2)"
-                tabIndex={0}
-                aria-label={[explain, openwrt && `OpenWrt: ${openwrt}`].filter(Boolean).join(" ")}
-              >
-                <IconInfoCircle size={14} stroke={1.6} />
-              </ThemeIcon>
-            </Tooltip>
+              </HoverCard.Dropdown>
+            </HoverCard>
           )}
+          {marks}
         </Group>
         <Box id={ids.description}>
           {description && (

@@ -11,7 +11,7 @@ import { where } from "../../../../src/intent/places";
 import { Intent } from "../../../../src/intent/schema";
 import { parseWgConf } from "../../../../src/wireguardConf";
 import { setIn, useDraft, useDraftValue } from "../../form/draft";
-import { PasswordField, TagsField, TextField, Value } from "../../form/fields";
+import { NumberField, PasswordField, TagsField, TextField, Value } from "../../form/fields";
 import { addChecked, defineList, ListPage } from "../../form/ListPage";
 import { Experimental, ItemIcon, ItemName, Section, SettingRow, SettingsPage } from "../../kit/layout";
 
@@ -44,6 +44,7 @@ const fromFile = (kind: Tunnel["type"], id: string, name: string, text: string, 
     private_key: conf.privateKey,
     address: address.includes("/") ? address : `${address}/32`,
     ...(conf.dns.filter((d) => !d.includes(":")).length ? { dns: conf.dns.filter((d) => !d.includes(":")) } : {}),
+    ...(conf.mtu ? { mtu: conf.mtu } : {}),
     peer: {
       public_key: conf.peer.publicKey,
       ...(conf.peer.presharedKey ? { preshared_key: conf.peer.presharedKey } : {}),
@@ -196,6 +197,7 @@ const ProviderEditor = ({ index }: { index: number }) => {
           <>
             <TextField name={`${at}.peer.endpoint`} label="Server address" />
             <TextField name={`${at}.address`} label="Address" />
+            <NumberField name={`${at}.mtu`} label="MTU" min={1280} max={1500} integer />
           </>
         ) : (
           <>

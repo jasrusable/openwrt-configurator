@@ -3,7 +3,7 @@
 // reached over it only once it is on.
 import type { Choice, ChoiceAt } from "../feature";
 import { where } from "../places";
-import { bandLabels, meshBands, meshChannels, strandedReason } from "../radios";
+import { bandLabels, illegalChannelReason, meshBands, meshChannels, strandedReason } from "../radios";
 
 /** A mesh key: 32 random letters and digits, from the platform's strong random source. */
 export const newMeshKey = () => {
@@ -22,6 +22,13 @@ const meshChannelRule = <B extends "2g" | "5g">(band: B): ChoiceAt<`hardware.*.r
 });
 
 export const meshRules: Choice[] = [
+  {
+    // The mesh's channel, one the country allows: every node would fail to start it.
+    path: "wifi.mesh.channel",
+    values: [...new Set(Object.values(meshChannels).flat())],
+    unavailable: (intent, _, channel) =>
+      intent.wifi.mesh.enabled && illegalChannelReason(intent.system.country, intent.wifi.mesh.band, channel),
+  },
   {
     // 160 MHz on 5 GHz spans 36 to 64, radar channels among them: a radar
     // would move the access point off the mesh's channel.

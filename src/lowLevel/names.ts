@@ -13,6 +13,7 @@ const toJson: Record<string, string> = {
   provisionOrder: "provision_order",
   privateKeyPath: "private_key_path",
   restartAfterRollback: "restart_after_rollback",
+  restartOnPackages: "restart_on_packages",
   runAfter: "run_after",
   runAfterReload: "run_after_reload",
 };

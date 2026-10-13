@@ -5,7 +5,7 @@ import type { Candidate, Inspected } from "../../../src/discover";
 import type { DeviceFacts, ReadAttempt } from "../../../src/deviceFacts";
 import type { Change } from "../../../src/intent/diff";
 import type { NetworkStatus } from "../../../src/status/network";
-import type { History } from "../../../src/status/history";
+import type { History, Range } from "../../../src/status/history";
 import type { Survey } from "../../../src/status/actions";
 import type { Intent } from "../../../src/intent/schema";
 import type { ProvisionStatus } from "../../../src/server/provisionJob";
@@ -152,8 +152,10 @@ export const loadApplyDiff = async () =>
 export const loadNetworkStatus = () => getJson<NetworkStatus>("api/status", "Could not read the network's status.");
 
 /** The graphs' points: all of them, or from `since` (ms) on. */
-export const loadHistory = (since = 0) =>
-  getJson<History>(since ? `api/history/${since}` : "api/history", "Could not read the graphs.");
+export const loadHistory = (since = 0, range: Range = "day") => {
+  const base = range === "day" ? "api/history" : `api/history/${range}`;
+  return getJson<History>(since ? `${base}/${since}` : base, "Could not read the graphs.");
+};
 
 /** Restart a service the settings declare on a device: a Status fix. */
 export const restartService = (device: string, service: string) =>
@@ -164,6 +166,18 @@ export const runWifiSurvey = () =>
   postJson<{ surveys: Survey[]; failed: { accessPoint: string; error: string }[] }>("api/wifi/survey", {}, "The survey did not finish.");
 
 /** The router's download speed now. */
+/** Reboot a device: it drops off for a minute or so. */
+export const rebootDevice = (device: string) =>
+  postJson<{ rebootingSince: number }>("api/device/reboot", { device }, "It did not start rebooting.");
+
+/** Restart a device's Wi-Fi: its clients reconnect within a minute. */
+export const restartWifi = (device: string) =>
+  postJson<{ ok: true }>("api/device/wifi-restart", { device }, "Its Wi-Fi did not restart.");
+
+/** Ping an address from a device: four pings. */
+export const pingFrom = (device: string, target: string) =>
+  postJson<{ sent: number; received: number; averageMs?: number }>("api/device/ping", { device, target }, "The ping did not run.");
+
 export const runSpeedTest = () => postJson<{ downMbps: number }>("api/internet/speed", {}, "The speed test did not finish.");
 
 /** OpenWrt's latest stable release. */

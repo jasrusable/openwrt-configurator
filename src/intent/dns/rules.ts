@@ -4,6 +4,25 @@ import { where } from "../places";
 
 export const dnsRules: Choice[] = [
   {
+    path: "networks.*.keep_dns",
+    values: [true],
+    unavailable: (intent, [n]) => {
+      const network = intent.networks[Number(n)];
+      const tunnel = intent.vpn.providers.find((t) => t.id === network?.access.via);
+      if (network?.dhcp.dns_servers?.length) return "Its devices are given other DNS servers (DHCP): they would be sent back to the router.";
+      if (tunnel) return `It goes out through ${tunnel.name}, whose DNS servers its devices use.`;
+      return undefined;
+    },
+  },
+  {
+    path: "dns.upstream.fallback",
+    values: ["cloudflare", "google", "quad9"],
+    unavailable: (intent, _at, value) =>
+      intent.dns.upstream.type === "encrypted" && intent.dns.upstream.provider === value
+        ? "It is already the provider."
+        : undefined,
+  },
+  {
     path: "dns.upstream.type",
     values: ["provider"],
     unavailable: (intent) => {

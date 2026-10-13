@@ -10,6 +10,7 @@
 import type { FieldInfo } from "./feature";
 import { featureModules } from "./modules";
 import { matchPattern } from "./paths";
+import { marksAt, markText } from "./patches/marks";
 import type { Intent } from "./schema";
 
 export type { FieldInfo };
@@ -31,9 +32,15 @@ const lookup = fields as unknown as FieldAtRunTime[];
 /** What a setting is called and does, by its path (each step a key or a list index). */
 export const fieldInfo = (path: readonly string[]): FieldAtRunTime | undefined => lookup.find((field) => matchPattern(field.path, path));
 
-/** A setting's explainer, given the rest of the intent. */
+/**
+ * A setting's explainer, then what any patch the intent needs says about it
+ * (src/intent/patches): where it holds, and the issue to read, so a setting a
+ * patch holds off somewhere says so rather than being overridden silently.
+ */
 export const explainFor = (path: readonly string[], intent: Intent) => {
   const info = fieldInfo(path);
-  if (typeof info?.explain !== "function") return info?.explain;
-  return info.explain(intent, matchPattern(info.path, path)!);
+  const own = typeof info?.explain === "function" ? info.explain(intent, matchPattern(info.path, path)!) : info?.explain;
+  // Each patch's once, though it marks the setting twice (a section per band).
+  const notes = [...new Set(marksAt(intent, path).map(markText))];
+  return [own, ...notes].filter(Boolean).join(" ") || undefined;
 };

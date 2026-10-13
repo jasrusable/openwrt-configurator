@@ -69,6 +69,14 @@ export const vpnFields: FieldInfo[] = [
   { path: "vpn.providers.*.private_key", label: "Private key", secret: true },
   { path: "vpn.providers.*.address", label: "Address", description: "Its address in the provider's network." },
   {
+    path: "vpn.providers.*.mtu",
+    label: "MTU",
+    description: "From the provider's file; empty is WireGuard's 1420.",
+    openwrt: "network interface mtu",
+    explain:
+      "The largest packet the tunnel sends. Some providers need less than WireGuard's 1420, as their path adds headers, and say so in the .conf they give you (MTU =); larger packets would then stall. TCP is kept within it by MSS clamping on the tunnel's zone.",
+  },
+  {
     path: "vpn.providers.*.dns",
     label: "DNS servers",
     description: "The provider's: networks out through it are given them.",

@@ -5,6 +5,8 @@ export type WgConf = {
   privateKey: string;
   addresses: string[];
   dns: string[];
+  /** [Interface] MTU, where the file sets one (some providers need less than WireGuard's 1420). */
+  mtu?: number;
   peer: { publicKey: string; presharedKey?: string; endpoint?: string; allowedIps: string[] };
 };
 
@@ -30,10 +32,12 @@ export const parseWgConf = (text: string): WgConf => {
   const peer = sections.peer;
   if (!iface?.privatekey) throw new Error("No [Interface] PrivateKey in it.");
   if (!peer?.publickey) throw new Error("No [Peer] PublicKey in it.");
+  const mtu = Number(iface.mtu);
   return {
     privateKey: iface.privatekey,
     addresses: list(iface.address),
     dns: list(iface.dns),
+    ...(iface.mtu && Number.isInteger(mtu) ? { mtu } : {}),
     peer: {
       publicKey: peer.publickey,
       ...(peer.presharedkey ? { presharedKey: peer.presharedkey } : {}),
@@ -50,6 +54,7 @@ export const formatWgConf = (conf: WgConf & { keepalive?: number }) =>
     `PrivateKey = ${conf.privateKey}`,
     `Address = ${conf.addresses.join(", ")}`,
     ...(conf.dns.length ? [`DNS = ${conf.dns.join(", ")}`] : []),
+    ...(conf.mtu ? [`MTU = ${conf.mtu}`] : []),
     "",
     "[Peer]",
     `PublicKey = ${conf.peer.publicKey}`,

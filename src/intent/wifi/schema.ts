@@ -58,6 +58,11 @@ const radio = (defaults: { enabled: boolean }) =>
        * the air (throughput). Per radio: every SSID on it shares its queues.
        */
       airtime: z.enum(["balanced", "latency", "throughput"]).default("balanced"),
+      /**
+       * 5 GHz: an automatic channel never on one with radar detection (DFS),
+       * whose radios wait 60 s (10 min on weather channels) before each start.
+       */
+      avoid_radar: z.boolean().default(false),
     })
     .strict()
     .default({});

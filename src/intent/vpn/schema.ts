@@ -36,20 +36,7 @@ const ipv4WithPrefix = z
   .regex(/^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/, "like 10.64.0.2/32")
   .refine((a) => parseIpv4(a.split("/")[0]) !== undefined && Number(a.split("/")[1]) <= 32, "like 10.64.0.2/32");
 
-/** Private and shared (CGNAT) ranges: what another site may claim. */
-const privateRanges = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"];
-
-/** Whether `cidr` lies wholly in a private range, so routing it to a site can take no internet address. */
-export const isPrivateRange = (cidr: string) => {
-  const r = parseCidr(cidr);
-  return (
-    !!r &&
-    privateRanges.some((p) => {
-      const q = parseCidr(p)!;
-      return r.start >= q.start && r.start + r.size <= q.start + q.size;
-    })
-  );
-};
+export { isPrivateRange } from "../addresses";
 
 /**
  * Remote access: phones and laptops reach home over WireGuard, as a zone
@@ -127,6 +114,12 @@ const providersSchema = z
           address: ipv4WithPrefix,
           /** The provider's DNS servers: the networks out through it use them (DHCP's option 6: IPv4 only, as the tunnel is). */
           dns: z.array(ipv4).optional(),
+          /**
+           * The tunnel's MTU from the provider's .conf; unset, WireGuard's
+           * own 1420. A provider that needs less (its path adds headers)
+           * says so in the file, and larger packets would otherwise stall.
+           */
+          mtu: z.number().int().min(1280, "1280 to 1500").max(1500, "1280 to 1500").optional(),
           peer: z
             .object({ public_key: wgKey, preshared_key: wgKey.optional(), endpoint: hostPort })
             .strict(),

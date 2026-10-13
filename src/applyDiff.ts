@@ -5,7 +5,12 @@
 // managed files. Read only while the Apply page is open, held in memory,
 // never stored. Secret options (Wi-Fi keys, passwords) are compared but their
 // values never leave this module.
-import { KeepEntry } from "./plan/types";
+import { KeepEntry, PlanDevice } from "./plan/types";
+import type { DeviceSchema } from "./deviceSchema";
+import { compileIntent } from "./intent/compile";
+import { patches } from "./intent/patches";
+import { needed } from "./intent/patches/patch";
+import type { Intent } from "./intent/schema";
 import { getPackagesToRemove, packagesToAdd } from "./getDeviceScript";
 import { isSecretOption } from "./secretOptions";
 import { readFacts } from "./deviceFacts";
@@ -29,15 +34,60 @@ export type UciChange = {
   after?: string;
   /** The section `key` was called before: renamed, its options compared under the new name. */
   renamedFrom?: string;
+  /** The fix (src/intent/patches) this line comes from, by its title: not the settings. */
+  fix?: string;
 };
 
-export type FileChange = { path: string; change: "added" | "removed" | "changed" };
+export type FileChange = { path: string; change: "added" | "removed" | "changed"; fix?: string };
 
 export type DeviceChanges = {
   hostname: string;
   config: UciChange[];
-  packages: { added: string[]; removed: string[] };
+  /** `fixes`: the fix each package comes from, where one does. */
+  packages: { added: string[]; removed: string[]; fixes?: Record<string, string> };
   files: FileChange[];
+};
+
+/** What a device's changes come from fixes rather than the settings: a line's key, a file's path, a package, to the fix's title. */
+export type FixSources = { config: Record<string, string>; files: Record<string, string>; packages: Record<string, string> };
+
+/**
+ * Which of a device's lines, files and packages each needed fix makes: the
+ * device's state compiled with that fix off differs there. Derived from the
+ * effect, so it cannot drift from what the fix does.
+ */
+export const fixSources = ({
+  intent,
+  deviceConfig,
+  deviceSchema,
+  state,
+}: {
+  intent: Intent;
+  deviceConfig: PlanDevice;
+  deviceSchema: DeviceSchema;
+  state: OpenWrtState;
+}): FixSources => {
+  const lines = uciLines(declaredConfigs(state.config));
+  const off = intent.system.patches?.off ?? [];
+  return patches.filter(needed(intent)).reduce<FixSources>(
+    (sources, patch) => {
+      const without = compileIntent({ ...intent, system: { ...intent.system, patches: { off: [...off, patch.id] } } });
+      const other = getOpenWrtState({ plan: without, deviceConfig, deviceSchema });
+      const otherLines = uciLines(declaredConfigs(other.config));
+      const keys = [...new Set([...lines.keys(), ...otherLines.keys()])].filter((key) => lines.get(key)?.value !== otherLines.get(key)?.value);
+      const files = state.files.filter((f) => other.files.find((o) => o.path === f.path)?.content !== f.content).map((f) => f.path);
+      const packages = [...state.packages.add, ...state.packages.remove].filter(
+        (p) => !other.packages.add.includes(p) && !other.packages.remove.includes(p)
+      );
+      const by = (items: string[]) => Object.fromEntries(items.map((item) => [item, patch.title]));
+      return {
+        config: { ...sources.config, ...by(keys) },
+        files: { ...sources.files, ...by(files) },
+        packages: { ...sources.packages, ...by(packages) },
+      };
+    },
+    { config: {}, files: {}, packages: {} }
+  );
 };
 
 /** As the page gets it: each device's changes, or why it was not reached (what it holds is then not known, nor the change). */
@@ -175,11 +225,14 @@ export const deviceDiff = ({
   state,
   now,
   sha256,
+  fixes = { config: {}, files: {}, packages: {} },
 }: {
   hostname: string;
   state: OpenWrtState;
   now: DeviceNow;
   sha256: (text: string) => string;
+  /** What comes from fixes (fixSources), to say so beside each change. */
+  fixes?: FixSources;
 }): DeviceChanges => {
   const after = configsAfter({
     current: now.config,
@@ -190,22 +243,23 @@ export const deviceDiff = ({
   const written = (content: string) => sha256(content.endsWith("\n") ? content : `${content}\n`);
   const files = state.files;
   const pairs = renames(now.config, after);
+  const withFix = <T extends object>(item: T, fix?: string): T => (fix ? { ...item, fix } : item);
+  const added = packagesToAdd({ state, installedPackages: now.installed });
+  const removed = getPackagesToRemove({ state, installedPackages: now.installed });
+  const packageFixes = Object.fromEntries([...added, ...removed].flatMap((p) => (fixes.packages[p] ? [[p, fixes.packages[p]]] : [])));
   return {
     hostname,
     config: [
       ...pairs.map(({ from, to }): UciChange => ({ key: to, renamedFrom: from })),
-      ...diffLines(renamed(uciLines(now.config), pairs), uciLines(after)),
+      ...diffLines(renamed(uciLines(now.config), pairs), uciLines(after)).map((change) => withFix(change, fixes.config[change.key])),
     ].sort((a, b) => a.key.localeCompare(b.key) || (a.renamedFrom ? -1 : 1)),
-    packages: {
-      added: packagesToAdd({ state, installedPackages: now.installed }),
-      removed: getPackagesToRemove({ state, installedPackages: now.installed }),
-    },
+    packages: { added, removed, ...(Object.keys(packageFixes).length ? { fixes: packageFixes } : {}) },
     files: [
       ...files.flatMap((f): FileChange[] =>
         !(f.path in now.hashes)
-          ? [{ path: f.path, change: "added" }]
+          ? [withFix({ path: f.path, change: "added" as const }, fixes.files[f.path])]
           : now.hashes[f.path] !== written(f.content)
-          ? [{ path: f.path, change: "changed" }]
+          ? [withFix({ path: f.path, change: "changed" as const }, fixes.files[f.path])]
           : []
       ),
       ...now.managed
@@ -242,7 +296,7 @@ export const readApplyDiff = async ({
 }): Promise<Result<Result<DeviceChanges, DeviceFailure>[], Problem>> => {
   const loaded = await loadSettings(intentPath, platform);
   if (!loaded.ok) return loaded;
-  const { plan } = loaded.value;
+  const { plan, intent } = loaded.value;
   const { ready } = provisionableDevices(plan);
   const reads = await readEach({
     intentPath,
@@ -265,6 +319,7 @@ export const readApplyDiff = async ({
         state,
         now: { config: first.config.configs, installed: first.installed, managed: first.managed, hashes },
         sha256: platform.sha256,
+        ...(intent ? { fixes: fixSources({ intent, deviceConfig, deviceSchema: found.schema, state }) } : {}),
       });
     },
   });

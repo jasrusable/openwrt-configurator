@@ -32,11 +32,14 @@ const warnAbout = (problems: string[]) => problems.forEach((problem) => console.
  * tool: changing either of those first could cut the path to the rest.
  * Config order is kept within each group.
  */
-export const provisioningOrder = <T extends { ipAddress: string; ssh: Pick<Session, "local">; order?: number }>(
+export const provisioningOrder = <T extends { ipAddress: string; hostname: string; ssh: Pick<Session, "local">; order?: number }>(
   devices: T[],
-  gateway?: string
+  gateway?: string,
+  /** The access points this machine is on, by Wi-Fi: after the rest, before the gateway. */
+  reachedThrough: string[] = []
 ) => {
-  const rank = (device: T) => (device.ssh.local ? 2 : device.ipAddress === gateway ? 1 : 0);
+  const rank = (device: T) =>
+    device.ssh.local ? 3 : device.ipAddress === gateway ? 2 : reachedThrough.includes(device.hostname) ? 1 : 0;
   return devices
     .map((device, index) => ({ device, index }))
     .sort((a, b) => rank(a.device) - rank(b.device) || (a.device.order ?? 0) - (b.device.order ?? 0) || a.index - b.index)

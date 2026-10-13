@@ -6,14 +6,16 @@
 // (written only when new ones came).
 import type { OpenWrtConfig } from "../engine/openWrtState";
 import { z } from "zod";
-import { readFacts } from "../deviceFacts";
-import { loadSettings } from "../settings";
+import { DeviceFacts, readFacts } from "../deviceFacts";
+import { loadSettings, SavedSettings } from "../settings";
+import type { Intent } from "../intent/schema";
+import type { DeviceSchema } from "../deviceSchema";
 import { Platform } from "../platform";
-import { provisionableDevices } from "../apply/provisionConfig";
+import { provisionableDevices, ProvisionableDevice } from "../apply/provisionConfig";
 import { readEach } from "../readEach";
 import { getOpenWrtState } from "../engine/getOpenWrtState";
 import { jobProgress, jobState, liveState } from "../server/provisionJob";
-import { readDeviceStatus } from "./device";
+import { meshWiredLink, readDeviceStatus } from "./device";
 import { NetworkStatus, networkStatus } from "./network";
 import { ActivityView, activityViewSchema, activityOf, attentionOf, clientsOf, devicesOf, internetCountersOf, internetOf, keepActivity, radiosOf } from "./views";
 import { ok, Result } from "../result";
@@ -74,6 +76,76 @@ const timeoutMs = 12000;
 const shapedInterfaces = (config: OpenWrtConfig | undefined) =>
   (config?.sqm?.queue ?? []).filter((queue) => queue.enabled === true || queue.enabled === "1").map((queue) => String(queue.interface));
 
+/** What a device's status is judged against: the services that must run there, and (the router) what is shaped. */
+type DeviceExpectations = { mustRun: string[]; shaped: string[] };
+
+/** What a status read takes from the settings: the intent, the devices to read, and each one's expectations. */
+export type StatusSettings = {
+  intent: Intent;
+  ready: ProvisionableDevice[];
+  /** Their facts, as they were before this read. */
+  facts: Record<string, DeviceFacts | undefined>;
+  expected: (hostname: string) => DeviceExpectations;
+};
+
+// Kept between reads in one process (the collector reads every 10 s while
+// someone looks): the settings load and compile again only when the file
+// changes, and a device's state only when its facts do. Secrets are resolved
+// at load (a keychain lookup each on a Mac), so a file left as it is keeps them.
+let kept: { text: string; settings: SavedSettings } | undefined;
+const keptStates = new Map<string, DeviceExpectations>();
+
+const expectationsOf = (settings: SavedSettings, deviceConfig: ProvisionableDevice, schema: DeviceSchema): DeviceExpectations => {
+  try {
+    const state = getOpenWrtState({ plan: settings.plan, deviceConfig, deviceSchema: schema });
+    return {
+      mustRun: state.services.filter((s) => s.running && s.enabled !== false).map((s) => s.name),
+      shaped: shapedInterfaces(state.config),
+    };
+  } catch {
+    return { mustRun: [], shaped: [] };
+  }
+};
+
+export const readStatusSettings = async (intentPath: string, platform: Platform): Promise<Result<StatusSettings, Problem>> => {
+  const text = (() => {
+    try {
+      return platform.readTextFile(intentPath);
+    } catch {
+      return undefined;
+    }
+  })();
+  if (text === undefined || kept?.text !== text) {
+    const loaded = await loadSettings(intentPath, platform);
+    if (!loaded.ok) return loaded;
+    kept = text === undefined ? undefined : { text, settings: loaded.value };
+    keptStates.clear();
+    if (!kept) return ok(statusSettingsOf(loaded.value, intentPath, platform));
+  }
+  return ok(statusSettingsOf(kept.settings, intentPath, platform));
+};
+
+const statusSettingsOf = (settings: SavedSettings, intentPath: string, platform: Platform): StatusSettings => {
+  const { ready } = provisionableDevices(settings.plan);
+  const facts = readFacts(platform, intentPath, ready.map((d) => d.hostname));
+  return {
+    intent: settings.intent,
+    ready,
+    facts,
+    expected: (hostname) => {
+      const deviceConfig = ready.find((d) => d.hostname === hostname);
+      const schema = facts[hostname]?.schema;
+      if (!deviceConfig || !schema) return { mustRun: [], shaped: [] };
+      const key = `${hostname}\n${JSON.stringify(schema)}`;
+      const known = keptStates.get(key);
+      if (known) return known;
+      const made = expectationsOf(settings, deviceConfig, schema);
+      keptStates.set(key, made);
+      return made;
+    },
+  };
+};
+
 export const readNetworkStatus = async ({
   intentPath,
   platform,
@@ -83,23 +155,9 @@ export const readNetworkStatus = async ({
   platform: Platform;
   now?: () => number;
 }): Promise<Result<NetworkStatus, Problem>> => {
-  const loaded = await loadSettings(intentPath, platform);
+  const loaded = await readStatusSettings(intentPath, platform);
   if (!loaded.ok) return loaded;
-  const { plan, intent } = loaded.value;
-  const { ready } = provisionableDevices(plan);
-  const known = readFacts(platform, intentPath, ready.map((d) => d.hostname));
-  // From the compiled settings, per device: what must run, and (the router)
-  // what smart queueing shapes, for the Internet checks.
-  const compiled = (hostname: string) => {
-    const deviceConfig = ready.find((d) => d.hostname === hostname);
-    const schema = known[hostname]?.schema;
-    if (!deviceConfig || !schema) return undefined;
-    try {
-      return getOpenWrtState({ plan, deviceConfig, deviceSchema: schema });
-    } catch {
-      return undefined;
-    }
-  };
+  const { intent, ready, expected, facts: known } = loaded.value;
   const devices = await readEach({
     intentPath,
     platform,
@@ -108,14 +166,14 @@ export const readNetworkStatus = async ({
     timeoutMs,
     now,
     read: (f) => {
-      const state = compiled(f.hostname);
-      const mustRun = (state?.services ?? []).filter((s) => s.running && s.enabled !== false).map((s) => s.name);
+      const { mustRun, shaped } = expected(f.hostname);
       const router = ready.find((d) => d.hostname === f.hostname)?.tags?.role === "router";
-      const shaped = shapedInterfaces(state?.config);
+      // Where its mesh over cables runs: what locating just read it is (DSA or swconfig).
+      const wired = meshWiredLink(f.schema);
       return readDeviceStatus(f.hostname, f.session, now, mustRun, {
-        ...(router ? { internet: { shaped } } : {}),
+        ...(router ? { internet: { shaped }, mdns: true } : {}),
         log: true,
-        meshWired: true,
+        ...(wired ? { meshWired: wired } : {}),
         traffic: true,
         heardBy: true,
       });

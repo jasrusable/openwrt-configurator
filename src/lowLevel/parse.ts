@@ -122,6 +122,7 @@ export const planOfLowLevel = (config: LowLevelConfig): Plan => ({
   services: (config.services ?? []).map(({ ".if": _if, ...service }) => ({ ...whenOf({ ".if": _if }), ...serviceFromJson(service) })),
   files: (config.files ?? []).map(({ ".if": _if, ...file }) => ({ ...whenOf({ ".if": _if }), ...fileFromJson(file) })),
   keep: (config.configs_to_not_reset ?? []).map((k) => ({ ...whenOf(k), entries: k.configs.map(keepEntryOf) })),
+  ...(config.new_configs?.length ? { newConfigs: config.new_configs } : {}),
   config: Object.fromEntries(
     Object.entries(config.config).map(([key, raw]) => [key, configSections(key, raw)])
   ) as Sections,

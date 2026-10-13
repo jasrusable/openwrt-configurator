@@ -19,12 +19,21 @@ export type OpenWrtState = {
   packages: { add: string[]; remove: string[] };
   /** What the wipe leaves alone; everything else on the device is wiped. */
   keep: KeepEntry[];
+  /** Configs declared new on purpose: not on the device, not shipped by OpenWrt. */
+  newConfigs?: string[];
   /** Services to keep enabled and started; `running` ones are checked. */
   services: Service[];
   files: StateFile[];
 };
 
-export type Service = { name: string; running: boolean; enabled?: boolean; restartAfterRollback?: boolean };
+export type Service = {
+  name: string;
+  running: boolean;
+  enabled?: boolean;
+  restartAfterRollback?: boolean;
+  /** Restarted when the run changes one of these packages (exact, or a prefix ending in `*`). */
+  restartOnPackages?: string[];
+};
 
 export type StateFile = {
   path: string;

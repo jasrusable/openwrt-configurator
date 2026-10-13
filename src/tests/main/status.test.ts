@@ -89,6 +89,7 @@ const device = (hostname: string, parts: Partial<DeviceStatus>): DeviceStatus =>
   counters: {},
   traffic: {},
   heardBy: [],
+  mdns: [],
   lines: [],
   mesh: [],
   wireguard: [],
@@ -210,6 +211,10 @@ test("the mesh: each node's direct neighbours and their throughput, named by any
   t.true(split.mesh![0].fragmentsOverCable, "a port at 1500: batman splits its frames over cable");
   const whole = networkStatus(wired, reads(device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1532 })), {});
   t.is(whole.mesh![0].fragmentsOverCable, undefined);
+  const swconfig = networkStatus(wired, reads(device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1500, meshWiredSplits: true })), {});
+  t.is(swconfig.mesh![0].fragmentsOverCable, undefined, "a switch's node splits by design: no fault");
+  const splitting = { ...wired, wifi: { ...wired.wifi, mesh: { ...wired.wifi.mesh, large_frames: false } } };
+  t.is(networkStatus(splitting, reads(device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1500 })), {}).mesh![0].fragmentsOverCable, undefined, "large frames off: splitting is the plan");
   const dropped = networkStatus(wired, reads(device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1532, meshWiredPath: { small: 3, large: 1 } })), {});
   t.true(dropped.mesh![0].dropsLargeFrames, "neighbours that answer small but not full-size pings: a switch drops the larger frames");
   const fine = networkStatus(wired, reads(device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1532, meshWiredPath: { small: 3, large: 3 } })), {});

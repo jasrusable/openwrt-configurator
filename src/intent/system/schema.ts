@@ -59,5 +59,13 @@ export const systemSchema = z
       })
       .strict()
       .default({}),
+    /**
+     * Fixes over OpenWrt (src/intent/patches) turned off, by id: a decision
+     * like any other. Required ones cannot be (patches' own check).
+     */
+    patches: z
+      .object({ off: z.array(z.string()).default([]) })
+      .strict()
+      .default({}),
   })
   .strict();

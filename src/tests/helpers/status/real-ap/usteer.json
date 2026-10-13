@@ -1,0 +1,280 @@
+{
+ "02:00:5e:00:00:17": {
+  "hostapd.phy0-ap1": {
+   "connected": false,
+   "signal": -93
+  },
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -93
+  }
+ },
+ "02:00:5e:00:00:10": {
+  "hostapd.phy0-ap1": {
+   "connected": true,
+   "signal": -63
+  }
+ },
+ "02:00:5e:00:00:12": {
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -66
+  },
+  "hostapd.phy1-ap0": {
+   "connected": true,
+   "signal": -78
+  }
+ },
+ "02:00:5e:00:00:13": {
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -61
+  },
+  "hostapd.phy1-ap0": {
+   "connected": true,
+   "signal": -71
+  }
+ },
+ "02:00:5e:00:00:18": {
+  "hostapd.phy0-ap1": {
+   "connected": false,
+   "signal": -101
+  },
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -101
+  }
+ },
+ "02:00:5e:00:00:05": {
+  "hostapd.phy0-ap1": {
+   "connected": false,
+   "signal": -62
+  },
+  "hostapd.phy0-ap0": {
+   "connected": true,
+   "signal": -59
+  }
+ },
+ "02:00:5e:00:00:14": {
+  "hostapd.phy1-ap0": {
+   "connected": true,
+   "signal": -75
+  }
+ },
+ "02:00:5e:00:00:19": {
+  "hostapd.phy0-ap1": {
+   "connected": false,
+   "signal": -90
+  },
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -90
+  }
+ },
+ "02:00:5e:00:00:1a": {
+  "hostapd.phy0-ap1": {
+   "connected": false,
+   "signal": -96
+  },
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -96
+  }
+ },
+ "02:00:5e:00:00:1b": {
+  "hostapd.phy0-ap1": {
+   "connected": false,
+   "signal": -86
+  },
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -86
+  }
+ },
+ "02:00:5e:00:00:1c": {
+  "hostapd.phy0-ap1": {
+   "connected": false,
+   "signal": -62
+  },
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -62
+  }
+ },
+ "02:00:5e:00:00:1d": {
+  "hostapd.phy0-ap1": {
+   "connected": false,
+   "signal": -93
+  },
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -93
+  }
+ },
+ "02:00:5e:00:00:1e": {
+  "hostapd.phy0-ap1": {
+   "connected": false,
+   "signal": -68
+  },
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -68
+  }
+ },
+ "02:00:5e:00:00:0e": {
+  "hostapd.phy0-ap1": {
+   "connected": true,
+   "signal": -48
+  }
+ },
+ "02:00:5e:00:00:1f": {
+  "hostapd.phy0-ap1": {
+   "connected": false,
+   "signal": -100
+  },
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -100
+  }
+ },
+ "02:00:5e:00:00:15": {
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -65
+  },
+  "hostapd.phy1-ap0": {
+   "connected": true,
+   "signal": -66
+  }
+ },
+ "02:00:5e:00:00:0c": {
+  "hostapd.phy0-ap1": {
+   "connected": true,
+   "signal": -72
+  }
+ },
+ "02:00:5e:00:00:0f": {
+  "hostapd.phy0-ap1": {
+   "connected": true,
+   "signal": -70
+  }
+ },
+ "02:00:5e:00:00:20": {
+  "hostapd.phy0-ap1": {
+   "connected": false,
+   "signal": -94
+  },
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -94
+  }
+ },
+ "02:00:5e:00:00:21": {
+  "hostapd.phy1-ap1": {
+   "connected": false,
+   "signal": -97
+  },
+  "hostapd.phy1-ap0": {
+   "connected": false,
+   "signal": -97
+  },
+  "hostapd.phy0-ap1": {
+   "connected": false,
+   "signal": -79
+  },
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -79
+  }
+ },
+ "02:00:5e:00:00:0d": {
+  "hostapd.phy0-ap1": {
+   "connected": true,
+   "signal": -59
+  }
+ },
+ "02:00:5e:00:00:06": {
+  "hostapd.phy0-ap0": {
+   "connected": true,
+   "signal": -82
+  }
+ },
+ "02:00:5e:00:00:08": {
+  "hostapd.phy0-ap0": {
+   "connected": true,
+   "signal": -58
+  }
+ },
+ "02:00:5e:00:00:07": {
+  "hostapd.phy0-ap0": {
+   "connected": true,
+   "signal": -53
+  }
+ },
+ "02:00:5e:00:00:22": {
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -61
+  }
+ },
+ "02:00:5e:00:00:03": {
+  "hostapd.phy0-ap0": {
+   "connected": true,
+   "signal": -63
+  },
+  "hostapd.phy1-ap0": {
+   "connected": false,
+   "signal": -77
+  }
+ },
+ "02:00:5e:00:00:02": {
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -70
+  },
+  "hostapd.phy1-ap0": {
+   "connected": true,
+   "signal": -73
+  }
+ },
+ "02:00:5e:00:00:23": {
+  "hostapd.phy1-ap1": {
+   "connected": false,
+   "signal": -98
+  },
+  "hostapd.phy1-ap0": {
+   "connected": false,
+   "signal": -98
+  },
+  "hostapd.phy0-ap1": {
+   "connected": false,
+   "signal": -87
+  },
+  "hostapd.phy0-ap0": {
+   "connected": false,
+   "signal": -87
+  }
+ },
+ "02:00:5e:00:00:04": {
+  "hostapd.phy0-ap0": {
+   "connected": true,
+   "signal": -62
+  },
+  "hostapd.phy1-ap0": {
+   "connected": false,
+   "signal": -66
+  }
+ },
+ "02:00:5e:00:00:0a": {
+  "hostapd.phy0-ap1": {
+   "connected": true,
+   "signal": -70
+  }
+ },
+ "02:00:5e:00:00:0b": {
+  "hostapd.phy0-ap1": {
+   "connected": true,
+   "signal": -75
+  }
+ }
+}

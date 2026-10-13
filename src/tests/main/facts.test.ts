@@ -51,12 +51,13 @@ test("a single port under any name, as a container or a new board names it", (t)
 test("an older switch (swconfig), under any switch name; radios from UCI where board.json has no wlan", (t) => {
   const c50 = facts("swconfig-archer-c50", read_("swconfig-archer-c50.uci-wireless.json"));
   t.true(c50.sw_config);
+  // In board.json's order, as OpenWrt's ucidef_add_switch writes it: the LAN ports first.
   t.deepEqual(c50.ports, [
-    { name: "port0", switch_port: 0, default_role: "wan" },
     { name: "port1", switch_port: 1, default_role: "lan" },
     { name: "port2", switch_port: 2, default_role: "lan" },
     { name: "port3", switch_port: 3, default_role: "lan" },
     { name: "port4", switch_port: 4, default_role: "lan" },
+    { name: "port0", switch_port: 0, default_role: "wan" },
     { name: "port6", switch_port: 6, sw_config_cpu_name: "eth0" },
   ]);
   t.deepEqual(
@@ -72,15 +73,16 @@ test("an older switch (swconfig), under any switch name; radios from UCI where b
 });
 
 test("a switch board with the WAN on a NIC of its own: that NIC a port beside the switch's", (t) => {
-  const c7 = facts("swconfig-wan-nic");
-  t.true(c7.sw_config);
-  t.deepEqual(c7.ports, [
-    { name: "port0", switch_port: 0, sw_config_cpu_name: "eth1" },
+  // The Archer C60 v2, as OpenWrt 25.12's board.d makes it: the CPU on eth0, the WAN on eth1.
+  const c60 = facts("swconfig-wan-nic");
+  t.true(c60.sw_config);
+  t.deepEqual(c60.ports, [
+    { name: "port0", switch_port: 0, sw_config_cpu_name: "eth0" },
+    { name: "port1", switch_port: 1, default_role: "lan" },
     { name: "port2", switch_port: 2, default_role: "lan" },
     { name: "port3", switch_port: 3, default_role: "lan" },
     { name: "port4", switch_port: 4, default_role: "lan" },
-    { name: "port5", switch_port: 5, default_role: "lan" },
-    { name: "eth0", default_role: "wan" },
+    { name: "eth1", default_role: "wan" },
   ]);
 });
 
@@ -134,4 +136,49 @@ test("whether each radio can be a mesh point: as read on the access point; unkno
   );
   t.deepEqual(ap.radios?.map((r) => r.mesh), [true, true]);
   t.deepEqual(facts("nwa50ax-pro").radios?.map((r) => r.mesh), [undefined, undefined]);
+});
+
+test("a switch's own name is kept; a second switch is said, not guessed at", (t) => {
+  const board = read_("swconfig-archer-c50.board.json");
+  const system = read_("swconfig-archer-c50.system.json");
+  t.is(parseDeviceFacts({ board, system }).switch, "switch0");
+  const renamed = { ...board, switch: { rtl8367: board.switch.switch0 } };
+  t.is(parseDeviceFacts({ board: renamed, system }).switch, "rtl8367");
+  const two = { ...board, switch: { switch0: board.switch.switch0, switch1: board.switch.switch0 } };
+  const facts = parseDeviceFacts({ board: two, system });
+  t.is(facts.switch, "switch0");
+  t.true(facts.skipped!.some((s) => /switch1: a second switch/.test(s)));
+  t.is(parseDeviceFacts({ board: read_("nanopi-r6s.board.json"), system: read_("nanopi-r6s.system.json") }).switch, undefined, "DSA: no switch");
+});
+
+
+test("each radio's channels, from nl80211: its band's enabled frequencies, within its own ranges on a shared wiphy", (t) => {
+  const ap = parseDeviceFacts({
+    board: read_("nwa50ax-pro.board.json"),
+    system: read_("nwa50ax-pro.system.json"),
+    // phy0's both bands in one list, as nl80211 gives a dual-band wiphy (2.4: 1, 6, 11; 5: 36, 149).
+    wiphys: { phy0: { freqs: [2412, 2437, 2462], radios: [] }, phy1: { freqs: [5180, 5745], radios: [] } },
+  });
+  t.deepEqual(ap.radios?.map((r) => [r.band, r.channels]), [["2g", [1, 6, 11]], ["5g", [36, 149]]]);
+
+  const shared = parseDeviceFacts({
+    board: read_("wifi7-multiradio.board.json"),
+    system: read_("wifi7-multiradio.system.json"),
+    wiphys: {
+      phy0: {
+        freqs: [2412, 5180, 5745, 6135],
+        radios: [
+          { index: 0, ranges: [[2400000, 2500000]] },
+          { index: 1, ranges: [[5150000, 5250000]] },
+          { index: 2, ranges: [[5925000, 7125000]] },
+        ],
+      },
+    },
+  });
+  t.deepEqual(
+    shared.radios?.filter((r) => r.name === "phy0").map((r) => [r.radio, r.channels]),
+    [[0, [1]], [1, [36]], [2, [37]]],
+    "5745 (149) is in no radio's range here"
+  );
+  t.is(parseDeviceFacts({ board: read_("nwa50ax-pro.board.json"), system: read_("nwa50ax-pro.system.json") }).radios![0].channels, undefined, "unknown when not read");
 });

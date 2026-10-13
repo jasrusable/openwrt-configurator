@@ -1,0 +1,41 @@
+{
+	"interfaces": {
+		"wan": {
+			"age": nan,
+			"online": nan,
+			"offline": 0,
+			"uptime": 3600,
+			"score": 10,
+			"lost": 0,
+			"turn": 0,
+			"status": "online",
+			"enabled": true,
+			"running": true,
+			"tracking": "active",
+			"up": true,
+			"track_ip": [
+				{
+					"ip": "1.1.1.1",
+					"status": "up",
+					"latency": -nan,
+					"packetloss": 0
+				}
+			]
+		},
+		"wanb": {
+			"age": 12,
+			"online": 0,
+			"offline": 12,
+			"uptime": 40,
+			"score": 0,
+			"lost": 9,
+			"turn": 3,
+			"status": "offline",
+			"enabled": true,
+			"running": true,
+			"tracking": "active",
+			"up": true,
+			"track_ip": []
+		}
+	}
+}

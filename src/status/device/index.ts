@@ -10,7 +10,8 @@ import { adverts, ipv6Leases, leases, neighbourTable, parseAdverts, parseIpv6Lea
 import { raw } from "./common";
 import { internetCheck, mwan3, parseInternetCheck, parseLines } from "./internet";
 import { logProbe, parseLog } from "./log";
-import { meshWired, originators, parseOriginators } from "./mesh";
+import { mdns, parseMdns } from "./mdns";
+import { meshWired, MeshWiredLink, originators, parseOriginators } from "./mesh";
 import { cores, counters, interfaces, links, parseCounters, parseInterfaces, parseLinks, parseStorage, parseSystemInfo, parseTemperature, storage, systemInfo, temperature } from "./system";
 import type { DeviceStatus } from "./types";
 import { handshakes, parseHandshakes } from "./vpn";
@@ -19,9 +20,10 @@ import { heardBy, parseHeardBy, parseWifi, wifi } from "./wifi";
 export { leasesCommand, parseAdverts, parseIpv6Leases, parseLeases, parseNeighbourTable, parseTraffic } from "./clients";
 export { internetCheckSeconds, latencyTarget, parseInternetCheck, parseLines } from "./internet";
 export { parseLog } from "./log";
-export { parseOriginators, parseRoutes } from "./mesh";
+export { parseMdns } from "./mdns";
+export { meshWired, meshWiredLink, parseOriginators, parseRoutes } from "./mesh";
 export { parseCounters, parseInterfaces, parseLinks, parseStorage, parseSystemInfo, parseTemperature } from "./system";
-export type { Adverts, DeviceStatus, InterfaceStatus, InternetCheck, Ipv6Lease, Lease, LineStatus, LogLine, MeshNeighbour, NeighbourEntry, PortLink, WifiClient, WifiInterface, WireguardPeer } from "./types";
+export type { Adverts, DeviceStatus, MdnsDevice, InterfaceStatus, InternetCheck, Ipv6Lease, Lease, LineStatus, LogLine, MeshNeighbour, NeighbourEntry, PortLink, WifiClient, WifiInterface, WireguardPeer } from "./types";
 export { parseHandshakes } from "./vpn";
 export { parseHeardBy, parseWifi } from "./wifi";
 
@@ -30,7 +32,16 @@ export { parseHeardBy, parseWifi } from "./wifi";
  * view's log, and the costlier reads only the pages showing them make (the
  * wired mesh's pings, nlbwmon's counts, usteer's view). Absent: not read.
  */
-export type StatusExtras = { internet?: { shaped: string[] }; log?: boolean; meshWired?: boolean; traffic?: boolean; heardBy?: boolean };
+export type StatusExtras = {
+  internet?: { shaped: string[] };
+  log?: boolean;
+  /** The wired mesh's link there (meshWiredLink: its VLAN device, and what carries it). */
+  meshWired?: MeshWiredLink;
+  traffic?: boolean;
+  heardBy?: boolean;
+  /** What devices say of themselves over mDNS (the router's umdns). */
+  mdns?: boolean;
+};
 
 /** A probe not made this time: its answer is the given value. */
 const skipped = <T>(value: T): Probe<T> => ({ command: "true", parse: () => value });
@@ -67,7 +78,7 @@ export const readDeviceStatus = async (
     mwan3: tolerant("mwan3", mwan3, undefined),
     originators,
     handshakes,
-    meshWired: extras.meshWired ? tolerant("the wired mesh", meshWired, undefined) : skipped(undefined),
+    meshWired: extras.meshWired ? tolerant("the wired mesh", meshWired(extras.meshWired), undefined) : skipped(undefined),
     storage,
     temperature,
     links,
@@ -79,6 +90,7 @@ export const readDeviceStatus = async (
     cores,
     traffic: extras.traffic ? tolerant("traffic (nlbwmon)", traffic, undefined) : skipped(undefined),
     heardBy: extras.heardBy ? tolerant("roaming (usteer)", heardBy, undefined) : skipped(undefined),
+    mdns: extras.mdns ? tolerant("device names (umdns)", mdns, { browse: undefined, hosts: undefined }) : skipped({ browse: undefined, hosts: undefined }),
     // Device names only (eth1, pppoe-wan): they go inside an awk program, unquoted.
     internetCheck: extras.internet
       ? internetCheck(extras.internet.shaped.filter((d) => /^[A-Za-z0-9._@-]+$/.test(d)))
@@ -97,7 +109,11 @@ export const readDeviceStatus = async (
     lines: parseLines(read.mwan3),
     mesh: parseOriginators(read.originators),
     ...(read.meshWired
-      ? { meshWiredMtu: read.meshWired.mtu, meshWiredPath: { small: read.meshWired.small, large: read.meshWired.large } }
+      ? {
+          meshWiredMtu: read.meshWired.mtu,
+          meshWiredPath: { small: read.meshWired.small, large: read.meshWired.large },
+          ...(extras.meshWired && !extras.meshWired.large ? { meshWiredSplits: true } : {}),
+        }
       : {}),
     wireguard: parseHandshakes(read.handshakes),
     ...(storageRead ? { storage: storageRead } : {}),
@@ -112,6 +128,7 @@ export const readDeviceStatus = async (
     ...(Number(read.cores) > 0 ? { cores: Number(read.cores) } : {}),
     traffic: parseTraffic(read.traffic),
     heardBy: parseHeardBy(read.heardBy),
+    mdns: parseMdns(read.mdns),
     ...(extras.internet ? { internet: parseInternetCheck(read.internetCheck) } : {}),
     ...(extras.log ? { log: parseLog(read.log) } : {}),
   };

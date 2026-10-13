@@ -59,6 +59,9 @@ const CandidateRow = ({ candidate, onPick }: { candidate: Candidate; onPick: () 
 
 type Choice = { name: string; role: "router" | "access-point"; location: string };
 
+/** The name dropbear's host key file has for a key type (ssh-ed25519: ed25519). */
+const dropbearKeyName = (type: string) => (type.startsWith("ecdsa") ? "ecdsa" : type.replace(/^ssh-/, ""));
+
 /**
  * Why a name will not do: checked against the draft, not only the saved
  * file, as its facts (its pinned key) are kept under it when added.
@@ -102,6 +105,23 @@ const Found = ({
         </SettingRow>
         <SettingRow label="Wi-Fi">
           <Text size="sm" c="dimmed">{bands.length ? bands.join(", ") : "None"}</Text>
+        </SettingRow>
+        <SettingRow label="MAC" description="What the router knows it by.">
+          <Text size="sm" c="dimmed" ff="monospace">
+            {device.macs.join(", ") || "—"}
+          </Text>
+        </SettingRow>
+        <SettingRow
+          label="Host key"
+          description={
+            device.hostKey
+              ? `Adding trusts this key from now on. To be sure it is your device, compare it with what its console prints for: dropbearkey -y -f /etc/dropbear/dropbear_${dropbearKeyName(device.hostKey.type)}_host_key`
+              : "Its key was not recorded."
+          }
+        >
+          <Text size="sm" c="dimmed" ff="monospace" style={{ wordBreak: "break-all" }}>
+            {device.fingerprint ?? "—"}
+          </Text>
         </SettingRow>
       </Section>
       {device.openLogin && (
@@ -267,7 +287,7 @@ export const AddHardwarePage = () => {
             )}
           </Section>
           <Section title="Or its address">
-            <SettingRow label="Address" description="If it is not listed: its IP address or name.">
+            <SettingRow label="Address" description="If it is not listed: its IP address (a name can be claimed by any device).">
               <Group gap={6} wrap="nowrap">
                 <TextInput value={typed} onChange={(e) => setTyped(e.currentTarget.value)} placeholder="10.0.0.143" w={180} />
                 <Button variant="default" disabled={!typed.trim()} onClick={() => pick(typed.trim())}>

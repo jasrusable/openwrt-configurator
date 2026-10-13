@@ -5,6 +5,7 @@
  * URL of one item's page. The problems list and the sidebar's marks use it.
  */
 export const settingPages: { path: string; page: string; item?: (index: string) => string }[] = [
+  { path: "system.patches", page: "fixes" },
   { path: "system", page: "system" },
   { path: "internet.lines", page: "internet", item: (i) => `/internet/${i}` },
   { path: "internet", page: "internet" },

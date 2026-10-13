@@ -15,7 +15,9 @@ import {
 } from "../../deviceFacts";
 import { deviceSchemaSchema } from "../../deviceSchema";
 import { nodePlatform } from "../../platforms/node";
-import { refreshStale } from "../../readEach";
+import { readEach, refreshStale } from "../../readEach";
+import { loadConfigOrThrow } from "../../loadConfig";
+import { provisionableDevices } from "../../apply/provisionConfig";
 import { board, network } from "../helpers/fakeNetwork";
 
 const root = join(__dirname, "..", "..", "..");
@@ -171,4 +173,24 @@ test("the devices seen: every device's file, whether its facts read or not; file
   writeFileSync(`${dir}/seen.json`, JSON.stringify(["home-router"]));
   t.deepEqual(listSeen(nodePlatform, path).sort(), ["home-router", "old-ap"]);
   t.deepEqual(readdirSync(dir).sort(), ["home-router.json", "old-ap.json"]);
+});
+
+test("a device's MACs are in its facts after its next read: a new mesh neighbour is named from then on", async (t) => {
+  const path = intentFile();
+  // Facts from before it had these interfaces: no MACs, so a neighbour showing them is a bare MAC.
+  writeFacts(nodePlatform, path, { hostname: "home-router", readAt: 1, schema, hostKey: { type: "ssh-ed25519", key: "ROUTER-KEY" } });
+  const { platform } = network({ "10.0.0.1": { board: board(schema.name), macs: ["aa:bb:cc:00:00:09"], key: "ROUTER-KEY" } });
+  const { plan } = await loadConfigOrThrow({ path, platform: nodePlatform });
+  const router = provisionableDevices(plan).ready.filter((d) => d.hostname === "home-router");
+  const reads = await readEach({
+    intentPath: path,
+    platform,
+    devices: router,
+    facts: readFacts(nodePlatform, path, ["home-router"]),
+    timeoutMs: 5000,
+    read: async () => "read",
+  });
+  t.true(reads[0].ok);
+  // What status names neighbours by, read again after locating (src/status/read.ts).
+  t.deepEqual(readFacts(nodePlatform, path, ["home-router"])["home-router"]?.macs, ["aa:bb:cc:00:00:09"]);
 });

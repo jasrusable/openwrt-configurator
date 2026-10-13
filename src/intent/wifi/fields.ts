@@ -70,9 +70,9 @@ export const wifiFields: FieldInfo[] = [
     path: "wifi.networks.*.isolate_clients",
     label: "Isolate clients",
     description: "Its devices cannot reach each other on the same access point.",
-    openwrt: "wifi-iface isolate",
+    openwrt: "wifi-iface isolate, bridge_isolate",
     explain:
-      "Devices on this SSID cannot reach each other directly on the same access point and band, only the internet and what the network's access allows. Good for guests.",
+      "Devices on this SSID cannot reach each other on the same access point (across its bands and its other isolated SSIDs too), only the internet and what the network's access allows. Good for guests. Devices on different access points, or wired, still can: every cable carries every network.",
   },
   { path: "wifi.radios", label: "Radios" },
   { path: "wifi.roaming", label: "Roaming" },
@@ -114,6 +114,14 @@ export const wifiFields: FieldInfo[] = [
     openwrt: "wifi-device cell_density",
     explain:
       "Raises the slowest data rate devices may use, so slow, distant devices cannot hold the air for long. Normal, High and Very high are OpenWrt's levels 1 to 3; Off allows the slowest legacy rates.",
+  },
+  {
+    path: "wifi.radios.*.avoid_radar",
+    label: "Avoid radar channels",
+    description: "An automatic channel never needs a radar check before it starts.",
+    openwrt: "wifi-device acs_exclude_dfs",
+    explain:
+      "On 5 GHz, channels shared with radar (DFS) make a radio listen for 60 seconds before each start (10 minutes on weather-radar channels), so Wi-Fi is gone for that long after every restart, and some radios fail to start on them. With this on, an automatic channel is picked from the rest (36-48 and 149-165 in most countries); fewer channels to spread over. A channel pinned per device in Hardware is kept as it is.",
   },
   {
     path: "wifi.radios.*.airtime",

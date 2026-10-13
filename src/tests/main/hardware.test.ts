@@ -132,7 +132,7 @@ test("@cpu_port names the switch's CPU port, with an optional VLAN", (t) => {
         },
         dsa
       ),
-    { message: /CPU port not defined/ }
+    { message: /its switch has no CPU port/ }
   );
 });
 
@@ -369,7 +369,8 @@ test("swconfig: an untagged line never takes a VLAN another line has tagged; one
 
 test("swconfig with the WAN on a NIC beside the switch: a line there is that NIC, out of every switch VLAN", (t) => {
   const board = (file: string) => JSON.parse(readFileSync(join(__dirname, "../helpers/boards", file), "utf8"));
-  const c7 = parseDeviceFacts({ board: board("swconfig-wan-nic.board.json"), system: board("swconfig-wan-nic.system.json") });
+  // The Archer C60 v2 (OpenWrt 25.12's board.d): switch ports 1-4, the CPU on eth0, the WAN NIC eth1.
+  const c60 = parseDeviceFacts({ board: board("swconfig-wan-nic.board.json"), system: board("swconfig-wan-nic.system.json") });
   const config = build(
     {
       network: {
@@ -380,20 +381,20 @@ test("swconfig with the WAN on a NIC beside the switch: a line there is that NIC
         device: [{ name: "br-lan.1", type: "bridge", ports: ["@cpu_port.1"] }],
         interface: [
           { ".name": "wan", device: "@wan_port", proto: "dhcp" },
-          { ".name": "wanb", device: "@port:port5.7", proto: "dhcp" },
+          { ".name": "wanb", device: "@port:port4.7", proto: "dhcp" },
         ],
       },
     },
-    c7
+    c60
   );
   const device = (name: string) => config.network.interface.find((i: any) => i[".name"] === name).device;
-  t.is(device("wan"), "eth0");
-  t.is(device("wanb"), "eth1.7", "a line on a switch port is still the CPU's VLAN");
+  t.is(device("wan"), "eth1");
+  t.is(device("wanb"), "eth0.7", "a line on a switch port is still the CPU's VLAN");
   t.deepEqual(
     config.network.switch_vlan.map((v: any) => `${v.vlan}: ${v.ports}`),
-    ["1: 0t 2 3 4", "20: 0t 2t 3t 4t", "7: 0t 5t"]
+    ["1: 0t 1 2 3", "20: 0t 1t 2t 3t", "7: 0t 4t"]
   );
-  t.deepEqual(config.network.device[0].ports, ["eth1.1"]);
+  t.deepEqual(config.network.device[0].ports, ["eth0.1"]);
 });
 
 test("@cpu_port is expanded wherever it is a whole value, an interface's device included", (t) => {
@@ -471,4 +472,74 @@ test("a radio nothing declares or uses is off; one an interface uses stays on", 
   );
   const used = build({ wireless: { "wifi-iface": [{ ssid: "x", mode: "ap", network: "lan", device: "*" }] } }, twoRadios);
   t.true(used.wireless["wifi-device"].every((d: any) => d.disabled === undefined));
+});
+
+test("@switch is the board's own switch: a switch, its VLANs and a line's VLAN all name it", (t) => {
+  const config = build(
+    {
+      network: {
+        switch: [{ name: "@switch", reset: true, enable_vlan: true }],
+        switch_vlan: [{ ".name": "vlan_1", device: "@switch", vlan: 1, ports: "*" }],
+        interface: [{ ".name": "wan", device: "@port:port2", proto: "dhcp" }],
+      },
+    },
+    { ...swconfig, switch: "rtl8367" }
+  );
+  t.is(config.network.switch[0].name, "rtl8367");
+  t.deepEqual(config.network.switch_vlan.map((v: any) => v.device), ["rtl8367", "rtl8367"]);
+  // Facts from before the name was kept: OpenWrt's usual.
+  t.is(build({ network: { switch: [{ name: "@switch" }] } }, swconfig).network.switch[0].name, "switch0");
+});
+
+
+// Tri-band: two 5 GHz radios, each with its own channels (facts, from nl80211).
+const triBandChannels = {
+  radios: [
+    { name: "wl0", type: "mac80211" as const, path: "p0", band: "2g" as const },
+    { name: "wl1", type: "mac80211" as const, path: "p1", band: "5g" as const, channels: [36, 40, 44, 48, 52, 56, 60, 64] },
+    { name: "wl2", type: "mac80211" as const, path: "p2", band: "5g" as const, channels: [100, 104, 149, 153, 157, 161, 165] },
+  ],
+};
+
+test("a band's channel goes to the radio that has it, and so does the mesh; a band the mesh keeps leaves the other radio for SSIDs", (t) => {
+  const config = build(
+    {
+      wireless: {
+        "wifi-device": [{ ".name": "radio1", band: "5g", channel: 149 }],
+        "wifi-iface": [
+          { ".name": "mesh", device: ["radio1"], mode: "mesh", ifname: "mesh0", network: "batmesh" },
+          { ".name": "home", device: ["@spare:radio1"], mode: "ap", ssid: "Home", network: "lan" },
+        ],
+      },
+    },
+    triBandChannels
+  );
+  const devices = config.wireless["wifi-device"].filter((d: any) => d.band === "5g");
+  t.deepEqual(
+    devices.map((d: any) => [d.path, d.channel]),
+    [["p1", "auto"], ["p2", 149]],
+    "149 is the upper radio's"
+  );
+  const on = (name: string) => config.wireless["wifi-iface"].filter((i: any) => i[".name"].startsWith(name)).map((i: any) => i.device);
+  const upper = devices.find((d: any) => d.path === "p2")[".name"];
+  const lower = devices.find((d: any) => d.path === "p1")[".name"];
+  t.deepEqual(on("mesh"), [upper], "the mesh on the radio holding its channel");
+  t.deepEqual(on("home"), [lower], "the SSID on the other one");
+});
+
+test("without channels in the facts, a band's first radio takes its channel, as before", (t) => {
+  const config = build(
+    { wireless: { "wifi-device": [{ ".name": "radio1", band: "5g", channel: 149 }] } },
+    { radios: triBandChannels.radios.map(({ channels, ...r }) => r) }
+  );
+  t.deepEqual(
+    config.wireless["wifi-device"].filter((d: any) => d.band === "5g").map((d: any) => d.channel),
+    [149, "auto"]
+  );
+  // A dual-band device's one 5 GHz radio: the mesh keeps it, no SSID there.
+  const dual = build(
+    { wireless: { "wifi-device": [{ ".name": "radio1", band: "5g" }], "wifi-iface": [{ ".name": "home", device: ["@spare:radio1"], ssid: "Home" }] } },
+    { radios: triBandChannels.radios.slice(0, 2) }
+  );
+  t.deepEqual(dual.wireless["wifi-iface"] ?? [], []);
 });

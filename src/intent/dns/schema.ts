@@ -2,6 +2,9 @@
 import { z } from "zod";
 import { dnsServer, name, namePattern } from "../validators";
 
+export const dohProviders = ["cloudflare", "google", "quad9"] as const;
+export type DohProvider = (typeof dohProviders)[number];
+
 export const dnsSchema = z
   .object({
     /**
@@ -14,7 +17,12 @@ export const dnsSchema = z
         z
           .object({
             type: z.literal("encrypted"),
-            provider: z.enum(["cloudflare", "google", "quad9"]),
+            provider: z.enum(dohProviders),
+            /**
+             * Asked only when the provider does not answer (dns/compile.ts);
+             * unset, another provider (`fallbackOf`); "none", no fallback.
+             */
+            fallback: z.enum([...dohProviders, "none"]).optional(),
           })
           .strict(),
         z

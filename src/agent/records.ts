@@ -25,6 +25,12 @@ export type AgentRecord =
   | { kind: "protocol"; name: string }
   /** services: enabled and started, or stopped and disabled. */
   | { kind: "enable" | "disable"; name: string }
+  /**
+   * services: restarted if this run changed `config` (as it has no reload
+   * trigger for it), or, with no config, regardless (a package swap the run
+   * already knows it made).
+   */
+  | { kind: "restart"; name: string; config?: string }
   /** hooks: a command, run once the config is live. */
   | { kind: "run"; command: string };
 
@@ -56,6 +62,10 @@ const encodeOne = (record: AgentRecord): string => {
     case "enable":
     case "disable":
       return `${record.kind} ${field("name" in record ? record.name : record.config, "name")}\n`;
+    case "restart":
+      return record.config === undefined
+        ? `restart ${field(record.name, "name")}\n`
+        : `restart ${field(record.name, "name")} ${field(record.config, "config")}\n`;
     case "batch": {
       const body = record.operations.map((operation) => lastField(operation, "operation")).join("\n") + "\n";
       return `batch ${lines(body)}\n${body}`;
@@ -111,6 +121,9 @@ export const decodeRecords = (text: string): AgentRecord[] => {
         break;
       case "commit":
         records.push({ kind, config: after(0) });
+        break;
+      case "restart":
+        records.push(rest.length > 1 ? { kind, name: rest[0], config: after(1) } : { kind, name: rest[0] });
         break;
       case "batch":
         records.push({ kind, operations: value(take(Number(rest[0]))).split("\n") });

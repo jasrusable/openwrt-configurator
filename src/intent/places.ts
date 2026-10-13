@@ -25,6 +25,7 @@ export const places = {
   rules: ["Firewall", "Rules"],
   dns: ["DNS & DHCP"],
   hardware: ["Hardware"],
+  fixes: ["Fixes"],
 } as const;
 
 export type Place = keyof typeof places;

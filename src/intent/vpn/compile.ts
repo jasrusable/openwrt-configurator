@@ -8,6 +8,7 @@
 // unreachable rule after it is the kill switch. Zones and the WAN rules are
 // the firewall feature's.
 import { Feature, onRouter, routerOnly, serviceWhen } from "../fragment";
+import { isIpv6Address, parseIpv4 } from "../addresses";
 import { section } from "../../plan/types";
 import { ovpnOption, ovpnSafeLines } from "./ovpn";
 import { clientAddresses, vpnRouterAddresses } from "./model";
@@ -46,6 +47,24 @@ export const ovpnFile = (tunnel: Pick<OvpnTunnel, "id" | "config" | "username">)
     "",
   ].join("\n");
 
+/**
+ * netifd resolves a WireGuard peer's endpoint_host once, when the interface
+ * comes up (proto wireguard.sh), so a peer at a dynamic DNS name whose
+ * address changed is never reached again until an ifup. wireguard-tools'
+ * own watchdog re-resolves the name of any peer silent for 150 s that has a
+ * persistent keepalive (set below); its header says to run it from cron
+ * every minute (verified in 25.12.5's package). Sources:
+ * https://github.com/openwrt/openwrt/blob/openwrt-25.12/package/network/utils/wireguard-tools/files/wireguard_watchdog
+ * https://github.com/openwrt/openwrt/blob/openwrt-25.12/package/network/utils/wireguard-tools/files/wireguard.sh
+ */
+const watchdogCron = "* * * * * /usr/bin/wireguard_watchdog\n";
+
+/** A host:port whose host is a name, not an address: one the watchdog must look up again. */
+const byName = (hostPort: string) => {
+  const host = hostPort.slice(0, hostPort.lastIndexOf(":")).replace(/^\[|\]$/g, "");
+  return parseIpv4(host) === undefined && !isIpv6Address(host);
+};
+
 const endpoint = (hostPort: string) => {
   const at = hostPort.lastIndexOf(":");
   return { endpoint_host: hostPort.slice(0, at).replace(/^\[|\]$/g, ""), endpoint_port: Number(hostPort.slice(at + 1)) };
@@ -61,6 +80,11 @@ export const vpn: Feature = (intent) => {
     const tunnel = tunnels.find((t) => t.id === n.access.via);
     return tunnel && n.access.internet ? [{ network: n, tunnel, priority: 100 + i * 2 }] : [];
   });
+  // Peers this router dials by name: linked sites, providers' servers.
+  const dialsByName = [
+    ...sites.peers.flatMap((s) => (s.endpoint ? [s.endpoint] : [])),
+    ...wgTunnels.map((t) => t.peer.endpoint),
+  ].some(byName);
   const localRanges = [
     ...networks.map((n) => ({ id: n.id, range: n.subnet })),
     ...(remote.enabled ? [{ id: "vpn", range: remote.subnet }] : []),
@@ -69,9 +93,19 @@ export const vpn: Feature = (intent) => {
   return {
     // Installed whether used or not: a setting changes config, not packages.
     packages: [{ when: onRouter, add: ["kmod-wireguard", "wireguard-tools", "openvpn-mbedtls"] }],
-    services: [serviceWhen(onRouter, "openvpn", ovpnTunnels.length > 0)],
+    services: [
+      serviceWhen(onRouter, "openvpn", ovpnTunnels.length > 0),
+      // Only while it has the watchdog to run; otherwise cron is left as it is.
+      ...(dialsByName ? [{ when: onRouter, name: "cron", running: true }] : []),
+    ],
     // The provider's .ovpn and login: root's alone (keys and a password in them).
-    files: ovpnTunnels.flatMap((tunnel) => {
+    files: [
+      // The whole of root's crontab, which this app owns: any other line in
+      // it is replaced. Gone with the last peer by name, as managed files go.
+      ...(dialsByName
+        ? [{ when: onRouter, path: "/etc/crontabs/root", mode: "0600", content: watchdogCron, runAfter: "/etc/init.d/cron restart" }]
+        : []),
+      ...ovpnTunnels.flatMap((tunnel) => {
       // Read at start only: a changed file needs the tunnel restarted, which
       // happens only when it changed (the engine compares before replacing).
       const restart = `/etc/init.d/openvpn restart ${tunnel.id}`;
@@ -90,7 +124,8 @@ export const vpn: Feature = (intent) => {
           : []),
         { when: onRouter, path: `/etc/openvpn/${tunnel.id}.ovpn`, mode: "0600", content: ovpnFile(tunnel), runAfter: restart },
       ];
-    }),
+      }),
+    ],
     config: {
       // Each OpenVPN tunnel run from its file.
       openvpn: {
@@ -118,6 +153,9 @@ export const vpn: Feature = (intent) => {
                 proto: "wireguard",
                 private_key: tunnel.private_key,
                 addresses: [tunnel.address],
+                // The provider's own, from its .conf (MSS clamping on its zone
+                // keeps TCP within it: firewall/compile.ts).
+                ...(tunnel.mtu ? { mtu: tunnel.mtu } : {}),
                 // Its routes in a table of its own: only the networks sent there use it.
                 ip4table: tunnelTable(tunnel.id),
               }

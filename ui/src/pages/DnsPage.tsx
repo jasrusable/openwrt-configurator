@@ -220,6 +220,17 @@ export const DnsPage = () => (
             { value: "quad9", label: "Quad9 (blocks known malware)" },
           ]}
         />
+        <SelectField
+          name="dns.upstream.fallback"
+          label="Fallback"
+          emptyLabel="Automatic"
+          options={[
+            { value: "cloudflare", label: "Cloudflare" },
+            { value: "google", label: "Google" },
+            { value: "quad9", label: "Quad9" },
+            { value: "none", label: "None" },
+          ]}
+        />
       </When>
       <When name="dns.upstream.type" is="custom">
         <TagsField

@@ -6,7 +6,11 @@ export const deviceSchemaSchema = z.object({
   /** The model for people, from board.json (e.g. "FriendlyElec NanoPi R6S"); name is its id. */
   model: z.string().optional(),
   sw_config: z.boolean().optional(),
+  /** swconfig: the switch's name, as board.json gives it (switch0, switch1…). */
+  switch: z.string().optional(),
   version: z.string(),
+  /** OpenWrt's target/subtarget (mediatek/filogic, rockchip/armv8): what drivers and kernel quirks it shares with others. */
+  target: z.string().optional(),
   ports: z
     .array(
       z.object({
@@ -34,6 +38,8 @@ export const deviceSchemaSchema = z.object({
         max_width: z.number().optional(),
         /** Whether it can be a mesh point (802.11s); unknown when not read. */
         mesh: z.boolean().optional(),
+        /** The channels it can use in its band (nl80211's, less those disabled); unknown when not read. */
+        channels: z.array(z.number().int()).optional(),
       })
     )
     .optional(),

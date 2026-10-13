@@ -211,7 +211,12 @@ export const networkStatus = (
                 name: d.name,
                 links: direct.map((n) => ({ to: nameOf(n.mac), throughput: n.throughput })),
                 // Over cables, a port that would not take batman's frames: it fragments there.
-                ...(intent.wifi.mesh.over_cable && status.meshWiredMtu !== undefined && status.meshWiredMtu < meshMtu
+                // Only where large frames are asked for and the link can carry them: else splitting is the plan.
+                ...(intent.wifi.mesh.over_cable &&
+                intent.wifi.mesh.large_frames &&
+                !status.meshWiredSplits &&
+                status.meshWiredMtu !== undefined &&
+                status.meshWiredMtu < meshMtu
                   ? { fragmentsOverCable: true }
                   : {}),
                 ...(intent.wifi.mesh.over_cable && status.meshWiredPath && status.meshWiredPath.large < status.meshWiredPath.small

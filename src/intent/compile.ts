@@ -4,6 +4,7 @@
 // resolves later, against the live device.
 import { merge } from "./fragment";
 import { featureModules } from "./modules";
+import { withPatchAmends } from "./patches";
 import { Intent } from "./schema";
 import { planIssues } from "../plan/check";
 import { Plan } from "../plan/types";
@@ -16,7 +17,11 @@ const steps = featureModules
   .sort((a, b) => a.order - b.order)
   .map((step) => step.compile);
 
-export const compileIntent = (intent: Intent): Plan => merge(steps.map((step) => step(intent)));
+/** Every feature's sections merged, before the patches' amends: where each came from is in its origin. */
+export const compileFeatures = (intent: Intent) => merge(steps.map((step) => step(intent)));
+
+/** Every feature's sections merged, then the patches' amends over them (src/intent/patches). */
+export const compileIntent = (intent: Intent): Plan => withPatchAmends(intent, compileFeatures(intent));
 
 /**
  * An intent's plan, if it passes the plan's own check (the one every plan

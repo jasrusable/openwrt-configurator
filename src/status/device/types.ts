@@ -70,6 +70,18 @@ export type LogLine = { at: number; text: string };
 
 export type Lease = { mac: string; address: string; name?: string; /** s since the epoch */ expires: number };
 
+/** A device heard over mDNS (the router's umdns): what it calls itself, where, and what it is. */
+export type MdnsDevice = {
+  /** Its host name, without .local. */
+  host: string;
+  /** What it calls itself: a naming service's instance ("Jason's iPhone"), else its host name. */
+  name: string;
+  addresses: string[];
+  /** Where it says: Apple's device-info model ("iPhone15,2"), a Cast device's ("Chromecast"). */
+  model?: string;
+  services: string[];
+};
+
 export type DeviceStatus = {
   hostname: string;
   readAt: number;
@@ -97,6 +109,8 @@ export type DeviceStatus = {
    * between drops the mesh's larger frames, which would lose packets.
    */
   meshWiredPath?: { small: number; large: number };
+  /** Its link splits batman's frames by design (a switch's): an MTU under the mesh's is no fault there. */
+  meshWiredSplits?: true;
   /** Its WireGuard peers: when each last completed a handshake. */
   wireguard: WireguardPeer[];
   /** Free and total space where packages and config live (the overlay), KiB. */
@@ -120,6 +134,8 @@ export type DeviceStatus = {
   cores?: number;
   /** nlbwmon's traffic per client MAC since its database began (the router). */
   traffic: Record<string, { rx: number; tx: number }>;
+  /** Devices heard over mDNS (the router). */
+  mdns: MdnsDevice[];
   /** usteer's view of each client: which of its nodes hear it, how well, which it is on. */
   heardBy: { mac: string; node: string; signal?: number; connected: boolean }[];
 };

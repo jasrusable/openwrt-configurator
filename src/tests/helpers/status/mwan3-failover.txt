@@ -1,0 +1,29 @@
+Tue Oct 13 13:23:48 2026 user.notice mwan3track[1289]: Stopping mwan3track for interface "wan". Status was "disabled"
+Tue Oct 13 13:23:48 2026 user.notice mwan3track[2501]: Stopping mwan3track for interface "wanb". Status was "disabled"
+Tue Oct 13 13:23:48 2026 user.notice mwan3track[4254]: Interface wan (eth1) is online
+Tue Oct 13 13:23:48 2026 user.notice mwan3track[4255]: Interface wanb (eth2) is online
+Tue Oct 13 13:23:49 2026 user.info mwan3track[4254]: Detect ifup event on interface wan (eth1)
+Tue Oct 13 13:23:49 2026 user.notice mwan3track[4254]: Interface wan (eth1) is online
+Tue Oct 13 13:23:49 2026 user.info mwan3track[4254]: Check (ping) failed for target "1.1.1.1" on interface wan (eth1). Current score: 6
+Tue Oct 13 13:23:49 2026 user.info mwan3track[4254]: Check (ping) failed for target "9.9.9.9" on interface wan (eth1). Current score: 6
+Tue Oct 13 13:23:49 2026 user.info mwan3track[4254]: Check (ping) failed for target "8.8.8.8" on interface wan (eth1). Current score: 6
+Tue Oct 13 13:23:49 2026 user.notice mwan3track[4254]: Interface wan (eth1) is disconnecting
+Tue Oct 13 13:23:49 2026 user.info mwan3track[4255]: Detect ifup event on interface wanb (eth2)
+Tue Oct 13 13:23:49 2026 user.notice mwan3track[4255]: Interface wanb (eth2) is online
+Tue Oct 13 13:23:54 2026 user.info mwan3track[4254]: Check (ping) failed for target "1.1.1.1" on interface wan (eth1). Current score: 5
+Tue Oct 13 13:23:54 2026 user.info mwan3track[4254]: Check (ping) failed for target "9.9.9.9" on interface wan (eth1). Current score: 5
+Tue Oct 13 13:23:54 2026 user.info mwan3track[4254]: Check (ping) failed for target "8.8.8.8" on interface wan (eth1). Current score: 5
+Tue Oct 13 13:23:59 2026 user.info mwan3track[4254]: Check (ping) failed for target "1.1.1.1" on interface wan (eth1). Current score: 4
+Tue Oct 13 13:23:59 2026 user.info mwan3track[4254]: Check (ping) failed for target "9.9.9.9" on interface wan (eth1). Current score: 4
+Tue Oct 13 13:23:59 2026 user.info mwan3track[4254]: Check (ping) failed for target "8.8.8.8" on interface wan (eth1). Current score: 4
+Tue Oct 13 13:23:59 2026 user.notice mwan3track[4254]: Interface wan (eth1) is offline
+Tue Oct 13 13:23:59 2026 user.notice onc-ipv6: wan is offline: IPv6 withdrawn until it is back
+Tue Oct 13 13:24:04 2026 user.info mwan3track[4254]: Check (ping) success for target "1.1.1.1" on interface wan (eth1). Current score: 0
+Tue Oct 13 13:24:04 2026 user.info mwan3track[4254]: Check (ping) success for target "9.9.9.9" on interface wan (eth1). Current score: 0
+Tue Oct 13 13:24:04 2026 user.info mwan3track[4254]: Lost 9 ping(s) on interface wan (eth1). Current score: 0
+Tue Oct 13 13:24:04 2026 user.notice mwan3track[4254]: Interface wan (eth1) is connecting
+Tue Oct 13 13:24:09 2026 user.info mwan3track[4254]: Check (ping) success for target "1.1.1.1" on interface wan (eth1). Current score: 1
+Tue Oct 13 13:24:09 2026 user.info mwan3track[4254]: Check (ping) success for target "9.9.9.9" on interface wan (eth1). Current score: 1
+Tue Oct 13 13:24:14 2026 user.info mwan3track[4254]: Check (ping) success for target "1.1.1.1" on interface wan (eth1). Current score: 2
+Tue Oct 13 13:24:14 2026 user.info mwan3track[4254]: Check (ping) success for target "9.9.9.9" on interface wan (eth1). Current score: 2
+Tue Oct 13 13:24:14 2026 user.notice mwan3track[4254]: Interface wan (eth1) is online

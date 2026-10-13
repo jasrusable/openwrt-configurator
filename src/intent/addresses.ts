@@ -73,3 +73,18 @@ export const overlaps = (a: string, b: string) => {
 /** The network (of those given) whose subnet holds an IPv4 address. */
 export const networkHolding = <N extends { subnet: string }>(networks: N[], address: string) =>
   parseIpv4(address) === undefined ? undefined : networks.find((n) => overlaps(n.subnet, `${address}/32`));
+
+/** Private and shared (CGNAT) ranges: no internet address lies in them. */
+const privateRanges = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"];
+
+/** Whether `cidr` lies wholly in a private range (a site's range may only be one; a WAN address in one is behind another NAT). */
+export const isPrivateRange = (cidr: string) => {
+  const r = parseCidr(cidr);
+  return (
+    !!r &&
+    privateRanges.some((p) => {
+      const q = parseCidr(p)!;
+      return r.start >= q.start && r.start + r.size <= q.start + q.size;
+    })
+  );
+};

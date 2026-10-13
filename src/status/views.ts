@@ -3,14 +3,18 @@
 // network, each device's health and ports, each access point's radios, the
 // internet line as the router sees it, and what happened lately in words.
 // Pure, like networkStatus: tested against recorded output.
+import { compareReleases } from "../release";
+import { ClientKind, clientKind } from "./clientKind";
 import { z } from "zod";
 import type { DeviceFacts } from "../deviceFacts";
 import { networkHasIpv6 } from "../intent/connections";
+import { isPrivateRange } from "../intent/addresses";
 import { type Intent } from "../intent/schema";
 import { bands } from "../intent/radios";
-import type { InternetCheck, PortLink } from "./device";
+import type { DeviceStatus, InternetCheck, PortLink } from "./device";
 import { networkOfAddress, type NetworkStatus, Reachability, readDevices, readOf, reached, routerOf, weakMeshLinkMbps, whyUnread } from "./network";
 import { bandOf } from "./values";
+import { droppableFixes } from "../intent/patches/status";
 
 
 export type Attention = {
@@ -28,6 +32,10 @@ export type Attention = {
 export type ClientView = {
   mac: string;
   name?: string;
+  /** What it probably is, for its icon (clientKind.ts). */
+  kind?: ClientKind;
+  /** Its model, where it says over mDNS (an iPhone's "iPhone15,2"). */
+  model?: string;
   ipv4?: string;
   ipv6: string[];
   /** The network it is on, by id: a page names it from the settings it shows. */
@@ -64,6 +72,8 @@ export type DeviceView = {
   /** Its physical ports (from its facts), each with its link. */
   ports: PortLink[];
   cores?: number;
+  /** Asked to reboot and not back yet (src/status/actions.ts). */
+  rebooting?: boolean;
 };
 
 export type RadioView = {
@@ -121,6 +131,7 @@ export const clientsOf = (
   );
   const neighbours = (router?.neighbours ?? []).filter((n) => !n.device || !lineDevices.has(n.device));
   const v6 = router?.ipv6Leases ?? [];
+  const heard = router?.mdns ?? [];
   const macs = [
     ...new Set([...leases.map((l) => l.mac), ...wifi.map((c) => c.mac), ...neighbours.filter((n) => !n.address.startsWith("fe80")).map((n) => n.mac)]),
   ].filter((mac) => !ours.has(mac));
@@ -154,11 +165,16 @@ export const clientsOf = (
           })
       );
       const network = ipv4 ? networkOfAddress(intent, ipv4)?.id : undefined;
+      // What it says of itself over mDNS, found by its addresses.
+      const said = heard.find((d) => d.addresses.some((a) => a === ipv4 || ipv6.includes(a)));
+      // Your own name for it first, then what it calls itself, then what it gave DHCP.
+      const name = reservation?.name ?? said?.name ?? lease?.name ?? v6.find((l) => l.mac === mac)?.hostname;
+      const kind = clientKind({ mac, name, model: said?.model, services: said?.services });
       return {
         mac,
-        ...(reservation?.name ?? lease?.name ?? v6.find((l) => l.mac === mac)?.hostname
-          ? { name: reservation?.name ?? lease?.name ?? v6.find((l) => l.mac === mac)?.hostname }
-          : {}),
+        ...(name ? { name } : {}),
+        ...(kind ? { kind } : {}),
+        ...(said?.model ? { model: said.model } : {}),
         ...(ipv4 ? { ipv4 } : {}),
         ipv6,
         ...(network ? { network } : {}),
@@ -269,6 +285,47 @@ export const activityOf = (intent: Intent, devices: Reachability[]): ActivityVie
 };
 
 /** What needs attention, worst first: each with what it means, and a fix or a link where there is one. */
+/** The release batman-adv's 2026.2 fixes reach (merged into routing's openwrt-25.12 after 25.12.5 was tagged). */
+export const meshFixesFrom = "25.12.6";
+
+/**
+ * What the mesh nodes' releases say (from facts): nodes on different
+ * releases can hold their links at the slowest rate (mt76#1066, fixed by
+ * matching them), and a release before batman-adv's fixes lacks them.
+ */
+const meshReleaseHints = (intent: Intent, facts: Record<string, DeviceFacts | undefined>): Attention[] => {
+  if (!intent.wifi.mesh.enabled) return [];
+  const nodes = intent.hardware.flatMap((d) => {
+    const schema = facts[d.name]?.schema;
+    const meshes = (schema?.radios ?? []).some((r) => r.band === intent.wifi.mesh.band && r.mesh !== false);
+    return schema && meshes ? [{ name: d.name, version: schema.version }] : [];
+  });
+  const releases = [...new Set(nodes.map((n) => n.version))];
+  return [
+    ...(releases.length > 1
+      ? [
+          {
+            id: "mesh:releases",
+            severity: "warning" as const,
+            title: "Mesh nodes run different OpenWrt releases",
+            detail: `${nodes.map((n) => `${n.name} ${n.version}`).join(", ")}: links between different releases can fall to the slowest rate (mt76#1066). Run the same release on every node.`,
+            link: "/hardware",
+          },
+        ]
+      : []),
+    ...(nodes.some((n) => (compareReleases(n.version, meshFixesFrom) ?? 0) < 0)
+      ? [
+          {
+            id: "mesh:batman-fixes",
+            severity: "info" as const,
+            title: `The mesh's routing gets fixes in OpenWrt ${meshFixesFrom}`,
+            detail: `batman-adv's fixes for bridge loop avoidance, multicast and reassembling split packets (which the mesh over cables relies on) come with ${meshFixesFrom} (openwrt/routing#1177); update the mesh nodes when it is out.`,
+          },
+        ]
+      : []),
+  ];
+};
+
 export const attentionOf = ({
   intent,
   devices,
@@ -393,11 +450,73 @@ export const attentionOf = ({
       }
     }
   }
+  out.push(...meshReleaseHints(intent, facts));
+  // A fix whose every device runs the release that fixed it: the patch can go.
+  out.push(
+    ...droppableFixes(intent, facts).map(
+      (fix): Attention => ({
+        id: `fix:droppable:${fix.id}`,
+        severity: "info",
+        title: `“${fix.title}” is no longer needed`,
+        detail: `Every device it applies to runs a release with the fix (${fix.devices.find((d) => d.state === "fixed")?.why}). It does nothing now; the app can drop it (${fix.dropWhen}).`,
+        link: "/fixes",
+      })
+    )
+  );
+  if (router) out.push(...routerHints(intent, router, facts[router.hostname]));
   if (applied === "differs") {
     out.push({ id: "apply:pending", severity: "info", title: "Saved settings are not applied yet", detail: "Your devices still run the settings applied before.", link: "?apply" });
   }
   const order = { problem: 0, warning: 1, info: 2 };
   return out.sort((a, b) => order[a.severity] - order[b.severity]);
+};
+
+/**
+ * A port whose driver can filter only a few VLANs: later ones are never
+ * created, so the networks they carry are silently missing there. The R6S's
+ * 1G port (stmmac, "Timeout accessing MAC_VLAN_Tag_Filter"):
+ * https://github.com/openwrt/openwrt/issues/16162, fix in
+ * https://github.com/openwrt/openwrt/pull/20279 (open). Every free port
+ * carries every network other than the main one tagged, until networks can
+ * be assigned per port (TODO.md).
+ */
+const vlanFilterLimits: Record<string, { port: string; vlans: number }> = {
+  "friendlyarm,nanopi-r6s": { port: "eth0", vlans: 3 },
+};
+
+/** What the router's own situation makes worth saying: hints, not faults. */
+const routerHints = (intent: Intent, router: DeviceStatus, facts: DeviceFacts | undefined): Attention[] => {
+  const main = intent.internet.lines[0];
+  // UPnP opens ports here, but behind another router (a private address on
+  // the line) the internet reaches only that one: STUN finds the outer
+  // address, and only a full-cone NAT (or that router's exposed host) passes
+  // the ports on.
+  const lineAddress = router.interfaces.find((i) => i.id === main?.id)?.ipv4[0]?.split("/")[0];
+  const behindNat = !!lineAddress && isPrivateRange(`${lineAddress}/32`);
+  const limit = facts && vlanFilterLimits[facts.schema.name];
+  const tagged = intent.networks.filter((n) => n.vlan !== undefined).length;
+  const portUsed = !!limit && router.links.some((l) => l.name === limit.port && l.up);
+  const portIsLine = !!limit && intent.internet.lines.some((l) => l.port === limit.port);
+  return [
+    ...(intent.internet.upnp && behindNat
+      ? [{
+          id: "upnp:behind-nat",
+          severity: "info" as const,
+          title: "UPnP is behind another router",
+          detail: `This router's internet address (${lineAddress}) is a private one, so ports opened here reach only the router in front. Make this router its exposed host there, or forward the ports there too.`,
+          link: "/internet",
+        }]
+      : []),
+    ...(limit && portUsed && !portIsLine && tagged >= limit.vlans
+      ? [{
+          id: `vlans:${router.hostname}:${limit.port}`,
+          severity: "warning" as const,
+          title: `${router.hostname}'s ${limit.port} carries only ${limit.vlans} networks`,
+          detail: `Its driver can filter only ${limit.vlans} tagged networks, and ${tagged} are carried there: the rest are missing on that port. Use another port for devices that need them.`,
+          link: "/networks",
+        }]
+      : []),
+  ];
 };
 
 /** Each internet line's byte counters now, on the router, and when (the server's clock): throughput comes from two reads. */

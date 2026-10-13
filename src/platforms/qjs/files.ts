@@ -69,17 +69,20 @@ export const listDir = (path: string) => {
   return error ? [] : names.filter((name) => name !== "." && name !== "..").sort();
 };
 
-export const mkdirp = (path: string) => {
+export const mkdirp = (path: string, mode?: number) => {
   const parts = path.split("/");
   for (let i = 1; i <= parts.length; i++) {
     const prefix = parts.slice(0, i).join("/");
     if (prefix && !fileExists(prefix)) {
-      const result = os.mkdir(prefix, 0o777);
+      const result = os.mkdir(prefix, mode ?? 0o777);
       if (result < 0 && !fileExists(prefix)) {
         throw fileError(prefix, -result);
       }
     }
   }
+  // Exactly the mode asked for (the umask may have taken some off, or it
+  // existed already): checked first, as a chmod is a whole process here.
+  if (mode !== undefined && fileMode(path) !== mode) os.exec(["chmod", mode.toString(8), path], { block: true });
 };
 
 /** Made new, owner-only; false when it exists (mkdir's EEXIST, 17). */

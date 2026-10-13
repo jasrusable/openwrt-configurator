@@ -7,7 +7,7 @@ import { DeviceSchema } from "../deviceSchema";
 import { OpenWrtSection } from "./openWrtState";
 import { isPlaceholder, Scalar, Value } from "../plan/types";
 import { ResolvedSection } from "./resolvePlan";
-import { sanitizeName, strings, writeSection } from "./values";
+import { sanitizeName, unresolvable, writeSection } from "./values";
 
 // A channel of each band (6 GHz: its first preferred-scan channel; 60 GHz: 802.11ad's 2).
 const defaultChannels = {
@@ -28,6 +28,7 @@ export const fitRadios = ({
   wireless: Record<string, ResolvedSection[]> | undefined;
 }): Record<string, OpenWrtSection[]> | undefined => {
   const written = writeSection(hostname);
+  const stuck = unresolvable(hostname);
   // Each radio with its band's declared wifi-device: the first of a band by
   // that section's name, another (tri-band: two in 5 GHz) by the name and
   // its place, or uci would merge the two.
@@ -42,26 +43,50 @@ export const fitRadios = ({
   }, []);
   const radioNames = radios.map((r) => r.name);
 
+  // A band's primary radio: the one whose channels hold its declared channel
+  // (pinned, or the mesh's; tri-band's lower or upper 5 GHz radio), else the
+  // band's first, as where the facts do not say. It takes that channel, and
+  // an interface that is one device (the mesh's).
+  const ofBand = (declaredName: string) => radios.filter((r) => r.declared?.name === declaredName);
+  const primaryOf = (declaredName: string) => {
+    const candidates = ofBand(declaredName);
+    const channel = candidates[0]?.declared?.options.channel;
+    return candidates.find((r) => typeof channel === "number" && r.radio.channels?.includes(channel)) ?? candidates[0];
+  };
+  const isPrimary = (r: (typeof radios)[number]) => (r.declared?.name ? primaryOf(r.declared.name)?.name === r.name : r.first);
+
   // A declared radio's name stands for every radio of its band; an interface
-  // with a name of its own (the mesh's ifname) is one device, so on the first
-  // only. A radio declared for a band this device lacks (6 GHz on a dual-band
-  // access point) has none here, so an interface on it is skipped. A name
-  // nothing declares goes through, for netifd to report, rather than hiding
-  // a typo.
+  // with a name of its own (the mesh's ifname) is one device, so on the
+  // primary only. A radio declared for a band this device lacks (6 GHz on a
+  // dual-band access point) has none here, so an interface on it is skipped.
+  // A name nothing declares goes through, for netifd to report, rather than
+  // hiding a typo.
   const radiosNamed = (name: string, single: boolean) => {
-    const ofBand = radios.filter((r) => r.declared?.name === name).map((r) => r.name);
-    return ofBand.length > 0
-      ? ofBand.slice(0, single ? 1 : undefined)
+    const all = ofBand(name).map((r) => r.name);
+    return all.length > 0
+      ? single
+        ? [primaryOf(name)!.name]
+        : all
       : radioNames.includes(name) || !declaredRadios.some((d) => d.name === name)
         ? [name]
         : [];
   };
+  /** A band's radios but its primary: where devices may go on a band the mesh keeps (tri-band's other 5 GHz radio). */
+  const spareRadios = (name: string) => ofBand(name).filter((r) => r.name !== primaryOf(name)?.name).map((r) => r.name);
 
   const ifaces = (wireless?.["wifi-iface"] || []).map((iface, wifiIfaceIndex) => {
     const { device, stations, ...options } = iface.options;
     // Unset, or every radio: each one the device has.
-    const named = device === undefined || (isPlaceholder(device) && device.kind === "allRadios") ? undefined : strings(device);
-    const devices = named ? named.flatMap((name) => radiosNamed(name, !!options.ifname)) : radioNames;
+    const items = device === undefined || (isPlaceholder(device) && device.kind === "allRadios") ? undefined : Array.isArray(device) ? device : [device];
+    const devices = items
+      ? items.flatMap((item) =>
+          isPlaceholder(item)
+            ? item.kind === "spareRadios"
+              ? spareRadios(item.radio)
+              : stuck(item)
+            : radiosNamed(String(item), !!options.ifname)
+        )
+      : radioNames;
     const base = iface.name;
     const interfaces = devices.map((deviceName, deviceIndex) => ({
       // A named interface is one per radio: the radio's name is added.
@@ -82,15 +107,16 @@ export const fitRadios = ({
   const wifiInterfaces = ifaces.flatMap((i) => i.interfaces);
   const wifiStations = ifaces.flatMap((i) => i.stationSections);
 
-  const wifiDevices = radios.map(({ radio, declared, name, first }) => {
+  const wifiDevices = radios.map((r) => {
+    const { radio, declared, name } = r;
     const htmode = declared?.options.htmode;
     const mode =
       isPlaceholder(htmode) && htmode.kind === "bestMode" ? bestMode(htmode.width, radio.htmodes) : (htmode as Scalar | undefined);
     return written("wireless", "wifi-device", name, {
       ...declared?.options,
-      // A pinned channel (or the mesh's) is the first radio's of its band:
-      // another there (tri-band's upper 5 GHz) may not have it.
-      channel: first ? (declared?.options.channel as Scalar | undefined) || defaultChannels[radio.band] : "auto",
+      // A pinned channel (or the mesh's) is the band's primary radio's:
+      // another there (tri-band's other 5 GHz) may not have it.
+      channel: isPrimary(r) ? (declared?.options.channel as Scalar | undefined) || defaultChannels[radio.band] : "auto",
       type: radio.type,
       band: radio.band,
       ...(radio.path ? { path: radio.path } : radio.phy !== undefined ? { phy: radio.phy } : {}),

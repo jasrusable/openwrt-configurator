@@ -12,10 +12,11 @@ import { provisionRoutes } from "./api/provision";
 import { sessionRoutes } from "./api/session";
 import { staticFiles } from "./api/static";
 import { statusRoutes } from "./api/status";
+import { patchesRoutes } from "./api/patches";
 import { Auth } from "./auth";
 import { ApiContext, refuse, router } from "./router";
 import { messageOf } from "../result";
-import { stateLayout } from "../store";
+import { keepStatePrivate, stateLayout } from "../store";
 
 /** Never inside another page's frame: there its own clicks (same origin, header and all) could be lured into a Save or an Apply. */
 const unframed = (response: HttpResponse): HttpResponse => ({
@@ -43,10 +44,16 @@ export const uiHandler = ({
   auth?: Auth;
   now?: () => number;
 }): HttpHandler => {
+  // Made private here, before anything is kept in it (an old one tightened).
+  try {
+    keepStatePrivate(platform, intentPath);
+  } catch {
+    // A directory that cannot be made yet: the first write says why.
+  }
   const context: ApiContext = { intentPath, platform, statusDir, now };
   const notFound = async () => refuse("not-found", "Not found.");
   const api = router(
-    [intentRoutes, provisionRoutes, devicesRoutes, statusRoutes, discoverRoutes, actionRoutes].flatMap((routes) => routes(context)),
+    [intentRoutes, provisionRoutes, devicesRoutes, statusRoutes, discoverRoutes, actionRoutes, patchesRoutes].flatMap((routes) => routes(context)),
     notFound
   );
   const session = auth && router(sessionRoutes({ auth, platform, intentPath, attemptsDir: loginAttemptsDir, now }), notFound);

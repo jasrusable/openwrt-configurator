@@ -1,0 +1,58 @@
+{
+	"_companion-link._tcp": {
+		"Jason iPhone": {
+			"iface": "br-lan",
+			"host": "jasons-iphone.local",
+			"domain": "local",
+			"port": 49152,
+			"ttl": 120,
+			"last_update": "2026-10-13T13:26:54Z",
+			"priority": 0,
+			"weight": 0,
+			"ipv4": [
+				"192.168.215.17",
+				"192.168.1.50"
+			]
+		}
+	},
+	"_device-info._tcp": {
+		"Jason iPhone": {
+			"iface": "br-lan",
+			"txt": [
+				"model=iPhone15,2"
+			],
+			"host": "jasons-iphone.local",
+			"domain": "local",
+			"ttl": 120,
+			"last_update": "2026-10-13T13:26:54Z",
+			"priority": 0,
+			"weight": 0,
+			"ipv4": [
+				"192.168.215.17",
+				"192.168.1.50"
+			]
+		}
+	},
+	"_ssh._tcp": {
+		"OpenWrt": {
+			"iface": "br-lan",
+			"host": "OpenWrt.local",
+			"domain": "local",
+			"port": 22,
+			"ttl": 4500,
+			"last_update": "2026-10-13T13:26:54Z",
+			"priority": 0,
+			"weight": 0,
+			"txt": [
+				"daemon=dropbear"
+			],
+			"ipv4": [
+				"192.168.1.1"
+			],
+			"ipv6": [
+				"fd95:b0ea:abe2::1",
+				"fe80::e455:aaff:fed7:130b"
+			]
+		}
+	}
+}

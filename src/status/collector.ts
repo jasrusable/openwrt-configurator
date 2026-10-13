@@ -11,7 +11,7 @@ import { fail, Problem, problem } from "../problem";
 import { Result, attempt, map, messageOf, ok } from "../result";
 import { jobState } from "../server/provisionJob";
 import { read, StoreFiles, StoreKey, write } from "../store";
-import { bucketMs, History, LineCounts, readingsOf, throughputOf, withReadings } from "./history";
+import { bucketMs, Histories, History, LineCounts, Range, readingsOf, throughputOf, withReadingsEverywhere } from "./history";
 import { NetworkStatus } from "./network";
 import { readNetworkStatus } from "./read";
 
@@ -27,8 +27,9 @@ const snapshotKey = (dir: string): StoreKey<Snapshot> => ({
   format: 1,
   upgrade: asWritten,
 });
-const historyKey = (dir: string): StoreKey<History> => ({
-  path: `${dir}/history.json`,
+/** Each range's points: the day's where they always were, the month's beside them. */
+const historyKey = (dir: string, range: Range = "day"): StoreKey<History> => ({
+  path: range === "day" ? `${dir}/history.json` : `${dir}/history-${range}.json`,
   schema: z.custom<History>((v) => !!v && typeof v === "object" && !Array.isArray(v)),
   format: 1,
   upgrade: asWritten,
@@ -55,7 +56,13 @@ export const markWanted = (files: StoreFiles, dir: string, now: number) => {
 
 export const readSnapshot = (files: Pick<Platform, "readTextFile">, dir: string) => read(files, snapshotKey(dir));
 
-export const readHistory = (files: Pick<Platform, "readTextFile">, dir: string): History => read(files, historyKey(dir)) ?? {};
+export const readHistory = (files: Pick<Platform, "readTextFile">, dir: string, range: Range = "day"): History =>
+  read(files, historyKey(dir, range)) ?? {};
+
+const readHistories = (files: Pick<Platform, "readTextFile">, dir: string): Histories => ({
+  day: readHistory(files, dir, "day"),
+  month: readHistory(files, dir, "month"),
+});
 
 /** Whether an apply is running: its devices are mid-change, and nothing reads them meanwhile. */
 const applying = async (intentPath: string, platform: Platform) =>
@@ -105,7 +112,7 @@ export const readAndKeep = async ({
     return snapshot;
   });
 
-type State = { history: History; counts: LineCounts; savedBucket?: number };
+type State = { histories: Histories; counts: LineCounts; savedBucket?: number };
 
 /** One read: the snapshot, with the throughput since the last, and its numbers in the history. */
 export const collectOnce = async ({
@@ -127,12 +134,15 @@ export const collectOnce = async ({
   const at = now();
   const { counts, ...throughput } = throughputOf(status.internetCounters, state.counts);
   write(platform, snapshotKey(dir), { at, status: { ...status, throughput, readAt: at } });
-  const history = withReadings(state.history, at, readingsOf(status, throughput), status.devices.map((d) => d.name));
+  const histories = withReadingsEverywhere(state.histories, at, readingsOf(status, throughput), status.devices.map((d) => d.name));
   // Saved as each minute starts: a restart loses a minute at most, and a
   // router's RAM (or a Mac's disk) is written once a minute, not each read.
   const bucket = at - (at % bucketMs);
-  if (bucket !== state.savedBucket) write(platform, historyKey(dir), history);
-  return ok({ history, counts, savedBucket: bucket });
+  if (bucket !== state.savedBucket) {
+    write(platform, historyKey(dir, "day"), histories.day);
+    write(platform, historyKey(dir, "month"), histories.month);
+  }
+  return ok({ histories, counts, savedBucket: bucket });
 };
 
 /** Read for as long as it runs (or until `stop` says so, for tests). */
@@ -154,7 +164,7 @@ export const runCollector = async ({
   /** One read (tests give their own). */
   collect?: typeof collectOnce;
 }) => {
-  let state: State = { history: readHistory(platform, dir), counts: {} };
+  let state: State = { histories: readHistories(platform, dir), counts: {} };
   let lastRead = -Infinity;
   let lastError: string | undefined;
   while (!stop()) {

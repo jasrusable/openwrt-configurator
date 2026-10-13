@@ -13,8 +13,10 @@ export const router = "router";
 export const remoteAccessZone = "vpn";
 export const sitesZone = "sites";
 export const vpnZoneIds = [remoteAccessZone, sitesZone];
+/** The internet's firewall zone, every internet line's (firewall/compile.ts). */
+export const wanZone = "wan";
 /** Not usable as a network id: rules use them. */
-export const reservedIds = [internet, router, "wan"];
+export const reservedIds = [internet, router, wanZone];
 
 /** What a network may reach: the internet, other networks, the router. */
 export const accessSchema = z

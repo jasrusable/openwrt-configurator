@@ -171,10 +171,38 @@ export const finaliseRecords = ({
  * the commit, before the confirming one: a stopped firewall's new rules take
  * effect only as it starts, so a lockout there must still roll back.
  */
-export const servicesRecords = (state: OpenWrtState): AgentRecord[] => [
-  ...state.services.filter((s) => s.enabled !== false).map((s): AgentRecord => ({ kind: "enable", name: s.name })),
-  ...state.services.filter((s) => s.enabled === false).map((s): AgentRecord => ({ kind: "disable", name: s.name })),
-];
+/** The config a service reads, where it is not its own name. */
+const serviceConfigs: Record<string, string> = { dnsmasq: "dhcp", odhcpd: "dhcp", sysntpd: "system", log: "system" };
+export const configOfService = (name: string) => serviceConfigs[name] ?? name;
+
+/**
+ * Each declared service enabled and started, or stopped and disabled; and
+ * restarted after the reload when this run changed its config and procd
+ * holds no reload trigger of its for that config (`triggers`, per running
+ * service: which configs its triggers watch). One procd does not know is
+ * started afresh anyway, on the new config.
+ */
+/** Whether a package matches one of a service's `restartOnPackages`: by name, or by a prefix ending in `*`. */
+const matchesPackage = (patterns: string[]) => (name: string) =>
+  patterns.some((p) => (p.endsWith("*") ? name.startsWith(p.slice(0, -1)) : name === p));
+
+export const servicesRecords = (
+  state: OpenWrtState,
+  triggers: Record<string, string[]> = {},
+  /** The packages this run installs or removes. */
+  changedPackages: string[] = []
+): AgentRecord[] => {
+  const enabled = state.services.filter((s) => s.enabled !== false);
+  const swapped = (s: OpenWrtState["services"][number]) => changedPackages.some(matchesPackage(s.restartOnPackages ?? []));
+  return [
+    ...enabled.map((s): AgentRecord => ({ kind: "enable", name: s.name })),
+    ...state.services.filter((s) => s.enabled === false).map((s): AgentRecord => ({ kind: "disable", name: s.name })),
+    ...enabled.filter(swapped).map((s): AgentRecord => ({ kind: "restart", name: s.name })),
+    ...enabled
+      .filter((s) => !swapped(s) && s.name in triggers && !triggers[s.name].includes(configOfService(s.name)))
+      .map((s): AgentRecord => ({ kind: "restart", name: s.name, config: configOfService(s.name) })),
+  ];
+};
 
 /**
  * The hooks that need the new config live (run_after_reload, in file order),
@@ -222,7 +250,10 @@ export const getDeviceScript = ({
   current?: UciConfigs;
   redact?: Redact;
 }) => {
-  const services = servicesRecords(state);
+  const changed = installedPackages
+    ? [...packagesToAdd({ state, installedPackages }), ...getPackagesToRemove({ state, installedPackages })]
+    : [];
+  const services = servicesRecords(state, {}, changed);
   const hooks = hookRecords(hookCommands(state).map((command) => (redact ? redact(command) : command)));
   return [
     renderVerb("prepare", prepareRecords({ state, installedPackages, redact })),

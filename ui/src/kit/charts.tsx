@@ -1,22 +1,30 @@
 // Small, quiet visuals for the Status pages, in plain SVG and Mantine's own
 // rings: an area chart, signal bars, a stat tile, a port faceplate. Colours
 // come from Mantine's palette variables, so dark mode holds.
-import { Box, Group, RingProgress, Stack, Text, Tooltip } from "@mantine/core";
+import { Box, Group, RingProgress, SegmentedControl, Stack, Text, Tooltip } from "@mantine/core";
 import { ReactNode, useId } from "react";
 import { linkWords } from "./format";
 
 type Point = [number, number];
 
-/** Readings further apart than this were not taken in between (no page was reading): the line breaks there. */
-const gapMs = 3 * 60_000;
+/**
+ * Points further apart than three of the series' own steps (a minute's, or
+ * 15 minutes' for 30 days) were not read in between: the line breaks there.
+ */
+const gapOf = (points: Point[]) => {
+  const steps = points.slice(1).map((p, i) => p[0] - points[i][0]).filter((d) => d > 0);
+  return 3 * (steps.length ? Math.min(...steps) : 60_000);
+};
 
 /** A series as its unbroken runs. */
-const runs = (points: Point[]) =>
-  points.reduce<Point[][]>((out, p, i) => {
-    if (i > 0 && p[0] - points[i - 1][0] > gapMs) out.push([]);
+const runs = (points: Point[]) => {
+  const gap = gapOf(points);
+  return points.reduce<Point[][]>((out, p, i) => {
+    if (i > 0 && p[0] - points[i - 1][0] > gap) out.push([]);
     out[out.length - 1].push(p);
     return out;
   }, [[]]);
+};
 
 /** One or two series over time, filled below; the newest at the right; broken where no readings were taken. */
 export const AreaChart = ({
@@ -105,17 +113,20 @@ export const SignalBars = ({ dbm }: { dbm?: number }) => {
   );
 };
 
-/** A card holding a chart: its title, what each colour is, and the time it spans. */
+/** A card holding a chart: its title, what each colour is, the time it spans, and (a graph over time) its range. */
 export const ChartCard = ({
   title,
   legend = [],
   span,
+  range,
   children,
 }: {
   title: ReactNode;
   legend?: { label: ReactNode; color: string }[];
   /** When the oldest reading shown was taken. */
   span?: number;
+  /** A graph over time: the range it shows, and how to change it (every graph's). */
+  range?: { value: "day" | "month"; onChange: (range: "day" | "month") => void };
   children: ReactNode;
 }) => (
   <Box className="onc-card" p="md">
@@ -137,6 +148,17 @@ export const ChartCard = ({
             {spanWords(Date.now() - span)}
           </Text>
         )}
+        {range && (
+          <SegmentedControl
+            size="xs"
+            value={range.value}
+            onChange={(v) => range.onChange(v === "month" ? "month" : "day")}
+            data={[
+              { value: "day", label: "Day" },
+              { value: "month", label: "30 days" },
+            ]}
+          />
+        )}
       </Group>
     </Group>
     {children}
@@ -144,7 +166,13 @@ export const ChartCard = ({
 );
 
 const spanWords = (ms: number) =>
-  ms < 90_000 ? "last minute" : ms < 90 * 60_000 ? `last ${Math.round(ms / 60_000)} min` : `last ${Math.round(ms / 3_600_000)} h`;
+  ms < 90_000
+    ? "last minute"
+    : ms < 90 * 60_000
+      ? `last ${Math.round(ms / 60_000)} min`
+      : ms < 48 * 3_600_000
+        ? `last ${Math.round(ms / 3_600_000)} h`
+        : `last ${Math.round(ms / 86_400_000)} days`;
 
 /** A headline number: what, how much, a line under it, and a trend or anything else. */
 export const Tile = ({

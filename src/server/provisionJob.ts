@@ -25,7 +25,7 @@ import { appliedExits, appliedWithProblemsExit } from "../apply/outcome";
 import { holderOf, LockFiles, releaseLock, takeLock } from "../lock";
 import { Platform } from "../platform";
 import { canonical } from "../json";
-import { read, stateLayout, StoreFiles, StoreKey, tryWrite, write } from "../store";
+import { keepStatePrivate, read, stateLayout, StoreFiles, StoreKey, tryWrite, write } from "../store";
 
 type JobFiles = StoreFiles & LockFiles & Pick<Platform, "commandLineOf">;
 
@@ -205,8 +205,8 @@ export const startProvision = async ({
   now: () => number;
 }) => {
   const paths = jobPaths(intentPath);
-  // Owner-only when made here: it holds snapshots of the intent.
-  files.makeDir(paths.dir);
+  // Owner-only: it holds snapshots of the intent.
+  keepStatePrivate(files, intentPath);
   const runId = `${now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   if (!(await takeLock(files, paths.lock, runId, (holder, since) => holderGone(files, paths.dir, holder, since, now), now))) {
     return busy;

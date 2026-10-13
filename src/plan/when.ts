@@ -14,6 +14,7 @@ export type Fact =
   | "device.ipaddr"
   | "device.model_id"
   | "device.version"
+  | "device.target"
   | "device.sw_config"
   | `device.wifi_${RadioBand}`
   | `device.mesh_${RadioBand}`;
@@ -37,6 +38,7 @@ const builtInFacts: Fact[] = [
   "device.ipaddr",
   "device.model_id",
   "device.version",
+  "device.target",
   ...radioBands.map((band): Fact => `device.wifi_${band}`),
   ...radioBands.map((band): Fact => `device.mesh_${band}`),
 ];

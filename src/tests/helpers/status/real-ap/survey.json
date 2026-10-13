@@ -1,0 +1,1817 @@
+[
+ {
+  "ifname": "phy0-ap0",
+  "bssid": "02:00:5e:00:00:01",
+  "scan": {
+   "results": [
+    {
+     "ssid": "ssid-3",
+     "bssid": "02:00:5e:00:00:24",
+     "mode": "Master",
+     "band": 2,
+     "channel": 11,
+     "mhz": 2462,
+     "signal": -74,
+     "quality": 36,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 11,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 2040
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       1,
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-4",
+     "bssid": "02:00:5e:00:00:1e",
+     "mode": "Master",
+     "band": 2,
+     "channel": 11,
+     "mhz": 2462,
+     "signal": -69,
+     "quality": 41,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 11,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 20
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "bssid": "02:00:5e:00:00:25",
+     "mode": "Master",
+     "band": 2,
+     "channel": 11,
+     "mhz": 2462,
+     "signal": -69,
+     "quality": 41,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 11,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 20
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-5",
+     "bssid": "02:00:5e:00:00:26",
+     "mode": "Master",
+     "band": 2,
+     "channel": 1,
+     "mhz": 2412,
+     "signal": -87,
+     "quality": 23,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 1,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 20
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2,
+       3
+      ],
+      "authentication": [
+       "psk",
+       "sae"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-6",
+     "bssid": "02:00:5e:00:00:27",
+     "mode": "Master",
+     "band": 2,
+     "channel": 1,
+     "mhz": 2412,
+     "signal": -85,
+     "quality": 25,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 1,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 20
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2,
+       3
+      ],
+      "authentication": [
+       "psk",
+       "sae"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-7",
+     "bssid": "02:00:5e:00:00:28",
+     "mode": "Master",
+     "band": 2,
+     "channel": 1,
+     "mhz": 2412,
+     "signal": -86,
+     "quality": 24,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 1,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 2040
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-8",
+     "bssid": "02:00:5e:00:00:29",
+     "mode": "Master",
+     "band": 2,
+     "channel": 1,
+     "mhz": 2412,
+     "signal": -93,
+     "quality": 17,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 1,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 2040
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2,
+       3
+      ],
+      "authentication": [
+       "psk",
+       "sae"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-8",
+     "bssid": "02:00:5e:00:00:2a",
+     "mode": "Master",
+     "band": 2,
+     "channel": 1,
+     "mhz": 2412,
+     "signal": -78,
+     "quality": 32,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 1,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 20
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2,
+       3
+      ],
+      "authentication": [
+       "psk",
+       "sae"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-9",
+     "bssid": "02:00:5e:00:00:2b",
+     "mode": "Master",
+     "band": 2,
+     "channel": 1,
+     "mhz": 2412,
+     "signal": -94,
+     "quality": 16,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 1,
+      "secondary_channel_offset": "above",
+      "channel_width": 20
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "tkip",
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-10",
+     "bssid": "02:00:5e:00:00:2c",
+     "mode": "Master",
+     "band": 2,
+     "channel": 6,
+     "mhz": 2437,
+     "signal": -70,
+     "quality": 40,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 6,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 20
+     },
+     "vht_operation": {
+      "channel_width": 40,
+      "center_freq_1": 6,
+      "center_freq_2": 0
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    }
+   ]
+  },
+  "survey": {
+   "results": [
+    {
+     "mhz": 2412,
+     "noise": 165,
+     "active_time": 116,
+     "busy_time": 44,
+     "busy_time_ext": 0,
+     "rx_time": 44,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2417,
+     "noise": 165,
+     "active_time": 120,
+     "busy_time": 24,
+     "busy_time_ext": 0,
+     "rx_time": 24,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2422,
+     "noise": 166,
+     "active_time": 120,
+     "busy_time": 3,
+     "busy_time_ext": 0,
+     "rx_time": 3,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2427,
+     "noise": 165,
+     "active_time": 120,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2432,
+     "noise": 165,
+     "active_time": 120,
+     "busy_time": 1,
+     "busy_time_ext": 0,
+     "rx_time": 1,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2437,
+     "noise": 165,
+     "active_time": 120,
+     "busy_time": 5,
+     "busy_time_ext": 0,
+     "rx_time": 5,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2442,
+     "noise": 164,
+     "active_time": 119,
+     "busy_time": 12,
+     "busy_time_ext": 0,
+     "rx_time": 12,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2447,
+     "noise": 166,
+     "active_time": 120,
+     "busy_time": 2,
+     "busy_time_ext": 0,
+     "rx_time": 2,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2452,
+     "noise": 165,
+     "active_time": 120,
+     "busy_time": 8,
+     "busy_time_ext": 0,
+     "rx_time": 8,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2457,
+     "noise": 165,
+     "active_time": 120,
+     "busy_time": 5,
+     "busy_time_ext": 0,
+     "rx_time": 5,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2462,
+     "noise": 167,
+     "active_time": 59053605,
+     "busy_time": 18195483335252724,
+     "busy_time_ext": 0,
+     "rx_time": 18195483333673944,
+     "tx_time": 1503130
+    },
+    {
+     "mhz": 2467,
+     "noise": 165,
+     "active_time": 129,
+     "busy_time": 9,
+     "busy_time_ext": 0,
+     "rx_time": 9,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2472,
+     "noise": 180,
+     "active_time": 160,
+     "busy_time": 5,
+     "busy_time_ext": 0,
+     "rx_time": 1,
+     "tx_time": 0
+    }
+   ]
+  }
+ },
+ {
+  "ifname": "phy0-ap1",
+  "bssid": "02:00:5e:00:00:09",
+  "scan": {
+   "results": [
+    {
+     "ssid": "ssid-3",
+     "bssid": "02:00:5e:00:00:24",
+     "mode": "Master",
+     "band": 2,
+     "channel": 11,
+     "mhz": 2462,
+     "signal": -74,
+     "quality": 36,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 11,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 2040
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       1,
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-4",
+     "bssid": "02:00:5e:00:00:1e",
+     "mode": "Master",
+     "band": 2,
+     "channel": 11,
+     "mhz": 2462,
+     "signal": -69,
+     "quality": 41,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 11,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 20
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "bssid": "02:00:5e:00:00:25",
+     "mode": "Master",
+     "band": 2,
+     "channel": 11,
+     "mhz": 2462,
+     "signal": -69,
+     "quality": 41,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 11,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 20
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-5",
+     "bssid": "02:00:5e:00:00:26",
+     "mode": "Master",
+     "band": 2,
+     "channel": 1,
+     "mhz": 2412,
+     "signal": -87,
+     "quality": 23,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 1,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 20
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2,
+       3
+      ],
+      "authentication": [
+       "psk",
+       "sae"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-6",
+     "bssid": "02:00:5e:00:00:27",
+     "mode": "Master",
+     "band": 2,
+     "channel": 1,
+     "mhz": 2412,
+     "signal": -85,
+     "quality": 25,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 1,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 20
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2,
+       3
+      ],
+      "authentication": [
+       "psk",
+       "sae"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-7",
+     "bssid": "02:00:5e:00:00:28",
+     "mode": "Master",
+     "band": 2,
+     "channel": 1,
+     "mhz": 2412,
+     "signal": -86,
+     "quality": 24,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 1,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 2040
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-8",
+     "bssid": "02:00:5e:00:00:29",
+     "mode": "Master",
+     "band": 2,
+     "channel": 1,
+     "mhz": 2412,
+     "signal": -94,
+     "quality": 16,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 1,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 2040
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2,
+       3
+      ],
+      "authentication": [
+       "psk",
+       "sae"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-8",
+     "bssid": "02:00:5e:00:00:2a",
+     "mode": "Master",
+     "band": 2,
+     "channel": 1,
+     "mhz": 2412,
+     "signal": -79,
+     "quality": 31,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 1,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 20
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2,
+       3
+      ],
+      "authentication": [
+       "psk",
+       "sae"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-9",
+     "bssid": "02:00:5e:00:00:2b",
+     "mode": "Master",
+     "band": 2,
+     "channel": 1,
+     "mhz": 2412,
+     "signal": -94,
+     "quality": 16,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 1,
+      "secondary_channel_offset": "above",
+      "channel_width": 20
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "tkip",
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-10",
+     "bssid": "02:00:5e:00:00:2c",
+     "mode": "Master",
+     "band": 2,
+     "channel": 6,
+     "mhz": 2437,
+     "signal": -70,
+     "quality": 40,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 6,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 20
+     },
+     "vht_operation": {
+      "channel_width": 40,
+      "center_freq_1": 6,
+      "center_freq_2": 0
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-11",
+     "bssid": "02:00:5e:00:00:2d",
+     "mode": "Master",
+     "band": 2,
+     "channel": 6,
+     "mhz": 2437,
+     "signal": -96,
+     "quality": 14,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 6,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 20
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-8",
+     "bssid": "02:00:5e:00:00:2e",
+     "mode": "Master",
+     "band": 2,
+     "channel": 6,
+     "mhz": 2437,
+     "signal": -99,
+     "quality": 11,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 6,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 20
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2,
+       3
+      ],
+      "authentication": [
+       "psk",
+       "sae"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    }
+   ]
+  },
+  "survey": {
+   "results": [
+    {
+     "mhz": 2412,
+     "noise": 165,
+     "active_time": 121,
+     "busy_time": 45,
+     "busy_time_ext": 0,
+     "rx_time": 44,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2417,
+     "noise": 166,
+     "active_time": 119,
+     "busy_time": 45,
+     "busy_time_ext": 0,
+     "rx_time": 44,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2422,
+     "noise": 165,
+     "active_time": 120,
+     "busy_time": 1,
+     "busy_time_ext": 0,
+     "rx_time": 1,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2427,
+     "noise": 165,
+     "active_time": 120,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2432,
+     "noise": 165,
+     "active_time": 119,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2437,
+     "noise": 165,
+     "active_time": 120,
+     "busy_time": 7,
+     "busy_time_ext": 0,
+     "rx_time": 7,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2442,
+     "noise": 165,
+     "active_time": 120,
+     "busy_time": 13,
+     "busy_time_ext": 0,
+     "rx_time": 12,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2447,
+     "noise": 166,
+     "active_time": 120,
+     "busy_time": 1,
+     "busy_time_ext": 0,
+     "rx_time": 1,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2452,
+     "noise": 165,
+     "active_time": 120,
+     "busy_time": 8,
+     "busy_time_ext": 0,
+     "rx_time": 8,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2457,
+     "noise": 166,
+     "active_time": 119,
+     "busy_time": 8,
+     "busy_time_ext": 0,
+     "rx_time": 8,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2462,
+     "noise": 166,
+     "active_time": 59053753,
+     "busy_time": 18195483335252730,
+     "busy_time_ext": 0,
+     "rx_time": 18195483333673948,
+     "tx_time": 1503131
+    },
+    {
+     "mhz": 2467,
+     "noise": 165,
+     "active_time": 119,
+     "busy_time": 5,
+     "busy_time_ext": 0,
+     "rx_time": 4,
+     "tx_time": 0
+    },
+    {
+     "mhz": 2472,
+     "noise": 181,
+     "active_time": 160,
+     "busy_time": 11,
+     "busy_time_ext": 0,
+     "rx_time": 3,
+     "tx_time": 0
+    }
+   ]
+  }
+ },
+ {
+  "ifname": "phy1-ap0",
+  "bssid": "02:00:5e:00:00:11",
+  "scan": {
+   "results": [
+    {
+     "ssid": "ssid-3",
+     "bssid": "02:00:5e:00:00:2f",
+     "mode": "Master",
+     "band": 5,
+     "channel": 44,
+     "mhz": 5220,
+     "signal": -81,
+     "quality": 29,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 44,
+      "secondary_channel_offset": "above",
+      "channel_width": 2040
+     },
+     "vht_operation": {
+      "channel_width": 80,
+      "center_freq_1": 42,
+      "center_freq_2": 0
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       1,
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "tkip",
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-6",
+     "bssid": "02:00:5e:00:00:30",
+     "mode": "Master",
+     "band": 5,
+     "channel": 108,
+     "mhz": 5540,
+     "signal": -95,
+     "quality": 15,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 108,
+      "secondary_channel_offset": "above",
+      "channel_width": 20
+     },
+     "vht_operation": {
+      "channel_width": 80,
+      "center_freq_1": 106,
+      "center_freq_2": 114
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2,
+       3
+      ],
+      "authentication": [
+       "psk",
+       "sae"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-5",
+     "bssid": "02:00:5e:00:00:31",
+     "mode": "Master",
+     "band": 5,
+     "channel": 108,
+     "mhz": 5540,
+     "signal": -96,
+     "quality": 14,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 108,
+      "secondary_channel_offset": "above",
+      "channel_width": 2040
+     },
+     "vht_operation": {
+      "channel_width": 80,
+      "center_freq_1": 106,
+      "center_freq_2": 114
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2,
+       3
+      ],
+      "authentication": [
+       "psk",
+       "sae"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-4",
+     "bssid": "02:00:5e:00:00:32",
+     "mode": "Master",
+     "band": 5,
+     "channel": 124,
+     "mhz": 5620,
+     "signal": -74,
+     "quality": 36,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 124,
+      "secondary_channel_offset": "above",
+      "channel_width": 2040
+     },
+     "vht_operation": {
+      "channel_width": 80,
+      "center_freq_1": 122,
+      "center_freq_2": 114
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "bssid": "02:00:5e:00:00:33",
+     "mode": "Master",
+     "band": 5,
+     "channel": 124,
+     "mhz": 5620,
+     "signal": -73,
+     "quality": 37,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 124,
+      "secondary_channel_offset": "above",
+      "channel_width": 2040
+     },
+     "vht_operation": {
+      "channel_width": 80,
+      "center_freq_1": 122,
+      "center_freq_2": 114
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    }
+   ]
+  },
+  "survey": {
+   "results": [
+    {
+     "mhz": 5180,
+     "noise": 164,
+     "active_time": 59048099,
+     "busy_time": 11171887054526208,
+     "busy_time_ext": 0,
+     "rx_time": 11171876970178772,
+     "tx_time": 10084139882
+    },
+    {
+     "mhz": 5200,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 6,
+     "busy_time_ext": 0,
+     "rx_time": 6,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5220,
+     "noise": 165,
+     "active_time": 115,
+     "busy_time": 7,
+     "busy_time_ext": 0,
+     "rx_time": 7,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5240,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 3,
+     "busy_time_ext": 0,
+     "rx_time": 2,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5260,
+     "noise": 165,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5280,
+     "noise": 165,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5300,
+     "noise": 165,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5320,
+     "noise": 165,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5500,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5520,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5540,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 1,
+     "busy_time_ext": 0,
+     "rx_time": 1,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5560,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5580,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5600,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5620,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 1,
+     "busy_time_ext": 0,
+     "rx_time": 1,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5640,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5660,
+     "noise": 164,
+     "active_time": 145,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5680,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5700,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5720,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5745,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5765,
+     "noise": 164,
+     "active_time": 116,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5785,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5805,
+     "noise": 164,
+     "active_time": 125,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5825,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5845,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5865,
+     "noise": 164,
+     "active_time": 155,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    }
+   ]
+  }
+ },
+ {
+  "ifname": "phy1-ap1",
+  "bssid": "02:00:5e:00:00:16",
+  "scan": {
+   "results": [
+    {
+     "ssid": "ssid-3",
+     "bssid": "02:00:5e:00:00:2f",
+     "mode": "Master",
+     "band": 5,
+     "channel": 44,
+     "mhz": 5220,
+     "signal": -81,
+     "quality": 29,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 44,
+      "secondary_channel_offset": "above",
+      "channel_width": 2040
+     },
+     "vht_operation": {
+      "channel_width": 80,
+      "center_freq_1": 42,
+      "center_freq_2": 0
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       1,
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "tkip",
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-6",
+     "bssid": "02:00:5e:00:00:30",
+     "mode": "Master",
+     "band": 5,
+     "channel": 108,
+     "mhz": 5540,
+     "signal": -95,
+     "quality": 15,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 108,
+      "secondary_channel_offset": "above",
+      "channel_width": 20
+     },
+     "vht_operation": {
+      "channel_width": 80,
+      "center_freq_1": 106,
+      "center_freq_2": 114
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2,
+       3
+      ],
+      "authentication": [
+       "psk",
+       "sae"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-5",
+     "bssid": "02:00:5e:00:00:31",
+     "mode": "Master",
+     "band": 5,
+     "channel": 108,
+     "mhz": 5540,
+     "signal": -95,
+     "quality": 15,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 108,
+      "secondary_channel_offset": "above",
+      "channel_width": 2040
+     },
+     "vht_operation": {
+      "channel_width": 80,
+      "center_freq_1": 106,
+      "center_freq_2": 114
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2,
+       3
+      ],
+      "authentication": [
+       "psk",
+       "sae"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-4",
+     "bssid": "02:00:5e:00:00:32",
+     "mode": "Master",
+     "band": 5,
+     "channel": 124,
+     "mhz": 5620,
+     "signal": -74,
+     "quality": 36,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 124,
+      "secondary_channel_offset": "above",
+      "channel_width": 2040
+     },
+     "vht_operation": {
+      "channel_width": 80,
+      "center_freq_1": 122,
+      "center_freq_2": 114
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "bssid": "02:00:5e:00:00:33",
+     "mode": "Master",
+     "band": 5,
+     "channel": 124,
+     "mhz": 5620,
+     "signal": -73,
+     "quality": 37,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 124,
+      "secondary_channel_offset": "above",
+      "channel_width": 2040
+     },
+     "vht_operation": {
+      "channel_width": 80,
+      "center_freq_1": 122,
+      "center_freq_2": 114
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-12",
+     "bssid": "02:00:5e:00:00:34",
+     "mode": "Master",
+     "band": 5,
+     "channel": 44,
+     "mhz": 5220,
+     "signal": -84,
+     "quality": 26,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 44,
+      "secondary_channel_offset": "no secondary",
+      "channel_width": 20
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    },
+    {
+     "ssid": "ssid-7",
+     "bssid": "02:00:5e:00:00:35",
+     "mode": "Master",
+     "band": 5,
+     "channel": 44,
+     "mhz": 5220,
+     "signal": -98,
+     "quality": 12,
+     "quality_max": 70,
+     "ht_operation": {
+      "primary_channel": 44,
+      "secondary_channel_offset": "above",
+      "channel_width": 2040
+     },
+     "vht_operation": {
+      "channel_width": 80,
+      "center_freq_1": 42,
+      "center_freq_2": 50
+     },
+     "encryption": {
+      "enabled": true,
+      "wpa": [
+       2
+      ],
+      "authentication": [
+       "psk"
+      ],
+      "ciphers": [
+       "ccmp"
+      ]
+     }
+    }
+   ]
+  },
+  "survey": {
+   "results": [
+    {
+     "mhz": 5180,
+     "noise": 164,
+     "active_time": 59048249,
+     "busy_time": 11171887054526236,
+     "busy_time_ext": 0,
+     "rx_time": 11171876970178796,
+     "tx_time": 10084139884
+    },
+    {
+     "mhz": 5200,
+     "noise": 165,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5220,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 2,
+     "busy_time_ext": 0,
+     "rx_time": 2,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5240,
+     "noise": 165,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5260,
+     "noise": 165,
+     "active_time": 127,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5280,
+     "noise": 165,
+     "active_time": 114,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5300,
+     "noise": 165,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5320,
+     "noise": 165,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5500,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5520,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5540,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 1,
+     "busy_time_ext": 0,
+     "rx_time": 1,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5560,
+     "noise": 164,
+     "active_time": 197,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5580,
+     "noise": 164,
+     "active_time": 114,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5600,
+     "noise": 164,
+     "active_time": 116,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5620,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 1,
+     "busy_time_ext": 0,
+     "rx_time": 1,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5640,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5660,
+     "noise": 164,
+     "active_time": 125,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5680,
+     "noise": 164,
+     "active_time": 116,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5700,
+     "noise": 164,
+     "active_time": 114,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5720,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5745,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5765,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5785,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5805,
+     "noise": 164,
+     "active_time": 116,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5825,
+     "noise": 164,
+     "active_time": 115,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5845,
+     "noise": 164,
+     "active_time": 116,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    },
+    {
+     "mhz": 5865,
+     "noise": 164,
+     "active_time": 165,
+     "busy_time": 0,
+     "busy_time_ext": 0,
+     "rx_time": 0,
+     "tx_time": 0
+    }
+   ]
+  }
+ }
+]

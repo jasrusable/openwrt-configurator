@@ -50,6 +50,7 @@ export const printPlan = (plan: Plan) => ({
   services: plan.services.map(({ when, ...service }) => ({ ...condition(when), ...serviceToJson(service) })),
   files: plan.files.map(({ when, ...file }) => ({ ...condition(when), ...fileToJson(file) })),
   configs_to_not_reset: plan.keep.map((k) => ({ ...condition(k.when), configs: k.entries.map(keepText) })),
+  ...(plan.newConfigs?.length ? { new_configs: plan.newConfigs } : {}),
   config: Object.fromEntries(
     Object.entries(orderConfigs(plan.config)).map(([config, types]) => [
       config,

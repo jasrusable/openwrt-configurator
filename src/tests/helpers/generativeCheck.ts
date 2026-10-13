@@ -8,9 +8,11 @@ import { stageRecords } from "../../getDeviceScript";
 import { getOpenWrtState } from "../../engine/getOpenWrtState";
 import { DeviceSchema } from "../../deviceSchema";
 import { compileIntent } from "../../intent/compile";
-import { Intent } from "../../intent/schema";
+import { Intent, intentSchema } from "../../intent/schema";
+import { patches } from "../../intent/patches";
 import { planOfJson } from "../../loadConfig";
 import { printPlan } from "../../lowLevel/print";
+import { withoutOrigins } from "../../plan/types";
 import { planIssues } from "../../plan/check";
 import { declaredConfigs, UciConfigs, UciSection, verifyConfigs } from "../../engine/uci";
 import { capturedBoards } from "./capturedBoards";
@@ -90,8 +92,19 @@ const fits = (intent: Intent, role: string, schema: DeviceSchema) => {
   );
 };
 
+/**
+ * Every other case, some optional fixes turned off (a decision like any
+ * other, src/intent/patches): everything must hold without them too. Here,
+ * not in the generator, so its intents (the equivalence corpus) stay as they are.
+ */
+const withSomeFixesOff = (intent: Intent, seed: number): Intent => {
+  if (seed % 2) return intent;
+  const off = patches.filter((p) => !p.required).map((p) => p.id).filter((_, i) => ((seed >> (i + 1)) & 1) === 1);
+  return intentSchema.parse({ ...intent, system: { ...intent.system, patches: { off } } });
+};
+
 export const check = (seed: number): string[] => {
-  const intent = generateIntent(seed);
+  const intent = withSomeFixesOff(generateIntent(seed), seed);
   const problems: string[] = [];
   const compiled = compileIntent(intent);
   if (JSON.stringify(compileIntent(intent)) !== JSON.stringify(compiled)) problems.push("compiling twice differs");
@@ -100,7 +113,8 @@ export const check = (seed: number): string[] => {
   // A plan printed as a hand-written config reads back, checked as one is, as the same plan.
   const read = planOfJson(printPlan(compiled));
   if (!read.ok) return [...problems, `its low-level JSON is refused: ${read.error.message.slice(0, 300)}`];
-  if (!isDeepStrictEqual(read.value.plan, compiled)) problems.push("its low-level JSON does not read back as the same plan");
+  // Origins are the compiler's notes to itself (patches' marks); a hand-written config has none.
+  if (!isDeepStrictEqual(read.value.plan, withoutOrigins(compiled))) problems.push("its low-level JSON does not read back as the same plan");
   for (const deviceConfig of compiled.devices) {
     const role = String(deviceConfig.tags?.role);
     for (const { name, schema } of boards) {

@@ -143,10 +143,19 @@ start_service() {
                 ...repeaters.map((d) =>
                   section({ name: "rescue", when: onDevice(d.name) }, { proto: "static", ipaddr: rescueAddress(d.name), netmask: "255.255.0.0" })
                 ),
+                // Over cables: batman on the cables' own VLAN. On DSA the
+                // bridge's VLAN device; on a swconfig switch the CPU's, as the
+                // switch carries the VLAN to it tagged. Old switches rarely
+                // pass 1532-byte frames, so there batman keeps to 1500 and
+                // splits its packets (large frames are DSA's only).
                 ...(intent.wifi.mesh.over_cable
                   ? [
                       section(
-                        { name: "batwired", when: when.all(node, onDsa) },
+                        {
+                          name: "batwired",
+                          when: node,
+                          overrides: [{ when: onSwConfig, options: { device: placeholder.cpuPort(meshWiredVlan) } }],
+                        },
                         { proto: "batadv_hardif", master: "bat0", device: `br-lan.${meshWiredVlan}` }
                       ),
                     ]
@@ -167,7 +176,6 @@ start_service() {
               // Over cables too: a VLAN of its own on every device's ports
               // (switched through those that are not nodes, the router
               // without Wi-Fi included), batman on it where there is one.
-              // DSA nodes only: on a swconfig switch it is carried, not used.
               ...(intent.wifi.mesh.over_cable
                 ? {
                     "bridge-vlan": [
@@ -180,7 +188,7 @@ start_service() {
                     switch_vlan: [
                       section(
                         { name: "vlan_mesh", when: onSwConfig },
-                        { device: "switch0", vlan: meshWiredVlan, ports: placeholder.freePortsTagged }
+                        { device: placeholder.switchName, vlan: meshWiredVlan, ports: placeholder.freePortsTagged }
                       ),
                     ],
                   }

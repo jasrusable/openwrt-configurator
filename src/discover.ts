@@ -15,6 +15,8 @@ import { DeviceSchema } from "./deviceSchema";
 import { deviceSchemaOf, deviceSchemaProbes } from "./getDeviceSchema";
 import { Intent } from "./intent/schema";
 import { namePattern } from "./intent/validators";
+import { isIpAddress } from "./intent/addresses";
+import { fingerprintOf } from "./sshFingerprint";
 import { knownKey, Located, locateEach, macsProbe, Neighbour } from "./locate";
 import { PlanDevice } from "./plan/types";
 import { Platform } from "./platform";
@@ -148,6 +150,8 @@ export type Inspected = {
   /** Its hostname now: "OpenWrt" on a stock device. */
   hostname: string;
   hostKey?: { type: string; key: string };
+  /** The host key's fingerprint, as the device's own console prints it: to compare before trusting it. */
+  fingerprint?: string;
   /** It let root in without this app's key: OpenWrt's default, open to anyone on the network. */
   openLogin: boolean;
   suggested: { name: string; role: "router" | "access-point" };
@@ -202,6 +206,7 @@ export const inspect = async ({
         const read = await runProbes(session, { ...deviceSchemaProbes, hostname: hostnameProbe, macs: macsProbe });
         const schema = deviceSchemaOf(address, read);
         const key = knownKey(platform, options.knownHostsFile!, address);
+        const fingerprint = key && fingerprintOf(key.key);
         const role = suggestRole(schema);
         return ok({
           address,
@@ -209,6 +214,7 @@ export const inspect = async ({
           macs: read.macs,
           hostname: read.hostname,
           ...(key ? { hostKey: { type: key.type, key: key.key } } : {}),
+          ...(fingerprint ? { fingerprint } : {}),
           openLogin: !!tries[i]?.password,
           suggested: { role, name: suggestName(read.hostname, role, intent.hardware.map((d) => d.name)) },
         });
@@ -222,8 +228,6 @@ export const inspect = async ({
   return fail("unreachable", `Could not log in to ${address}: ${failures.join("; ")}`);
 };
 
-/** An address as the page may give one: an IP address or a name, nothing a shell would read. */
-const addressPattern = /^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$/;
 
 /** The read of a device picked to add, kept here so adopting uses it and nothing the browser sends. */
 export const inspectedKey = (intentPath: string, address: string): StoreKey<Inspected> => ({
@@ -242,7 +246,9 @@ export const inspectAt = async ({
   platform: Platform;
   address: string;
 }): Promise<Result<Inspected, Problem>> => {
-  if (!addressPattern.test(address)) return fail("invalid", "Give an address, like 10.0.0.143 or ap.lan.");
+  // An address, never a name: any device on the network can claim a name in
+  // DHCP, and this read is the moment a device is trusted.
+  if (!isIpAddress(address)) return fail("invalid", "Give its IP address, like 10.0.0.143: a name can be claimed by any device on the network.");
   const intent = await savedIntent(intentPath, platform);
   if (!intent.ok) return intent;
   const inspected = await inspect({ address, intent: intent.value, platform });
@@ -273,7 +279,7 @@ export const adopt = async ({
   name: string;
   now?: () => number;
 }): Promise<Result<{ ok: true }, Problem>> => {
-  if (!addressPattern.test(address)) return fail("invalid", "Give an address, like 10.0.0.143 or ap.lan.");
+  if (!isIpAddress(address)) return fail("invalid", "Give its IP address, like 10.0.0.143.");
   if (!namePattern.test(name) || name.length > 31) return fail("invalid", "A name like ap-2.");
   const intent = await savedIntent(intentPath, platform);
   if (!intent.ok) return intent;

@@ -1,6 +1,7 @@
 // What a radio may be set to, the same for the schema, the compiler and the
 // UI's choices: each band's channels, the widths, and the mesh's own.
 import { where } from "./places";
+import { regdb } from "./wifi/regdb";
 import type { Intent } from "./schema";
 
 export const bands = ["2g", "5g", "6g"] as const;
@@ -76,3 +77,26 @@ export const strandedReason = (intent: Intent, wifi: WifiSettings) => {
   const stranded = intent.wifi.networks.find((w) => broadcastBands(intent.wifi, w).length && !broadcastBands(wifi, w).length);
   return stranded && `“${stranded.ssid || "Unnamed"}” would be broadcast nowhere: give it another band first (${where("ssids")}).`;
 };
+
+/** A channel's centre frequency (MHz), as OpenWrt's wifi-detect counts them. */
+const centreOf = (band: Band, channel: number) =>
+  band === "2g" ? (channel === 14 ? 2484 : 2407 + 5 * channel) : band === "5g" ? 5000 + 5 * channel : 5950 + 5 * channel;
+
+/**
+ * Whether an access point may use a channel (its 20 MHz) in a country, by
+ * wireless-regdb (regdb.ts, generated): the kernel holds hostapd to the same
+ * table, so a channel outside it leaves the radio down. A country the table
+ * lacks: no limit known.
+ */
+export const channelLegal = (country: string, band: Band, channel: number) => {
+  const ranges = regdb[country];
+  if (!ranges) return true;
+  const centre = centreOf(band, channel);
+  return ranges.some(([start, end]) => start <= centre - 10 && centre + 10 <= end);
+};
+
+/** Why a channel cannot be used in the intent's country, if it cannot. */
+export const illegalChannelReason = (country: string, band: Band, channel: number | "auto" | undefined) =>
+  typeof channel === "number" && !channelLegal(country, band, channel)
+    ? `Channel ${channel} (${bandLabels[band]}) is not allowed in ${country}: the radio would not start.`
+    : undefined;

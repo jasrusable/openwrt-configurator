@@ -7,6 +7,7 @@ import { execFile, spawnSync } from "child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "fs";
 import { join } from "path";
 import { AgentRecord, decodeRecords, encodeRecords } from "../../agent/records";
+import { stateOf } from "../helpers/fixtures";
 import { agentScript, bootScript } from "../../agent/script";
 import { tempDir } from "../helpers/tempDir";
 
@@ -123,6 +124,19 @@ test("armed, then disarmed and done: the config stays and nothing is left behind
   t.notRegex(d.log(), /reload_config|^reboot/m);
 });
 
+test("a wedged system log (logger never returns) cannot stall a rollback", async (t) => {
+  const d = device();
+  // A logd whose socket is full blocks every writer, as this logger does.
+  stub(d.bin, "logger", `echo "logger $*" >> "${d.base}/log"; exec sleep 30`);
+  await d.run("begin");
+  t.true((await d.arm(["restore /etc/old"], "--timeout", "1", "--mode", "reload", "--recover", "1")).stdout.includes("ONC_ARMED"));
+  writeFileSync(`${d.root}/etc/old`, "changed\n");
+  const started = Date.now();
+  await until(() => !existsSync(d.agent), 30_000);
+  t.is(readFileSync(`${d.root}/etc/old`, "utf8"), "before\n", "restored all the same");
+  t.true(Date.now() - started < 20_000, `took ${Date.now() - started} ms`);
+});
+
 test("not confirmed in time: config, files, packages, boot links, services and staged changes restored, in order", async (t) => {
   const d = device();
   writeFileSync(`${d.state}/running/svc`, "");
@@ -227,8 +241,22 @@ test("the commit's marker: there only once finalise has committed", async (t) =>
   t.true((await d.run("commit-finished")).includes("ONC_COMMITTED"));
 });
 
+test("every verb leaves the SSH session's cgroup for the agent's own, or the root one, so procd can always restart dropbear", async (t) => {
+  const d = device();
+  const cg = `${d.root}/sys/fs/cgroup`;
+  mkdirSync(cg, { recursive: true });
+  writeFileSync(`${cg}/cgroup.procs`, "");
+  await d.run("begin");
+  t.regex(readFileSync(`${cg}/onc/cgroup.procs`, "utf8"), /^\d+\n$/, "into its own cgroup");
+  // Where its own cannot be made, the root one.
+  rmSync(`${cg}/onc`, { recursive: true });
+  writeFileSync(`${cg}/onc`, "not a directory");
+  await d.run("begin");
+  t.regex(readFileSync(`${cg}/cgroup.procs`, "utf8"), /^\d+\n$/);
+});
+
 test("the agent is one fixed script: no run's values in it", async (t) => {
-  t.notRegex(agentScript, /\$\{(?!ONC_ROOT|ONC_TMP|AGENT|RUN|line|rest|h[#%]|v%|w%|n1?\}|f\})[a-z]/i, "only its own shell variables");
+  t.notRegex(agentScript, /\$\{(?!ONC_ROOT|ONC_TMP|AGENT|RUN|line|rest|h[#%]|c#|v%|w%|n1?\}|f\})[a-z]/i, "only its own shell variables");
   t.false(agentScript.includes("\nONC_AGENT_EOF\n"));
 });
 
@@ -368,6 +396,21 @@ test("stage: one batch, a value spanning lines on its own, stale files gone, fil
   t.false(existsSync(`${d.root}${path}.onc-new`));
 });
 
+test("stage: a run_after that leaves a process running never holds the call open", async (t) => {
+  // Over SSH a call ends only once its streams close: a daemon a run_after
+  // starts must not keep them (seen in the rig: a stage that never answered).
+  // execFile, like dropbear, waits for the streams too.
+  const d = device();
+  await d.run("begin");
+  const started = Date.now();
+  const out = await d.steps("stage", [
+    { kind: "write", path: "/etc/daemon.conf", mode: "0644", content: "x\n", runAfter: "(/bin/sleep 8; echo late >&2) &\necho started" },
+  ]);
+  t.regex(out.stdout, /^ONC_OK$/m, out.stderr);
+  t.regex(out.stderr, /started/, "its output still passed on");
+  t.true(Date.now() - started < 5000, `took ${Date.now() - started} ms`);
+});
+
 test("stage: a batch uci complains about fails the step, by name, with uci's words", async (t) => {
   const d = device();
   await d.run("begin");
@@ -422,6 +465,44 @@ test("services: enabled and started, or stopped and disabled; a missing one skip
   t.false(existsSync(`${d.state}/running/other`));
 });
 
+test("a service with no reload trigger for its config is restarted after a finalise that changed it, and only then", async (t) => {
+  const d = device();
+  await d.run("begin");
+  // md5sum as reload_config uses it, made deterministic: "h<bytes>".
+  stub(join(d.base, "bin"), "md5sum", `printf 'h%s  -\\n' "$(cat | wc -c | tr -d ' ')"`);
+  writeFileSync(`${d.root}/etc/config/dhcp`, "");
+  // The last reload's md5s: network as it is now (uci show says nothing here), dhcp otherwise.
+  mkdirSync(`${d.root}/var/run`, { recursive: true });
+  writeFileSync(`${d.root}/var/run/config.md5`, "h0  /var/run/config.check/network\nhzz  /var/run/config.check/dhcp\n");
+  t.regex((await d.steps("finalise", [{ kind: "commit", config: "network" }, { kind: "commit", config: "dhcp" }])).stdout, /^ONC_OK$/m);
+  const out = await d.steps("services", [
+    { kind: "restart", name: "svc", config: "dhcp" },
+    { kind: "restart", name: "other", config: "network" },
+  ]);
+  t.regex(out.stdout, /^ONC_OK$/m, out.stderr);
+  const log = lines(d.log());
+  t.true(log.includes("svc restart"), "its config changed: restarted");
+  t.false(log.includes("other restart"), "its config unchanged: left alone");
+});
+
+test("services: a restart with no config is unconditional (a package swap the plan knew of)", async (t) => {
+  const d = device();
+  await d.run("begin");
+  stub(`${d.root}/etc/init.d`, "wpad", `echo "wpad $*" >> "${d.base}/log"`);
+  const out = await d.steps("services", [{ kind: "restart", name: "wpad" }]);
+  t.regex(out.stdout, /^ONC_OK$/m, out.stderr);
+  t.true(lines(d.log()).includes("wpad restart"));
+});
+
+test("services records: a service restarted on a package swap, when the run changes a matching package", (t) => {
+  const { servicesRecords } = require("../../getDeviceScript") as typeof import("../../getDeviceScript");
+  const state = stateOf({ services: [{ name: "wpad", running: false, restartOnPackages: ["wpad*"] }, { name: "usteer", running: true }] });
+  t.deepEqual(servicesRecords(state, {}, ["usteer"]).filter((r) => r.kind === "restart"), [], "no wpad package changed");
+  const records = servicesRecords(state, {}, ["wpad-basic-mbedtls", "wpad-mbedtls"]);
+  t.deepEqual(records.filter((r) => r.kind === "restart"), [{ kind: "restart", name: "wpad" }]);
+  t.deepEqual(decodeRecords(encodeRecords(records)), records, "round-trips without a config");
+});
+
 test("hooks: in order, the one that fails named by its number, nothing after it run", async (t) => {
   const d = device();
   await d.run("begin");
@@ -456,4 +537,12 @@ test("revert: every staged change, whoever made it, for configs that are there",
   t.regex(await d.run("revert"), /^ONC_OK$/m);
   t.regex(d.log(), /^uci revert network$/m);
   t.notRegex(d.log(), /uci revert gone/);
+});
+
+test("services records: a running service with no trigger for its own config is restarted if it changed; one procd does not know is not", (t) => {
+  const { servicesRecords } = require("../../getDeviceScript") as typeof import("../../getDeviceScript");
+  const state = stateOf({ services: [{ name: "dnsmasq", running: true }, { name: "quiet", running: true }, { name: "fresh", running: true }] });
+  const records = servicesRecords(state, { dnsmasq: ["dhcp", "system"], quiet: [] });
+  t.deepEqual(records.filter((r) => r.kind === "restart"), [{ kind: "restart", name: "quiet", config: "quiet" }]);
+  t.deepEqual(decodeRecords(encodeRecords(records)), records, "the restart record round-trips");
 });

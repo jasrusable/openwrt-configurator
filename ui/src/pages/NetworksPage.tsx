@@ -106,6 +106,7 @@ const newNetwork = (
     ipv6: internetIpv6(intent),
     ...guest,
     access: { ...guest.access, fallback: true },
+    keep_dns: false,
   };
 };
 
@@ -295,6 +296,7 @@ const AccessSection = ({ index }: { index: number }) => {
             : "AirPlay, printers and Chromecasts, seen across networks."
         }
       />
+      <SwitchField name={`networks.${index}.keep_dns`} />
       <MultiSelectField
         name={`networks.${index}.access.networks`}
         options={reachable}

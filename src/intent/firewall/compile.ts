@@ -122,7 +122,12 @@ export const firewall: Feature = (intent) => {
     config: {
       firewall: {
         defaults: routerOnly(
-          sections([{ input: "REJECT", output: "ACCEPT", forward: "REJECT", synflood_protect: true, drop_invalid: true }])
+          // As stock: no drop_invalid. It came from the early LuCI-style
+          // settings (a switch, then frozen on), with no reason recorded; fw4
+          // already drops invalid packets arriving on a masqueraded zone
+          // (masq_allow_invalid 0), and the global one also cut flows an mwan3
+          // failover moved between lines.
+          sections([{ input: "REJECT", output: "ACCEPT", forward: "REJECT", synflood_protect: true }])
         ),
         zone: routerOnly([
           // Each network its own zone, named by its id. Between networks only

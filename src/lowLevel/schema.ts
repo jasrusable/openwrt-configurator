@@ -87,6 +87,7 @@ export const lowLevelSchema = z
             running: z.boolean().optional(),
             enabled: z.boolean().optional(),
             restart_after_rollback: z.boolean().optional(),
+            restart_on_packages: z.array(z.string().regex(/^[a-z0-9][a-z0-9._+-]*\*?$/, "a package name, or a prefix ending in *")).optional(),
           })
           .strict()
       )
@@ -116,6 +117,8 @@ export const lowLevelSchema = z
           .strict()
       )
       .optional(),
+    // Configs a custom package brings, which the device lacks and OpenWrt does not ship.
+    new_configs: z.array(z.string().regex(/^[A-Za-z0-9_-]+$/, "a config's name")).optional(),
     config: z.record(config),
   })
   .strict();

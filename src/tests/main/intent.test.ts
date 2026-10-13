@@ -65,7 +65,7 @@ test("on the router: WAN on the board's WAN port, everything else bridged", (t) 
       [20, ["eth0:t", "eth2:t"]],
     ]
   );
-  t.deepEqual(config.dhcp.dnsmasq[0].server, ["127.0.0.1#5053"]);
+  t.deepEqual(config.dhcp.dnsmasq[0].server, ["127.0.0.1#5053", "127.0.0.1#5054"], "the provider, then its fallback");
   t.is(wan.peerdns, false, "encrypted DNS ignores the ISP's resolvers");
   t.is(config.system.system[0].timezone, "CET-1CEST,M3.5.0,M10.5.0/3");
   t.false("wireless" in config, "the router has no radios and no Wi-Fi");
@@ -235,6 +235,10 @@ test("internet: a static address", (t) => {
   t.deepEqual(issues({ address: "203.0.113.300", gateway: "203.0.113.9" }), [
     "internet.lines.0.static.address: an IPv4 address, like 203.0.113.10",
   ]);
+  // The provider's range over one of ours: the router could not tell the sides apart.
+  t.deepEqual(issues({ address: "10.0.0.200", prefix_length: 16, gateway: "10.0.0.254" }), [
+    "internet.lines.0.static.address: the provider's range overlaps “Home” (10.0.0.0/24): give one of them another range",
+  ]);
 });
 
 test("internet: IPv6 asks for the prefix size; PPPoE gets an explicit wan6", (t) => {
@@ -362,7 +366,16 @@ test("SSIDs: security mode, hidden, off, and fast roaming", (t) => {
       (w: any) => w.ssid === intent.wifi.networks[1].ssid
     );
   };
+  // Fast roaming on a WPA2 SSID stays on: the ft-key-race patch holds it off
+  // only with WPA3 on 25.12 (patches.test.ts, wifiFixes.test.ts).
   t.like(iface(() => {}), { encryption: "psk2+ccmp", ieee80211r: true });
+  t.like(iface((w) => Object.assign(w, { security: "wpa2-wpa3", extra_passwords: undefined })), { ieee80211r: false });
+  const wpa3 = sample();
+  Object.assign(wpa3.wifi.networks[1], { security: "wpa2-wpa3", extra_passwords: undefined });
+  t.true(
+    compileIntent(intentSchema.parse(wpa3)).config.wireless["wifi-iface"].some((s) => s.options.ieee80211r === true && (s.overrides ?? []).some((o) => o.options.ieee80211r === false)),
+    "on in the plan, the patch's override beside it"
+  );
   t.is(iface((w) => (w.security = "wpa2-wpa3")).encryption, "sae-mixed");
   t.is(iface((w) => (w.security = "wpa3")).encryption, "sae");
   t.like(iface((w) => Object.assign(w, { hidden: true, enabled: false })), { hidden: true, disabled: true });
@@ -410,10 +423,12 @@ test("SSIDs: security mode, hidden, off, and fast roaming", (t) => {
     min_snr: "0",
     band_steering_interval: "0",
   });
+  // On 25.12's usteer (no aggressiveness: a request is always followed by a
+  // disconnect), Nudge's move trigger is off: the usteer-nudge-requests patch.
   t.like(roaming("nudge"), {
     aggressiveness: "1",
     roam_scan_snr: "-70",
-    roam_trigger_snr: "-75",
+    roam_trigger_snr: "0",
     roam_kick_delay: "10000",
     min_snr: "0",
   });
@@ -440,7 +455,8 @@ test("DNS: where names are looked up, rebind protection, own names, DHCP's DNS",
     return { dnsmasq: config.dhcp.dnsmasq[0], wan: iface(config, "wan"), config };
   };
   const encrypted = dns(() => {});
-  t.like(encrypted.dnsmasq, { noresolv: true, server: ["127.0.0.1#5053"], rebind_protection: true, rebind_localhost: true });
+  // The provider's proxy, then the fallback provider's, strictly in that order (dnsAndTunnels.test.ts).
+  t.like(encrypted.dnsmasq, { noresolv: true, server: ["127.0.0.1#5053", "127.0.0.1#5054"], strictorder: true, rebind_protection: true, rebind_localhost: true });
   t.is(encrypted.wan.peerdns, false);
 
   const provider = dns((i) => (i.dns.upstream = { type: "provider" }));
@@ -498,6 +514,7 @@ test("patches apply only where they say: by model, by role", (t) => {
   t.deepEqual(files("home-ap-1", "zyxel,nwa50ax-pro"), [
     "/etc/hotplug.d/net/20-aql",
     "/usr/libexec/onc/ubihealthd-config",
+    "/etc/hotplug.d/net/30-onc-eee-off",
   ]);
   t.deepEqual(
     files("home-router", "friendlyarm,nanopi-r6s", (i) => (i.internet.lines[0].ipv6.enabled = false)).filter(
@@ -1169,7 +1186,9 @@ test("odhcpd is re-bound when a network comes up, and restarted after a rollback
   stub("pidof", "exit 0");
   stub("logger", "true");
   stub("sleep", "true");
-  const script = hook.replace(/\/etc\/init\.d\/odhcpd restart/g, `echo restarted >> ${dir}/log`).replace(/\/tmp\/onc-/g, `${dir}/onc-`);
+  // Its locks into the test's directory first: that directory may itself be
+  // under /tmp/onc- (Linux), and must not be rewritten in the log's path.
+  const script = hook.replace(/\/tmp\/onc-/g, `${dir}/onc-`).replace(/\/etc\/init\.d\/odhcpd restart/g, `echo restarted >> ${dir}/log`);
   const run = (iface: string, action = "ifup") =>
     spawnSync("sh", ["-c", `${script}\nwait`], { env: { PATH: `${dir}:/usr/bin:/bin`, ACTION: action, INTERFACE: iface }, encoding: "utf8" });
   // The hook restarts in the background, as netifd must not wait on it: read
@@ -1229,8 +1248,9 @@ test("a network with its own DNS servers: odhcpd does not announce the router as
   const intent = sample();
   intent.internet.lines[0].ipv6.enabled = true;
   intent.networks[0].dhcp.dns_servers = ["10.0.0.53"];
-  const dhcp = (compile(intent).config as any).dhcp.dhcp.find((d: any) => d[".name"] === intent.networks[0].id);
-  const onRouter = dhcp[".overrides"].find((o: any) => /router/.test(o[".if"])).override;
+  // The router's alone (access points have no DHCP server to read it).
+  const onRouter = (compile(intent).config as any).dhcp.dhcp.find((d: any) => d[".name"] === intent.networks[0].id);
+  t.regex(onRouter[".if"], /router/);
   t.is(onRouter.dns_service, false);
   t.deepEqual(onRouter.dhcp_option.filter((o: string) => o.startsWith("6,")), ["6,10.0.0.53"]);
 });
@@ -1299,8 +1319,9 @@ test("an SSID broadcast on no band is refused, the mesh's reserved band included
 });
 
 test("pinned channels: each band's own, the odd UNII-3 ones included", (t) => {
-  const pin = (band: "2g" | "5g", channel: number) => {
+  const pin = (band: "2g" | "5g", channel: number, country = "US") => {
     const intent = sample();
+    intent.system.country = country;
     intent.hardware[1].radios = { [band]: { channel } };
     return intentSchema.safeParse(intent).success;
   };
@@ -1309,8 +1330,30 @@ test("pinned channels: each band's own, the odd UNII-3 ones included", (t) => {
   t.true(pin("5g", 144));
   t.false(pin("5g", 38));
   t.false(pin("5g", 6));
-  t.true(pin("2g", 13));
+  t.true(pin("2g", 13, "CH"));
   t.false(pin("2g", 36));
+});
+
+test("a pinned channel is one the country allows: hostapd would not start on another", (t) => {
+  const pinned = (country: string, band: "2g" | "5g", channel: number) => {
+    const intent = sample();
+    intent.system.country = country;
+    intent.hardware[1].radios = { [band]: { channel } };
+    const result = intentSchema.safeParse(intent);
+    return result.success ? "ok" : result.error.issues.map((i) => i.message).join("; ");
+  };
+  t.regex(pinned("US", "2g", 13), /Channel 13 \(2.4 GHz\) is not allowed in US/);
+  t.is(pinned("CH", "2g", 13), "ok");
+  // ETSI's 5470-5725 ends where 144 (5710-5730) still runs: the kernel turns it off.
+  t.regex(pinned("CH", "5g", 144), /Channel 144 .* not allowed in CH/);
+  t.is(pinned("US", "5g", 144), "ok");
+  t.regex(pinned("US", "5g", 173), /not allowed in US/);
+  // Changing the country is greyed out while a pin would be stranded.
+  const raw = sample();
+  raw.hardware[1].radios = { "2g": { channel: 13 } };
+  const intent = intentSchema.parse(raw);
+  t.regex(String(availability(intent, "system.country").option("US").unavailable), /channel 13 pinned on .*Change it first/);
+  t.falsy(availability(intent, "system.country").option("DE").unavailable);
 });
 
 test("the local domain may be one label or several, like home.arpa", (t) => {
@@ -1323,4 +1366,29 @@ test("the local domain may be one label or several, like home.arpa", (t) => {
   t.false(intentSchema.safeParse(withDomain("home..arpa")).success);
   t.false(intentSchema.safeParse(withDomain("Home.arpa")).success);
   t.like((compile(withDomain("home.arpa")).config as any).dhcp.dnsmasq[0], { local: "/home.arpa/", domain: "home.arpa" });
+});
+
+test("an isolated SSID is isolated by hostapd and on the access point's bridge too", (t) => {
+  const intent = sample();
+  intent.wifi.networks[1].isolate_clients = true;
+  const ifaces = (compile(intent).config as any).wireless["wifi-iface"];
+  const isolated = ifaces.filter((i: any) => i.ssid === intent.wifi.networks[1].ssid);
+  t.true(isolated.length > 0);
+  for (const iface of isolated) t.like(iface, { isolate: true, bridge_isolate: true });
+  const open = ifaces.filter((i: any) => i.ssid === intent.wifi.networks[0].ssid);
+  for (const iface of open) t.is(iface.bridge_isolate, undefined, "only those asked for");
+});
+
+test("over cables on a swconfig access point: batman on the CPU's VLAN device, the switch carrying it tagged", (t) => {
+  const intent = sample();
+  intent.wifi.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", band_reserved: false, over_cable: true, large_frames: true };
+  const ap = onDevice("home-ap-1", "tplink,archer-c50-v4", intent);
+  t.like(ap.network.interface.find((i: any) => i[".name"] === "batwired"), { proto: "batadv_hardif", master: "bat0", device: "eth0.4000" });
+  const vlan = ap.network.switch_vlan.find((v: any) => v.vlan === "4000" || v.vlan === 4000);
+  t.regex(vlan.ports, /^6t /, "the CPU tagged first");
+  // Large frames are DSA's: only the Wi-Fi mesh's own device takes 1532 here, no cable's.
+  t.deepEqual(
+    (ap.network.device ?? []).filter((d: any) => Number(d.mtu) === 1532).map((d: any) => d.name),
+    ["mesh0"]
+  );
 });

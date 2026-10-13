@@ -2,6 +2,9 @@
 // manager from 25.12 on (and in snapshots since late 2024); older releases
 // have opkg and other package names, so a device on one is refused before
 // anything is touched, rather than failing partway, at the package step.
+/** The oldest release this tool supports: a patch fixed before it is one to drop. */
+export const oldestSupportedRelease = "25.12.0";
+
 export const supportedRelease = (version: string) => {
   if (/^SNAPSHOT/i.test(version)) return true;
   const match = /^(\d+)\.(\d+)/.exec(version);

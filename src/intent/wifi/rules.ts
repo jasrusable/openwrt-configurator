@@ -8,6 +8,16 @@ import { steeringLabels } from "./roaming";
 
 export const wifiRules: Choice[] = [
   {
+    path: "wifi.radios.*.avoid_radar",
+    values: [true],
+    unavailable: (intent, [band]) =>
+      band !== "5g"
+        ? "Only 5 GHz has radar channels."
+        : intent.wifi.mesh.enabled && intent.wifi.mesh.band === "5g" && "The mesh keeps 5 GHz on a radar-free channel already.",
+    // Harmless where unavailable: nothing is compiled for it.
+    refuses: false,
+  },
+  {
     path: "wifi.radios.*.width",
     values: ["80", "160"],
     unavailable: (_, [band]) => band === "2g" && "2.4 GHz is at most 40 MHz wide.",

@@ -4,10 +4,12 @@
 //
 //   "@wan_port", "@port:eth2", "@port:eth2.10"  a line's port (anywhere)
 //   "@cpu_port", "@cpu_port.1"                 the switch's CPU device (anywhere)
+//   "@switch"                                  the switch's name (a switch's, a switch VLAN's device)
 //   "*", "*t"                                  free ports (in a port list), a bridge VLAN's
 //                                              whole port list, every radio (a Wi-Fi interface's device)
 //   "@bridge_ports"                            one device section per bridge port (a device's name)
 //   "@best/80"                                 a radio's best mode up to a width (its htmode)
+//   "@spare:radio1"                            a band's radios but the one holding radio1's channel (in a Wi-Fi interface's devices)
 //
 // A plain text that would read as one is written with a second "@"
 // ("@@wan_port" is the text "@wan_port"); a plain "*" or "*t" where it
@@ -18,6 +20,7 @@ import { Placeholder, Scalar } from "../plan/types";
 const portPattern = /^@(?:wan_port|port:([A-Za-z0-9_-]+))(?:\.(\d+))?$/;
 const cpuPattern = /^@cpu_port(?:\.(\d+))?$/;
 const bestPattern = /^@best\/(\d+)$/;
+const sparePattern = /^@spare:([A-Za-z0-9_]+)$/;
 
 /** What a text could stand for, before asking whether it may stand there. */
 const candidate = (at: string, text: string, whole: boolean): Placeholder | undefined => {
@@ -28,6 +31,9 @@ const candidate = (at: string, text: string, whole: boolean): Placeholder | unde
   const best = bestPattern.exec(text);
   if (best) return { kind: "bestMode", width: Number(best[1]) };
   if (text === "@bridge_ports") return { kind: "eachBridgePort" };
+  if (text === "@switch") return { kind: "switchName" };
+  const spare = sparePattern.exec(text);
+  if (spare) return { kind: "spareRadios", radio: spare[1] };
   if (text === "*" || text === "*t") {
     const tagged = text === "*t";
     if (whole && at === "network.bridge-vlan.ports") return { kind: "bridgePorts", tagged };
@@ -57,8 +63,12 @@ export const writePlaceholder = (at: string, p: Placeholder, whole: boolean): st
       return p.tagged ? "*t" : "*";
     case "eachBridgePort":
       return "@bridge_ports";
+    case "switchName":
+      return "@switch";
     case "allRadios":
       return "*";
+    case "spareRadios":
+      return `@spare:${p.radio}`;
     case "bestMode":
       return `@best/${p.width}`;
     case "stations":

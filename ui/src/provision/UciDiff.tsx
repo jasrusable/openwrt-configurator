@@ -26,9 +26,9 @@ const summary = (d: Exclude<DeviceDiff, { error: string }>) => {
   return parts.length ? parts.join(" · ") : "Nothing changes";
 };
 
-/** Its changes as lines: + added, − removed, before → after, renamed. */
+/** Its changes as lines: + added, − removed, before → after, renamed; a fix's, said so. */
 const Lines = ({ diff }: { diff: Exclude<DeviceDiff, { error: string }> }) => {
-  const line = (sign: "+" | "−" | "~", text: string, key: string) => (
+  const line = (sign: "+" | "−" | "~", text: string, key: string, fix?: string) => (
     <Text
       key={key}
       component="div"
@@ -38,6 +38,11 @@ const Lines = ({ diff }: { diff: Exclude<DeviceDiff, { error: string }> }) => {
       style={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}
     >
       {sign} {text}
+      {fix && (
+        <Text span c="dimmed" ff="text" size="xs">
+          {"  "}from fix “{fix}”
+        </Text>
+      )}
     </Text>
   );
   return (
@@ -46,15 +51,15 @@ const Lines = ({ diff }: { diff: Exclude<DeviceDiff, { error: string }> }) => {
         c.renamedFrom
           ? line("~", `${c.renamedFrom} renamed ${c.key.slice(c.key.indexOf(".") + 1)}`, `r${c.key}`)
           : c.before === undefined
-          ? line("+", `${c.key}=${c.after}`, c.key)
+          ? line("+", `${c.key}=${c.after}`, c.key, c.fix)
           : c.after === undefined
-          ? line("−", `${c.key}=${c.before}`, c.key)
-          : line("~", `${c.key}: ${c.before} → ${c.after}`, c.key)
+          ? line("−", `${c.key}=${c.before}`, c.key, c.fix)
+          : line("~", `${c.key}: ${c.before} → ${c.after}`, c.key, c.fix)
       )}
-      {diff.packages.added.map((p) => line("+", `package ${p}`, `p+${p}`))}
-      {diff.packages.removed.map((p) => line("−", `package ${p}`, `p-${p}`))}
+      {diff.packages.added.map((p) => line("+", `package ${p}`, `p+${p}`, diff.packages.fixes?.[p]))}
+      {diff.packages.removed.map((p) => line("−", `package ${p}`, `p-${p}`, diff.packages.fixes?.[p]))}
       {diff.files.map((f) =>
-        line(f.change === "added" ? "+" : f.change === "removed" ? "−" : "~", `file ${f.path}`, `f${f.path}`)
+        line(f.change === "added" ? "+" : f.change === "removed" ? "−" : "~", `file ${f.path}`, `f${f.path}`, f.fix)
       )}
     </Code>
   );

@@ -180,8 +180,9 @@ export const nodePlatform: Platform = {
     withPath(path, () => writeFileSync(path, data)),
   appendTextFile: (path, data) =>
     withPath(path, () => appendFileSync(path, data)),
-  mkdirp: (path) => {
-    mkdirSync(path, { recursive: true });
+  mkdirp: (path, mode) => {
+    mkdirSync(path, { recursive: true, ...(mode === undefined ? {} : { mode }) });
+    if (mode !== undefined && (statSync(path).mode & 0o777) !== mode) chmodSync(path, mode);
   },
   fileMode: (path) => {
     try {

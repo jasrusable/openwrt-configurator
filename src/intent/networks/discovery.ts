@@ -3,6 +3,10 @@
 // isolated IoT network's speaker still shows up at home. avahi reads a file,
 // not UCI; it is always installed on the router, and with fewer than two
 // networks sharing it only answers for the router, on the main network.
+// umdns, OpenWrt's own mDNS daemon, listens on the same networks for Status:
+// what devices call themselves and what they are (an iPhone's model), read
+// over ubus; it shares the port with avahi (both reuse it, verified on 25.12.5).
+import { section } from "../../plan/types";
 import { Feature, mainNetwork, onRouter } from "../fragment";
 import { deviceOf } from "./compile";
 
@@ -10,10 +14,19 @@ export const discovery: Feature = (intent) => {
   const sharing = intent.networks.filter((n) => n.share_devices);
   const reflect = sharing.length >= 2;
   // Never WAN: avahi answers on every interface unless told which.
-  const interfaces = (reflect ? sharing : [mainNetwork(intent)]).map(deviceOf);
+  const networks = reflect ? sharing : [mainNetwork(intent)];
+  const interfaces = networks.map(deviceOf);
   return {
-    packages: [{ when: onRouter, add: ["avahi-nodbus-daemon"] }],
-    services: [{ when: onRouter, name: "avahi-daemon", running: true }],
+    packages: [{ when: onRouter, add: ["avahi-nodbus-daemon", "umdns"] }],
+    services: [
+      { when: onRouter, name: "avahi-daemon", running: true },
+      { when: onRouter, name: "umdns", running: true },
+    ],
+    config: {
+      umdns: {
+        umdns: [section({ name: "umdns", when: onRouter }, { jail: true, network: networks.map((n) => n.id) })],
+      },
+    },
     files: [
       {
         when: onRouter,

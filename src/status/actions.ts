@@ -1,8 +1,8 @@
 // What a Status page can do when asked (and only then): restart a service the
 // settings need running on a device (the fix for, say, odhcpd gone silent),
-// test the internet line's download speed from the router, survey the air
-// around the access points, and look up OpenWrt's latest release. Nothing here
-// changes a setting.
+// reboot a device, restart its Wi-Fi, ping from it, test the internet line's
+// download speed from the router, survey the air around the access points,
+// and look up OpenWrt's latest release. Nothing here changes a setting.
 import { z } from "zod";
 import { readFacts } from "../deviceFacts";
 import { Probe, runProbe } from "../deviceProbes";
@@ -18,7 +18,7 @@ import { readEach } from "../readEach";
 import { jobState } from "../server/provisionJob";
 import { withLock } from "../lock";
 import { shellQuote } from "../shell";
-import { restartable } from "./views";
+import { DeviceView, restartable } from "./views";
 import { arr, bandOf, channelOf, obj } from "./values";
 
 /**
@@ -98,6 +98,111 @@ export const restartService = ({
     return restarted ? ok({ ok: true as const }) : fail("failed", `${service} did not restart on ${hostname}.`);
   });
 
+/**
+ * Started in the background, a moment after the answer: the command returns
+ * (and the session closes cleanly) before what it starts cuts the link.
+ * Dropbear does not end what a session leaves running.
+ */
+const detached = (command: string, said: string): Probe<boolean> => ({
+  command: `(sleep 2; ${command}) </dev/null >/dev/null 2>&1 & echo ${said}`,
+  parse: ({ stdout }) => stdout.includes(said),
+});
+
+/** When each device was asked to reboot, kept so status can say so until it answers again. */
+const rebootKey = (intentPath: string): StoreKey<Record<string, number>> => ({
+  path: stateLayout(intentPath).rebooting,
+  schema: z.record(z.string(), z.number()),
+  format: 1,
+});
+
+/** How long a reboot is expected to take at most: past it, a device that has not come back is just not reached. */
+const rebootWindowMs = 10 * 60_000;
+
+/**
+ * Whether a device asked to reboot at `at` is still on its way: not answered
+ * since, or answering with an uptime from before the request (it has not gone
+ * down yet).
+ */
+export const stillRebooting = (at: number, device: Pick<DeviceView, "reachable" | "uptime"> | undefined, now: number) =>
+  now - at < rebootWindowMs &&
+  (!device?.reachable || device.uptime === undefined || device.uptime * 1000 > now - at);
+
+/** The status with each device on its way through a reboot marked so. */
+export const withRebooting = <S extends { deviceViews?: DeviceView[] }>(status: S, asked: Record<string, number>, now: number): S =>
+  status.deviceViews
+    ? {
+        ...status,
+        deviceViews: status.deviceViews.map((d) =>
+          asked[d.name] !== undefined && stillRebooting(asked[d.name], d, now) ? { ...d, rebooting: true } : d
+        ),
+      }
+    : status;
+
+/** Devices asked to reboot, as kept. */
+export const rebootsAsked = (platform: Pick<Platform, "readTextFile">, intentPath: string) =>
+  read(platform, rebootKey(intentPath)) ?? {};
+
+/** Reboot `hostname`: it drops off for a minute or so; status says "rebooting" until it answers again. */
+export const rebootDevice = ({
+  intentPath,
+  platform,
+  hostname,
+  now = Date.now,
+}: {
+  intentPath: string;
+  platform: Platform;
+  hostname: string;
+  now?: () => number;
+}) =>
+  oneAtATime(platform, intentPath, "reboot", () =>
+    onDevice(intentPath, platform, hostname, 20_000, async (session) => {
+      if (!(await runProbe(session, detached("reboot", "ONC_REBOOTING")))) return fail("failed", `${hostname} did not start rebooting.`);
+      const at = now();
+      // Kept only for the "rebooting" words: a write that fails costs those, not the reboot.
+      tryWrite(platform, rebootKey(intentPath), { ...rebootsAsked(platform, intentPath), [hostname]: at });
+      return ok({ rebootingSince: at });
+    })
+  );
+
+/** Restart `hostname`'s Wi-Fi: its clients (and a mesh link through it) drop and reconnect within a minute. */
+export const restartWifi = ({ intentPath, platform, hostname }: { intentPath: string; platform: Platform; hostname: string }) =>
+  oneAtATime(platform, intentPath, "wifi-restart", () =>
+    onDevice(intentPath, platform, hostname, 20_000, async (session) => {
+      const hasWifi = await runProbe(session, { command: "command -v wifi >/dev/null && echo ONC_WIFI", parse: ({ stdout }) => stdout.includes("ONC_WIFI") } as Probe<boolean>);
+      if (!hasWifi) return fail("invalid", `${hostname} has no Wi-Fi.`);
+      return (await runProbe(session, detached("wifi down; wifi up", "ONC_RESTARTING")))
+        ? ok({ ok: true as const })
+        : fail("failed", `${hostname} did not restart its Wi-Fi.`);
+    })
+  );
+
+/** A ping's target: an address or a host name, never anything a shell or ping would read as more. */
+export const pingTarget = /^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$/;
+
+export type PingResult = { sent: number; received: number; averageMs?: number };
+
+/** busybox ping's summary: "4 packets transmitted, 3 packets received, …" and "round-trip min/avg/max = a/b/c ms". */
+export const parsePing = (stdout: string): PingResult | undefined => {
+  const counts = /(\d+) packets transmitted, (\d+) packets received/.exec(stdout);
+  if (!counts) return undefined;
+  const average = /min\/avg\/max = [\d.]+\/([\d.]+)\//.exec(stdout);
+  return { sent: Number(counts[1]), received: Number(counts[2]), ...(average ? { averageMs: Number(average[1]) } : {}) };
+};
+
+/** Ping `target` from `hostname`: four pings, two seconds each at most. */
+export const pingFrom = ({ intentPath, platform, hostname, target }: { intentPath: string; platform: Platform; hostname: string; target: string }) =>
+  pingTarget.test(target)
+    ? oneAtATime(platform, intentPath, "ping", () =>
+        onDevice(intentPath, platform, hostname, 20_000, async (session) => {
+          const pinged = await runProbe(session, {
+            command: `ping -c 4 -W 2 ${shellQuote(target)} 2>&1`,
+            parse: ({ stdout }) => ({ result: parsePing(stdout), said: stdout.trim().split("\n").pop() ?? "" }),
+          } as Probe<{ result?: PingResult; said: string }>);
+          return pinged.result ? ok(pinged.result) : fail("failed", pinged.said || `No answer from ping on ${hostname}.`);
+        })
+      )
+    : Promise.resolve(fail("invalid", "Give an address or a host name to ping."));
+
 /** How long the router takes to download this much, from Cloudflare's speed test. */
 const speedBytes = 25_000_000;
 
@@ -167,8 +272,11 @@ export const latestRelease = async ({
 
 export type Survey = {
   accessPoint: string;
-  /** Each channel the radios measured: how busy it was (anyone's traffic, ours included), %. */
-  channels: { band: string; channel: number; busy: number; ours: boolean }[];
+  /**
+   * Each channel the radios measured: how busy it was (anyone's traffic,
+   * ours included), %; unknown where the counters cannot be right.
+   */
+  channels: { band: string; channel: number; busy?: number; ours: boolean }[];
   /**
    * Networks around, our own radios left out: for picking a quieter channel.
    * `impostor`: one of your network names from a radio that is none of yours.
@@ -188,6 +296,12 @@ type Heard = Survey["neighbours"][number] & { bssid?: string };
 export type SurveyRead = { accessPoint: string; own: string[]; channels: Survey["channels"]; heard: Heard[] };
 
 /** The survey probe's array: each radio's ifname, its own BSSID, iwinfo scan and survey. */
+/** Far past any uptime, in ms: a counter this large wrapped (mt7915/mt7981 underflow them after days: mt76#1135). */
+const wrapped = 1e15;
+
+/** Whether a channel's survey counters can be right: busy no more than the time measured, neither wrapped. */
+const plausible = (active: number, busy: number) => busy <= active && active < wrapped && busy < wrapped;
+
 export const parseSurvey = (accessPoint: string, value: unknown): SurveyRead => {
   const radios = arr(value).map(obj);
   const seen = new Map<number, Survey["channels"][number]>();
@@ -198,7 +312,12 @@ export const parseSurvey = (accessPoint: string, value: unknown): SurveyRead => 
       const active = Number(s.active_time);
       const busy = Number(s.busy_time);
       if (!(mhz > 0) || !(active > 0) || !(busy >= 0)) continue;
-      const entry = { band: bandOf(mhz)!, channel: channelOf(mhz), busy: Math.min(100, Math.round((busy / active) * 100)), ours: s.in_use === true };
+      const entry = {
+        band: bandOf(mhz)!,
+        channel: channelOf(mhz),
+        ...(plausible(active, busy) ? { busy: Math.round((busy / active) * 100) } : {}),
+        ours: s.in_use === true,
+      };
       if (!seen.has(mhz) || entry.ours) seen.set(mhz, entry);
     }
     for (const n of arr(obj(radio.scan).results).map(obj)) {

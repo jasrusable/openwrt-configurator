@@ -6,10 +6,10 @@ import { named } from "../names";
 import { Options, placeholder, Placeholder, section, Value } from "../../plan/types";
 import { fnv, siteSeed } from "../site";
 import { checkOf, Connection, failoverOrder, ipv6Interface, multiWan, primaryConnection, slowLine, stickySeconds } from "../connections";
-import { netmask } from "../addresses";
+import { isPrivateRange, netmask } from "../addresses";
 import type { Intent } from "../schema";
 import { lineTypes } from "./schema";
-import { ddnsCheckMinutes } from "./constants";
+import { ddnsCheckMinutes, stunServer } from "./constants";
 
 /**
  * Per-packet overhead by line, as OpenWrt's SQM guidance gives it: fibre is
@@ -90,6 +90,10 @@ export const ddnsService = (ddns: NonNullable<Intent["internet"]["dynamic_dns"]>
     force_unit: "hours",
   };
 };
+
+/** Whether a line's own address may be a private one: what it gets by DHCP is not known here. */
+const mayBePrivate = (line: Connection | undefined) =>
+  !!line && (line.type === "dhcp" || (line.type === "static" && isPrivateRange(`${line.static.address}/32`)));
 
 export const internet: Feature = (intent) => {
   const { lines: connections, upnp } = intent.internet;
@@ -284,7 +288,8 @@ export const internet: Feature = (intent) => {
               when: onRouter,
               path: "/etc/hotplug.d/iface/17-onc-ipv6-follows-line",
               mode: "0644",
-              // mwan3track sends connected/disconnected to every iface hotplug script.
+              // mwan3track sends connected/disconnected to every iface hotplug
+              // script (seen on 25.12.5: scripts/mwan3-test.sh).
               content: `[ "$INTERFACE" = "${mainLine.id}" ] || exit 0
 case "$ACTION" in
   disconnected) logger -t onc-ipv6 "${mainLine.id} is offline: IPv6 withdrawn until it is back"; ifdown ${ipv6Interface(mainLine)} ;;
@@ -344,6 +349,16 @@ esac
             upnp_lease_file: "/var/run/miniupnpd.leases",
             igdv1: true,
             uuid: upnpUuid(siteSeed(intent)),
+            // Behind another router the line's address is a private one,
+            // which miniupnpd 2.3.9 refuses to forward to ("Port forwarding
+            // is impossible"); STUN finds the outer address, which works
+            // behind a full-cone NAT (that router's exposed host). Where the
+            // line's address can be private: DHCP, or a private static one.
+            // Releases with ext_allow_private_ipv4 (master, not 25.12:
+            // https://github.com/openwrt/packages/pull/28644) will want that too.
+            ...(mayBePrivate(primaryConnection(intent))
+              ? { use_stun: true, stun_host: stunServer.host, stun_port: stunServer.port }
+              : { use_stun: false }),
           }),
         ]),
         perm_rule: routerOnly(

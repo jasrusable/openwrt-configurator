@@ -35,9 +35,23 @@ jobs:
   # Provisions a real OpenWrt userland (procd, dropbear, netifd) booted in a
   # container, over every SSH client path, including self-rollback when the
   # new config cuts SSH off. See scripts/rig-test.sh.
+  # Each supported release: the first and the latest 25.12, and a snapshot,
+  # which may break with upstream and so may fail without failing the run.
   rig:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        openwrt: ["25.12.0", "25.12.5"]
+        experimental: [false]
+        include:
+          - openwrt: SNAPSHOT
+            experimental: true
+    continue-on-error: ${{ matrix.experimental }}
+    name: rig (OpenWrt ${{ matrix.openwrt }})
+    env:
+      ONC_RIG_VERSION: ${{ matrix.openwrt }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -49,3 +63,21 @@ jobs:
       - run: npm ci
 
       - run: scripts/rig-test.sh
+
+  # mwan3 on a real OpenWrt userland: a line's failover as mwan3track logs it,
+  # and the hook that takes the main line's IPv6 down and back.
+  # See scripts/mwan3-test.sh.
+  mwan3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: ".node-version"
+          cache: "npm"
+
+      - run: npm ci
+
+      - run: scripts/mwan3-test.sh

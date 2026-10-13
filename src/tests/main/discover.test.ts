@@ -88,12 +88,15 @@ const stock = (accepts: { key: boolean }) => {
     connect: async (target) => {
       targets.push(target);
       if (target.privateKeyPath && !accepts.key) throw new Error("Permission denied (publickey)");
-      writeFileSync(knownHosts, `${target.host} ssh-ed25519 STOCK-KEY\n`);
+      writeFileSync(knownHosts, `${target.host} ssh-ed25519 ${stockKey}\n`);
       return session;
     },
   };
   return { platform, targets };
 };
+
+/** A throwaway ed25519 key's blob (see sshFingerprint.test.ts). */
+const stockKey = "AAAAC3NzaC1lZDI1NTE5AAAAID5Uksu7SVbBjJHbyYQi5Ph9ttJOj9q5YIlUqopPzPZH";
 
 test("a stock device is read with OpenWrt's default, never the admin password, and flagged as open", async (t) => {
   const intent = sample();
@@ -106,7 +109,9 @@ test("a stock device is read with OpenWrt's default, never the admin password, a
     address: "10.0.0.143",
     hostname: "OpenWrt",
     macs: ["aa:00:00:00:00:43"],
-    hostKey: { type: "ssh-ed25519", key: "STOCK-KEY" },
+    hostKey: { type: "ssh-ed25519", key: stockKey },
+    // As ssh-keygen -l prints it, for comparing with the device's console.
+    fingerprint: "SHA256:gh/DjvamWtJ5GKvUg3A1h7FCtff7jQ+tzXzJM3F15R8",
     openLogin: true,
     suggested: { role: "access-point", name: "ap-1" },
   });

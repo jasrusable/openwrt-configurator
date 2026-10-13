@@ -1,0 +1,1360 @@
+[
+ {
+  "object": "hostapd.phy0-ap0",
+  "status": {
+   "driver": "nl80211",
+   "status": "ENABLED",
+   "bssid": "02:00:5e:00:00:01",
+   "ssid": "ssid-1",
+   "freq": 2462,
+   "channel": 11,
+   "op_class": 81,
+   "beacon_interval": 100,
+   "bss_color": 53,
+   "phy": "phy0",
+   "rrm": {
+    "neighbor_report_tx": 31
+   },
+   "wnm": {
+    "bss_transition_query_rx": 0,
+    "bss_transition_request_tx": 0,
+    "bss_transition_response_rx": 0
+   },
+   "airtime": {
+    "time": 0,
+    "time_busy": 0,
+    "utilization": 0
+   },
+   "dfs": {
+    "cac_seconds": 0,
+    "cac_active": false,
+    "cac_seconds_left": 0
+   }
+  },
+  "clients": {
+   "freq": 2462,
+   "clients": {
+    "02:00:5e:00:00:02": {
+     "auth": true,
+     "assoc": false,
+     "authorized": false,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": false,
+     "he": true,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      65,
+      8,
+      1,
+      0,
+      0
+     ],
+     "extended_capabilities": [
+      0,
+      0,
+      8,
+      0,
+      0,
+      0,
+      0,
+      64
+     ],
+     "aid": 9,
+     "capabilities": {}
+    },
+    "02:00:5e:00:00:03": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": false,
+     "he": false,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      123,
+      0,
+      2,
+      0,
+      0
+     ],
+     "extended_capabilities": [
+      4,
+      0,
+      10,
+      2,
+      1,
+      64,
+      0,
+      0,
+      0,
+      1
+     ],
+     "aid": 7,
+     "bytes": {
+      "rx": 6744,
+      "tx": 10737
+     },
+     "airtime": {
+      "rx": 6860,
+      "tx": 10313
+     },
+     "packets": {
+      "rx": 57,
+      "tx": 30
+     },
+     "rate": {
+      "rx": 6500000,
+      "tx": 600000
+     },
+     "signal": -62,
+     "capabilities": {}
+    },
+    "02:00:5e:00:00:04": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": false,
+     "he": true,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      67,
+      8,
+      1,
+      0,
+      0
+     ],
+     "extended_capabilities": [
+      4,
+      0,
+      8,
+      0,
+      0,
+      0,
+      0,
+      64
+     ],
+     "aid": 3,
+     "bytes": {
+      "rx": 350565,
+      "tx": 3142981
+     },
+     "airtime": {
+      "rx": 70982,
+      "tx": 551813
+     },
+     "packets": {
+      "rx": 1456,
+      "tx": 2436
+     },
+     "rate": {
+      "rx": 22940000,
+      "tx": 10320000
+     },
+     "signal": -63,
+     "capabilities": {}
+    },
+    "02:00:5e:00:00:05": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": false,
+     "he": false,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "extended_capabilities": [],
+     "aid": 4,
+     "signature": "wifi4|probe:0,1,50,3,45,221(001018,2),221(00904c,51),htcap:0020,htagg:1a,htmcs:000000ff|assoc:0,1,48,45,221(001018,2),221(0050f2,2),htcap:0020,htagg:1a,htmcs:000000ff",
+     "bytes": {
+      "rx": 5685592,
+      "tx": 4944572
+     },
+     "airtime": {
+      "rx": 6724687,
+      "tx": 6398247
+     },
+     "packets": {
+      "rx": 54883,
+      "tx": 21305
+     },
+     "rate": {
+      "rx": 7220000,
+      "tx": 2600000
+     },
+     "signal": -60,
+     "capabilities": {}
+    },
+    "02:00:5e:00:00:06": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": false,
+     "he": false,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "extended_capabilities": [],
+     "aid": 5,
+     "bytes": {
+      "rx": 5327997,
+      "tx": 684282
+     },
+     "airtime": {
+      "rx": 12827207,
+      "tx": 1531807
+     },
+     "packets": {
+      "rx": 58706,
+      "tx": 6968
+     },
+     "rate": {
+      "rx": 3900000,
+      "tx": 3900000
+     },
+     "signal": -83,
+     "capabilities": {}
+    },
+    "02:00:5e:00:00:07": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": false,
+     "he": false,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "extended_capabilities": [],
+     "aid": 2,
+     "bytes": {
+      "rx": 5419967,
+      "tx": 706677
+     },
+     "airtime": {
+      "rx": 14059063,
+      "tx": 1382309
+     },
+     "packets": {
+      "rx": 66405,
+      "tx": 7049
+     },
+     "rate": {
+      "rx": 7220000,
+      "tx": 2600000
+     },
+     "signal": -52,
+     "capabilities": {}
+    },
+    "02:00:5e:00:00:08": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": false,
+     "he": false,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "extended_capabilities": [],
+     "aid": 1,
+     "bytes": {
+      "rx": 5396347,
+      "tx": 691239
+     },
+     "airtime": {
+      "rx": 14165305,
+      "tx": 1088962
+     },
+     "packets": {
+      "rx": 65936,
+      "tx": 6980
+     },
+     "rate": {
+      "rx": 3900000,
+      "tx": 3900000
+     },
+     "signal": -58,
+     "capabilities": {}
+    }
+   }
+  },
+  "info": {
+   "phy": "phy0",
+   "ssid": "ssid-1",
+   "bssid": "02:00:5e:00:00:01",
+   "country": "CH",
+   "mode": "Master",
+   "channel": 11,
+   "center_chan1": 11,
+   "frequency": 2462,
+   "frequency_offset": 0,
+   "txpower": 20,
+   "txpower_offset": 0,
+   "quality": 48,
+   "quality_max": 70,
+   "signal": -62,
+   "noise": -91,
+   "bitrate": 39700,
+   "encryption": {
+    "enabled": true,
+    "wpa": [
+     2
+    ],
+    "authentication": [
+     "psk"
+    ],
+    "ciphers": [
+     "ccmp"
+    ]
+   },
+   "htmodes": [
+    "HT20",
+    "HT40",
+    "HE20",
+    "HE40"
+   ],
+   "hwmodes": [
+    "b",
+    "g",
+    "n",
+    "ax"
+   ],
+   "hwmodes_text": "ax/b/g/n",
+   "hwmode": "ax",
+   "htmode": "HE20",
+   "hardware": {
+    "id": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "name": "MediaTek MT7981"
+   }
+  }
+ },
+ {
+  "object": "hostapd.phy0-ap1",
+  "status": {
+   "driver": "nl80211",
+   "status": "ENABLED",
+   "bssid": "02:00:5e:00:00:09",
+   "ssid": "ssid-2",
+   "freq": 2462,
+   "channel": 11,
+   "op_class": 81,
+   "beacon_interval": 100,
+   "bss_color": 53,
+   "phy": "phy0",
+   "rrm": {
+    "neighbor_report_tx": 0
+   },
+   "wnm": {
+    "bss_transition_query_rx": 0,
+    "bss_transition_request_tx": 0,
+    "bss_transition_response_rx": 0
+   },
+   "airtime": {
+    "time": 0,
+    "time_busy": 0,
+    "utilization": 0
+   },
+   "dfs": {
+    "cac_seconds": 0,
+    "cac_active": false,
+    "cac_seconds_left": 0
+   }
+  },
+  "clients": {
+   "freq": 2462,
+   "clients": {
+    "02:00:5e:00:00:0a": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": false,
+     "he": false,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "extended_capabilities": [],
+     "aid": 7,
+     "bytes": {
+      "rx": 2375935,
+      "tx": 6655
+     },
+     "airtime": {
+      "rx": 2752389,
+      "tx": 90945
+     },
+     "packets": {
+      "rx": 7919,
+      "tx": 77
+     },
+     "rate": {
+      "rx": 600000,
+      "tx": 100000
+     },
+     "signal": -70,
+     "capabilities": {}
+    },
+    "02:00:5e:00:00:0b": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": false,
+     "he": false,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "extended_capabilities": [],
+     "aid": 6,
+     "bytes": {
+      "rx": 2338295,
+      "tx": 133328
+     },
+     "airtime": {
+      "rx": 2989596,
+      "tx": 2893852
+     },
+     "packets": {
+      "rx": 9505,
+      "tx": 2038
+     },
+     "rate": {
+      "rx": 3600000,
+      "tx": 100000
+     },
+     "signal": -76,
+     "capabilities": {}
+    },
+    "02:00:5e:00:00:0c": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": false,
+     "he": false,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "extended_capabilities": [
+      4
+     ],
+     "aid": 5,
+     "signature": "wifi4|probe:0,1,50,221(0050f2,4),wps:_|assoc:0,1,59,48,221(0050f2,2),45,127,htcap:192c,htagg:1d,htmcs:000000ff,extcap:04",
+     "bytes": {
+      "rx": 8256982,
+      "tx": 4211595
+     },
+     "airtime": {
+      "rx": 7478034,
+      "tx": 10161008
+     },
+     "packets": {
+      "rx": 44227,
+      "tx": 40382
+     },
+     "rate": {
+      "rx": 7220000,
+      "tx": 3900000
+     },
+     "signal": -73,
+     "capabilities": {}
+    },
+    "02:00:5e:00:00:0d": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": false,
+     "he": false,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "extended_capabilities": [],
+     "aid": 3,
+     "bytes": {
+      "rx": 5418521,
+      "tx": 695569
+     },
+     "airtime": {
+      "rx": 15487309,
+      "tx": 1115583
+     },
+     "packets": {
+      "rx": 66286,
+      "tx": 7008
+     },
+     "rate": {
+      "rx": 7220000,
+      "tx": 3900000
+     },
+     "signal": -57,
+     "capabilities": {}
+    },
+    "02:00:5e:00:00:0e": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": false,
+     "he": false,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "extended_capabilities": [],
+     "aid": 2,
+     "bytes": {
+      "rx": 587728,
+      "tx": 187867
+     },
+     "airtime": {
+      "rx": 4132154,
+      "tx": 374019
+     },
+     "packets": {
+      "rx": 17578,
+      "tx": 2311
+     },
+     "rate": {
+      "rx": 600000,
+      "tx": 3900000
+     },
+     "signal": -48,
+     "capabilities": {}
+    },
+    "02:00:5e:00:00:0f": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": false,
+     "he": false,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "extended_capabilities": [],
+     "aid": 1,
+     "signature": "wifi4|probe:0,1,50,221(0050f2,4),wps:_|assoc:0,1,48,221(0050f2,2),45,htcap:192c,htagg:1d,htmcs:000000ff",
+     "bytes": {
+      "rx": 6827701,
+      "tx": 4019612
+     },
+     "airtime": {
+      "rx": 4024839,
+      "tx": 9313622
+     },
+     "packets": {
+      "rx": 35746,
+      "tx": 36405
+     },
+     "rate": {
+      "rx": 5850000,
+      "tx": 3900000
+     },
+     "signal": -70,
+     "capabilities": {}
+    },
+    "02:00:5e:00:00:10": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": false,
+     "he": false,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "extended_capabilities": [],
+     "aid": 4,
+     "signature": "wifi4|probe:0,1,50|assoc:0,1,48,45,221(0050f2,2),htcap:116e,htagg:10,htmcs:000000ff",
+     "bytes": {
+      "rx": 1265216,
+      "tx": 353569
+     },
+     "airtime": {
+      "rx": 10181907,
+      "tx": 934529
+     },
+     "packets": {
+      "rx": 41847,
+      "tx": 5379
+     },
+     "rate": {
+      "rx": 7220000,
+      "tx": 3900000
+     },
+     "signal": -63,
+     "capabilities": {}
+    }
+   }
+  },
+  "info": {
+   "phy": "phy0",
+   "ssid": "ssid-2",
+   "bssid": "02:00:5e:00:00:09",
+   "country": "CH",
+   "mode": "Master",
+   "channel": 11,
+   "center_chan1": 11,
+   "frequency": 2462,
+   "frequency_offset": 0,
+   "txpower": 20,
+   "txpower_offset": 0,
+   "quality": 46,
+   "quality_max": 70,
+   "signal": -64,
+   "noise": -90,
+   "bitrate": 28100,
+   "encryption": {
+    "enabled": true,
+    "wpa": [
+     2
+    ],
+    "authentication": [
+     "psk"
+    ],
+    "ciphers": [
+     "ccmp"
+    ]
+   },
+   "htmodes": [
+    "HT20",
+    "HT40",
+    "HE20",
+    "HE40"
+   ],
+   "hwmodes": [
+    "b",
+    "g",
+    "n",
+    "ax"
+   ],
+   "hwmodes_text": "ax/b/g/n",
+   "hwmode": "ax",
+   "htmode": "HE20",
+   "hardware": {
+    "id": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "name": "MediaTek MT7981"
+   }
+  }
+ },
+ {
+  "object": "hostapd.phy1-ap0",
+  "status": {
+   "driver": "nl80211",
+   "status": "ENABLED",
+   "bssid": "02:00:5e:00:00:11",
+   "ssid": "ssid-1",
+   "freq": 5180,
+   "channel": 36,
+   "op_class": 128,
+   "beacon_interval": 100,
+   "bss_color": 5,
+   "phy": "phy1",
+   "rrm": {
+    "neighbor_report_tx": 35
+   },
+   "wnm": {
+    "bss_transition_query_rx": 0,
+    "bss_transition_request_tx": 0,
+    "bss_transition_response_rx": 0
+   },
+   "airtime": {
+    "time": 0,
+    "time_busy": 0,
+    "utilization": 0
+   },
+   "dfs": {
+    "cac_seconds": 0,
+    "cac_active": false,
+    "cac_seconds_left": 0
+   }
+  },
+  "clients": {
+   "freq": 5180,
+   "clients": {
+    "02:00:5e:00:00:12": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": true,
+     "he": false,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      50,
+      72,
+      1,
+      0,
+      0
+     ],
+     "extended_capabilities": [
+      0,
+      0,
+      8,
+      0,
+      0,
+      0,
+      0,
+      64
+     ],
+     "aid": 6,
+     "signature": "wifi4|probe:0,1,45,127,191,221(0050f2,8),221(001018,2),htcap:0063,htagg:17,htmcs:000000ff,vhtcap:0f805032,vhtrxmcs:0000fffe,vhttxmcs:0000fffe,extcap:0000080000000040|assoc:0,1,33,36,48,70,45,127,191,221(001018,2),221(0050f2,2),htcap:0063,htagg:17,htmcs:000000ff,vhtcap:0f805032,vhtrxmcs:0000fffe,vhttxmcs:0000fffe,txpow:e003,extcap:0000080000000040",
+     "bytes": {
+      "rx": 1267998409,
+      "tx": 3857536232
+     },
+     "airtime": {
+      "rx": 1121195916,
+      "tx": 1437127430
+     },
+     "packets": {
+      "rx": 14081502,
+      "tx": 12944100
+     },
+     "rate": {
+      "rx": 720000,
+      "tx": 39000000
+     },
+     "signal": -78,
+     "capabilities": {
+      "vht": {
+       "su_beamformee": true,
+       "mu_beamformee": false,
+       "mcs_map": {
+        "rx": {
+         "1ss": 9,
+         "2ss": -1,
+         "3ss": -1,
+         "4ss": -1,
+         "5ss": -1,
+         "6ss": -1,
+         "7ss": -1,
+         "8ss": -1
+        },
+        "tx": {
+         "1ss": 9,
+         "2ss": -1,
+         "3ss": -1,
+         "4ss": -1,
+         "5ss": -1,
+         "6ss": -1,
+         "7ss": -1,
+         "8ss": -1
+        }
+       }
+      }
+     }
+    },
+    "02:00:5e:00:00:13": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": true,
+     "he": true,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      67,
+      8,
+      1,
+      0,
+      0
+     ],
+     "extended_capabilities": [
+      4,
+      0,
+      8,
+      0,
+      0,
+      0,
+      0,
+      192,
+      1
+     ],
+     "aid": 4,
+     "signature": "wifi4|probe:0,1,45,127,191,255,255,221(0017f2,10),221(00904c,4),221(0050f2,8),221(001018,2),htcap:006f,htagg:1b,htmcs:000000ff,vhtcap:0f817032,vhtrxmcs:0000fffa,vhttxmcs:2000fffa,extcap:04004804000000c0010020|assoc:0,1,33,36,48,70,54,55,59,45,127,191,255,255,221(0017f2,10),221(00904c,4),221(001018,2),221(0050f2,2),htcap:006f,htagg:1b,htmcs:0000ffff,vhtcap:0f817076,vhtrxmcs:0000fffa,vhttxmcs:2000fffa,txpow:14f2,extcap:04000800000000c001",
+     "bytes": {
+      "rx": 42444,
+      "tx": 12519
+     },
+     "airtime": {
+      "rx": 38574,
+      "tx": 10090
+     },
+     "packets": {
+      "rx": 225,
+      "tx": 57
+     },
+     "rate": {
+      "rx": 81670000,
+      "tx": 28670000
+     },
+     "signal": -70,
+     "capabilities": {
+      "vht": {
+       "su_beamformee": true,
+       "mu_beamformee": false,
+       "mcs_map": {
+        "rx": {
+         "1ss": 9,
+         "2ss": 9,
+         "3ss": -1,
+         "4ss": -1,
+         "5ss": -1,
+         "6ss": -1,
+         "7ss": -1,
+         "8ss": -1
+        },
+        "tx": {
+         "1ss": 9,
+         "2ss": 9,
+         "3ss": -1,
+         "4ss": -1,
+         "5ss": -1,
+         "6ss": -1,
+         "7ss": -1,
+         "8ss": -1
+        }
+       }
+      }
+     }
+    },
+    "02:00:5e:00:00:02": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": true,
+     "he": true,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      65,
+      8,
+      1,
+      0,
+      0
+     ],
+     "extended_capabilities": [
+      0,
+      0,
+      8,
+      0,
+      0,
+      0,
+      0,
+      64
+     ],
+     "aid": 3,
+     "signature": "wifi4|probe:0,1,45,127,191,255,221(0017f2,10),221(00904c,4),221(0050f2,8),221(001018,2),htcap:006f,htagg:1b,htmcs:0000ffff,vhtcap:0f817832,vhtrxmcs:0000fffa,vhttxmcs:0000fffa,extcap:0000080400000040|assoc:0,1,33,36,48,70,54,55,45,127,191,255,221(0017f2,10),221(00904c,4),221(001018,2),221(0050f2,2),htcap:006f,htagg:1b,htmcs:0000ffff,vhtcap:0f817832,vhtrxmcs:0000fffa,vhttxmcs:0000fffa,txpow:15f9,extcap:0000080000000040",
+     "bytes": {
+      "rx": 907019,
+      "tx": 1097095
+     },
+     "airtime": {
+      "rx": 259424,
+      "tx": 388572
+     },
+     "packets": {
+      "rx": 2967,
+      "tx": 2883
+     },
+     "rate": {
+      "rx": 40830000,
+      "tx": 22940000
+     },
+     "signal": -73,
+     "capabilities": {
+      "vht": {
+       "su_beamformee": true,
+       "mu_beamformee": false,
+       "mcs_map": {
+        "rx": {
+         "1ss": 9,
+         "2ss": 9,
+         "3ss": -1,
+         "4ss": -1,
+         "5ss": -1,
+         "6ss": -1,
+         "7ss": -1,
+         "8ss": -1
+        },
+        "tx": {
+         "1ss": 9,
+         "2ss": 9,
+         "3ss": -1,
+         "4ss": -1,
+         "5ss": -1,
+         "6ss": -1,
+         "7ss": -1,
+         "8ss": -1
+        }
+       }
+      }
+     }
+    },
+    "02:00:5e:00:00:14": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": true,
+     "he": false,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "extended_capabilities": [
+      4,
+      0,
+      8,
+      10,
+      1,
+      0,
+      1,
+      64,
+      0,
+      64
+     ],
+     "aid": 1,
+     "bytes": {
+      "rx": 79725759,
+      "tx": 170195096
+     },
+     "airtime": {
+      "rx": 59371239,
+      "tx": 425784291
+     },
+     "packets": {
+      "rx": 598713,
+      "tx": 1533605
+     },
+     "rate": {
+      "rx": 17560000,
+      "tx": 600000
+     },
+     "signal": -78,
+     "capabilities": {
+      "vht": {
+       "su_beamformee": true,
+       "mu_beamformee": false,
+       "mcs_map": {
+        "rx": {
+         "1ss": 9,
+         "2ss": 9,
+         "3ss": -1,
+         "4ss": -1,
+         "5ss": -1,
+         "6ss": -1,
+         "7ss": -1,
+         "8ss": -1
+        },
+        "tx": {
+         "1ss": 9,
+         "2ss": 9,
+         "3ss": -1,
+         "4ss": -1,
+         "5ss": -1,
+         "6ss": -1,
+         "7ss": -1,
+         "8ss": -1
+        }
+       }
+      }
+     }
+    },
+    "02:00:5e:00:00:15": {
+     "auth": true,
+     "assoc": true,
+     "authorized": true,
+     "preauth": false,
+     "wds": false,
+     "wmm": true,
+     "ht": true,
+     "vht": true,
+     "he": true,
+     "wps": false,
+     "mfp": false,
+     "mbo": false,
+     "rrm": [
+      113,
+      8,
+      1,
+      0,
+      0
+     ],
+     "extended_capabilities": [
+      0,
+      0,
+      8,
+      0,
+      0,
+      0,
+      0,
+      64
+     ],
+     "aid": 2,
+     "signature": "wifi4|probe:0,1,45,127,191,255,221(0017f2,10),221(00904c,4),221(0050f2,8),221(001018,2),htcap:006f,htagg:1b,htmcs:0000ffff,vhtcap:0f817032,vhtrxmcs:0000fffa,vhttxmcs:0000fffa,extcap:0000080400000040|assoc:0,1,33,36,48,70,54,55,45,127,191,255,221(0017f2,10),221(00904c,4),221(001018,2),221(0050f2,2),htcap:006f,htagg:1b,htmcs:0000ffff,vhtcap:0f817032,vhtrxmcs:0000fffa,vhttxmcs:0000fffa,txpow:14f9,extcap:0000080000000040",
+     "bytes": {
+      "rx": 156614,
+      "tx": 43457
+     },
+     "airtime": {
+      "rx": 168247,
+      "tx": 86804
+     },
+     "packets": {
+      "rx": 1294,
+      "tx": 473
+     },
+     "rate": {
+      "rx": 64850000,
+      "tx": 96070000
+     },
+     "signal": -66,
+     "capabilities": {
+      "vht": {
+       "su_beamformee": true,
+       "mu_beamformee": false,
+       "mcs_map": {
+        "rx": {
+         "1ss": 9,
+         "2ss": 9,
+         "3ss": -1,
+         "4ss": -1,
+         "5ss": -1,
+         "6ss": -1,
+         "7ss": -1,
+         "8ss": -1
+        },
+        "tx": {
+         "1ss": 9,
+         "2ss": 9,
+         "3ss": -1,
+         "4ss": -1,
+         "5ss": -1,
+         "6ss": -1,
+         "7ss": -1,
+         "8ss": -1
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "info": {
+   "phy": "phy1",
+   "ssid": "ssid-1",
+   "bssid": "02:00:5e:00:00:11",
+   "country": "CH",
+   "mode": "Master",
+   "channel": 36,
+   "center_chan1": 42,
+   "frequency": 5180,
+   "frequency_offset": 0,
+   "txpower": 23,
+   "txpower_offset": 0,
+   "quality": 37,
+   "quality_max": 70,
+   "signal": -73,
+   "noise": -92,
+   "bitrate": 138800,
+   "encryption": {
+    "enabled": true,
+    "wpa": [
+     2
+    ],
+    "authentication": [
+     "psk"
+    ],
+    "ciphers": [
+     "ccmp"
+    ]
+   },
+   "htmodes": [
+    "HT20",
+    "HT40",
+    "VHT20",
+    "VHT40",
+    "VHT80",
+    "VHT160",
+    "HE20",
+    "HE40",
+    "HE80",
+    "HE160"
+   ],
+   "hwmodes": [
+    "n",
+    "ac",
+    "ax"
+   ],
+   "hwmodes_text": "ac/ax/n",
+   "hwmode": "ax",
+   "htmode": "HE80",
+   "hardware": {
+    "id": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "name": "MediaTek MT7981"
+   }
+  }
+ },
+ {
+  "object": "hostapd.phy1-ap1",
+  "status": {
+   "driver": "nl80211",
+   "status": "ENABLED",
+   "bssid": "02:00:5e:00:00:16",
+   "ssid": "ssid-2",
+   "freq": 5180,
+   "channel": 36,
+   "op_class": 128,
+   "beacon_interval": 100,
+   "bss_color": 5,
+   "phy": "phy1",
+   "rrm": {
+    "neighbor_report_tx": 0
+   },
+   "wnm": {
+    "bss_transition_query_rx": 0,
+    "bss_transition_request_tx": 0,
+    "bss_transition_response_rx": 0
+   },
+   "airtime": {
+    "time": 0,
+    "time_busy": 0,
+    "utilization": 0
+   },
+   "dfs": {
+    "cac_seconds": 0,
+    "cac_active": false,
+    "cac_seconds_left": 0
+   }
+  },
+  "clients": {
+   "freq": 5180,
+   "clients": {}
+  },
+  "info": {
+   "phy": "phy1",
+   "ssid": "ssid-2",
+   "bssid": "02:00:5e:00:00:16",
+   "country": "CH",
+   "mode": "Master",
+   "channel": 36,
+   "center_chan1": 42,
+   "frequency": 5180,
+   "frequency_offset": 0,
+   "txpower": 23,
+   "txpower_offset": 0,
+   "quality_max": 70,
+   "noise": -92,
+   "encryption": {
+    "enabled": true,
+    "wpa": [
+     2
+    ],
+    "authentication": [
+     "psk"
+    ],
+    "ciphers": [
+     "ccmp"
+    ]
+   },
+   "htmodes": [
+    "HT20",
+    "HT40",
+    "VHT20",
+    "VHT40",
+    "VHT80",
+    "VHT160",
+    "HE20",
+    "HE40",
+    "HE80",
+    "HE160"
+   ],
+   "hwmodes": [
+    "n",
+    "ac",
+    "ax"
+   ],
+   "hwmodes_text": "ac/ax/n",
+   "hwmode": "ax",
+   "htmode": "HE80",
+   "hardware": {
+    "id": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "name": "MediaTek MT7981"
+   }
+  }
+ }
+]

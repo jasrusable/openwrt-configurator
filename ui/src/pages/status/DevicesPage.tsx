@@ -1,6 +1,7 @@
 // Devices: each router and access point's health (processor, memory,
-// storage, temperature, with this browser's history of them), its ports'
-// links as a faceplate, and whether a newer OpenWrt release is out.
+// storage, temperature, with their history), its ports' links as a
+// faceplate, whether a newer OpenWrt release is out, and what can be done to
+// it (ping from it, restart its Wi-Fi, reboot it: DeviceActions).
 import { Badge, Box, Group, SimpleGrid, Stack, Text } from "@mantine/core";
 import { IconAccessPoint, IconRouter } from "@tabler/icons-react";
 import type { Intent } from "../../../../src/intent/schema";
@@ -12,6 +13,7 @@ import { duration } from "../../facts";
 import { useDraftValue } from "../../form/draft";
 import { AreaChart, PortFace, Ring } from "../../kit/charts";
 import { EmptyState, ItemIcon, Section, SettingsPage, StatusDot } from "../../kit/layout";
+import { DeviceActions } from "./DeviceActions";
 import { liveLine, unread } from "./shared";
 
 const heat = (c: number) => (c >= 85 ? "red" : c >= 70 ? "orange" : c >= 55 ? "yellow" : "teal");
@@ -42,13 +44,14 @@ const DeviceCard = ({ device: d, latest }: { device: DeviceView; latest?: string
                 {latest} is out
               </Badge>
             )}
-            <StatusDot color={d.reachable ? "green" : "red"} />
+            <StatusDot color={d.rebooting ? "orange" : d.reachable ? "green" : "red"} />
             <Text size="sm" c="dimmed" style={{ whiteSpace: "nowrap" }}>
-              {d.reachable ? (d.uptime ? `Up ${duration(d.uptime)}` : "Up") : "Not reached"}
+              {d.rebooting ? "Rebooting…" : d.reachable ? (d.uptime ? `Up ${duration(d.uptime)}` : "Up") : "Not reached"}
             </Text>
+            <DeviceActions device={d} />
           </Group>
         </Group>
-        {d.reachable ? (
+        {d.reachable && !d.rebooting ? (
           <>
             <Group justify="space-around" wrap="wrap" gap="md">
               {cpu !== undefined && <Ring share={Math.min(cpu, 1)} label={`Processor${d.cores ? ` · ${d.cores} cores` : ""}`} />}
@@ -85,7 +88,7 @@ const DeviceCard = ({ device: d, latest }: { device: DeviceView; latest?: string
           </>
         ) : (
           <Text size="sm" c="dimmed">
-            {d.error ?? "It did not answer."}
+            {d.rebooting ? "It is restarting: back in a minute or so." : (d.error ?? "It did not answer.")}
           </Text>
         )}
       </Stack>

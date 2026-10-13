@@ -27,10 +27,12 @@ export const fitPorts = ({
   const ports = deviceSchema.ports || [];
   const cpuPort = ports.find((port) => !!port.sw_config_cpu_name);
   const cpu = () => {
-    if (!cpuPort?.sw_config_cpu_name) throw new Error(`CPU port not defined`);
+    if (!cpuPort?.sw_config_cpu_name) throw new Error(`${hostname}: its switch has no CPU port (board.json), so no network can reach it.`);
     return { port: cpuPort.name, device: cpuPort.sw_config_cpu_name };
   };
   const physicalPorts = ports.filter((port) => !port.sw_config_cpu_name);
+  // The switch's own name (board.json's); facts read before it was kept: OpenWrt's usual.
+  const switchName = deviceSchema.switch ?? "switch0";
   // On swconfig a port is the switch's (a switch VLAN reaches it, through the
   // CPU's device) or one beside it (a NIC of its own, used as on DSA).
   const onSwitch = (name: string) => useSwConfig && ports.some((p) => p.name === name && p.switch_port !== undefined);
@@ -54,7 +56,9 @@ export const fitPorts = ({
   // (eth0.2), and the port leaves the networks' free ports.
   const wanPortName = () => {
     const wan = physicalPorts.find((port) => port.default_role === "wan");
-    if (!wan) throw new Error(`${hostname} has no WAN port for "@wan_port".`);
+    if (!wan) {
+      throw new Error(`${hostname} has no WAN port (its board names none), so an internet line cannot use it: name the line's port, or make it an access point.`);
+    }
     return wan.name;
   };
   const lineOf = (p: Placeholder) => (p.kind === "linePort" ? { port: p.port ?? wanPortName(), vlan: p.vlan } : undefined);
@@ -109,10 +113,16 @@ export const fitPorts = ({
     const line = switchLines.find((l) => l.port === port && (vlan === undefined || l.vlan === vlan))!;
     return `${cpu().device}.${line.vlan}`;
   };
-  // Line and CPU ports, wherever they are: devices by name now.
+  // Line and CPU ports, and the switch, wherever they are: devices by name now.
   const withPorts = (value: Value) =>
     mapPlaceholders(value, (p) =>
-      p.kind === "linePort" ? lineDevice(lineOf(p)!) : p.kind === "cpuPort" ? `${cpu().device}${p.vlan !== undefined ? `.${p.vlan}` : ""}` : p
+      p.kind === "linePort"
+        ? lineDevice(lineOf(p)!)
+        : p.kind === "cpuPort"
+          ? `${cpu().device}${p.vlan !== undefined ? `.${p.vlan}` : ""}`
+          : p.kind === "switchName"
+            ? switchName
+            : p
     );
   const withLines: ResolvedSections = Object.fromEntries(
     Object.entries(resolved).map(([configKey, types]) => [
@@ -128,7 +138,7 @@ export const fitPorts = ({
   const lineSwitchVlans: ResolvedSection[] = switchLines.map((l) => ({
     name: `line_${l.port}_${l.vlan}`,
     options: {
-      device: networkSwitchVlans[0]?.options.device ?? "switch0",
+      device: switchName,
       vlan: l.vlan,
       ports: [`${l.port}${l.tagged ? ":t" : ""}`],
     },

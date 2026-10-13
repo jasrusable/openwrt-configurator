@@ -179,6 +179,80 @@ export const removalCascade = (packages: string[]): Probe<string[]> => ({
   },
 });
 
+/** "OK: 12.8 MiB in 155 packages" (apk 3's last line) → KiB, or undefined. */
+export const apkTotalKb = (line: string): number | undefined => {
+  const m = /OK:\s+([\d.]+)\s*(B|KiB|MiB|GiB)\b/.exec(line);
+  if (!m) return undefined;
+  const scale = { B: 1 / 1024, KiB: 1, MiB: 1024, GiB: 1024 * 1024 }[m[2] as "B" | "KiB" | "MiB" | "GiB"];
+  return Number(m[1]) * scale;
+};
+
+export type PackageSpace = { needKb: number; freeKb: number };
+
+/**
+ * What a run's packages would take of the flash, before any is touched: the
+ * installed total now, after the removals and after the additions (apk's own
+ * simulation, with a fresh index as prepare uses), against the overlay's free
+ * space. Installed sizes are uncompressed and the overlay compresses, so it
+ * errs on the safe side. Undefined when apk cannot say (no index reachable):
+ * the install would then fail on its own, with nothing changed yet.
+ */
+export const packageSpace = ({ add, remove }: { add: string[]; remove: string[] }): Probe<PackageSpace | undefined> => ({
+  command: [
+    "apk update > /dev/null 2>&1",
+    "apk add --simulate 2>&1 | tail -n 1",
+    remove.length ? `apk del --simulate --rdepends ${remove.map(shellQuote).join(" ")} 2>&1 | tail -n 1` : "apk add --simulate 2>&1 | tail -n 1",
+    `apk add --simulate ${add.map(shellQuote).join(" ")} 2>&1 | tail -n 1`,
+    "{ df -k /overlay 2> /dev/null || df -k /; } | tail -n 1",
+  ].join("; "),
+  parse: ({ stdout }) => {
+    const [now, afterRemove, afterAdd, df] = lines(stdout);
+    const totals = [now, afterRemove, afterAdd].map((line) => apkTotalKb(line ?? ""));
+    const freeKb = Number((df ?? "").trim().split(/\s+/)[3]);
+    if (totals.some((t) => t === undefined) || !Number.isFinite(freeKb)) return undefined;
+    const [n, r, a] = totals as number[];
+    return { needKb: Math.max(0, a - n + (r - n)), freeKb };
+  },
+});
+
+/** The MACs of every Wi-Fi client associated with the device now, lower case. */
+export const wifiStations: Probe<string[]> = {
+  command:
+    'for d in /sys/class/net/*/phy80211; do [ -e "$d" ] || continue; i=${d%/phy80211}; iwinfo "${i##*/}" assoclist 2> /dev/null; done',
+  parse: ({ stdout }) => [
+    ...new Set(lines(stdout).flatMap((line) => (/^([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})\s/.exec(line)?.[1].toLowerCase() ?? []))),
+  ],
+};
+
+/**
+ * Per service procd knows: the configs its reload triggers watch (each a
+ * `["eq", "package", <config>]` in its triggers). A service without one for
+ * its config ignores a change to it until restarted.
+ */
+export const serviceTriggers: Probe<Record<string, string[]>> = {
+  command: `ubus call service list '{"verbose":true}'`,
+  parse: ({ stdout }) => {
+    const watched = (value: unknown): string[] =>
+      Array.isArray(value)
+        ? value[0] === "eq" && value[1] === "package" && typeof value[2] === "string"
+          ? [value[2]]
+          : value.flatMap(watched)
+        : [];
+    try {
+      const services = JSON.parse(stdout) as Record<string, { triggers?: unknown }>;
+      return Object.fromEntries(Object.entries(services).map(([name, s]) => [name, [...new Set(watched(s?.triggers))]]));
+    } catch {
+      return {};
+    }
+  },
+};
+
+/** The configs the device has (/etc/config's files). */
+export const configNames: Probe<string[]> = {
+  command: "ls -1 /etc/config",
+  parse: ({ stdout }) => lines(stdout).filter((name) => /^[A-Za-z0-9_-]+$/.test(name)),
+};
+
 /** Files of `paths` the device does not have. */
 export const missingFiles = (paths: string[]): Probe<string[]> => ({
   command: paths.length ? `for f in ${paths.map(shellQuote).join(" ")}; do [ -e "$f" ] || echo "$f"; done` : "true",

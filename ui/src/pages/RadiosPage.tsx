@@ -210,6 +210,7 @@ const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
         />
       </Section>
       <Section title="Channel">
+        {band === "5g" && <SwitchField name={at("avoid_radar")} />}
         {meshChannel !== undefined ? (
           <SettingRow label="Channel" description={`Set by the mesh, on every access point (${where("mesh")}).`}>
             <Button variant="subtle" size="compact-sm" onClick={() => navigate("/wifi/mesh")}>

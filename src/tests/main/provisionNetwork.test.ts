@@ -188,6 +188,7 @@ test.serial("a device that cuts itself off after commit takes the whole change b
 test.serial("the gateway and the device running the tool go last", (t) => {
   const device = (ipAddress: string, local = false) => ({
     ipAddress,
+    hostname: `d${ipAddress.split(".")[3]}`,
     ssh: { local },
   });
   const ordered = provisioningOrder(
@@ -208,6 +209,13 @@ test.serial("the gateway and the device running the tool go last", (t) => {
     provisioningOrder([device("10.0.0.2"), repeater, device("10.0.0.3")], "10.0.0.1").map((d) => d.ipAddress),
     ["10.0.0.9", "10.0.0.2", "10.0.0.3"],
     "a mesh repeater before what it hangs off"
+  );
+  t.deepEqual(
+    provisioningOrder([device("10.0.0.1"), device("10.0.0.2"), device("10.0.0.3"), device("10.0.0.4")], "10.0.0.1", ["d2"]).map(
+      (d) => d.ipAddress
+    ),
+    ["10.0.0.3", "10.0.0.4", "10.0.0.2", "10.0.0.1"],
+    "the access point this machine is on by Wi-Fi: after the rest, before the gateway"
   );
 });
 
@@ -394,6 +402,23 @@ test.serial("a step whose answer never comes (a stalled client, the link up) end
   t.true(device.events.includes("rollback-now"));
   t.false(device.events.includes("disarm"));
   t.false(device.events.includes("commit"));
+});
+
+test.serial("packages that would not fit the flash are refused at plan, before anything changes", async (t) => {
+  const device = fakeDevice({ hostname: "ap", newPackages: ["mwan3", "kmod-batman-adv"], freeKb: 1500 });
+  const error = await failure(t, run([device]));
+  t.regex(error!.message, /too little room for the packages this run installs \(mwan3, kmod-batman-adv\): they take about 2\.0 MiB, and it has 1\.5 MiB free/);
+  t.false(device.events.includes("arm"), "nothing armed, nothing changed");
+});
+
+test.serial("a declared config neither on the device nor shipped by OpenWrt is a typo, refused at plan; one listed as new is not", async (t) => {
+  const typo = fakeDevice({ hostname: "ap", extraConfig: { firwall: { zone: [{ ".name": "lan" }] } } });
+  const error = await failure(t, run([typo]));
+  t.regex(error!.message, /"firwall" is not a config on the device, nor one OpenWrt ships: a typo\?/);
+  t.false(typo.events.includes("arm"), "nothing armed, nothing changed");
+  const custom = fakeDevice({ hostname: "ap", extraConfig: { myapp: { myapp: [{ ".name": "main" }] } }, newConfigs: ["myapp"] });
+  const result = await run([custom]);
+  t.true(result.ok, "declared new: applied");
 });
 
 test.serial("confirming checks the commit's own marker: a finalise script that never writes it is rolled back", async (t) => {

@@ -10,7 +10,8 @@
 //   prepare < records         revert, seed missing owned configs, packages, the reload baseline
 //   stage < records           the uci batch (the wipe and the declared config), then files
 //   finalise < records        commit each config, the commit's marker, reload_config
-//   services < records        enable and start, or stop and disable, each declared service
+//   services < records        enable and start, or stop and disable, each declared service;
+//                             restart one with no reload trigger for a config this run changed
 //   hooks < records           the run_after_reload commands, once the config is live
 //   stage-packages <pkg>...   fetch them for an offline reinstall; prints the count
 //   arm [options] < lists     snapshots, the boot-time copy, the watchdog
@@ -103,7 +104,13 @@ BOOT_ROOT="$ROOT/etc/onc/rollback"
 BOOT="$BOOT_ROOT/$RUN"
 INIT="$ROOT/etc/init.d/onc-rollback"
 
-say() { logger -t onc "$*" 2>/dev/null; }
+# To the system log, bounded: a wedged logd (its socket's queue full) blocks
+# a writer, and must never stall a rollback. busybox has no \`timeout\` here.
+say() {
+	logger -t onc "$*" < /dev/null > /dev/null 2>&1 & say_pid=$!
+	( sleep 2; kill "$say_pid" ) < /dev/null > /dev/null 2>&1 & say_killer=$!
+	wait "$say_pid" 2> /dev/null; kill "$say_killer" 2> /dev/null
+}
 
 # What a pid runs now, and its parent, from /proc (ps where there is none, as in tests).
 comm_of() { { cat "/proc/$1/comm"; } 2>/dev/null || ps -o comm= -p "$1" 2>/dev/null; }
@@ -149,6 +156,13 @@ begin() {
 # --- The steps an apply changes the device with (prepare ... hooks) ---
 
 step() { printf 'ONC_STEP %s\\n' "$*"; }
+
+# A command that may leave a process behind (a service it starts, a daemon a
+# hook forks): its output goes to a file and is passed on once it ends, never
+# the session's own streams. A process left holding those would keep the SSH
+# channel open, and the call would never end (seen in the rig: a stage that
+# never answered).
+detached() { "$@" < /dev/null > "$W/out" 2>&1; detached_status=$?; cat "$W/out" >&2; rm -f "$W/out"; return $detached_status; }
 
 # The verb's records (stdin), kept: refused unless they end with "end", as
 # one cut short must not be half done.
@@ -216,8 +230,8 @@ prepare() {
 	revert_pending >&2 || return 1
 	each_record prepare_record || return 1
 	# Removed first, then installed: as many as there are, by one apk each.
-	if [ -s "$W/remove" ]; then step "apk del --rdepends $(words "$W/remove")"; xargs apk del --rdepends < "$W/remove" >&2 || return 1; fi
-	if [ -s "$W/add" ]; then step "apk add --update-cache $(words "$W/add")"; xargs apk add --update-cache < "$W/add" >&2 || return 1; fi
+	if [ -s "$W/remove" ]; then step "apk del --rdepends $(words "$W/remove")"; detached apk del --rdepends $(cat "$W/remove") || return 1; fi
+	if [ -s "$W/add" ]; then step "apk add --update-cache $(words "$W/add")"; detached apk add --update-cache $(cat "$W/add") || return 1; fi
 	# The stock configs apk set aside for one of ours: never used.
 	if [ -s "$W/remove" ] || [ -s "$W/add" ]; then
 		while IFS= read -r p; do rm -f "$ROOT$p.apk-new"; done < "$W/seeds"
@@ -228,7 +242,7 @@ prepare() {
 	# reload_config compares \`uci show\`, staged deltas included, so after
 	# staging it would record this run's own changes as the baseline.
 	step reload_config
-	reload_config >&2
+	detached reload_config
 }
 
 # The wipe and the declared config, then the managed files: before the
@@ -275,7 +289,7 @@ write_file() {
 		if [ "$n2" -gt 0 ]; then
 			step "run_after $rest"
 			sed -n "$((n1+1)),\\$p" "$W/body" > "$W/after"
-			sh "$W/after" < /dev/null >&2 || return 1
+			detached sh "$W/after" || return 1
 		fi
 	fi
 }
@@ -296,18 +310,32 @@ finalise_record() {
 	esac
 }
 
+# The configs the reload is about to signal as changed, by the test
+# reload_config itself makes: each one's \`uci show\` against the md5s it kept
+# at the last reload. The services step restarts what has no trigger for one.
+changed_configs() {
+	for c in "$ROOT"/etc/config/*; do
+		c=\${c##*/}
+		now=$(uci show "$c" 2> /dev/null | md5sum | cut -d" " -f1)
+		was=$(grep " /var/run/config.check/$c\$" "$ROOT/var/run/config.md5" 2> /dev/null | cut -d" " -f1)
+		[ "$now" = "$was" ] || echo "$c"
+	done > "$W/changed"
+}
+
 finalise() {
 	: > "$W/protocols"
 	each_record finalise_record || return 1
 	# Confirming checks it: a link dropped before or during the commits looks
 	# the same as one dropped by the reload.
 	touch "$R/committed" 2> /dev/null
+	changed_configs
 	step reload_config
 	# One step, no write between: the reload can drop the link, and the next
 	# write would end this verb. netifd learns protocol handlers only as it
 	# starts, so one a package of this run brought (wireguard) leaves its
-	# interface down until netifd restarts.
-	reload_config >&2
+	# interface down until netifd restarts. Its output nowhere: nothing
+	# written after the reload, and nothing it leaves behind holds the channel.
+	reload_config < /dev/null > /dev/null 2>&1
 	while IFS= read -r p; do
 		ubus call network get_proto_handlers 2> /dev/null | grep -q "\\"$p\\":" || { "$ROOT/etc/init.d/network" restart > /dev/null 2>&1; break; }
 	done < "$W/protocols"
@@ -319,18 +347,31 @@ finalise() {
 # starting them again would apply them again for nothing. Or, unused, stopped
 # and disabled: an empty config is not always nothing. A missing init script
 # is skipped, a failure said, not fatal: the check after says what runs.
+# "<service> <config>": restarted if this run changed the config, as no
+# reload trigger of the service's watches it; "<service>" alone: restarted
+# (a package swap the plan already knows this run made).
+restart_record() {
+	next_field; init="$ROOT/etc/init.d/$f"
+	[ -x "$init" ] || return 0
+	[ -z "$rest" ] || grep -qx "$rest" "$W/changed" 2> /dev/null || return 0
+	step "restart $f"
+	detached "$init" restart || echo "could not restart $f" >&2
+}
+
 services_record() {
+	[ "$kind" = restart ] && { restart_record; return; }
 	s=$rest; init="$ROOT/etc/init.d/$s"
 	[ -x "$init" ] || return 0
 	case "$kind" in
 		enable)
 			step "enable $s"
-			"$init" enabled || "$init" enable >&2 || echo "could not enable $s" >&2
-			procd_knows "$s" || "$init" start >&2 || echo "could not start $s" >&2 ;;
+			"$init" enabled || detached "$init" enable || echo "could not enable $s" >&2
+			procd_knows "$s" || detached "$init" start || echo "could not start $s" >&2 ;;
 		disable)
 			step "disable $s"
-			! "$init" enabled || "$init" disable >&2 || echo "could not disable $s" >&2
+			! "$init" enabled || detached "$init" disable || echo "could not disable $s" >&2
 			! "$init" running > /dev/null 2>&1 || "$init" stop > /dev/null 2>&1 || echo "could not stop $s" >&2 ;;
+
 		*) echo "onc-agent services: unexpected $kind" >&2; return 1 ;;
 	esac
 }
@@ -341,7 +382,7 @@ hooks_record() {
 	[ "$kind" = run ] || { echo "onc-agent hooks: unexpected $kind" >&2; return 1; }
 	hook=$((hook+1))
 	step "hook $hook"
-	cp "$W/body" "$W/after" && sh "$W/after" < /dev/null >&2
+	cp "$W/body" "$W/after" && detached sh "$W/after"
 }
 
 hooks() { hook=0; each_record hooks_record; }
@@ -542,6 +583,23 @@ rollback_now() {
 	p="$(cat "$R/${watchdogPidFile}" 2>/dev/null)"; s="$(cat "$R/sleep.pid" 2>/dev/null)"
 	if { own_sleep "$s" "$p" && kill "$s" 2> /dev/null; } || [ -f "$R/restoring" ]; then echo ONC_WOKEN; fi
 }
+
+# Out of the SSH session's cgroup, before anything else: procd runs dropbear
+# in a cgroup of its own (/services/dropbear/instance1), and every verb
+# starts in it, as dropbear's child. A process left there (the watchdog, a
+# service this run restarted) keeps procd from removing that cgroup, and a
+# dropbear the run stopped is then never started again (seen on SNAPSHOT); a
+# procd that kills a stopped service's cgroup would kill the watchdog
+# mid-rollback. So each verb moves itself, and with it all it starts, into
+# the agent's own cgroup where cgroup v2 is mounted, else the root one; where
+# there are no cgroups, nothing. The session's dropbear stays where it is.
+leave_session_cgroup() {
+	cg="$ROOT/sys/fs/cgroup"
+	[ -f "$cg/cgroup.procs" ] || return 0
+	{ mkdir -p "$cg/onc" && echo $$ > "$cg/onc/cgroup.procs"; } 2> /dev/null || echo $$ > "$cg/cgroup.procs" 2> /dev/null
+	return 0
+}
+leave_session_cgroup
 
 case "$1" in
 	begin) begin ;;

@@ -5,10 +5,21 @@ import { obj } from "../values";
 import { json, keptInRam, raw } from "./common";
 import type { InternetCheck, LineStatus } from "./types";
 
+/**
+ * Bare `nan`/`inf` as JSON values made readable (null). 25.12's mwan3 (2.12,
+ * a ucode rpcd handler) answers `"age": nan` for a line online since boot
+ * with no change: its time is `int("")`, and libubox prints NaN as is, which
+ * no JSON parser takes, so every line's state was lost in exactly the steady
+ * state. Drop once mwan3 or libubox write valid JSON:
+ * https://github.com/openwrt/packages/issues/29653 (open).
+ */
+export const withoutBareNumbers = (text: string) =>
+  text.replace(/([:\[,]\s*)[-+]?(nan|inf(inity)?)(?=\s*[,}\]])/gi, "$1null");
+
 /** mwan3's lines, without what it pings (no need, and kept short). Nothing where mwan3 is not running. */
 export const mwan3: Probe<unknown> = {
   command: "ubus call mwan3 status 2>/dev/null || echo '{}'",
-  parse: ({ stdout }) => json(stdout || "{}", "mwan3 status"),
+  parse: ({ stdout }) => json(withoutBareNumbers(stdout || "{}"), "mwan3 status"),
 };
 
 /** `ubus call mwan3 status`, as each line's state and for how long. */

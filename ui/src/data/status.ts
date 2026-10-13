@@ -6,7 +6,7 @@
 // reads the devices fast.
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { NetworkStatus } from "../../../src/status/network";
-import { loadLatestRelease, loadNetworkStatus, restartService, runSpeedTest, runWifiSurvey } from "./api";
+import { loadLatestRelease, loadNetworkStatus, pingFrom, rebootDevice, restartService, restartWifi, runSpeedTest, runWifiSurvey } from "./api";
 
 export const statusKey = ["network-status"] as const;
 
@@ -41,6 +41,16 @@ export const useRestartService = () => {
 };
 
 export const useSpeedTest = () => useMutation({ mutationFn: runSpeedTest });
+
+/** Reboot a device; status is read again so it says "rebooting" at once. */
+export const useReboot = () => {
+  const queryClient = useQueryClient();
+  return useMutation({ mutationFn: rebootDevice, onSuccess: () => queryClient.invalidateQueries({ queryKey: statusKey }) });
+};
+
+export const useRestartWifi = () => useMutation({ mutationFn: restartWifi });
+
+export const usePing = () => useMutation({ mutationFn: ({ device, target }: { device: string; target: string }) => pingFrom(device, target) });
 
 /** Each access point's survey: on request, as a scan can briefly disturb its clients. */
 export const useWifiSurvey = () => useMutation({ mutationFn: runWifiSurvey });

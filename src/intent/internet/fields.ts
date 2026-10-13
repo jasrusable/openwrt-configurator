@@ -2,7 +2,7 @@
 // numbers come from where the compiler takes them (connections.ts, compile.ts).
 import type { FieldInfo } from "../feature";
 import { lineCheck, meteredCheck, monthlyMegabytes, secondsToDown, slowLine, stickySeconds } from "../connections";
-import { ddnsCheckMinutes } from "./constants";
+import { ddnsCheckMinutes, stunServer } from "./constants";
 
 export const internetFields: FieldInfo[] = [
   { path: "internet", label: "Internet" },
@@ -133,6 +133,6 @@ export const internetFields: FieldInfo[] = [
     description: "Lets games and apps open the ports they need.",
     openwrt: "miniupnpd",
     explain:
-      "Lets devices on the main network open ports on the router for themselves (game consoles, some apps), over UPnP IGD and NAT-PMP. Secure mode is on: a device can only open ports to itself.",
+      `Lets devices on the main network open ports on the router for themselves (game consoles, some apps), over UPnP IGD and NAT-PMP. Secure mode is on: a device can only open ports to itself. Behind another router (an address from DHCP, or a private one) it learns the outer address over STUN (${stunServer.host}); the ports then reach the internet only if that router passes them on (its exposed host).`,
   },
 ];

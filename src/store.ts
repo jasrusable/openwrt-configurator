@@ -15,6 +15,9 @@ import { problem, Problem } from "./problem";
 
 export type StoreFiles = Pick<Platform, "readTextFile" | "writeFileAtomic" | "mkdirp" | "removeFile">;
 
+/** What the store makes is its owner's alone: the files are, and so are the directories that name them. */
+const privateDir = 0o700;
+
 export type StoreKey<T> = {
   path: string;
   schema: z.ZodType<T>;
@@ -53,7 +56,7 @@ export const read = <T>(files: Pick<Platform, "readTextFile">, key: StoreKey<T>)
 
 /** Keep `value`, whole: written aside and renamed into place, with its mode from the start. */
 export const write = <T>(files: StoreFiles, key: StoreKey<T>, value: T) => {
-  files.mkdirp(dirname(key.path));
+  files.mkdirp(dirname(key.path), privateDir);
   files.writeFileAtomic(key.path, JSON.stringify({ format: key.format, value }), key.mode ?? 0o600);
 };
 
@@ -84,7 +87,7 @@ export const update = <T>(files: StoreFiles, key: StoreKey<T>, change: (current:
 /** A value moved to another key as it is, whatever its format: renaming what it belongs to. */
 export const move = (files: StoreFiles, from: StoreKey<unknown>, to: StoreKey<unknown>) => {
   const text = files.readTextFile(from.path);
-  files.mkdirp(dirname(to.path));
+  files.mkdirp(dirname(to.path), privateDir);
   files.writeFileAtomic(to.path, text, to.mode ?? 0o600);
   files.removeFile(from.path);
 };
@@ -110,6 +113,13 @@ export const list = <T>(
 export const fileName = (name: string) => name.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "_");
 
 /**
+ * The state directory, made or tightened owner-only (one made before this
+ * was 0755: its files' names say which devices there are, and their runs).
+ */
+export const keepStatePrivate = (files: Pick<Platform, "mkdirp">, intentPath: string) =>
+  files.mkdirp(stateLayout(intentPath).root, privateDir);
+
+/**
  * Where everything kept beside an intent lives (`<intent>.state/`): the one
  * place a path under it is spelt out.
  */
@@ -132,6 +142,8 @@ export const stateLayout = (intentPath: string) => {
     activity: `${root}/activity.json`,
     /** OpenWrt's latest release, as last asked (src/status/actions.ts). */
     release: `${root}/openwrt-release.json`,
+    /** Devices asked to reboot, and when (src/status/actions.ts). */
+    rebooting: `${root}/rebooting.json`,
     /** The lock a Status action takes, one action at a time. */
     actionLock: (name: string) => `${root}/${name}.lock`,
   };

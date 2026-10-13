@@ -7,9 +7,9 @@ import { Plan, PlanDevice } from "../plan/types";
 import { OpenWrtState } from "../engine/openWrtState";
 import { join } from "../posixPath";
 import { Platform, Session, SshTarget } from "../platform";
-import { runProbe } from "../deviceProbes";
+import { runProbe, wifiStations } from "../deviceProbes";
 import { meshDepths, meshView } from "./meshOrder";
-import { defaultGateway } from "./gateway";
+import { defaultGateway, ownMacs } from "./gateway";
 import { provisionNetwork, provisioningOrder } from "./provisionNetwork";
 import { RollbackMode } from "../agent";
 import { ConfirmTiming, confirmTiming } from "./reconnect";
@@ -150,6 +150,28 @@ const meshDepthsOf = async (
   return meshDepths({ views, cabled });
 };
 
+/**
+ * The devices this machine reaches the network through by Wi-Fi: one whose
+ * Wi-Fi clients include one of its MACs. Applied after the rest, as changing
+ * it first could cut this machine off from the devices after it. Read-only.
+ */
+const accessPointsOf = async (
+  platform: Pick<Platform, "os" | "run">,
+  ready: { deviceConfig: PlanDevice; ssh: Session }[]
+): Promise<string[]> => {
+  const mine = await ownMacs(platform);
+  if (mine.length === 0) return [];
+  const seen = await Promise.all(
+    ready
+      .filter(({ ssh }) => !ssh.local)
+      .map(async ({ deviceConfig, ssh }) => ({
+        hostname: deviceConfig.hostname,
+        stations: await runProbe(ssh, wifiStations).catch(() => [] as string[]),
+      }))
+  );
+  return seen.filter(({ stations }) => stations.some((mac) => mine.includes(mac))).map(({ hostname }) => hostname);
+};
+
 export const provisionConfig = async ({
   plan,
   confirm = true,
@@ -250,7 +272,8 @@ export const provisionConfig = async ({
       timing: timing ?? confirmTiming(),
       report,
     })),
-    await defaultGateway(platform)
+    await defaultGateway(platform),
+    await accessPointsOf(platform, planned)
   );
   console.log(
     `Provisioning ${devices.map((d) => d.hostname).join(", then ")}` +

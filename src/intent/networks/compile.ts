@@ -107,11 +107,11 @@ export const network: Feature = (intent) => {
         // bridge; older swconfig switches tag in the switch, one bridge per
         // VLAN. Sections of their own, each for its kind (not an override's
         // list), so other features' (the mesh's backbone) are kept beside them.
-        switch: [section({ when: onSwConfig }, { name: "switch0", reset: true, enable_vlan: true })],
+        switch: [section({ when: onSwConfig }, { name: placeholder.switchName, reset: true, enable_vlan: true })],
         switch_vlan: networks.map((n) =>
           section(
             { name: `vlan_${vlanOf(n)}`, when: onSwConfig },
-            { device: "switch0", vlan: vlanOf(n), ports: isMain(n) ? placeholder.freePorts : placeholder.freePortsTagged }
+            { device: placeholder.switchName, vlan: vlanOf(n), ports: isMain(n) ? placeholder.freePorts : placeholder.freePortsTagged }
           )
         ),
         "bridge-vlan": networks.map((n) =>
@@ -183,6 +183,17 @@ export const network: Feature = (intent) => {
             ? [section({ name: `${main.id}6`, when: onAccessPoints }, { device: deviceOf(main), proto: "dhcpv6", reqprefix: "no" })]
             : []),
         ],
+        // No dhcp_default_duid, deliberately: 25.12 makes a random one at
+        // first boot (uci-defaults 14_network-generate-duid, only while it is
+        // "auto"), which the wipe removes, so the DHCP clients identify by
+        // MAC as before 25.12: stable across applies, rollbacks and
+        // reflashes. Declaring one would also send it as the DHCPv4
+        // client-id (ff + IAID + DUID), the 25.12 change some ISPs refuse
+        // (https://github.com/openwrt/openwrt/issues/21671,
+        // https://github.com/openwrt/openwrt/issues/22332), and give every
+        // device a new lease once, an access point a new address mid-apply.
+        // Revisit with `sendclientid` (commit eae2afc352, after 25.12.5):
+        // TODO.md.
         globals: [
           section(
             {
@@ -196,17 +207,13 @@ export const network: Feature = (intent) => {
           ),
         ],
       },
+      // The router's alone: access points have neither dnsmasq nor odhcpd
+      // (hardware/compile.ts removes them), so nothing there would read it.
       dhcp: {
         dhcp: networks.map((n) =>
           section(
-            {
-              name: n.id,
-              overrides: [
-                { when: onRouter, options: dhcpServer(n, ipv6(n), tunnelOf(n) ? tunnelDns(tunnelOf(n)!) : []) },
-                { when: onAccessPoints, options: { ignore: true, dhcpv4: "disabled", dhcpv6: "disabled", ra: "disabled", ndp: "disabled" } },
-              ],
-            },
-            { interface: n.id }
+            { name: n.id, when: onRouter },
+            { interface: n.id, ...dhcpServer(n, ipv6(n), tunnelOf(n) ? tunnelDns(tunnelOf(n)!) : []) }
           )
         ),
         // Reservations: the same address every time, and a name in DNS.
@@ -219,7 +226,7 @@ export const network: Feature = (intent) => {
         ),
         odhcpd: [
           section(
-            { name: "odhcpd", when: everyDevice },
+            { name: "odhcpd", when: onRouter },
             { leasefile: "/tmp/odhcpd.leases", leasetrigger: "/usr/sbin/odhcpd-update", hostsdir: "/tmp/hosts", piodir: "/tmp/odhcpd-piodir" }
           ),
         ],

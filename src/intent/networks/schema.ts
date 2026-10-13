@@ -86,6 +86,12 @@ export const networkSchema = z
      * networks that share theirs, and theirs here: mDNS, reflected.
      */
     share_devices: z.boolean().default(false),
+    /**
+     * Devices on it use the router's DNS, whatever they are set to: DNS sent
+     * elsewhere is answered by the router, DNS over TLS to the internet is
+     * refused, and browsers are told not to use their own (dns/compile.ts).
+     */
+    keep_dns: z.boolean().default(false),
   })
   .strict();
 

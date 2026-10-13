@@ -80,3 +80,7 @@ export const matchPattern = (pattern: string, path: readonly string[]): string[]
     []
   );
 };
+
+/** The value at a dotted path ("wifi.networks.2"), or undefined where there is none. */
+export const valueAt = (root: unknown, path: string): unknown =>
+  path.split(".").reduce<unknown>((value, key) => (value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined), root);

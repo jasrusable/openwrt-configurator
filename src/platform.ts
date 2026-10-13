@@ -101,7 +101,12 @@ export type Platform = {
   writeTextFile: (path: string, data: string) => void;
   /** Adds to the end, making the file if needed: one write, never the whole file again. */
   appendTextFile: (path: string, data: string) => void;
-  mkdirp: (path: string) => void;
+  /**
+   * Makes the directory and any missing parents. With a mode, those it makes
+   * get it, and the directory itself is set to it if it already exists (an
+   * old one tightened); parents that existed are left as they are.
+   */
+  mkdirp: (path: string, mode?: number) => void;
   /** Permission bits (e.g. 0o600), or undefined when the file does not exist. */
   fileMode: (path: string) => number | undefined;
   /** No-op when the file does not exist. */

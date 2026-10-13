@@ -12,6 +12,7 @@ export const deviceLookup = (device: PlanDevice, schema: DeviceSchema): Lookup =
     "device.ipaddr": device.ipaddr,
     "device.model_id": device.modelId ?? schema.name,
     "device.version": schema.version,
+    "device.target": schema.target,
     // Whether it has a radio in each band: for config only a radio there can
     // carry (a mesh on a router that may or may not have Wi-Fi).
     ...Object.fromEntries(["2g", "5g", "6g"].map((band) => [`device.wifi_${band}`, radios.some((r) => r.band === band)])),

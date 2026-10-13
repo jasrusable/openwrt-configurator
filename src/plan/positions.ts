@@ -25,8 +25,13 @@ export const placeholderFits = (p: Placeholder, at: string, whole: boolean): boo
       return whole && at === "network.bridge-vlan.ports";
     case "eachBridgePort":
       return whole && at === "network.device.name";
+    // The switch, where a section names it.
+    case "switchName":
+      return whole && (at === "network.switch.name" || at === "network.switch_vlan.device");
     case "allRadios":
       return whole && at === "wireless.wifi-iface.device";
+    case "spareRadios":
+      return !whole && at === "wireless.wifi-iface.device";
     case "bestMode":
       return whole && at === "wireless.wifi-device.htmode";
     case "stations":

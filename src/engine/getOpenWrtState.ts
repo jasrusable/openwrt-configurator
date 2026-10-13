@@ -23,15 +23,17 @@ export const getOpenWrtState = ({
 
   // One entry per service: running if any declaration says so, and off
   // only if every declaration says so.
-  const services = declared.services.reduce<ServiceState[]>((acc, { name, running, enabled, restartAfterRollback }) => {
+  const services = declared.services.reduce<ServiceState[]>((acc, { name, running, enabled, restartAfterRollback, restartOnPackages }) => {
     const on = enabled !== false;
     const known = acc.find((s) => s.name === name);
     const restart = !!restartAfterRollback || !!known?.restartAfterRollback;
+    const onPackages = unique([known?.restartOnPackages, restartOnPackages]);
     const merged = {
       ...(known
         ? { name, running: known.running || !!running, ...(known.enabled === false && !on ? { enabled: false } : {}) }
         : { name, running: !!running, ...(on ? {} : { enabled: false }) }),
       ...(restart ? { restartAfterRollback: true } : {}),
+      ...(onPackages.length ? { restartOnPackages: onPackages } : {}),
     };
     return known ? acc.map((s) => (s.name === name ? merged : s)) : [...acc, merged];
   }, []);
@@ -52,6 +54,7 @@ export const getOpenWrtState = ({
     // What the wipe leaves alone. The rest is worked out against the device's
     // actual config, read after the package step (see stageRecords).
     keep: declared.keep.flatMap((k) => k.entries),
+    ...(plan.newConfigs?.length ? { newConfigs: plan.newConfigs } : {}),
     services,
     files,
   };

@@ -31,6 +31,7 @@ const device = (hostname: string, parts: Partial<DeviceStatus>): DeviceStatus =>
   counters: {},
   traffic: {},
   heardBy: [],
+  mdns: [],
   ...parts,
 });
 

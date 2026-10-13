@@ -120,7 +120,16 @@ export const fakeDevice = ({
   arming = "arms",
   dropsDuringConfigure = false,
   stalls,
+  freeKb = 100_000,
+  extraConfig,
+  newConfigs,
 }: {
+  /** Configs the run declares beside its system one (a typo's, say). */
+  extraConfig?: Record<string, Record<string, { ".name": string }[]>>;
+  /** Declared new on purpose (the low-level file's new_configs). */
+  newConfigs?: string[];
+  /** The overlay's free space; each new package takes 1 MiB of it. */
+  freeKb?: number;
   /**
    * This agent verb never answers (the client stalls, the link up): the call
    * runs out its time limit on the clock, the device untouched by it.
@@ -210,7 +219,8 @@ export const fakeDevice = ({
           return session();
         },
         state: stateOf({
-          config: { system: { system: [{ ".name": "s", hostname }] } },
+          config: { system: { system: [{ ".name": "s", hostname }] }, ...(extraConfig ?? {}) },
+          ...(newConfigs ? { newConfigs } : {}),
           services: services ?? [],
           packages: { add: newPackages ?? [], remove: removes ?? [] },
         }),
@@ -363,9 +373,17 @@ export const fakeDevice = ({
           })
         );
       if (command === "apk info") return ok("dnsmasq\n");
+      // packageSpace: totals now, after removals, after additions; then df.
+      if (command.startsWith("apk update")) {
+        const now = 10;
+        const added = (newPackages ?? []).length;
+        return ok(`OK: ${now} MiB in 131 packages\nOK: ${now} MiB in 131 packages\nOK: ${now + added} MiB in ${131 + added} packages\noverlay 200000 100000 ${freeKb} 50% /overlay\n`);
+      }
       if (command.startsWith("apk del --simulate")) return ok((removes ?? []).map((p, i) => `(${i + 1}/${removes!.length}) Purging ${p} (1.0)`).join("\n"));
       if (command.includes("uci export")) return ok(formatUciExport(staged));
       if (command === "uci changes" || command === "true") return ok();
+      // The plan's question of which configs services' reload triggers watch: none here.
+      if (command.includes(`ubus call service list '{"verbose":true}'`)) return ok("{}");
       if (command.includes("ubus call service list")) {
         record("settle");
         return ok();

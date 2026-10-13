@@ -3,15 +3,6 @@
 Open work, roughly in priority order. Remove an item when it is done; the
 commit that does it is the record.
 
-## Services without a reload trigger
-
-Each feature declares its services, enabled and started on every apply (the
-agent's `services` verb, `servicesRecords` in `src/getDeviceScript.ts`). A service whose init script has no `service_triggers`
-still ignores a config change until restarted: ubihealthd has a patch that
-restarts it; find which others in use are in the same position (`ubus call
-service list '{"name":"<svc>","verbose":true}'` shows triggers) and restart
-those whose config changed. Cover boot state and running state in the rig.
-
 ## Intent layer and web UI
 
 The goal: a simple, Apple/UniFi-style web UI that edits a high-level *intent*
@@ -28,9 +19,11 @@ over `src/server/`, and the React UI in `ui/`.
       rules live in each feature's `checks.ts` and `rules.ts` (one main
       network, unique VLANs and ranges, Wi-Fi on an existing network) and
       inputs are constrained.
-      Still to do: channels legal in the chosen country, and the LAN not
-      overlapping the WAN's range. Device-only facts (a missing 5 GHz radio) fail at plan
-      time, before any change.
+      Done also: channels legal in the chosen country (wireless-regdb,
+      `scripts/gen-regdb.js`), a static line's range not over a network's,
+      and a device that cannot carry its part (no WAN port) refused at plan
+      in plain words. Still to do: a DHCP line's range over a network's is
+      only known at runtime (an ISP router on 192.168.1.x): a Status warning.
 - [ ] **Reading devices** (CLAUDE.md, "Reading devices"; the app replaces
       LuCI, status included). Done: device facts that keep themselves fresh
       (`src/deviceFacts.ts`; pages ask for stale ones, applies write them),
@@ -44,22 +37,55 @@ over `src/server/`, and the React UI in `ui/`.
       guided Add hardware (`src/discover.ts`) and login access from the
       intent (authorized keys, password login off), and the Status pages
       (Overview, Clients, Devices, Performance, Activity; read by the server's
-      collector, graphs a day long; restart a service, speed test, Wi-Fi
-      survey). Next, in
-      order: a read-only rpcd "monitor" login compiled onto every device
-      (status objects only, never UCI; its own reviewed step: hashed
-      password with a stable salt); actions (reboot, restart Wi-Fi, ping)
-      with a confirmation; then LuCI off the devices (uhttpd and rpcd stay;
-      `rpcd-mod-iwinfo` explicit); longer history (a month at 15-minute points) last.
+      collector, graphs a day at a minute and 30 days at 15 minutes; restart a service, speed test, Wi-Fi
+      survey; reboot, restart Wi-Fi and ping from a device, each confirmed).
+      Next: LuCI off the devices (an open question for you: uhttpd and
+      rpcd stay; `rpcd-mod-iwinfo` explicit).
+- [ ] **A read-only "monitor" login for status reads: designed, verified,
+      not built; your call.** Status reads log in over SSH as root. The
+      alternative: an rpcd user compiled onto every device, its ACL only the
+      ubus objects, files and execs the probes need, read over `/ubus`.
+      Verified on 25.12.5: an rpcd login with an MD5-crypt hash and its own
+      ACL works; `system info` and `file read` of an allowed path answer,
+      `uci` and `/etc/shadow` are refused; JSON-RPC batches over `/ubus`
+      (uclient-fetch `--post-data`) carry many calls in one request.
+      Not built, because it is not clearly better:
+      1. Privilege: the collector runs beside the apply path, on the same
+         machine as the same user holding the root login (the Mac's
+         server; root on a router), so a lesser login for reads takes no
+         root credential away from that host.
+      2. Transport: plain HTTP is the only cheap form (one request per
+         read, no handshake), but it sends the login and every status
+         answer (clients, MACs, logs) in clear on the main network, where
+         SSH keeps them encrypted today: a new weak spot. HTTPS needs each
+         device's self-signed uhttpd certificate pinned like host keys
+         (`--ca-certificate` with the device's own; whether ustream-ssl
+         also checks the name is not verified) and costs a TLS handshake
+         per read, close to SSH's.
+      3. Cost: a pure-TS crypt (QuickJS has no crypto), a new generated
+         secret in the intent, an ACL kept in step with every probe, and
+         the probes (shell batches over ubus, /proc, sysfs, batctl, wg,
+         logread, iwinfo) rewritten as ubus and file calls, SSH kept for
+         the rest.
+      Worth it if the collector moves to a host or user without root
+      credentials, or if pinned HTTPS proves simple; the router's read cost
+      is better cut by caching the compiled state.
 - [ ] Per-port network assignment (today every LAN port carries every
-      network: the main one untagged, the others tagged). Also a security
+      network: the main one untagged, the others tagged). Also for drivers that filter only a few VLANs: the R6S's eth0
+      handles about 3 (https://github.com/openwrt/openwrt/issues/16162; Status warns,
+      `vlanFilterLimits` in src/status/views.ts), so only the networks it needs. Also a security
       fix: a wired device can tag its frames into any network's VLAN, which
       bypasses a main network that is not allowed to reach the others.
       Only access point uplinks should be trunks.
-- [ ] Full client isolation. `isolate` (hostapd) only separates clients of
-      one access point and band; across access points, bands and wired
-      ports it needs bridge port isolation (or routing every client through
-      the router's firewall).
+- [ ] Full client isolation across access points and wired ports. An
+      isolated SSID has hostapd's isolation and the access point's bridge
+      port isolation (`bridge_isolate`): its clients reach neither each
+      other nor the access point's other isolated SSIDs and bands. Across
+      access points they still can: an isolated port reaches every port
+      that is not, and the uplinks carry every network (verified on a Linux
+      bridge). Needs per-port networks first (wired ports netifd cannot
+      isolate by UCI at all), then filtering on the uplinks, or every
+      client routed through the router's firewall.
 - [ ] Provisioning jaculu from its intent. Parity checked offline (both
       configs through the engine against the captured R6S and NWA50AX Pro
       schemas, secrets masked): the R6S and odhcpd scripts match byte for
@@ -75,39 +101,39 @@ over `src/server/`, and the React UI in `ui/`.
 - [ ] Open schema questions: a second AP (`jaculu-ap-2`)? Why two SSIDs on
       one LAN? What are the extra Wi-Fi passwords for? Keep LuCI? Wi-Fi on
       a router that has radios (today only access points broadcast)?
-- [ ] Snapshot tests per feature × OpenWrt version; the rig on more than
-      one version.
-- [ ] Run a line on a swconfig router on real hardware (compiled to OpenWrt's own layout, VLAN 2 with the CPU tagged; checked only against the Archer C50's schema).
+- [ ] Run a line on a swconfig router on real hardware. The layout is checked
+      offline against OpenWrt's own (`swconfigLayout.test.ts`: the Archer C50
+      v4 and C60 v2 boards generated by OpenWrt's ucidef_add_switch, run
+      through its config_generate): the main network's VLAN, the CPU tagging,
+      the WAN's VLAN or NIC all match. A real switch (its port order, the CPU
+      port's tagging on the wire) is what is left.
+- [ ] OpenWrt SNAPSHOT: a "wipe" rollback leaves the device without SSH
+      (25.12 passes). procd runs each service in a cgroup; the agent and its
+      watchdog, started from an SSH session, stay in dropbear's
+      (`/services/dropbear/instance1`, "failed to remove busy cgroup"), and the
+      snapshot's procd does not start dropbear again while they hold it. The
+      agent should move what outlives the session (the watchdog at least) out
+      of that cgroup. The rig's snapshot job shows it.
 - [ ] Router-hosted first run: today `/etc/onc/intent.json` must be copied there; a first-run page that starts one from the router itself (its facts, its current network) would make the package usable on its own. Also HTTPS: the session cookie travels in clear over plain HTTP, as LuCI's does.
-- [ ] CLI `provision` (no `--facts-for`) still trusts an access point's `name.lan` on first use through the shared known_hosts; only the UI's apply holds it to a pin.
-- [ ] **Check free storage before installing.** Packages are fixed per role (mwan3 ~2.1 MiB, the mesh's ~0.4 MiB, the full wpad), so a small-flash device (8 MB) may not fit them: read the overlay's free space as a fact and have the apply refuse before `apk add` ("needs 2.1 MiB, has 1.4"), rather than filling the flash mid-run.
+
+- [ ] **Off is always explicit, tested.** For every service a feature installs on a role, compiling with that feature off must give an explicit off state (a disabled section, `ignore 1`, or the service declared `enabled: false` so it is stopped and disabled at boot), never just "no config". Missing config counts as off only when the package is not installed on that role (dnsmasq and odhcpd on access points). A test walks every feature's services × roles over the generator's intents and fails on a service that is installed, unused and not declared off; each package's "no section" behaviour stays checked against its init script on the image (miniupnpd starts without one, https-dns-proxy rewrites dnsmasq).
+
+- [ ] **DHCP identity with `sendclientid`.** Devices identify by MAC today (no `dhcp_default_duid`, see src/intent/networks/compile.ts). Once every device runs a release with `sendclientid` (commit eae2afc352, after 25.12.5), consider a stable DUID derived from the site seed and the device's name (survives a WAN port or hardware change) with `sendclientid` set per line so DHCPv4 sends no RFC 4361 client-id. Changing it renumbers each device once: plan it, and never on an access point mid-apply.
+- [ ] **UPnP options a later release brings:** `ext_allow_private_ipv4` (packages commit 6f657eb190, master 2026-04-19; https://github.com/openwrt/packages/pull/28644) and `upnp_lease_file6` (IPv6 pinholes surviving a restart; packages commit 9aaf2ffb96, master 2026-01-12), neither in 25.12.5's miniupnpd init script (checked): gate both by release when one ships them.
 
 ## Mesh
 
 - Run it on real hardware (two access points), then drop "Experimental".
-- Mesh over cables (`wifi.mesh.over_cable`) on swconfig nodes: there the VLAN is only carried, not used.
-- Tri-band access points with two 5 GHz radios: the mesh uses the first; a dedicated second 5 GHz radio needs each radio's channels in the facts.
 - A QEMU OpenWrt VM with `kmod-mac80211-hwsim` for an end-to-end mesh test in CI.
 - The wired mesh's MTU and path check on real switches (verified only in Docker, and a 1500-only Docker bridge as the bad switch).
-- A mesh neighbour's name comes from facts' MACs: until they are re-read (a day), a new neighbour shows as a MAC and its speed test is refused.
 
 ## Status
 
-- Clients: names learnt from mDNS; a client's type is guessed from its name only (icons).
-- Wi-Fi survey and usteer roaming: run on the user's AP only once usteer and the survey are exercised there (verified in Docker).
-- mwan3track's log line ("Interface wan (eth1) is offline") is from its source, not recorded: record one on a router with two lines.
-- Every status read compiles each device's settings again (`getOpenWrtState`, for the services that must run and the shaped interfaces), and the collector reads every 10 s while someone looks: cheap on a Mac, to measure under QuickJS on a router.
+- Clients: a client's kind also from its DHCP vendor class (option 60), which dnsmasq's lease file does not keep (a `dhcp-script` or `log-dhcp` would). Names and kinds from mDNS (umdns), its name and a few makers are done.
 
 ## From the settings and apply review (2026-10-13)
 
-- Ordering: the access point the workstation is on (by Wi-Fi) is not put last, only the gateway and a local device.
-- Adopting (Hardware › Add): show the host key's fingerprint and the MAC before adopting, and take addresses only, not names.
 - One root password is sent to every device: prefer keys only, the password only with password login on and no key.
-- `<intent>.state` is made with the default mode (0755 under the usual umask; its files are 0600): make the directory 0700 when first made (`stateLayout`, the platforms' `mkdirp`).
-- Access points get `dhcp` sections though dnsmasq and odhcpd are removed there; harmless, but noise in the apply diff.
-- A misspelled config in a hand-written file (`firwall`) is not caught: configs not in `src/plan/rules.ts`' table take any section type, and `uci batch` fails on a config the device lacks unless prepare seeds it (packages changing), when the real one is then wiped as undeclared. Check declared configs against the device's at plan. (Options stay open by design; a section's required options and unknown section types are refused.)
-- swconfig: the switch is `switch0` in the compiler and engine; facts drop board.json's switch name (a board whose switch is named otherwise, or with two, is wrong).
-- The IPv6-follows-the-line hook (mwan3 `disconnected`/`connected`) is from mwan3's source: watch a real failover.
 
 ## Roadmap (2026-10-13)
 

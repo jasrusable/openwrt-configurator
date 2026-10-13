@@ -7,7 +7,7 @@ import { Button, Group, Progress, SimpleGrid, Stack, Text } from "@mantine/core"
 import { where } from "../../../../src/intent/places";
 import type { Intent } from "../../../../src/intent/schema";
 import type { Survey } from "../../../../src/status/actions";
-import { useSeries } from "../../data/history";
+import { useRangeSwitch, useSeries } from "../../data/history";
 import { bitsWords, bytes } from "../../kit/format";
 import { throughputNow, useNetworkStatus, useSpeedTest, useWifiSurvey } from "../../data/status";
 import { duration } from "../../facts";
@@ -31,6 +31,7 @@ const Internet = ({ intent }: { intent: Intent }) => {
   const down = useSeries("down");
   const up = useSeries("up");
   const latency = useSeries("latency");
+  const range = useRangeSwitch();
   const check = status.data?.internetCheck;
   const now = throughputNow(status.data);
   const peak = Math.max(0, ...down.map((p) => p[1]));
@@ -46,10 +47,10 @@ const Internet = ({ intent }: { intent: Intent }) => {
           sub={`To ${latencyTarget}, from the router`}
         />
       </SimpleGrid>
-      <ChartCard title="Throughput" legend={[{ label: "Down", color: "blue" }, { label: "Up", color: "teal" }]} span={down[0]?.[0]}>
+      <ChartCard title="Throughput" legend={[{ label: "Down", color: "blue" }, { label: "Up", color: "teal" }]} span={down[0]?.[0]} range={range}>
         <AreaChart series={[down, up]} colors={["blue", "teal"]} height={110} />
       </ChartCard>
-      <ChartCard title="Latency" legend={[{ label: "ms", color: "violet" }]} span={latency[0]?.[0]}>
+      <ChartCard title="Latency" legend={[{ label: "ms", color: "violet" }]} span={latency[0]?.[0]} range={range}>
         <AreaChart series={[latency]} colors={["violet"]} height={70} />
       </ChartCard>
       <Section title="Connections">
@@ -133,15 +134,17 @@ const SurveyCard = ({ survey }: { survey: Survey }) => {
                     <Text size="xs" w={34} ta="right" fw={c.ours ? 700 : 400}>
                       {c.channel}
                     </Text>
+                    {/* Unknown where the radio's counters cannot be right (mt76#1135): no bar, rather than a bogus one. */}
                     <Progress
-                      value={c.busy}
-                      color={c.busy >= 60 ? "red" : c.busy >= 30 ? "orange" : bandColor(band)}
+                      value={c.busy ?? 0}
+                      color={c.busy === undefined ? "gray" : c.busy >= 60 ? "red" : c.busy >= 30 ? "orange" : bandColor(band)}
                       size="lg"
                       radius="sm"
                       style={{ flex: 1 }}
                     />
                     <Text size="xs" c="dimmed" w={150}>
-                      {c.busy}% busy{heard ? ` · ${heard} network${heard === 1 ? "" : "s"}` : ""}
+                      {c.busy === undefined ? "unknown" : `${c.busy}% busy`}
+                      {heard ? ` · ${heard} network${heard === 1 ? "" : "s"}` : ""}
                       {c.ours ? " · yours" : ""}
                     </Text>
                   </Group>

@@ -18,6 +18,7 @@ const withIot = () => {
     name: "Gadgets",
     vlan: 30,
     subnet: "10.0.30.0/24",
+    keep_dns: false,
     dhcp: { pool_size: 50, lease: "12h", reservations: [] },
     ipv6: false,
     share_devices: iot.share_devices,

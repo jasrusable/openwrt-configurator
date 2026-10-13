@@ -20,7 +20,8 @@
 # the real 90 s default.
 #
 # Needs docker (privileged containers), jq, openssl and `npm ci` done.
-# Usage: scripts/rig-test.sh [job ...]   (default: dbclient openssh node network)
+# Usage: [ONC_RIG_VERSION=25.12.0|25.12.5|SNAPSHOT] [ONC_RIG_KEEP=1] scripts/rig-test.sh [job ...]
+#        (default: 25.12.5; jobs dbclient openssh node network)
 
 # Device-side snippets are single-quoted on purpose: they expand in the container.
 # shellcheck disable=SC2016
@@ -29,17 +30,16 @@ set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 # The controller's Node, exactly the repo's.
 node_image="node:$(cat "$root/.node-version")-alpine"
-case "$(uname -m)" in
-  # The arm64 rootfs is labelled linux/aarch64_generic, which no --platform
-  # matches, so it runs with none; the node image is a normal multi-arch one.
-  arm64 | aarch64) image=openwrt/rootfs:armsr-armv8-v25.12.5 platform='' node_platform=linux/arm64 ;;
-  *) image=openwrt/rootfs:x86-64-v25.12.5 platform=linux/amd64 node_platform=linux/amd64 ;;
-esac
+# The OpenWrt image (ONC_RIG_VERSION): see scripts/openwrt-image.sh.
+. "$root/scripts/openwrt-image.sh"
+echo "OpenWrt $version ($image)"
 work=$(mktemp -d)
 prefix=onc-rig-$$
 clients=${*:-dbclient openssh node network}
 
+# ONC_RIG_KEEP=1 leaves the containers for a look after a failure (docker ps).
 cleanup() {
+  if [ "${ONC_RIG_KEEP:-}" = 1 ]; then echo "kept: $(docker ps -q --filter "name=^$prefix-" | tr '\n' ' ')"; return; fi
   for c in $(docker ps -aq --filter "name=^$prefix-"); do docker rm -f "$c" >/dev/null 2>&1 || true; done
   rm -rf "$work"
 }
@@ -78,6 +78,7 @@ boot_device() {
   # dropbear and netifd are up almost at once, but board.json is generated
   # later in boot; wait for what the tool reads, and for the LAN.
   device 'n=0; until { [ -s /etc/board.json ] && ubus call network.interface.lan status >/dev/null 2>&1 && pidof dropbear >/dev/null; } || [ $n -ge 90 ]; do sleep 1; n=$((n+1)); done; [ -s /etc/board.json ]'
+  quiet_kmsg "$dev"
   booted_ip=$(docker inspect "$dev" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
   gateway=$(docker inspect "$dev" --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}')
   booted_model=$(device 'jsonfilter -i /etc/board.json -e @.model.id')
@@ -131,7 +132,9 @@ run_client() {
   # wipe: dropbear is neither declared nor excluded, so the reset deletes it.
   # lockout: dropbear is declared, on a port nothing will reconnect to.
   # exact: keep, plus a package installed mid-run that ships its own config.
-  for mode in keep wipe lockout exact; do
+  # quiet1, quiet2: keep, plus quietsvc's config (x=1, then x=2), a service
+  # whose init script has no reload trigger.
+  for mode in keep wipe lockout exact quiet1 quiet2; do
     jq -n --arg ip "$ip" --arg model "$model" --arg pw "$password" --arg auth "$auth" --arg mode "$mode" --arg note "$note" '
       {
         devices: [{
@@ -143,14 +146,17 @@ run_client() {
         configs_to_not_reset: [{ ".if": "*", configs: (
           ["luci.*","rpcd.*","ucitrack.*","uhttpd.*","system.led","network.*",
            "firewall.*","dhcp.*","wireless.*","attendedsysupgrade.*"]
-          + (if $mode == "keep" or $mode == "exact" then ["dropbear.*"] else [] end)) }],
+          + (if $mode == "keep" or $mode == "exact" or ($mode | startswith("quiet")) then ["dropbear.*"] else [] end)) }],
         package_profiles: (if $mode == "exact" then [{ packages: ["irqbalance"] }] else [] end),
+        services: (if ($mode | startswith("quiet")) then [{ name: "quietsvc", running: true }] else [] end),
         config: ({ system: { system: [{ zonename: "UTC", timezone: "UTC0" }] },
                    onctest: { onctest: [{ ".name": "main", note: $note }] } }
           + (if $mode == "lockout"
              then { dropbear: { dropbear: [{ PasswordAuth: "on", RootPasswordAuth: "on", Port: 2223 }] } }
              elif $mode == "exact"
              then { irqbalance: { irqbalance: [{ ".name": "main", enabled: true }] } }
+             elif ($mode | startswith("quiet"))
+             then { quietsvc: { quietsvc: [{ ".name": "main", x: ($mode | ltrimstr("quiet")) }] } }
              else {} end))
       }' >"$work/$client-$mode.json"
   done
@@ -201,17 +207,28 @@ run_client() {
   if [ "$client" = dbclient ]; then
     # Someone's unfinished `uci set` in a package this run never touches, and
     # an unsaved LuCI edit (rpcd stages those per session, elsewhere). The
-    # first must be reported and discarded, the second left alone.
-    session=$(device "ubus call session login '{\"username\":\"root\",\"password\":\"$password\"}' | jsonfilter -e @.ubus_rpc_session")
-    device "ubus call uci set '{\"config\":\"system\",\"section\":\"@system[0]\",\"values\":{\"hostname\":\"luci-pending\"},\"ubus_rpc_session\":\"$session\"}'"
-    device 'uci set luci.main.lang=de'
+    # first must be reported and discarded, the second left alone. An image
+    # without LuCI (snapshots' rootfs) has neither its config nor the ACL
+    # that lets root's session stage UCI: the stray change goes in onctest.
+    if device '[ -f /etc/config/luci ] && [ -f /usr/share/rpcd/acl.d/luci-base.json ]'; then
+      stray=luci stray_set='uci set luci.main.lang=de' stray_gone='[ "$(uci -q get luci.main.lang)" != de ]'
+      session=$(device "ubus call session login '{\"username\":\"root\",\"password\":\"$password\"}' | jsonfilter -e @.ubus_rpc_session")
+      device "ubus call uci set '{\"config\":\"system\",\"section\":\"@system[0]\",\"values\":{\"hostname\":\"luci-pending\"},\"ubus_rpc_session\":\"$session\"}'"
+      luci_kept() { device "ubus call uci changes '{\"ubus_rpc_session\":\"$session\"}' | grep -q luci-pending"; }
+      label="stray staged changes are discarded and reported; LuCI's are kept"
+    else
+      stray=onctest stray_set='uci set onctest.stray=thing' stray_gone='[ -z "$(uci -q get onctest.stray)" ]'
+      luci_kept() { true; }
+      label="stray staged changes are discarded and reported (no LuCI on this image)"
+    fi
+    device "$stray_set"
     if provision keep &&
-      grep -q "discarding uncommitted UCI changes in luci (1)" "$work/$client.out" &&
+      grep -q "discarding uncommitted UCI changes in $stray (1)" "$work/$client.out" &&
       device_is_clean &&
-      [ "$(device 'uci -q get luci.main.lang')" != de ] &&
-      device "ubus call uci changes '{\"ubus_rpc_session\":\"$session\"}' | grep -q luci-pending"; then
-      pass "stray staged changes are discarded and reported; LuCI's are kept"
-    else fail "stray staged changes are discarded and reported; LuCI's are kept"; show; fi
+      device "$stray_gone" &&
+      luci_kept; then
+      pass "$label"
+    else fail "$label"; show; fi
 
     # What the old reset missed: a section type only a package installed
     # during the run brings (irqbalance ships `config irqbalance 'irqbalance'`),
@@ -227,13 +244,36 @@ config evil\$(touch /tmp/pwned2)[0]'; uci commit onctest"
     else fail "the result is exactly the declared config, even where a package adds some"; show
       device 'uci export irqbalance; uci show onctest | cut -d= -f1' | sed 's/^/        /'; fi
 
+    # A service with no reload trigger ignores a reload: one whose config this
+    # run changed is restarted (its pid changes); one whose config did not is
+    # left alone (its pid stays).
+    device "printf '%s\n' '#!/bin/sh /etc/rc.common' START=99 USE_PROCD=1 \
+      'start_service() { procd_open_instance; procd_set_param command /bin/sleep 3000; procd_close_instance; }' \
+      > /etc/init.d/quietsvc; chmod +x /etc/init.d/quietsvc
+      printf '%s\n' \"config quietsvc 'main'\" \"	option x '0'\" > /etc/config/quietsvc
+      /etc/init.d/quietsvc enable; /etc/init.d/quietsvc start"
+    quiet_pid() { device 'ubus call service list "{\"name\":\"quietsvc\"}" | jsonfilter -e "@.quietsvc.instances.*.pid"'; }
+    if provision quiet1 && device_is_clean && first=$(quiet_pid) &&
+      provision quiet2 && device_is_clean && changed=$(quiet_pid) &&
+      provision quiet2 && device_is_clean && same=$(quiet_pid) &&
+      [ -n "$first" ] && [ "$changed" != "$first" ] && [ "$same" = "$changed" ] &&
+      [ "$(device 'uci -q get quietsvc.main.x')" = 2 ]; then
+      pass "a service with no reload trigger is restarted when its config changes, and only then"
+    else fail "a service with no reload trigger is restarted when its config changes, and only then"; show
+      echo "        pids: ${first:-?} ${changed:-?} ${same:-?}"; fi
+
     rolls_back lockout
   fi
   [ "$client" != openssh ] && rolls_back wipe
 
   device 'rm -f /etc/dropbear/dropbear_*_host_key; /etc/init.d/dropbear restart; n=0; until netstat -ltn | grep -q ":22 " || [ $n -ge 15 ]; do sleep 1; n=$((n+1)); done'
-  if ! onc print-uci-commands "$client-keep.json" >"$work/$client.out" 2>&1 &&
-    grep -q "host key for $ip has changed" "$work/$client.out"; then
+  # A first connection to the restarted dropbear has once timed out ("no
+  # response", on 25.12.0): neither an accept nor a refusal, so it is asked again.
+  refused_key() {
+    ! onc print-uci-commands "$client-keep.json" >"$work/$client.out" 2>&1 &&
+      grep -q "host key for $ip has changed" "$work/$client.out"
+  }
+  if refused_key || { grep -q "no response" "$work/$client.out" && refused_key; }; then
     pass "a changed host key is refused"
   else fail "a changed host key is refused"; show; fi
 

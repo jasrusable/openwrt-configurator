@@ -33,7 +33,7 @@ export const meshFields: FieldInfo[] = [
     label: "Only for the mesh",
     description: "Devices use the other bands: the mesh has this one to itself.",
     explain:
-      "No SSID is broadcast on the mesh's band, so the mesh gets all of that radio's airtime instead of sharing it with your devices. Best on access points with three radios (a 6 GHz one for the mesh); on two, devices are left with the other band alone.",
+      "No SSID is broadcast on the mesh's radio, so the mesh gets all of its airtime instead of sharing it with your devices. Best on access points with three radios: a 6 GHz one for the mesh, or with two 5 GHz radios the one on the mesh's channel, the other still serving devices. On two, devices are left with the other band alone.",
   },
   {
     path: "wifi.mesh.over_cable",
@@ -41,7 +41,7 @@ export const meshFields: FieldInfo[] = [
     description: "Nodes with a cable between them use it, and Wi-Fi when it fails.",
     openwrt: "batman-adv on a VLAN",
     explain: () =>
-      `batman-adv also runs over your cables, on VLAN ${meshWiredVlan}, carried tagged on every device's ports (the router and access points without Wi-Fi in the mesh's band only pass it on). Between two nodes with a cable it then prefers the cable, and falls back to the mesh when it breaks. Without it, a cabled node still links the mesh to the network, and its devices still move to another one if its cable breaks; this adds the cable as a path of the mesh itself. No network may use VLAN ${meshWiredVlan}.`,
+      `batman-adv also runs over your cables, on VLAN ${meshWiredVlan}, carried tagged on every device's ports, older switch chips (swconfig) included (the router and access points without Wi-Fi in the mesh's band only pass it on). Between two nodes with a cable it then prefers the cable, and falls back to the mesh when it breaks. Without it, a cabled node still links the mesh to the network, and its devices still move to another one if its cable breaks; this adds the cable as a path of the mesh itself. No network may use VLAN ${meshWiredVlan}.`,
   },
   {
     path: "wifi.mesh.large_frames",
@@ -49,7 +49,7 @@ export const meshFields: FieldInfo[] = [
     description: "Faster; any switch between nodes must pass them.",
     openwrt: `MTU ${meshMtu}`,
     explain: () =>
-      `The mesh adds its own header to every packet, so over cables it sends frames of ${meshMtu} bytes, ${meshMtu - 1500} more than usual: every port of your devices is set to take them, your networks' own stay at 1500. Most switches pass them; one that does not drops full-size packets, which the Overview shows. Off, the mesh splits such packets in two over cable instead: it always works, a little slower.`,
+      `The mesh adds its own header to every packet, so over cables it sends frames of ${meshMtu} bytes, ${meshMtu - 1500} more than usual: every port of your devices is set to take them (older switch chips, swconfig, stay at 1500 and split instead), your networks' own stay at 1500. Most switches pass them; one that does not drops full-size packets, which the Overview shows. Off, the mesh splits such packets in two over cable instead: it always works, a little slower.`,
   },
   {
     path: "hardware.*.uplink",

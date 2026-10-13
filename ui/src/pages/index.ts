@@ -5,6 +5,7 @@
 // page titles and tabs stay text only, so the icon is not repeated.
 import {
   IconAdjustments,
+  IconBandage,
   IconCpu,
   IconDevices,
   IconGauge,
@@ -24,6 +25,7 @@ import { FirewallPage } from "./firewall";
 import { VpnPage } from "./vpn";
 import { SystemPage } from "./SystemPage";
 import { HardwarePage } from "./HardwarePage";
+import { FixesPage } from "./FixesPage";
 import { InternetPage } from "./InternetPage";
 import { NetworksPage } from "./NetworksPage";
 import { OverviewPage } from "./OverviewPage";
@@ -48,6 +50,8 @@ export const pages = [
   { group: "settings", id: "vpn", label: placeName("vpn"), icon: IconLock, color: "teal", Page: VpnPage },
   { group: "settings", id: "dns", label: placeName("dns"), icon: IconShieldLock, color: "violet", Page: DnsPage },
   { group: "settings", id: "hardware", label: placeName("hardware"), icon: IconRouter, color: "orange", Page: HardwarePage },
+  // What this app layers over OpenWrt for known problems, device by device.
+  { group: "settings", id: "fixes", label: placeName("fixes"), icon: IconBandage, color: "pink", Page: FixesPage },
 ] as const;
 
 /** The sidebar's groups, in order: what the network is doing, then how it is set up. */

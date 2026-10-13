@@ -17,12 +17,15 @@ const object = (value: unknown): Json => (value && typeof value === "object" && 
 const strings = (value: unknown) => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []);
 const string = (value: unknown) => (typeof value === "string" && value ? value : undefined);
 
+/** Older switches (swconfig): each switch board.json lists, by its name (switch0, …). */
+const switchesOf = (board: Json) => Object.entries(object(board.switch)).filter(([, s]) => Array.isArray(object(s).ports));
+
 /**
- * Older switches (swconfig): the switch's ports by number, named `port<num>`
- * (not eth<num>, a real NIC's name on boards with one beside the switch).
+ * The (first) switch's ports by number, named `port<num>` (not eth<num>, a
+ * real NIC's name on boards with one beside the switch).
  */
 const switchPorts = (board: Json): Port[] | undefined => {
-  const switches = Object.values(object(board.switch)).filter((s) => Array.isArray(object(s).ports));
+  const switches = switchesOf(board).map(([, s]) => s);
   if (switches.length === 0) return undefined;
   return (object(switches[0]).ports as unknown[]).flatMap((p): Port[] => {
     const port = object(p);
@@ -103,6 +106,39 @@ const wlanRadios = (board: Json, skipped: string[]): Radio[] | undefined => {
   });
 };
 
+/** A frequency's channel and band, as OpenWrt's wifi-detect counts them (MHz). */
+const channelOf = (freq: number): { band: Radio["band"]; channel: number } | undefined =>
+  freq === 2484
+    ? { band: "2g", channel: 14 }
+    : freq >= 2407 && freq < 2484
+      ? { band: "2g", channel: (freq - 2407) / 5 }
+      : freq === 5935
+        ? { band: "6g", channel: 2 }
+        : freq >= 5000 && freq < 5950
+          ? { band: "5g", channel: (freq - 5000) / 5 }
+          : freq >= 5950 && freq <= 7125
+            ? { band: "6g", channel: (freq - 5950) / 5 }
+            : undefined;
+
+/**
+ * A radio's channels: its wiphy's enabled frequencies (wiphyChannels in
+ * getDeviceSchema.ts) in its band, and, where a wiphy has several radios,
+ * within that radio's own ranges (kHz, as nl80211 gives them).
+ */
+const channelsOf = (wiphys: Json, radio: Radio): number[] | undefined => {
+  const wiphy = object(wiphys[radio.phy ?? radio.name]);
+  const freqs = Array.isArray(wiphy.freqs) ? wiphy.freqs.filter((f): f is number => typeof f === "number") : undefined;
+  if (!freqs) return undefined;
+  const own = (Array.isArray(wiphy.radios) ? wiphy.radios.map(object) : []).find((r) => r.index === radio.radio);
+  const ranges = Array.isArray(own?.ranges) ? (own!.ranges as unknown[]).filter((r): r is [number, number] => Array.isArray(r)) : undefined;
+  return freqs
+    .filter((f) => !ranges || ranges.some(([start, end]) => f * 1000 >= start && f * 1000 <= end))
+    .flatMap((f) => {
+      const at = channelOf(f);
+      return at && at.band === radio.band && Number.isInteger(at.channel) ? [at.channel] : [];
+    });
+};
+
 /** A device without `wlan` (older releases): its wifi-device sections, as `ubus call uci get` gives them. */
 const uciRadios = (uci: unknown, skipped: string[]): Radio[] =>
   Object.values(object(object(uci).values)).flatMap((value): Radio[] => {
@@ -129,6 +165,7 @@ export const parseDeviceFacts = ({
   system: systemRaw,
   uciWireless,
   meshSupport,
+  wiphys,
 }: {
   /** /etc/board.json. */
   board: unknown;
@@ -138,6 +175,8 @@ export const parseDeviceFacts = ({
   uciWireless?: unknown;
   /** Which wiphys can be a mesh point, by name (deviceProbes' meshSupport); unknown where absent. */
   meshSupport?: unknown;
+  /** Each wiphy's enabled frequencies and its radios' ranges, by name (wiphyChannels); unknown where absent. */
+  wiphys?: unknown;
 }): DeviceSchema => {
   const board = object(boardRaw);
   const system = object(systemRaw);
@@ -148,6 +187,9 @@ export const parseDeviceFacts = ({
   if (!version) throw new Error(`${name} reports no OpenWrt release (ubus system board).`);
 
   const fromSwitch = switchPorts(board);
+  const switches = switchesOf(board).map(([switchName]) => switchName);
+  // One switch is used; a second (rare) is said, not guessed at.
+  switches.slice(1).forEach((other) => skipped.push(`${other}: a second switch (only ${switches[0]} is used)`));
   const ports = fromSwitch ? [...fromSwitch, ...portsBesideSwitch(board, fromSwitch)] : networkPorts(board);
   if (ports.length === 0) {
     throw new Error(
@@ -158,15 +200,23 @@ export const parseDeviceFacts = ({
     throw new Error(`${name}: board.json's switch has no CPU port.`);
   }
   const mesh = object(meshSupport);
-  const radios = (wlanRadios(board, skipped) ?? uciRadios(uciWireless, skipped)).map((radio) =>
-    typeof mesh[radio.phy ?? radio.name] === "boolean" ? { ...radio, mesh: mesh[radio.phy ?? radio.name] as boolean } : radio
-  );
+  const radios = (wlanRadios(board, skipped) ?? uciRadios(uciWireless, skipped)).map((radio) => {
+    const channels = channelsOf(object(wiphys), radio);
+    return {
+      ...radio,
+      ...(typeof mesh[radio.phy ?? radio.name] === "boolean" ? { mesh: mesh[radio.phy ?? radio.name] as boolean } : {}),
+      ...(channels?.length ? { channels } : {}),
+    };
+  });
   const model = string(system.model) ?? string(object(board.model).name);
+  const target = string(object(system.release).target);
   return {
     name,
     ...(model ? { model } : {}),
     version,
+    ...(target ? { target } : {}),
     sw_config: !!fromSwitch,
+    ...(fromSwitch ? { switch: switches[0] } : {}),
     ports,
     ...(radios.length ? { radios } : {}),
     ...(skipped.length ? { skipped } : {}),

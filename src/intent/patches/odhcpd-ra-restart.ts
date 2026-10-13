@@ -3,13 +3,27 @@ import { Patch } from "./patch";
 
 export const odhcpdRaRestart: Patch = {
   id: "odhcpd-ra-restart",
+  title: "odhcpd restarted when IPv6 advertisements stall",
+  required: true,
+  note: "odhcpd is restarted when wan6 gets its route, and when a network moves, so devices keep getting IPv6",
+  affects: ["internet.lines.*.ipv6.enabled"],
   why:
     "odhcpd starts before wan6 has an IPv6 default route, advertises a lifetime of 0 and " +
     "never recovers, so every client is left link-local only; restarting it once the " +
     "route exists fixes it (seen on 25.12.5, odhcpd 2026.06.29). Its reload also keeps the " +
     "device a network had: an apply that moved the LAN (br-lan to br-lan.1) left it sending " +
     "to one that was gone, the same silence; so it is restarted when one of the networks comes up.",
-  upstream: "https://github.com/openwrt/odhcpd/issues/388",
+  kind: "fix",
+  references: [
+    { kind: "issue", url: "https://github.com/openwrt/odhcpd/issues/388", note: "open: RA not sent on LAN when the log level is below 7 (odhcpd 2026.01.19), the same silence" },
+    { kind: "issue", url: "https://github.com/openwrt/odhcpd/issues/423", note: "the user's report: carrier loss withdraws every advertised prefix" },
+    { kind: "issue", url: "https://github.com/openwrt/odhcpd/issues/400", note: "open: the cost of each restart, DHCPv6 leases are lost (managed-config clients renumber)" },
+    { kind: "pr", url: "https://github.com/openwrt/odhcpd/pull/364", note: "open, WIP: leases kept across restarts, which would make the restarts free" },
+    { kind: "report", url: "https://github.com/openwrt/odhcpd/issues/423", note: "seen twice on the user's router (25.12.5, odhcpd 2026.06.29)" },
+  ],
+  added: "2026-10-11",
+  verified: "the user's NanoPi R6S on 25.12.5: clients link-local only until odhcpd was restarted",
+  dropWhen: "odhcpd recovers on its own once wan6 has a default route, and follows a network moved to another device",
   target: { roles: ["router"] },
   // Only the internet's IPv6 brings up wan6 and router advertisements.
   applies: (intent) => internetIpv6(intent),
@@ -34,12 +48,23 @@ export const odhcpdRaRestart: Patch = {
 # A network of ours coming up (an apply that moved it to another device,
 # br-lan to br-lan.1): odhcpd's reload keeps the device it had and goes on
 # sending to one that is gone, so the whole network loses IPv6 (seen on a
-# real router). Restart it, once for several networks coming up together.
+# real router). Restart it, once for several networks coming up together,
+# and only once its device has carrier: restarted while the bridge had
+# none, odhcpd dropped the interface and never took it up again (odhcpd#423).
 case " ${intent.networks.map((n) => n.id).join(" ")} " in *" $INTERFACE "*)
 	(
 		LOCK=/tmp/onc-odhcpd-lan.lock
 		mkdir "$LOCK" 2>/dev/null || exit 0
 		trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+		if [ -n "$DEVICE" ]; then
+			carrier() { [ "$(cat "/sys/class/net/$DEVICE/carrier" 2>/dev/null)" = 1 ]; }
+			i=0
+			while ! carrier && [ $i -lt 15 ]; do sleep 1; i=$((i + 1)); done
+			if ! carrier; then
+				logger -t onc-ipv6 "$INTERFACE came up without carrier on $DEVICE; leaving odhcpd alone"
+				exit 0
+			fi
+		fi
 		sleep 3
 		pidof odhcpd >/dev/null 2>&1 || exit 0
 		logger -t onc-ipv6 "$INTERFACE came up: restarting odhcpd so it advertises on it"

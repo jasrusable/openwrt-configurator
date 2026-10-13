@@ -31,24 +31,24 @@ import { EmptyState, ItemIcon, Section, SettingRow, SettingsPage } from "../../k
 import { bytes } from "../../kit/format";
 import { BandBadge, liveLine, unread } from "./shared";
 import { bandLabels } from "../../../../src/intent/labels";
+import type { ClientKind } from "../../../../src/status/clientKind";
 
-/** What a device probably is, from the name it gives: only for its icon. */
-const kinds: [RegExp, typeof IconDevices, string][] = [
-  [/iphone|pixel|galaxy|android|phone|oneplus|xiaomi|redmi|huawei|oppo|motorola/i, IconDeviceMobile, "blue"],
-  [/ipad|tablet|kindle|\btab\b|-tab/i, IconDeviceTablet, "blue"],
-  [/watch/i, IconDeviceWatch, "blue"],
-  [/macbook|laptop|thinkpad|surface|notebook|xps|zenbook/i, IconDeviceLaptop, "indigo"],
-  [/^mac$|imac|desktop|\bpc\b|-pc|workstation|mac-?mini|mac-?studio|nas|synology|server|raspberry|\brpi/i, IconDeviceDesktop, "indigo"],
-  [/\btv\b|-tv|appletv|apple-tv|chromecast|roku|firetv|fire-tv|shield|bravia|webos|tizen/i, IconDeviceTv, "violet"],
-  [/sonos|echo|homepod|speaker|beoplay|bose|marshall|nest-?(audio|mini)|google-?home/i, IconDeviceSpeaker, "violet"],
-  // Brother printers name themselves BRW/BRN and their MAC.
-  [/printer|epson|^br[wn][0-9a-f]{6}|canon|hp[a-f0-9]{6}|laserjet|officejet/i, IconPrinter, "teal"],
-  [/cam|ring|doorbell|arlo|wyze/i, IconCamera, "orange"],
-  [/playstation|ps[45]|xbox|switch|steam/i, IconDeviceGamepad2, "pink"],
-  [/esp|tasmota|shelly|tuya|hue|wiz_|bulb|plug|light|lifx|tado|sensor|thermostat|roborock|vacuum|purifier|levoit|litter|robot|dyson/i, IconBulb, "yellow"],
-];
+/** Each kind's icon (src/status/clientKind.ts works out what a client is). */
+const kindIcons: Record<ClientKind, [typeof IconDevices, string]> = {
+  phone: [IconDeviceMobile, "blue"],
+  tablet: [IconDeviceTablet, "blue"],
+  watch: [IconDeviceWatch, "blue"],
+  laptop: [IconDeviceLaptop, "indigo"],
+  computer: [IconDeviceDesktop, "indigo"],
+  tv: [IconDeviceTv, "violet"],
+  speaker: [IconDeviceSpeaker, "violet"],
+  printer: [IconPrinter, "teal"],
+  camera: [IconCamera, "orange"],
+  console: [IconDeviceGamepad2, "pink"],
+  iot: [IconBulb, "yellow"],
+};
 // Unknown: a colour of its own, as grey is how a client that is not online is drawn.
-const kindOf = (c: ClientView) => kinds.find(([re]) => re.test(c.name ?? "")) ?? ([undefined, IconDevices, "cyan"] as const);
+const kindOf = (c: ClientView) => (c.kind ? kindIcons[c.kind] : ([IconDevices, "cyan"] as const));
 
 const how = (c: ClientView) =>
   c.connection.kind === "wifi"
@@ -81,7 +81,7 @@ const ClientRow = ({ client }: { client: ClientView }) => {
     draft.set(`networks.${network}.dhcp.reservations`, [...n.dhcp.reservations, { name, mac: client.mac, address: client.ipv4! }]);
     navigate(`/networks/${network}`);
   };
-  const [, icon, color] = kindOf(client);
+  const [icon, color] = kindOf(client);
   const wifi = client.connection.kind === "wifi" ? client.connection : undefined;
   return (
     <SettingRow
