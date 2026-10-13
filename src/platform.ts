@@ -13,13 +13,24 @@ export type ExecResult = {
   stderr: string;
   /** `null` when the command never reported an exit status (e.g. the link dropped). */
   code: number | null;
+  /** Ended because it ran past its time limit (then `code` is null too). */
+  timedOut?: boolean;
 };
 
-/** A shell on a device. Shaped like node-ssh's `NodeSSH`, which satisfies it. */
+/**
+ * How long a command on a device may run unless it says otherwise. A link
+ * can stall without dropping (an SSH client waiting on a session the device
+ * never serves): every command ends by this, its client killed, rather than
+ * holding a run forever.
+ */
+export const commandTimeoutMs = 120_000;
+
+/** A shell on a device. */
 export type Session = {
+  /** Ends the command (its client killed or the link closed) after `timeoutMs`, else `commandTimeoutMs`. */
   execCommand: (
     command: string,
-    options?: { stdin?: string }
+    options?: { stdin?: string; timeoutMs?: number }
   ) => Promise<ExecResult>;
   dispose: () => void;
   /** Commands run on this machine itself, not over SSH (a device provisioning itself). */

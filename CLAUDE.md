@@ -224,6 +224,13 @@ QuickJS on a router (`qjsGlobals.ts` first; SSH as a spawned `dbclient` or
 OpenSSH per command, exit status from a marker; local mode runs commands with
 `sh -c`). Functions take only the `Pick<Platform, …>` they use.
 
+Every command on a device ends by a time limit (`commandTimeoutMs`, 2 min;
+longer for package steps and hooks, per agent verb): QuickJS kills the
+client, Node closes the connection, and the answer says `timedOut`, which
+the agent reads as "unreachable", so the phases roll the device back rather
+than wait. A stalled dbclient once held a rig run forever
+(`provisionNetwork.test.ts`, `commandTimeout.test.ts`, the QuickJS session check).
+
 ## Contracts worth knowing before changing the apply path
 
 - **The wipe.** Every run leaves each device's UCI config exactly as

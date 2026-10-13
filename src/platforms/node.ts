@@ -29,7 +29,7 @@ import {
   parseKnownHosts,
 } from "../knownHosts";
 import { dirname } from "../posixPath";
-import { loopbackHosts, NetworkError, Platform, SshTarget } from "../platform";
+import { commandTimeoutMs, ExecResult, loopbackHosts, NetworkError, Platform, Session, SshTarget } from "../platform";
 
 const transientCodes = new Set([
   "ECONNRESET",
@@ -123,6 +123,30 @@ const hostKeyOptions = (target: SshTarget, onChanged: () => void) => {
     },
   };
 };
+
+/**
+ * node-ssh's session with each command's time limit: one that runs past it
+ * ends the connection (a stalled channel cannot be told apart from a stalled
+ * link), answers `timedOut`, and the session is not used again.
+ */
+export const limitedSession = (ssh: Pick<NodeSSH, "execCommand" | "dispose">): Session => ({
+  execCommand: (command, options) =>
+    new Promise<ExecResult>((resolve) => {
+      const timer = setTimeout(() => {
+        ssh.dispose();
+        resolve({ stdout: "", stderr: "", code: null, timedOut: true });
+      }, options?.timeoutMs ?? commandTimeoutMs);
+      ssh
+        .execCommand(command, options?.stdin === undefined ? {} : { stdin: options.stdin })
+        .then(
+          (result) => resolve(result),
+          // A link that went: no exit status, as a dropped channel reports.
+          (e) => resolve({ stdout: "", stderr: String((e as Error)?.message ?? e), code: null })
+        )
+        .finally(() => clearTimeout(timer));
+    }),
+  dispose: () => ssh.dispose(),
+});
 
 const headersOf = (response: Response) => {
   const headers: Record<string, string> = {};
@@ -333,7 +357,7 @@ export const nodePlatform: Platform = {
     // RST arriving mid-command would emit 'error' with nothing attached and kill
     // the process. The command still settles via the channel closing.
     ssh.connection?.on("error", () => {});
-    return ssh;
+    return limitedSession(ssh);
   },
 
   writeFileAtomic: (path, data, mode) =>

@@ -38,8 +38,9 @@ const configureFailure = (run: DeviceRun, message: string, { unknown = false } =
 const runSteps = async (run: DeviceRun, verb: agent.Verb<agent.Steps>): Promise<Result<void, PhaseFailure>> => {
   const answer = await agent.call(run.ssh, verb);
   if (!answer.ok) {
-    console.error(`The connection to ${run.hostname} dropped while configuring it (${answer.error.message}).`);
-    return err(configureFailure(run, `Lost the connection to ${run.hostname} while configuring it.`, { unknown: true }));
+    // A link that dropped, or a step with no answer within its time limit:
+    // either way what the device did is not known.
+    return err(configureFailure(run, `Lost the connection to ${run.hostname} while configuring it (${answer.error.message}).`, { unknown: true }));
   }
   if (answer.value.done) return ok(undefined);
   console.error(`${run.hostname} failed at: ${answer.value.step}`);

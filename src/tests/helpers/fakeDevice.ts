@@ -4,7 +4,7 @@
 import { stateOf } from "./fixtures";
 import { AgentRecord, decodeRecords } from "../../agent/records";
 import { DeviceRunOptions } from "../../apply/run";
-import { ExecResult, Session } from "../../platform";
+import { commandTimeoutMs, ExecResult, Session } from "../../platform";
 import { confirmTiming } from "../../apply/reconnect";
 import { UciConfigs, UciSection } from "../../engine/uci";
 
@@ -119,7 +119,13 @@ export const fakeDevice = ({
   stagesShort = false,
   arming = "arms",
   dropsDuringConfigure = false,
+  stalls,
 }: {
+  /**
+   * This agent verb never answers (the client stalls, the link up): the call
+   * runs out its time limit on the clock, the device untouched by it.
+   */
+  stalls?: string;
   /** Staging the packages it removes keeps one fewer than asked (no room in /tmp). */
   stagesShort?: boolean;
   /**
@@ -343,6 +349,11 @@ export const fakeDevice = ({
       if (!device.reachable) return { stdout: "", stderr: "", code: null };
       // The agent (src/agent): written with its first verb, then called by verb.
       const verb = /sh \/tmp\/onc-agent-\w+\.sh (\S+)/.exec(command)?.[1];
+      if (verb && verb === stalls) {
+        record(`stalled ${verb}`);
+        await clock!.sleep(options?.timeoutMs ?? commandTimeoutMs);
+        return { stdout: "", stderr: "", code: null, timedOut: true };
+      }
       if (verb) return agentVerb(verb, command, options?.stdin);
       if (command.startsWith("cat /etc/board.json"))
         return ok(

@@ -5,7 +5,7 @@
 // value the phases handle.
 import { problem, Problem } from "../problem";
 import { attempt, messageOf, Result } from "../result";
-import { ExecResult, Session } from "../platform";
+import { commandTimeoutMs, ExecResult, Session } from "../platform";
 import { shellQuote } from "../shell";
 import { agentPath } from "./paths";
 import { AgentRecord, encodeRecords } from "./records";
@@ -14,8 +14,16 @@ import { agentScript } from "./script";
 /** How the device recovers if a provision is never confirmed. */
 export type RollbackMode = "reload" | "reboot" | "reload-then-reboot";
 
-/** One call of the agent: its command, what it reads on stdin, and how its answer reads. */
-export type Verb<T> = { command: string; stdin?: string; parse: (result: ExecResult) => T };
+/**
+ * One call of the agent: its command, what it reads on stdin, how its answer
+ * reads, and how long it may take (else the session's `commandTimeoutMs`).
+ */
+export type Verb<T> = { command: string; stdin?: string; parse: (result: ExecResult) => T; timeoutMs?: number };
+
+/** Package downloads and installs on a slow link or a slow flash: the longest steps there are. */
+const packagesTimeoutMs = 15 * 60_000;
+/** The run_after_reload hooks are the settings' own commands. */
+const hooksTimeoutMs = 5 * 60_000;
 
 const verb = (runId: string, name: string, args: string[] = []) =>
   [`sh ${agentPath(runId)} ${name}`, ...args.map(shellQuote)].join(" ");
@@ -45,17 +53,18 @@ const stepsOf = ({ stdout, stderr, code }: ExecResult): Steps => {
   return { done: false, step: started.length ? started[started.length - 1][1] : "its first step", stderr: stderr.trim() };
 };
 
-const steps = (runId: string, name: string, records: AgentRecord[]): Verb<Steps> => ({
+const steps = (runId: string, name: string, records: AgentRecord[], timeoutMs?: number): Verb<Steps> => ({
   command: verb(runId, name),
   stdin: encodeRecords(records),
   parse: stepsOf,
+  ...(timeoutMs ? { timeoutMs } : {}),
 });
 
 /** Discard every staged uci change on the device, whoever made it. */
 export const revert = (runId: string): Verb<Steps> => ({ command: verb(runId, "revert"), parse: stepsOf });
 
 /** Revert, seed the owned configs the device lacks, remove and install packages, refresh the reload baseline. */
-export const prepare = (runId: string, records: AgentRecord[]) => steps(runId, "prepare", records);
+export const prepare = (runId: string, records: AgentRecord[]) => steps(runId, "prepare", records, packagesTimeoutMs);
 
 /** The uci batch (the wipe and the declared config), then the managed files. */
 export const stage = (runId: string, records: AgentRecord[]) => steps(runId, "stage", records);
@@ -67,12 +76,13 @@ export const finalise = (runId: string, records: AgentRecord[]) => steps(runId, 
 export const services = (runId: string, records: AgentRecord[]) => steps(runId, "services", records);
 
 /** The run_after_reload hooks, once the config is live. */
-export const hooks = (runId: string, records: AgentRecord[]) => steps(runId, "hooks", records);
+export const hooks = (runId: string, records: AgentRecord[]) => steps(runId, "hooks", records, hooksTimeoutMs);
 
 /** Fetch packages a run removes, so a rollback can reinstall them with the network down. How many were kept. */
 export const stagePackages = (runId: string, packages: string[]): Verb<number> => ({
   command: verb(runId, "stage-packages", packages),
   parse: ({ stdout }) => Number(/ONC_STAGED\s+(\d+)/.exec(stdout)?.[1] ?? 0),
+  timeoutMs: packagesTimeoutMs,
 });
 
 /** What a rollback puts back, beyond /etc/config. */
@@ -150,10 +160,14 @@ export const drop = (runId: string): Verb<boolean> => ({ command: verb(runId, "d
  * closed with no exit status (node-ssh resolves a dropped command that way)
  * is no answer either, never a "no".
  */
-export const call = <T>(session: Session, { command, stdin, parse }: Verb<T>): Promise<Result<T, Problem>> =>
+export const call = <T>(session: Session, { command, stdin, parse, timeoutMs }: Verb<T>): Promise<Result<T, Problem>> =>
   attempt(
     async () => {
-      const result = await session.execCommand(command, stdin === undefined ? undefined : { stdin });
+      const result = await session.execCommand(command, {
+        ...(stdin === undefined ? {} : { stdin }),
+        ...(timeoutMs ? { timeoutMs } : {}),
+      });
+      if (result.timedOut) throw new Error(`no answer within ${Math.round((timeoutMs ?? commandTimeoutMs) / 1000)} s`);
       if (result.code === null) throw new Error("the connection dropped");
       return parse(result);
     },

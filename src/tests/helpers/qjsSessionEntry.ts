@@ -32,6 +32,14 @@ const main = async () => {
   r = await s.execCommand("exit 0");
   check("exit inside the command", r.code === 0, r);
 
+  const started = Date.now();
+  r = await s.execCommand("sleep 30", { timeoutMs: 500 });
+  check(
+    "a command past its time limit is killed and says so",
+    r.timedOut === true && r.code === null && Date.now() - started < 10_000,
+    { ...r, ms: Date.now() - started }
+  );
+
   const big = "x".repeat(200000) + "\n";
   r = await s.execCommand("wc -c", { stdin: big });
   check(

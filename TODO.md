@@ -108,8 +108,6 @@ over `src/server/`, and the React UI in `ui/`.
 - A misspelled config in a hand-written file (`firwall`) is not caught: configs not in `src/plan/rules.ts`' table take any section type, and `uci batch` fails on a config the device lacks unless prepare seeds it (packages changing), when the real one is then wiped as undeclared. Check declared configs against the device's at plan. (Options stay open by design; a section's required options and unknown section types are refused.)
 - swconfig: the switch is `switch0` in the compiler and engine; facts drop board.json's switch name (a board whose switch is named otherwise, or with two, is wrong).
 - The IPv6-follows-the-line hook (mwan3 `disconnected`/`connected`) is from mwan3's source: watch a real failover.
-- The SSH transports have no connect time limit: a login that stalls before authentication (seen once in the rig, dbclient path) holds an apply until the watchdog. Give each connect one, as locate's 4 s handshake does.
-- SSH/agent calls have no time limit: a stalled dbclient session hung the rig once at the stage step (data on stdin never arrived).
 
 ## Roadmap (2026-10-13)
 

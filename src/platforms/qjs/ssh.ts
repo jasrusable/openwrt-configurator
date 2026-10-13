@@ -1,7 +1,7 @@
 import * as std from "std";
 import { hostKeyAlgorithms, hostKeyChangedMessage, pinnedKeyChangedMessage } from "../../knownHosts";
 import { dirname } from "../../posixPath";
-import { ExecResult, Session, SshTarget } from "../../platform";
+import { commandTimeoutMs, ExecResult, Session, SshTarget } from "../../platform";
 import { mkdirp, removeFile } from "./files";
 import { environment, spawn, spawnSync, tmpPath, which } from "./process";
 
@@ -21,6 +21,8 @@ const wrapCommand = (command: string) =>
   `(\n${command}\n)\nprintf '\\n${EXIT_MARKER}%s\\n' "$?" >&2`;
 
 const unwrapResult = (result: ExecResult): ExecResult => {
+  // Killed for running too long: whatever it printed, it never finished.
+  if (result.timedOut) return { stdout: result.stdout, stderr: result.stderr, code: null, timedOut: true };
   const match = new RegExp(`\\n?${EXIT_MARKER}(\\d+)\\n?$`).exec(result.stderr);
   return match
     ? {
@@ -45,13 +47,12 @@ const transport = (
   env: Record<string, string>
 ): Transport => ({
   exec: async (command, options) =>
-    unwrapResult(
-      await spawn(clientArgv(wrapCommand(command)), { env, ...options })
-    ),
+    unwrapResult(await spawn(clientArgv(wrapCommand(command)), { env, ...options })),
 });
 
 const sessionOver = ({ exec, cleanup }: Transport, local = false): Session => ({
-  execCommand: (command, options) => exec(command, { stdin: options?.stdin }),
+  execCommand: (command, options) =>
+    exec(command, { stdin: options?.stdin, timeoutMs: options?.timeoutMs ?? commandTimeoutMs }),
   // Every command is its own client process: only files of its own to remove.
   dispose: () => cleanup?.(),
   local,

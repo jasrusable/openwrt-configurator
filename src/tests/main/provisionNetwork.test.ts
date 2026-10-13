@@ -385,6 +385,17 @@ test.serial("a link that drops mid-configure leaves the device's state unknown: 
   t.false(device.events.includes("disarm"));
 });
 
+test.serial("a step whose answer never comes (a stalled client, the link up) ends at its time limit and rolls back, never hangs", async (t) => {
+  // The rig saw it once: the stage step's input never reached the agent, and the run waited forever.
+  const device = fakeDevice({ hostname: "ap", stalls: "stage" });
+  const error = await failure(t, run([device]));
+  t.regex(error!.message, /no answer within 120 s/);
+  t.true(device.events.includes("stalled stage"));
+  t.true(device.events.includes("rollback-now"));
+  t.false(device.events.includes("disarm"));
+  t.false(device.events.includes("commit"));
+});
+
 test.serial("confirming checks the commit's own marker: a finalise script that never writes it is rolled back", async (t) => {
   const device = fakeDevice({ hostname: "ap", commitIncomplete: true });
   const error = await failure(t, run([device]));
