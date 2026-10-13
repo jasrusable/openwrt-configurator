@@ -2,7 +2,7 @@ import test from "ava";
 import { sampleIntentJson } from "../helpers/fixtures";
 import { tempDir } from "../helpers/tempDir";
 import { spawnSync } from "child_process";
-import { readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { deviceSchemaSchema } from "../../deviceSchema";
 import { getOpenWrtConfig } from "../../engine/getOpenWrtConfig";
@@ -1172,13 +1172,20 @@ test("odhcpd is re-bound when a network comes up, and restarted after a rollback
   const script = hook.replace(/\/etc\/init\.d\/odhcpd restart/g, `echo restarted >> ${dir}/log`).replace(/\/tmp\/onc-/g, `${dir}/onc-`);
   const run = (iface: string, action = "ifup") =>
     spawnSync("sh", ["-c", `${script}\nwait`], { env: { PATH: `${dir}:/usr/bin:/bin`, ACTION: action, INTERFACE: iface }, encoding: "utf8" });
+  // The hook restarts in the background, as netifd must not wait on it: read
+  // its log once it is there (a loaded CI runner takes its time).
+  const logAfter = (minimumMs: number) => {
+    const until = Date.now() + 10_000;
+    spawnSync("sleep", [String(minimumMs / 1000)]);
+    while (!existsSync(join(dir, "log")) && Date.now() < until) spawnSync("sleep", ["0.1"]);
+    return readFileSync(join(dir, "log"), "utf8").trim();
+  };
   run("guest");
-  spawnSync("sleep", ["0.3"]);
-  t.is(readFileSync(join(dir, "log"), "utf8").trim(), "restarted", "a network up: restarted");
+  t.is(logAfter(0), "restarted", "a network up: restarted");
   run("lan", "ifdown");
   run("somethingelse");
-  spawnSync("sleep", ["0.3"]);
-  t.is(readFileSync(join(dir, "log"), "utf8").trim().split("\n").length, 1, "down, or not ours: nothing");
+  // Nothing new may appear: give anything that would a moment to show.
+  t.is(logAfter(500).split("\n").length, 1, "down, or not ours: nothing");
 });
 
 test("on an access point, a network only carried has no IPv6, link-local included; the main one keeps it", (t) => {
