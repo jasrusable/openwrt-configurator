@@ -229,3 +229,19 @@ test("no page can frame the app: every answer says so", async (t) => {
     }
   });
 });
+
+test("an IPv6 client is counted by its /64, and everyone together has a ceiling", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "onc-auth6-"));
+  const intentPath = join(dir, "intent.json");
+  writeFileSync(intentPath, readFileSync(join(__dirname, "../../../sampleConfigs/intent.json")));
+  const run = async (argv: string[], options?: { stdin?: string }) =>
+    argv[0] === "ucode" ? { code: 0, stdout: JSON.stringify({ result: null }), stderr: "" } : nodePlatform.run(argv, options);
+  const platform = { ...nodePlatform, run, sleep: async () => {} };
+  const handle = uiHandler({ intentPath, uiRoot: dir, platform, auth: rpcdAuth(platform) });
+  const guess = (from: string) =>
+    handle({ method: "POST", path: "/api/login", body: JSON.stringify({ password: "nope" }), headers: { "x-onc": "1" }, remoteAddress: from });
+  // One device rotating addresses in its /64 is still one client.
+  const statuses = [];
+  for (let i = 1; i <= 7; i++) statuses.push((await guess(`2001:db8:1:2::${i.toString(16)}`)).status);
+  t.true(statuses.includes(429), JSON.stringify(statuses));
+});

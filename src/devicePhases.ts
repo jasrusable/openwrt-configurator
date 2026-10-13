@@ -361,7 +361,9 @@ export const revertStaged = async (
     }
     if (!run.armedAt) return;
     if (disarm) {
-      await ssh.execCommand(`touch ${confirmFlag}`);
+      // Its boot-time copy too, now: its watchdog removes it only when it
+      // wakes, and a later run's confirmed config must not be restored over.
+      await ssh.execCommand(`touch ${confirmFlag}; rm -rf ${runPaths(run.runId).bootDir}`);
       console.error(`Reverted.`);
       step(run, "reverted");
     } else {

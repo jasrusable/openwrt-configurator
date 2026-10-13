@@ -433,6 +433,8 @@ const withCookie = (response: HttpResponse, sid: string | undefined): HttpRespon
 /** POST {password}: a session (cookie) for the router's root password; or ends it. */
 /** Wrong passwords allowed within the window, from one client, before its logins pause. */
 const loginAttempts = 5;
+/** From everyone together: a client with many addresses (IPv6 has endless) is held by this. */
+const loginAttemptsAll = 30;
 const loginWindowMs = 60_000;
 
 const sessionApi =
@@ -471,7 +473,10 @@ const sessionApi =
     // owner out; named "<time>-<client>-<random>".
     const dir = attemptsDir ?? `${intentPath}.state/login-attempts`;
     platform.mkdirp(dir);
-    const client = (request.remoteAddress ?? "any").replace(/[^A-Za-z0-9]/g, "_");
+    // An IPv6 client by its /64: one device can take any address in it.
+    const remote = request.remoteAddress ?? "any";
+    const prefix = remote.includes(":") ? remote.split(":").slice(0, 4).join(":") : remote;
+    const client = prefix.replace(/[^A-Za-z0-9]/g, "_");
     const mine = `${now()}-${client}-${Math.random().toString(36).slice(2, 10)}`;
     platform.writeTextFile(`${dir}/${mine}`, "");
     const listed = await platform.run(["ls", dir]).catch(() => ({ stdout: "" }));
@@ -485,9 +490,10 @@ const sessionApi =
           platform.removeFile(`${dir}/${name}`);
           return false;
         }
-        return name.split("-")[1] === client;
+        return true;
       });
-    if (recent.length > loginAttempts) {
+    const fromClient = recent.filter((name) => name.split("-")[1] === client);
+    if (fromClient.length > loginAttempts || recent.length > loginAttemptsAll) {
       // Kept: a client hammering stays paused (only itself: counted per client).
       return json(429, { error: "Too many wrong passwords: wait a minute and try again." });
     }

@@ -296,6 +296,10 @@ export const disarmWatchdog = ({
   bootDir: string;
 }): Probe<"disarmed" | "fired"> => {
   const gone = 'i=0; while kill -0 "$p" 2>/dev/null && [ $i -lt 5 ]; do sleep 1; i=$((i+1)); done';
+  // Confirmed: this config is the one a restart must keep, so every earlier
+  // run's boot-time copy goes too (one reverted, say, whose watchdog has not
+  // woken yet to remove its own), or a restart would restore it over this.
+  const bootRoot = bootDir.replace(/\/[^/]+$/, "");
   return {
     command: [
       `rm -f ${stagedScriptPath}`,
@@ -303,9 +307,9 @@ export const disarmWatchdog = ({
       `p=$(cat ${pidFile} 2>/dev/null); s=$(cat ${sleepPidFile} 2>/dev/null)`,
       `if [ -z "$p" ] || ! grep -q onc-watchdog /proc/$p/cmdline 2>/dev/null; then echo ONC_FIRED`,
       `else touch ${confirmFlag}`,
-      `  if [ -n "$s" ] && [ "$(cat /proc/$s/comm 2>/dev/null)" = sleep ] && kill "$s" 2>/dev/null; then ${gone}; rm -rf ${bootDir}; echo ONC_DISARMED`,
+      `  if [ -n "$s" ] && [ "$(cat /proc/$s/comm 2>/dev/null)" = sleep ] && kill "$s" 2>/dev/null; then ${gone}; rm -rf ${bootRoot}; echo ONC_DISARMED`,
       // Its sleep had just ended: it either saw the flag (and exits) or is restoring.
-      `  else sleep 1; if [ -f ${rollbackDir}/restoring ]; then echo ONC_FIRED; else ${gone}; rm -rf ${bootDir}; echo ONC_DISARMED; fi`,
+      `  else sleep 1; if [ -f ${rollbackDir}/restoring ]; then echo ONC_FIRED; else ${gone}; rm -rf ${bootRoot}; echo ONC_DISARMED; fi`,
       `  fi`,
       `fi`,
     ].join("\n"),
