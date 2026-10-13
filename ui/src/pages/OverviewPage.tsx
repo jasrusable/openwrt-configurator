@@ -207,7 +207,7 @@ export const OverviewPage = () => {
   const router = routerFacts(intent, facts);
   const wan = router && portsOf(router.schema).wan[0];
   const dns = intent.dns.upstream;
-  const several = intent.internet.connections.length > 1;
+  const several = intent.internet.lines.length > 1;
   // On a backup: the main line is down and another carries the traffic.
   const main = live?.connections[0];
   const carrying = live?.connections.find((c) => c.inUse);
@@ -219,7 +219,7 @@ export const OverviewPage = () => {
   return (
     <SettingsPage
       title="Overview"
-      description={liveLine(intent.site.name, status.dataUpdatedAt, status.isFetching, !!live)}
+      description={liveLine(intent.system.name, status.dataUpdatedAt, status.isFetching, !!live)}
     >
       <AttentionSection items={live?.attention} />
       {/* Saved but not applied is in Needs attention; up to date says nothing. */}
@@ -235,7 +235,7 @@ export const OverviewPage = () => {
       <Topology intent={intent} />
 
       <Section title="Internet" description={onBackup}>
-        {intent.internet.connections.map((c) => {
+        {intent.internet.lines.map((c) => {
           const now = live?.connections.find((x) => x.id === c.id);
           const port = c.port ?? wan;
           const { works, since, word, dot } = lineState(now, several);
@@ -253,7 +253,7 @@ export const OverviewPage = () => {
                   .join(" · ") || undefined
               }
             >
-              <State up={dot}>{word ?? connections[c.connection.type]}</State>
+              <State up={dot}>{word ?? connections[c.type]}</State>
             </SettingRow>
           );
         })}
@@ -365,7 +365,7 @@ export const OverviewPage = () => {
       </Section>
 
       <Section title="Wi-Fi">
-        {intent.wifi.map((ssid) => {
+        {intent.wifi.networks.map((ssid) => {
           const now = live?.ssids.find((s) => s.ssid === ssid.ssid);
           const on = now && now.accessPoints.length > 0;
           return (

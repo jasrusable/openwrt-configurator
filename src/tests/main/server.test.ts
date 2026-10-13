@@ -46,12 +46,12 @@ test("an API request without the X-ONC header is refused (CSRF), reads too", asy
 test("a valid save is written whole, readable only by its owner", async (t) => {
   await withServer(async (handle, intentPath) => {
     const intent = JSON.parse(readFileSync(intentPath, "utf8"));
-    intent.site.name = "Cabin";
+    intent.system.name = "Cabin";
     const put = await handle(
       request("PUT", "/api/intent", JSON.stringify(intent), { "x-onc": "1" })
     );
     t.is(put.status, 200);
-    t.is(JSON.parse(readFileSync(intentPath, "utf8")).site.name, "Cabin");
+    t.is(JSON.parse(readFileSync(intentPath, "utf8")).system.name, "Cabin");
     t.is(statSync(intentPath).mode & 0o777, 0o600);
   });
 });
@@ -60,13 +60,13 @@ test("an invalid save is refused with the fields to fix", async (t) => {
   await withServer(async (handle, intentPath) => {
     const before = readFileSync(intentPath, "utf8");
     const intent = JSON.parse(before);
-    intent.wifi[0].password = "short";
+    intent.wifi.networks[0].password = "short";
     const put = await handle(
       request("PUT", "/api/intent", JSON.stringify(intent), { "x-onc": "1" })
     );
     t.is(put.status, 400);
     t.deepEqual(JSON.parse(put.body).issues, [
-      { path: "wifi.0.password", message: "at least 8 characters" },
+      { path: "wifi.networks.0.password", message: "at least 8 characters" },
     ]);
     t.is(readFileSync(intentPath, "utf8"), before);
   });
@@ -75,7 +75,7 @@ test("an invalid save is refused with the fields to fix", async (t) => {
 test("an invalid saved draft is never provisioned", async (t) => {
   await withServer(async (handle, intentPath) => {
     const intent = JSON.parse(readFileSync(intentPath, "utf8"));
-    intent.site.country = "XX";
+    intent.system.country = "XX";
     writeFileSync(intentPath, JSON.stringify(intent));
     const post = await handle(request("POST", "/api/provision", "", { "x-onc": "1" }));
     t.is(post.status, 409);
@@ -86,10 +86,10 @@ test("an invalid saved draft is never provisioned", async (t) => {
 test("settings a file leaves out are served as their defaults", async (t) => {
   await withServer(async (handle, intentPath) => {
     const intent = JSON.parse(readFileSync(intentPath, "utf8"));
-    delete intent.radios;
+    delete intent.wifi.radios;
     writeFileSync(intentPath, JSON.stringify(intent));
     const served = JSON.parse((await handle(request("GET", "/api/intent"))).body);
-    t.deepEqual(served.radios["6g"], {
+    t.deepEqual(served.wifi.radios["6g"], {
       enabled: false,
       width: "auto",
       power: "auto",
@@ -208,15 +208,15 @@ test("a save or an apply of a version older than the file is refused: another ta
     t.truthy(version);
     const mine = JSON.parse(read.body);
     // Another tab saves first.
-    const theirs = { ...mine, site: { ...mine.site, name: "Theirs" } };
+    const theirs = { ...mine, system: { ...mine.system, name: "Theirs" } };
     const saved = await handle(request("PUT", "/api/intent", JSON.stringify(theirs), { "x-onc": "1", "x-onc-version": version }));
     t.is(saved.status, 200);
     t.not(saved.headers["x-onc-version"], version);
     // This one, still on the old version, is refused, and nothing is overwritten.
-    const stale = await handle(request("PUT", "/api/intent", JSON.stringify({ ...mine, site: { ...mine.site, name: "Mine" } }), { "x-onc": "1", "x-onc-version": version }));
+    const stale = await handle(request("PUT", "/api/intent", JSON.stringify({ ...mine, system: { ...mine.system, name: "Mine" } }), { "x-onc": "1", "x-onc-version": version }));
     t.is(stale.status, 409);
     t.true(JSON.parse(stale.body).changedElsewhere);
-    t.is(JSON.parse(readFileSync(intentPath, "utf8")).site.name, "Theirs");
+    t.is(JSON.parse(readFileSync(intentPath, "utf8")).system.name, "Theirs");
     t.is((await handle(request("POST", "/api/provision", "", { "x-onc": "1", "x-onc-version": version }))).status, 409);
   });
 });

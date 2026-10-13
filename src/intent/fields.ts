@@ -35,37 +35,38 @@ export type FieldInfo = {
 };
 
 export const fields: FieldInfo[] = [
-  { path: "site", label: "System" },
-  { path: "site.name", label: "Name" },
+  { path: "system", label: "System" },
+  { path: "system.name", label: "Name" },
   {
-    path: "site.timezone",
+    path: "system.timezone",
     label: "Time zone",
     description: "Access points also broadcast it, so clients can set their clocks (802.11v).",
   },
   {
-    path: "site.country",
+    path: "system.country",
     label: "Country",
     description:
       "Sets which Wi-Fi channels and power levels are allowed; access points announce it to clients (802.11d).",
   },
-  { path: "admin", label: "Administration" },
+  { path: "system.app_login", label: "This app's login" },
   {
-    path: "admin.ssh_key_path",
+    path: "system.app_login.key",
     label: "SSH key",
     openwrt: "dropbear authorized key",
     explain:
       "The private key on this computer that the app logs in to every device with, as root over SSH. Its public half must already be in each device's authorized keys (LuCI: System › Administration › SSH-Keys); the app does not install it.",
   },
   {
-    path: "admin.password",
+    path: "system.app_login.password",
     label: "Password",
     secret: true,
     openwrt: "root password",
     explain:
       "The devices' root password, used to log in over SSH when there is no key. The app only logs in with it; it never changes the password on the devices.",
   },
+  { path: "system.ssh", label: "SSH" },
   {
-    path: "admin.authorized_keys",
+    path: "system.ssh.authorized_keys",
     label: "Authorized keys",
     description: "Public keys that may log in to the devices as root.",
     openwrt: "/etc/dropbear/authorized_keys",
@@ -73,7 +74,7 @@ export const fields: FieldInfo[] = [
       "Installed on every device by each apply, replacing what was there. Empty leaves each device's own file alone. This app's key belongs here, so it can still log in once password login is off.",
   },
   {
-    path: "admin.password_login",
+    path: "system.ssh.password_login",
     label: "Password login",
     description: "Whether root may log in with a password.",
     openwrt: "dropbear PasswordAuth, RootPasswordAuth",
@@ -103,16 +104,16 @@ export const fields: FieldInfo[] = [
     explain:
       "Shown as the device's description on LuCI's status page, to tell access points apart.",
   },
-  { path: "hardware.*.wifi", label: "Wi-Fi" },
+  { path: "hardware.*.radios", label: "Radios" },
   {
-    path: "hardware.*.wifi.channel.2g",
+    path: "hardware.*.radios.2g.channel",
     label: "2.4 GHz channel",
     openwrt: "wifi-device channel",
     explain:
       "Pins this access point to one channel on the band. Auto picks the clearest channel each time the access point starts; pinning keeps neighbouring access points on different channels.",
   },
   {
-    path: "hardware.*.wifi.channel.5g",
+    path: "hardware.*.radios.5g.channel",
     label: "5 GHz channel",
     openwrt: "wifi-device channel",
     explain:
@@ -120,11 +121,11 @@ export const fields: FieldInfo[] = [
   },
 
   { path: "internet", label: "Internet" },
-  { path: "internet.connections", label: "Connections" },
-  { path: "internet.connections.*", label: (c) => `“${c?.name || "unnamed"}”` },
-  { path: "internet.connections.*.name", label: "Name" },
+  { path: "internet.lines", label: "Connections" },
+  { path: "internet.lines.*", label: (c) => `“${c?.name || "unnamed"}”` },
+  { path: "internet.lines.*.name", label: "Name" },
   {
-    path: "internet.connections.*.port",
+    path: "internet.lines.*.port",
     label: "Port",
     description: "Where the line plugs into the router.",
     openwrt: "wan interface device",
@@ -132,37 +133,35 @@ export const fields: FieldInfo[] = [
       "The router port this line plugs into. Unset, the one the router's maker marked WAN. A port given to a connection leaves the home network's bridge, so plug nothing else into it.",
   },
   {
-    path: "internet.connections.*.connection",
+    path: "internet.lines.*.type",
     label: "Connection",
     description: "How the router reaches your provider.",
-  },
-  {
-    path: "internet.connections.*.connection.type",
-    label: "Type",
     openwrt: "wan interface proto",
     explain:
       "How the router gets its internet address: by DHCP from a modem or fibre box, by PPPoE with a username and password (common on fibre and DSL), or as a fixed address your provider gave you.",
   },
-  { path: "internet.connections.*.connection.username", label: "Username" },
-  { path: "internet.connections.*.connection.password", label: "Password", secret: true },
-  { path: "internet.connections.*.connection.address", label: "IP address" },
-  { path: "internet.connections.*.connection.prefix_length", label: "Subnet mask" },
-  { path: "internet.connections.*.connection.gateway", label: "Gateway" },
-  { path: "internet.connections.*.connection.dns", label: "DNS servers" },
+  { path: "internet.lines.*.pppoe", label: "PPPoE" },
+  { path: "internet.lines.*.pppoe.username", label: "Username" },
+  { path: "internet.lines.*.pppoe.password", label: "Password", secret: true },
+  { path: "internet.lines.*.static", label: "Fixed address" },
+  { path: "internet.lines.*.static.address", label: "IP address" },
+  { path: "internet.lines.*.static.prefix_length", label: "Subnet mask" },
+  { path: "internet.lines.*.static.gateway", label: "Gateway" },
+  { path: "internet.lines.*.static.dns", label: "DNS servers" },
   {
-    path: "internet.connections.*.vlan",
+    path: "internet.lines.*.vlan",
     label: "VLAN tag",
     description: "Some providers need the line tagged with a VLAN.",
   },
   {
-    path: "internet.connections.*.ipv6",
+    path: "internet.lines.*.ipv6.enabled",
     label: "IPv6",
     openwrt: "wan6 interface (DHCPv6)",
     explain:
       "Asks your provider for IPv6 over DHCPv6, and passes a part of the prefix it gets to every network with IPv6 on. Off, every network is IPv4 only. Only the first connection's: two providers' prefixes at once would leave devices using a dead one when a line fails.",
   },
   {
-    path: "internet.connections.*.ipv6_prefix",
+    path: "internet.lines.*.ipv6.prefix",
     label: "IPv6 prefix size",
     description: "How much address space to ask your provider for; each network with IPv6 needs a /64.",
     openwrt: "wan6 reqprefix",
@@ -170,7 +169,7 @@ export const fields: FieldInfo[] = [
       "The size of IPv6 prefix to ask your provider for. Auto takes whatever it offers; set a size if your provider needs to be asked, e.g. /56. Each network with IPv6 takes one /64 of it.",
   },
   {
-    path: "internet.connections.*.speed",
+    path: "internet.lines.*.shaping",
     label: "Smart queueing",
     description:
       "Shapes traffic to this line's speed, so calls and games stay smooth under load.",
@@ -178,15 +177,15 @@ export const fields: FieldInfo[] = [
     explain:
       "Shapes traffic to just under this line's speed with cake, so queues build up on the router, where they are kept short, instead of in the modem. Calls and games stay smooth while something big uploads or downloads, and bandwidth is shared fairly between devices. Each line has its own.",
   },
-  { path: "internet.connections.*.speed.down_mbps", label: "Download", unit: "Mbit/s" },
-  { path: "internet.connections.*.speed.up_mbps", label: "Upload", unit: "Mbit/s" },
+  { path: "internet.lines.*.shaping.down_mbps", label: "Download", unit: "Mbit/s" },
+  { path: "internet.lines.*.shaping.up_mbps", label: "Upload", unit: "Mbit/s" },
   {
-    path: "internet.connections.*.speed.line",
+    path: "internet.lines.*.shaping.medium",
     label: "Line type",
     description: "Sets how much each packet really costs on the line.",
   },
   {
-    path: "internet.connections.*.weight",
+    path: "internet.lines.*.failover.weight",
     label: "Share",
     description: "Its share of new connections, against the others'.",
     openwrt: "mwan3 member weight",
@@ -194,7 +193,7 @@ export const fields: FieldInfo[] = [
       "When connections share traffic, each new connection from a device goes out one line or another in proportion to these numbers: 3 against 1 sends three in four out of this one. A single download stays on one line.",
   },
   {
-    path: "internet.connections.*.metered",
+    path: "internet.lines.*.failover.metered",
     label: "Metered",
     description: "Paid by the amount, like mobile data: a backup only, checked sparingly.",
     openwrt: "mwan3 interface interval, track_ip",
@@ -202,7 +201,7 @@ export const fields: FieldInfo[] = [
       `Checks this line with ${meteredCheck.ips.length} address every ${meteredCheck.intervalS} seconds instead of ${lineCheck.ips.length} every ${lineCheck.intervalS}: about ${monthlyMegabytes(meteredCheck)} MB a month of checks rather than ${monthlyMegabytes(lineCheck)} MB, so noticing it fail takes about ${secondsToDown(meteredCheck)} seconds (with "down when slow", each check sends ${slowLine.count} pings, so ${slowLine.count} times the data). It only carries traffic when the others are down: after every other line in failover, never shared when sharing.`,
   },
   {
-    path: "internet.connections.*.down_when_slow",
+    path: "internet.lines.*.failover.down_when_slow",
     label: "Down when slow",
     description: "A line that is up but too slow to use counts as down.",
     openwrt: "mwan3 check_quality",
@@ -210,7 +209,7 @@ export const fields: FieldInfo[] = [
       `Each check sends ${slowLine.count} pings to each address and measures them: worse than ${slowLine.failMs} ms or ${slowLine.failLossPct}% lost marks the line down, as if it had failed, until it is better than ${slowLine.recoverMs} ms and ${slowLine.recoverLossPct}% again. For a mobile line that is technically up but unusable.`,
   },
   {
-    path: "internet.share_per_device",
+    path: "internet.use_lines.sticky_per_device",
     label: "Keep each device on one line",
     description: "Games and calls never switch line mid-way.",
     openwrt: "mwan3 rule sticky",
@@ -218,27 +217,27 @@ export const fields: FieldInfo[] = [
       `Sharing traffic, each new connection goes out one line or another, and only secure websites keep to one. With this on, a device keeps to the line it was given for everything, until it has been quiet for ${stickySeconds / 60} minutes: steadier for games and calls, but one device cannot use both lines at once.`,
   },
   {
-    path: "internet.mode",
+    path: "internet.use_lines.mode",
     label: "Using several",
     description: "How the connections work together.",
     openwrt: "mwan3",
     explain: (intent) =>
       `Failover: everything goes out the first connection that works, in the order listed, and moves to the next within about ${secondsToDown(lineCheck)} seconds of a line failing (mwan3 pings ${lineCheck.ips.slice(0, -1).join(", ")} and ${lineCheck.ips[lineCheck.ips.length - 1]} out of each line, waiting up to ${lineCheck.timeoutS} seconds for each, then ${lineCheck.intervalS} seconds before the next round; ${lineCheck.missesDown} failed rounds in a row mark it down). A metered line comes after all the others. Share: new connections are spread over the working lines by their share, and secure websites keep to one line per device. Either way IPv6 uses the first connection.` +
-      (intent.internet.connections.length < 2 ? " Add a second connection to use it." : ""),
+      (intent.internet.lines.length < 2 ? " Add a second connection to use it." : ""),
   },
   {
-    path: "internet.ddns",
+    path: "internet.dynamic_dns",
     label: "Name on the internet",
     description: "A name that follows your internet address, for remote access.",
     openwrt: "ddns-scripts",
     explain:
       "Keeps a name (home.example.com) pointing at your internet address as it changes, at your DNS provider, checked every 10 minutes. The address is read from the web, so it works behind another router too. Remote access and other sites use the name.",
   },
-  { path: "internet.ddns.provider", label: "Provider" },
-  { path: "internet.ddns.hostname", label: "Name" },
-  { path: "internet.ddns.token", label: "API token", secret: true },
+  { path: "internet.dynamic_dns.provider", label: "Provider" },
+  { path: "internet.dynamic_dns.hostname", label: "Name" },
+  { path: "internet.dynamic_dns.token", label: "API token", secret: true },
   {
-    path: "internet.ddns.zone",
+    path: "internet.dynamic_dns.zone",
     label: "Zone",
     description: "Unset: the name's last two parts.",
     explain: "The Cloudflare zone the name is in: for vpn.home.example.co.uk, example.co.uk. Unset, the last two parts of the name (example.com), which is right unless the domain ends in two parts of its own.",
@@ -252,9 +251,9 @@ export const fields: FieldInfo[] = [
       "Lets devices on the main network open ports on the router for themselves (game consoles, some apps), over UPnP IGD and NAT-PMP. Secure mode is on: a device can only open ports to itself.",
   },
 
-  { path: "mesh", label: "Mesh" },
+  { path: "wifi.mesh", label: "Mesh" },
   {
-    path: "mesh.enabled",
+    path: "wifi.mesh.enabled",
     label: "Mesh",
     description: "Access points link over Wi-Fi, so they need no cable.",
     openwrt: "802.11s · batman-adv",
@@ -262,28 +261,28 @@ export const fields: FieldInfo[] = [
       `Access points (and the router, if it has Wi-Fi in the band) link to each other over an encrypted 802.11s mesh, with batman-adv choosing the best path over it, so an access point with only power can carry every network. A node that is also cabled is fine: batman's loop avoidance keeps it from looping. The mesh shares its radio with that band's devices, so on an access point with two radios, Wi-Fi in that band is slower. Its link carries ${meshMtu} bytes, so nothing is fragmented, and each extra hop costs ${meshHopPenalty} in batman's choice, preferring fewer.`,
   },
   {
-    path: "mesh.band",
+    path: "wifi.mesh.band",
     label: "Band",
     description: "5 GHz is faster; 2.4 GHz reaches further; 6 GHz is for access points with three radios.",
   },
   {
-    path: "mesh.channel",
+    path: "wifi.mesh.channel",
     label: "Channel",
     description: "Every node uses it; never one a radar could move.",
     openwrt: "wifi-device channel",
     explain:
       "All mesh nodes must share one channel, so it is fixed here and the access points' own channel for this band follows it. Only channels without radar detection (DFS) are offered: on those, a radar makes an access point leave the channel, and it would drop out of the mesh.",
   },
-  { path: "mesh.key", label: "Mesh key", secret: true },
+  { path: "wifi.mesh.key", label: "Mesh key", secret: true },
   {
-    path: "mesh.dedicated",
+    path: "wifi.mesh.band_reserved",
     label: "Only for the mesh",
     description: "Devices use the other bands: the mesh has this one to itself.",
     explain:
       "No SSID is broadcast on the mesh's band, so the mesh gets all of that radio's airtime instead of sharing it with your devices. Best on access points with three radios (a 6 GHz one for the mesh); on two, devices are left with the other band alone.",
   },
   {
-    path: "mesh.wired",
+    path: "wifi.mesh.over_cable",
     label: "Also over cables",
     description: "Nodes with a cable between them use it, and Wi-Fi when it fails.",
     openwrt: "batman-adv on a VLAN",
@@ -291,7 +290,7 @@ export const fields: FieldInfo[] = [
       `batman-adv also runs over your cables, on VLAN ${meshWiredVlan}, carried tagged on every device's ports (the router and access points without Wi-Fi in the mesh's band only pass it on). Between two nodes with a cable it then prefers the cable, and falls back to the mesh when it breaks. Without it, a cabled node still links the mesh to the network, and its devices still move to another one if its cable breaks; this adds the cable as a path of the mesh itself. No network may use VLAN ${meshWiredVlan}.`,
   },
   {
-    path: "mesh.jumbo",
+    path: "wifi.mesh.large_frames",
     label: "Larger frames over cable",
     description: "Faster; any switch between nodes must pass them.",
     openwrt: `MTU ${meshMtu}`,
@@ -306,9 +305,10 @@ export const fields: FieldInfo[] = [
       "How this access point reaches the rest of the network. Over the mesh it needs only power; cabled, it also links the mesh into the network. Its first setup must be over a cable, as it has no mesh until then. Applying changes those over the mesh first, so a change never cuts one off halfway.",
   },
 
-  { path: "vpn", label: "Remote access" },
+  { path: "vpn", label: "VPN" },
+  { path: "vpn.remote_access", label: "Remote access" },
   {
-    path: "vpn.enabled",
+    path: "vpn.remote_access.enabled",
     label: "Remote access",
     description: "Phones and laptops reach home from anywhere, over WireGuard.",
     openwrt: "wireguard interface vpn",
@@ -316,47 +316,47 @@ export const fields: FieldInfo[] = [
       "Runs a WireGuard server on the router. Each client has its own key and address, and lands in a zone of its own with the access set below, like a network's. A client's private key is made in this page and shown once, as a QR code and a file; only its public key is kept, so the settings file opens no device.",
   },
   {
-    path: "vpn.port",
+    path: "vpn.remote_access.port",
     label: "Port",
     description: "The UDP port clients connect to.",
     openwrt: "wireguard listen_port",
     explain:
       "The router listens for WireGuard here, and the firewall lets it in from the internet. If your router is behind another one (its internet address is a private one), forward this UDP port to it there, or connect over IPv6.",
   },
-  { path: "vpn.subnet", label: "Addresses", description: "The clients' range; each keeps its own address." },
+  { path: "vpn.remote_access.subnet", label: "Addresses", description: "The clients' range; each keeps its own address." },
   {
-    path: "vpn.endpoint",
+    path: "vpn.remote_access.endpoint",
     label: "Address",
     description: "Where clients connect: a name or an address. Unset, your dynamic DNS name.",
   },
-  { path: "vpn.private_key", label: "Router's key", secret: true },
-  { path: "vpn.access", label: "Access" },
+  { path: "vpn.remote_access.private_key", label: "Router's key", secret: true },
+  { path: "vpn.remote_access.access", label: "Access" },
   {
-    path: "vpn.access.internet",
+    path: "vpn.remote_access.access.internet",
     label: "Internet",
     openwrt: "zone forwarding to wan",
     explain: "Whether remote clients can reach the internet through this router.",
   },
   {
-    path: "vpn.access.networks",
+    path: "vpn.remote_access.access.networks",
     label: "Can reach",
     description: "Your networks remote clients may connect to.",
     openwrt: "zone forwardings",
     explain: "The networks remote clients may open connections to, one firewall forwarding each. Replies always come back.",
   },
   {
-    path: "vpn.access.router",
+    path: "vpn.remote_access.access.router",
     label: "Router access",
     description: "Full: anything on the router. Services: DNS and time only.",
     openwrt: "zone input",
   },
-  { path: "vpn.clients", label: "Clients" },
-  { path: "vpn.clients.*", label: (c) => `“${c?.name || "unnamed"}”` },
-  { path: "vpn.clients.*.name", label: "Name" },
-  { path: "vpn.clients.*.public_key", label: "Key", description: "Its public key: its private one stays on the device." },
-  { path: "vpn.clients.*.host", label: "Address" },
+  { path: "vpn.remote_access.clients", label: "Clients" },
+  { path: "vpn.remote_access.clients.*", label: (c) => `“${c?.name || "unnamed"}”` },
+  { path: "vpn.remote_access.clients.*.name", label: "Name" },
+  { path: "vpn.remote_access.clients.*.public_key", label: "Key", description: "Its public key: its private one stays on the device." },
+  { path: "vpn.remote_access.clients.*.host", label: "Address" },
   {
-    path: "vpn.clients.*.route",
+    path: "vpn.remote_access.clients.*.route",
     label: "Through home",
     description: "Everything, or only your networks.",
     openwrt: "AllowedIPs",
@@ -364,73 +364,73 @@ export const fields: FieldInfo[] = [
       "Everything: all its traffic goes through home, as if it were on your network (safer on public Wi-Fi; slower). Only your networks: it reaches home's networks and the router through the tunnel, and the rest of the internet directly.",
   },
 
-  { path: "tunnels", label: "VPN providers" },
-  { path: "tunnels.*", label: (t) => `“${t?.name || "unnamed"}”` },
-  { path: "tunnels.*.name", label: "Name" },
-  { path: "tunnels.*.type", label: "Kind", description: "WireGuard or OpenVPN, as the provider gives it." },
-  { path: "tunnels.*.private_key", label: "Private key", secret: true },
-  { path: "tunnels.*.address", label: "Address", description: "Its address in the provider's network." },
+  { path: "vpn.providers", label: "VPN providers" },
+  { path: "vpn.providers.*", label: (t) => `“${t?.name || "unnamed"}”` },
+  { path: "vpn.providers.*.name", label: "Name" },
+  { path: "vpn.providers.*.type", label: "Kind", description: "WireGuard or OpenVPN, as the provider gives it." },
+  { path: "vpn.providers.*.private_key", label: "Private key", secret: true },
+  { path: "vpn.providers.*.address", label: "Address", description: "Its address in the provider's network." },
   {
-    path: "tunnels.*.dns",
+    path: "vpn.providers.*.dns",
     label: "DNS servers",
     description: "The provider's: networks out through it are given them.",
     explain:
       `Devices on a network that goes out through this tunnel are handed these DNS servers, so their lookups go through the tunnel too instead of out the plain internet. None given: ${tunnelDefaultDns.join(" and ")}, also through the tunnel.`,
   },
-  { path: "tunnels.*.peer", label: "Server" },
-  { path: "tunnels.*.peer.public_key", label: "Server key" },
-  { path: "tunnels.*.peer.preshared_key", label: "Preshared key", secret: true },
-  { path: "tunnels.*.peer.endpoint", label: "Server address" },
+  { path: "vpn.providers.*.peer", label: "Server" },
+  { path: "vpn.providers.*.peer.public_key", label: "Server key" },
+  { path: "vpn.providers.*.peer.preshared_key", label: "Preshared key", secret: true },
+  { path: "vpn.providers.*.peer.endpoint", label: "Server address" },
   {
-    path: "tunnels.*.config",
+    path: "vpn.providers.*.config",
     label: "Provider's file",
     secret: true,
     description: "The .ovpn your provider gives you.",
     explain:
       "Used as given, with three lines set last: its own device name, and route-nopull, so the provider can never take the router's default route; the router sends only the networks you choose through it. Kept root's alone on the router.",
   },
-  { path: "tunnels.*.username", label: "Username" },
-  { path: "tunnels.*.password", label: "Password", secret: true },
+  { path: "vpn.providers.*.username", label: "Username" },
+  { path: "vpn.providers.*.password", label: "Password", secret: true },
 
-  { path: "sites", label: "Sites" },
-  { path: "sites.private_key", label: "This site's key", secret: true },
+  { path: "vpn.sites", label: "Sites" },
+  { path: "vpn.sites.private_key", label: "This site's key", secret: true },
   {
-    path: "sites.port",
+    path: "vpn.sites.port",
     label: "Port",
     description: "The UDP port other sites connect to.",
     openwrt: "wireguard listen_port",
   },
-  { path: "sites.access", label: "Access" },
+  { path: "vpn.sites.access", label: "Access" },
   {
-    path: "sites.access.internet",
+    path: "vpn.sites.access.internet",
     label: "Internet",
     openwrt: "zone forwarding to wan",
     explain: "Whether the linked sites can reach the internet through this router.",
   },
   {
-    path: "sites.access.networks",
+    path: "vpn.sites.access.networks",
     label: "Can reach",
     description: "Your networks the linked sites may connect to.",
     openwrt: "zone forwardings",
     explain: "The networks the linked sites may open connections to, one firewall forwarding each. Replies always come back.",
   },
   {
-    path: "sites.access.router",
+    path: "vpn.sites.access.router",
     label: "Router access",
     description: "Full: anything on the router. Services: DNS and time only.",
     openwrt: "zone input",
   },
-  { path: "sites.peers", label: "Linked sites" },
-  { path: "sites.peers.*", label: (s) => `“${s?.name || "unnamed"}”` },
-  { path: "sites.peers.*.name", label: "Name" },
-  { path: "sites.peers.*.public_key", label: "Its key" },
+  { path: "vpn.sites.peers", label: "Linked sites" },
+  { path: "vpn.sites.peers.*", label: (s) => `“${s?.name || "unnamed"}”` },
+  { path: "vpn.sites.peers.*.name", label: "Name" },
+  { path: "vpn.sites.peers.*.public_key", label: "Its key" },
   {
-    path: "sites.peers.*.endpoint",
+    path: "vpn.sites.peers.*.endpoint",
     label: "Its address",
     description: "Where it is; unset, it connects here.",
   },
   {
-    path: "sites.peers.*.subnets",
+    path: "vpn.sites.peers.*.subnets",
     label: "Its networks",
     description: "The ranges behind it, routed to it.",
     openwrt: "allowed_ips, route_allowed_ips",
@@ -440,15 +440,14 @@ export const fields: FieldInfo[] = [
   { path: "networks.*", label: (n) => `“${n?.name || "unnamed"}”` },
   { path: "networks.*.name", label: "Name" },
   {
-    path: "networks.*.line",
+    path: "networks.*.access.via",
     label: "Internet line",
     description: "Which internet connection or VPN provider its devices use.",
     openwrt: "mwan3 policy and rule",
     explain:
       "Unset, its devices go out as the internet's setting says (failover or sharing). Set, they go out the connection or VPN provider chosen. A connection: when it is down they use the others, or have no internet until it is back; IPv4 only, IPv6 always uses the first one. A VPN provider: when it is down they have no internet (a kill switch), the network has no IPv6, which would go around the tunnel, and its DNS goes through the tunnel too. The router itself, and other networks, are not affected.",
   },
-  { path: "networks.*.line.connection", label: "Line" },
-  { path: "networks.*.line.fallback", label: "Use the others when it is down" },
+  { path: "networks.*.access.fallback", label: "Use the others when it is down" },
   {
     path: "networks.*.vlan",
     label: "VLAN",
@@ -463,7 +462,7 @@ export const fields: FieldInfo[] = [
     description: "Every device on it gets a new address; the router takes the first.",
   },
   {
-    path: "networks.*.dhcp.size",
+    path: "networks.*.dhcp.pool_size",
     label: "Addresses for devices",
     openwrt: "dhcp start / limit",
     explain:
@@ -492,16 +491,16 @@ export const fields: FieldInfo[] = [
       "Gives this network one /64 of the internet's IPv6 prefix, announced by router advertisements and DHCPv6 from the router (odhcpd). Devices get public IPv6 addresses, plus a stable private one that never changes.",
   },
   {
-    path: "networks.*.reservations",
+    path: "networks.*.dhcp.reservations",
     label: "Reserved addresses",
     openwrt: "dhcp host (static lease)",
     explain:
       "Devices that always get the same IPv4 address, matched by MAC address, and a name: <name>.<local domain>. Rules and port forwards that point at a device need one.",
   },
-  { path: "networks.*.reservations.*", label: (r) => `“${r?.name || "unnamed"}”` },
-  { path: "networks.*.reservations.*.name", label: "Name" },
-  { path: "networks.*.reservations.*.mac", label: "MAC address" },
-  { path: "networks.*.reservations.*.address", label: "Address" },
+  { path: "networks.*.dhcp.reservations.*", label: (r) => `“${r?.name || "unnamed"}”` },
+  { path: "networks.*.dhcp.reservations.*.name", label: "Name" },
+  { path: "networks.*.dhcp.reservations.*.mac", label: "MAC address" },
+  { path: "networks.*.dhcp.reservations.*.address", label: "Address" },
   {
     path: "networks.*.share_devices",
     label: "Share devices with other networks",
@@ -536,110 +535,110 @@ export const fields: FieldInfo[] = [
   },
 
   { path: "wifi", label: "Wi-Fi" },
-  { path: "wifi.*", label: (w) => `“${w?.ssid || "unnamed"}”` },
+  { path: "wifi.networks.*", label: (w) => `“${w?.ssid || "unnamed"}”` },
   {
-    path: "wifi.*.ssid",
+    path: "wifi.networks.*.ssid",
     label: "Name",
     description: "Devices will have to join the network again under its new name.",
   },
   {
-    path: "wifi.*.password",
+    path: "wifi.networks.*.password",
     label: "Password",
     secret: true,
     description: "Devices will have to join again with the new password.",
   },
   {
-    path: "wifi.*.extra_passwords",
+    path: "wifi.networks.*.extra_passwords",
     label: "More passwords",
     secret: true,
     openwrt: "wifi-station keys (multi-PSK)",
     explain:
       "More passwords for the same SSID, each with the same access. Hand one out (to a guest, a smart plug) and remove it later without changing the main one. WPA2 only: WPA3 allows a single password.",
   },
-  { path: "wifi.*.enabled", label: "Enabled" },
+  { path: "wifi.networks.*.enabled", label: "Enabled" },
   {
-    path: "wifi.*.security",
+    path: "wifi.networks.*.security",
     label: "Security",
     description: "WPA3 is stronger; WPA2/WPA3 lets older devices still join.",
     openwrt: "wifi-iface encryption: psk2, sae-mixed, sae",
     explain:
       "WPA2/WPA3 lets newer devices use WPA3 (SAE) while older ones use WPA2. WPA3 only is the most secure but locks out older devices. WPA3 always brings protected management frames.",
   },
-  { path: "wifi.*.hidden", label: "Hidden" },
+  { path: "wifi.networks.*.hidden", label: "Hidden" },
   {
-    path: "wifi.*.roaming_assistance",
+    path: "wifi.networks.*.roaming.assisted",
     label: "Roaming assistance",
     description: "Access points tell devices about their neighbours (802.11k/v).",
     openwrt: "802.11k/v · usteer ssid_list",
     explain: (intent, [i]) => {
-      const level = intent.roaming?.steering ?? "advise";
+      const level = intent.wifi.roaming?.steering ?? "advise";
       const base =
         "Access points tell devices about their neighbours (802.11k) and can suggest a better one (802.11v), with usteer sharing what each access point sees.";
-      return level !== "off" && intent.wifi?.[Number(i)]?.roaming_assistance === false
+      return level !== "off" && intent.wifi.networks?.[Number(i)]?.roaming.assisted === false
         ? `${base} Off for this SSID: no neighbour lists, and steering (${where("roaming")}) leaves its devices alone.`
         : `${base} Steering is ${steeringLabels[level]} (${where("roaming")}): ${describeSteering(level)}`;
     },
   },
   {
-    path: "wifi.*.fast_roaming",
+    path: "wifi.networks.*.roaming.fast",
     label: "Fast roaming",
     description: "Devices move between access points without a pause (802.11r).",
     openwrt: "802.11r (fast transition)",
     explain:
       "Moving between access points takes milliseconds instead of a full reconnect, so calls do not drop. A few old devices cannot join an SSID with it on; turn it off if one will not connect.",
   },
-  { path: "wifi.*.bands", label: "Bands" },
+  { path: "wifi.networks.*.bands", label: "Bands" },
   {
-    path: "wifi.*.isolate_clients",
+    path: "wifi.networks.*.isolate_clients",
     label: "Isolate clients",
     description: "Whether devices on it, on the same access point and band, are kept from reaching each other.",
     openwrt: "wifi-iface isolate",
     explain:
       "Devices on this SSID cannot reach each other directly on the same access point and band, only the internet and what the network's access allows. Good for guests.",
   },
-  { path: "radios", label: "Radios" },
-  { path: "roaming", label: "Roaming" },
+  { path: "wifi.radios", label: "Radios" },
+  { path: "wifi.roaming", label: "Roaming" },
   {
-    path: "roaming.steering",
+    path: "wifi.roaming.steering",
     label: "Steering",
     description: "How firmly access points move devices to a better access point or band.",
     openwrt: "usteer roam_trigger_snr, aggressiveness, min_snr",
     explain: describeSteeringLevels,
   },
   {
-    path: "roaming.prefer_5g",
+    path: "wifi.roaming.prefer_5g",
     label: "Prefer 5 GHz",
     description: "Moves dual-band devices with a strong signal off 2.4 GHz.",
     openwrt: "usteer band steering",
-    explain: (intent) => describePrefer5g(intent.roaming?.steering ?? "advise"),
+    explain: (intent) => describePrefer5g(intent.wifi.roaming?.steering ?? "advise"),
   },
 
-  { path: "radios.5g", label: "5 GHz" },
-  { path: "radios.6g", label: "6 GHz" },
-  { path: "radios.*.enabled", label: "Enabled" },
+  { path: "wifi.radios.5g", label: "5 GHz" },
+  { path: "wifi.radios.6g", label: "6 GHz" },
+  { path: "wifi.radios.*.enabled", label: "Enabled" },
   {
-    path: "radios.*.width",
+    path: "wifi.radios.*.width",
     label: "Channel width",
     openwrt: "wifi-device htmode (HE20 to HE160)",
     explain:
       "Wider channels are faster, but there are fewer of them, so they overlap neighbours more. Auto is 20 MHz on 2.4 GHz, 80 MHz on 5 GHz and 160 MHz on 6 GHz, at Wi-Fi 6 rates.",
   },
   {
-    path: "radios.*.power",
+    path: "wifi.radios.*.power",
     label: "Transmit power",
     openwrt: "wifi-device txpower",
     explain:
       "Auto transmits at the most your country allows. Low, Medium and High are 10, 15 and 20 dBm, still capped by the country's limit.",
   },
   {
-    path: "radios.*.cell_density",
+    path: "wifi.radios.*.cell_density",
     label: "Cell density",
     openwrt: "wifi-device cell_density",
     explain:
       "Raises the slowest data rate devices may use, so slow, distant devices cannot hold the air for long. Normal, High and Very high are OpenWrt's levels 1 to 3; Off allows the slowest legacy rates.",
   },
   {
-    path: "radios.*.airtime",
+    path: "wifi.radios.*.airtime",
     label: "Airtime",
     description: "What the band's Wi-Fi queues favour: latency, balance or throughput.",
     openwrt: "AQL, aql_txq_limit",
@@ -647,7 +646,7 @@ export const fields: FieldInfo[] = [
       "How much each radio queues per device, in airtime. Low latency queues little (2–4 ms), keeping calls responsive while someone downloads; Throughput queues more (8–20 ms) to keep the air full; Balanced is the kernel's 5–12 ms.",
   },
   {
-    path: "wifi.*.network",
+    path: "wifi.networks.*.network",
     label: "Network",
     description: "Devices joining this Wi-Fi land on that network.",
   },
@@ -665,10 +664,10 @@ export const fields: FieldInfo[] = [
   { path: "firewall.rules.*.enabled", label: "Enabled" },
   { path: "firewall.rules.*.from", label: "From" },
   { path: "firewall.rules.*.to", label: "To" },
-  { path: "firewall.rules.*.source_addresses", label: "Only from" },
-  { path: "firewall.rules.*.destination_addresses", label: "Only to" },
+  { path: "firewall.rules.*.from_addresses", label: "Only from" },
+  { path: "firewall.rules.*.to_addresses", label: "Only to" },
   { path: "firewall.rules.*.protocol", label: "Protocol" },
-  { path: "firewall.rules.*.destination_port", label: "Ports" },
+  { path: "firewall.rules.*.ports", label: "Ports" },
   {
     path: "firewall.rules.*.action",
     label: "Action",
@@ -687,10 +686,10 @@ export const fields: FieldInfo[] = [
   { path: "firewall.port_forwards.*.name", label: "Name" },
   { path: "firewall.port_forwards.*.enabled", label: "Enabled" },
   { path: "firewall.port_forwards.*.protocol", label: "Protocol" },
-  { path: "firewall.port_forwards.*.external_port", label: "External port" },
-  { path: "firewall.port_forwards.*.internal_address", label: "Internal address" },
-  { path: "firewall.port_forwards.*.internal_port", label: "Internal port" },
-  { path: "firewall.port_forwards.*.source_addresses", label: "Only from" },
+  { path: "firewall.port_forwards.*.port", label: "External port" },
+  { path: "firewall.port_forwards.*.to.address", label: "Internal address" },
+  { path: "firewall.port_forwards.*.to.port", label: "Internal port" },
+  { path: "firewall.port_forwards.*.from_addresses", label: "Only from" },
   {
     path: "firewall.port_forwards.*.reflection",
     label: "NAT loopback",
@@ -701,7 +700,7 @@ export const fields: FieldInfo[] = [
 
   { path: "dns", label: "DNS" },
   {
-    path: "dns.local_domain",
+    path: "dns.domain",
     label: "Local domain",
     description: "Devices are reachable as name.domain.",
     openwrt: "dnsmasq domain",
@@ -728,15 +727,15 @@ export const fields: FieldInfo[] = [
       "Refuses answers from the internet that point at private addresses, which blocks DNS rebinding attacks on devices at home. Turn it off if a service you use resolves to a local address on purpose.",
   },
   {
-    path: "dns.records",
+    path: "dns.hosts",
     label: "Local names",
     openwrt: "dnsmasq domain (hostname)",
     explain:
       "Your own names: <name>.<local domain> answers with the address you give, on every network.",
   },
-  { path: "dns.records.*", label: (r) => `“${r?.name || "unnamed"}”` },
-  { path: "dns.records.*.name", label: "Name" },
-  { path: "dns.records.*.address", label: "Address" },
+  { path: "dns.hosts.*", label: (r) => `“${r?.name || "unnamed"}”` },
+  { path: "dns.hosts.*.name", label: "Name" },
+  { path: "dns.hosts.*.address", label: "Address" },
 ];
 
 const matches = (pattern: string, path: string[]) => {

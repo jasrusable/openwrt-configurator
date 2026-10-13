@@ -51,9 +51,9 @@ const Internet = ({ intent }: { intent: Intent }) => {
         <AreaChart series={[latency]} colors={["violet"]} height={70} />
       </ChartCard>
       <Section title="Connections">
-        {intent.internet.connections.map((c) => {
+        {intent.internet.lines.map((c) => {
           const now = status.data?.connections.find((x) => x.id === c.id);
-          const { works, since, word, dot } = lineState(now, intent.internet.connections.length > 1);
+          const { works, since, word, dot } = lineState(now, intent.internet.lines.length > 1);
           return (
             <SettingRow
               key={c.id}
@@ -291,7 +291,7 @@ export const PerformancePage = () => {
   const intent: Intent = useDraftValue();
   const status = useNetworkStatus("performance");
   return (
-    <SettingsPage title="Performance" description={liveLine(intent.site.name, status.dataUpdatedAt, status.isFetching, !!status.data)}>
+    <SettingsPage title="Performance" description={liveLine(intent.system.name, status.dataUpdatedAt, status.isFetching, !!status.data)}>
       <Internet intent={intent} />
       <Text fw={600} size="lg" mt="md">
         Wi-Fi

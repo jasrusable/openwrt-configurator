@@ -92,7 +92,7 @@ const Shell = () => {
   const { pathname } = useLocation();
   const problems = usePageProblems();
   const [navOpen, nav] = useDisclosure(false);
-  const site: string = useDraftValue("site.name") || "Network";
+  const site: string = useDraftValue("system.name") || "Network";
   const dirty = useDraftChanged();
   useEffect(() => {
     document.title = site;

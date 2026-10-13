@@ -35,13 +35,13 @@ export const system: Feature = (intent) => {
     ],
     // Who may log in as root. Listed keys replace the device's file; none
     // leaves a hand-installed one alone. dropbear reads it at each login.
-    files: intent.admin.authorized_keys.length
+    files: intent.system.ssh.authorized_keys.length
       ? [
           {
             ".if": everyDevice,
             path: "/etc/dropbear/authorized_keys",
             mode: "0600",
-            content: intent.admin.authorized_keys.join("\n") + "\n",
+            content: intent.system.ssh.authorized_keys.join("\n") + "\n",
           },
         ]
       : [],
@@ -60,8 +60,8 @@ export const system: Feature = (intent) => {
             ".overrides": intent.hardware
               .filter((h) => h.location)
               .map((h) => ({ ".if": onDevice(h.name), override: { description: h.location } })),
-            zonename: intent.site.timezone,
-            timezone: timezones[intent.site.timezone],
+            zonename: intent.system.timezone,
+            timezone: timezones[intent.system.timezone],
             log_size: "2048",
           },
         ],
@@ -90,8 +90,8 @@ export const system: Feature = (intent) => {
             // Off: only the authorized keys (below) let root in. A stock
             // device has no root password and accepts any, so this is what
             // closes it.
-            PasswordAuth: intent.admin.password_login ? "on" : "off",
-            RootPasswordAuth: intent.admin.password_login ? "on" : "off",
+            PasswordAuth: intent.system.ssh.password_login ? "on" : "off",
+            RootPasswordAuth: intent.system.ssh.password_login ? "on" : "off",
             Port: 22,
             // Only on the main network: guests and IoT get no SSH. Bound to
             // its device, not an address, so an address from DHCP (as access
@@ -143,7 +143,7 @@ export const system: Feature = (intent) => {
             days: 397,
             key_type: "ec",
             ec_curve: "P-256",
-            country: intent.site.country,
+            country: intent.system.country,
             commonname: "OpenWrt",
           },
         ],

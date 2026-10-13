@@ -29,10 +29,10 @@ export const radios: { band: Band; name: string; width: string }[] = [
  * or the mesh's links would differ by node.
  */
 export const radioWidth = (intent: Intent, band: Band) => {
-  const settings = intent.radios[band];
+  const settings = intent.wifi.radios[band];
   const usual = radios.find((r) => r.band === band)!.width;
   const width = settings.width === "auto" ? usual : settings.width;
-  return intent.mesh.enabled && intent.mesh.band === band && band === "5g" ? String(Math.min(80, Number(width))) : width;
+  return intent.wifi.mesh.enabled && intent.wifi.mesh.band === band && band === "5g" ? String(Math.min(80, Number(width))) : width;
 };
 
 /** dBm. The driver still caps it at what the country allows. */
@@ -50,7 +50,7 @@ const encryption = { wpa2: "psk2+ccmp", "wpa2-wpa3": "sae-mixed", wpa3: "sae" } 
  * roam_kick_delay is also how long a move request stays open, so it must not
  * be 0 while steering.
  */
-const steering = ({ steering, prefer_5g }: Intent["roaming"]) => {
+const steering = ({ steering, prefer_5g }: Intent["wifi"]["roaming"]) => {
   const level = steeringValues[steering];
   const moves = steering === "nudge" || steering === "push";
   return {
@@ -67,15 +67,15 @@ const steering = ({ steering, prefer_5g }: Intent["roaming"]) => {
 };
 
 export const wifi: Feature = (intent) => {
-  const posixTimezone = timezones[intent.site.timezone];
+  const posixTimezone = timezones[intent.system.timezone];
   const ap = (section: Record<string, unknown>) => ({
     ".if": onAccessPoints,
     ...section,
   });
-  const enabled = radios.filter(({ band }) => intent.radios[band].enabled);
-  const ssidNames = uniqueNames("wifi", intent.wifi, (ssid) => ssid.ssid);
-  const meshBand = intent.mesh.enabled ? intent.mesh.band : undefined;
-  const dedicatedBand = intent.mesh.enabled && intent.mesh.dedicated ? intent.mesh.band : undefined;
+  const enabled = radios.filter(({ band }) => intent.wifi.radios[band].enabled);
+  const ssidNames = uniqueNames("wifi", intent.wifi.networks, (ssid) => ssid.ssid);
+  const meshBand = intent.wifi.mesh.enabled ? intent.wifi.mesh.band : undefined;
+  const dedicatedBand = intent.wifi.mesh.enabled && intent.wifi.mesh.band_reserved ? intent.wifi.mesh.band : undefined;
 
   return {
     package_profiles: [
@@ -92,7 +92,7 @@ export const wifi: Feature = (intent) => {
     config: {
       wireless: {
         "wifi-device": radios.map(({ band, name, width }) => {
-          const settings = intent.radios[band];
+          const settings = intent.wifi.radios[band];
           return ap({
             ".name": name,
             band,
@@ -101,20 +101,20 @@ export const wifi: Feature = (intent) => {
             // The mesh's band at most 80 MHz: wider reaches radar channels.
             htmode: `@best/${radioWidth(intent, band)}`,
             // The mesh's band: every node on its channel, pinned or not.
-            channel: meshBand === band ? intent.mesh.channel : "auto",
+            channel: meshBand === band ? intent.wifi.mesh.channel : "auto",
             cell_density: cellDensity[settings.cell_density],
             ...(settings.power === "auto" ? {} : { txpower: txpower[settings.power] }),
-            country: intent.site.country,
+            country: intent.system.country,
             ".overrides": intent.hardware.flatMap((device) => {
               if (meshBand === band) return [];
-              const channel = (device.wifi?.channel as Record<string, unknown> | undefined)?.[band];
+              const channel = (device.radios as Record<string, { channel?: unknown } | undefined> | undefined)?.[band]?.channel;
               return channel !== undefined
                 ? [{ ".if": onDevice(device.name), override: { channel } }]
                 : [];
             }),
           });
         }),
-        "wifi-iface": intent.wifi.flatMap((ssid, i) => {
+        "wifi-iface": intent.wifi.networks.flatMap((ssid, i) => {
           // Not the mesh's band when it has it to itself.
           const on = enabled.filter(
             ({ band }) => (!ssid.bands || ssid.bands.includes(band)) && !(dedicatedBand === band)
@@ -141,10 +141,10 @@ export const wifi: Feature = (intent) => {
             // and keys from the password (locally for WPA2, by a shared
             // key-holder for WPA3), the same on every access point; FT over
             // the air.
-            ieee80211r: ssid.fast_roaming,
+            ieee80211r: ssid.roaming.fast,
             // Over the air, said rather than left to the default: over the
             // network (DS) trips up some clients.
-            ...(ssid.fast_roaming ? { ft_over_ds: false } : {}),
+            ...(ssid.roaming.fast ? { ft_over_ds: false } : {}),
             ieee80211k: takesPart(intent, ssid),
             bss_transition: takesPart(intent, ssid),
             time_advertisement: 2,
@@ -185,7 +185,7 @@ export const wifi: Feature = (intent) => {
             probe_steering: "0",
             load_balancing_threshold: "0",
             band_steering_threshold: "0",
-            ...steering(intent.roaming),
+            ...steering(intent.wifi.roaming),
             load_kick_enabled: "0",
             min_connect_snr: "0",
             initial_connect_delay: "0",

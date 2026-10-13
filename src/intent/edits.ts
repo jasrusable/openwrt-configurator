@@ -31,13 +31,19 @@ export const withoutNetwork = (intent: Intent, index: number): Intent => {
         access: { ...network.access, networks: network.access.networks.filter((n) => n !== id) },
       })),
     // Remote access and the sites no longer reach it either.
-    vpn: { ...intent.vpn, access: { ...intent.vpn.access, networks: intent.vpn.access.networks.filter((n) => n !== id) } },
-    sites: { ...intent.sites, access: { ...intent.sites.access, networks: intent.sites.access.networks.filter((n) => n !== id) } },
+    vpn: {
+      ...intent.vpn,
+      remote_access: {
+        ...intent.vpn.remote_access,
+        access: { ...intent.vpn.remote_access.access, networks: intent.vpn.remote_access.access.networks.filter((n) => n !== id) },
+      },
+      sites: { ...intent.vpn.sites, access: { ...intent.vpn.sites.access, networks: intent.vpn.sites.access.networks.filter((n) => n !== id) } },
+    },
     firewall: {
       ...intent.firewall,
       rules: intent.firewall.rules.filter((r) => r.from !== id && r.to !== id),
       port_forwards: intent.firewall.port_forwards.filter(
-        (f) => !f.internal_address.startsWith(prefix)
+        (f) => !f.to.address.startsWith(prefix)
       ),
     },
   };

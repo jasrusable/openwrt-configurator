@@ -33,8 +33,8 @@ const forwards = defineList({
     name: "",
     enabled: true,
     protocol: "tcp" as const,
-    external_port: "",
-    internal_address: "",
+    port: "",
+    to: { address: "" },
     reflection: true,
   }),
   itemTitle: (i) => (
@@ -60,7 +60,7 @@ const forwards = defineList({
           <Value
             name={`firewall.port_forwards.${i}`}
             format={(f) =>
-              f && `${f.protocol.toUpperCase()} ${f.external_port}`
+              f && `${f.protocol.toUpperCase()} ${f.port}`
             }
           />
         </Text>
@@ -73,7 +73,7 @@ const forwards = defineList({
           <Value
             name={`firewall.port_forwards.${i}`}
             format={(f) =>
-              f && `${f.internal_address}:${f.internal_port || f.external_port}`
+              f && `${f.to.address}:${f.to.port || f.port}`
             }
           />
         </Text>
@@ -113,18 +113,18 @@ const forwards = defineList({
           options={protocolOptions}
         />
         <TextField
-          name={`firewall.port_forwards.${i}.external_port`}
+          name={`firewall.port_forwards.${i}.port`}
           label="External port"
           description="A port or a range, like 27015 or 6881-6889."
         />
         <TextField
-          name={`firewall.port_forwards.${i}.internal_address`}
+          name={`firewall.port_forwards.${i}.to.address`}
           label="To address"
           description="A device on one of your networks."
           placeholder="10.0.0.50"
         />
         <TextField
-          name={`firewall.port_forwards.${i}.internal_port`}
+          name={`firewall.port_forwards.${i}.to.port`}
           label="To port"
           description="Empty: the same as the external port."
           placeholder="Same"
@@ -132,7 +132,7 @@ const forwards = defineList({
       </Section>
       <Section title="Advanced">
         <TagsField
-          name={`firewall.port_forwards.${i}.source_addresses`}
+          name={`firewall.port_forwards.${i}.from_addresses`}
           label="Only from"
           description="Empty: from anywhere."
           placeholder="203.0.113.7"

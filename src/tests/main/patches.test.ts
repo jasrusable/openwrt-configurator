@@ -51,7 +51,7 @@ const example: Patch = {
   id: "example",
   why: "An example patch for the tests, with every kind of change.",
   target: { roles: ["access-point"], releases: { before: "26.03" } },
-  applies: (intent) => intent.internet.connections[0].ipv6,
+  applies: (intent) => intent.internet.lines[0].ipv6.enabled,
   apply: () => ({
     files: [{ path: "/etc/example", content: "x" }],
     config: { system: { example: [{ enabled: true }] } },
@@ -71,7 +71,7 @@ test("everything a patch emits carries its target; one the intent does not need 
   t.deepEqual(fragment.services, [{ name: "example", running: true, ".if": when }]);
 
   const intent = sample();
-  intent.internet.connections[0].ipv6 = false;
+  intent.internet.lines[0].ipv6.enabled = false;
   t.deepEqual(applyPatches([example])(intent), {
     files: [],
     config: {},

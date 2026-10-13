@@ -39,14 +39,14 @@ test("a provider's .conf, read: its key, address, DNS and server", (t) => {
 
 test("turning remote access on makes the router's key; a client's file matches the router's peer for it", (t) => {
   const intent = sample();
-  const on = availability(intent, "vpn.enabled").option(true).swap!.apply(intent);
-  t.true(on.vpn.enabled);
-  t.truthy(on.vpn.private_key);
-  t.deepEqual(on.vpn.access.networks, ["lan"], "the main network, to start");
+  const on = availability(intent, "vpn.remote_access.enabled").option(true).swap!.apply(intent);
+  t.true(on.vpn.remote_access.enabled);
+  t.truthy(on.vpn.remote_access.private_key);
+  t.deepEqual(on.vpn.remote_access.access.networks, ["lan"], "the main network, to start");
   const clientKey = newPrivateKey();
   const client = { id: "c1", name: "Phone", public_key: publicKeyOf(clientKey), host: nextClientHost([])!, route: "home" as const };
-  const file = parseWgConf(clientConf({ ...on, vpn: { ...on.vpn, endpoint: "home.example.com" } }, client, clientKey));
-  t.is(file.peer.publicKey, publicKeyOf(on.vpn.private_key!));
+  const file = parseWgConf(clientConf({ ...on, vpn: { ...on.vpn, remote_access: { ...on.vpn.remote_access, endpoint: "home.example.com" } } }, client, clientKey));
+  t.is(file.peer.publicKey, publicKeyOf(on.vpn.remote_access.private_key!));
   t.is(file.peer.endpoint, "home.example.com:51820");
   t.deepEqual(file.addresses, clientAddresses(on, client).map((a, i) => `${a}/${i === 0 ? 32 : 128}`));
   t.deepEqual(file.dns, ["10.0.99.1"]);
@@ -55,7 +55,11 @@ test("turning remote access on makes the router's key; a client's file matches t
 
 test("a site's invitation carries what the other needs, and reads back the same", (t) => {
   const intent = sample();
-  const site = { ...intent, sites: { ...intent.sites, private_key: newPrivateKey() }, internet: { ...intent.internet, ddns: { provider: "duckdns" as const, hostname: "home.duckdns.org", token: "x" } } };
+  const site = {
+    ...intent,
+    vpn: { ...intent.vpn, sites: { ...intent.vpn.sites, private_key: newPrivateKey() } },
+    internet: { ...intent.internet, dynamic_dns: { provider: "duckdns" as const, hostname: "home.duckdns.org", token: "x" } },
+  };
   const invite = inviteOf(site)!;
   t.is(invite.endpoint, "home.duckdns.org:51821");
   t.deepEqual(decodeInvite(encodeInvite(invite)), invite);
@@ -74,7 +78,7 @@ test("netifd is restarted only for a protocol it may not know, on reload_config'
 test("an .ovpn that would run or write things on the router is refused, and never written", (t) => {
   const intent = sample();
   const config = "client\nremote vpn.example.com 1194\nscript-security 2\nup /bin/evil.sh\n  plugin /x.so\nlog /etc/shadow\n";
-  const parsed = intentSchema.safeParse({ ...intent, tunnels: [{ id: "tun1", name: "Bad", type: "openvpn", config }] });
+  const parsed = intentSchema.safeParse({ ...intent, vpn: { ...intent.vpn, providers: [{ id: "tun1", name: "Bad", type: "openvpn", config }] } });
   t.false(parsed.success);
   t.regex(JSON.stringify(parsed.error?.issues), /may not set here.*script-security, up, plugin, log/);
   const file = ovpnFile({ id: "tun1", config });
@@ -87,7 +91,7 @@ test("a site may claim only private ranges, none overlapping another site's or t
   const key = publicKeyOf(newPrivateKey());
   const peer = (id: string, subnets: string[]) => ({ id, name: id, public_key: key, subnets });
   const issues = (peers: unknown[]) =>
-    JSON.stringify(intentSchema.safeParse({ ...intent, sites: { private_key: newPrivateKey(), peers } }).error?.issues ?? []);
+    JSON.stringify(intentSchema.safeParse({ ...intent, vpn: { ...intent.vpn, sites: { private_key: newPrivateKey(), peers } } }).error?.issues ?? []);
   t.regex(issues([peer("s1", ["8.8.0.0/16"])]), /8\.8\.0\.0\/16 is not a private range/);
   t.regex(issues([peer("s1", ["10.9.0.0/16"]), peer("s2", ["10.9.1.0/24"])]), /10\.9\.1\.0\/24 overlaps s1's/);
   t.regex(issues([peer("s1", ["10.9.0.0/16"]), peer("s1", ["10.8.0.0/16"])]), /another has the id s1/);
@@ -96,14 +100,15 @@ test("a site may claim only private ranges, none overlapping another site's or t
 
 test("a provider's DNS servers are IPv4: DHCP's option 6 takes nothing else, and dnsmasq would not start", (t) => {
   const tunnel = { id: "tun1", name: "P", type: "openvpn", config: "remote vpn.example.com 1194\n", dns: ["2001:db8::1"] };
-  const r = intentSchema.safeParse({ ...sample(), tunnels: [tunnel] });
-  t.true(!r.success && r.error.issues.some((i) => i.path.join(".") === "tunnels.0.dns.0"));
+  const s = sample();
+  const r = intentSchema.safeParse({ ...s, vpn: { ...s.vpn, providers: [tunnel] } });
+  t.true(!r.success && r.error.issues.some((i) => i.path.join(".") === "vpn.providers.0.dns.0"));
 });
 
 test("turning remote access off keeps networks' access to it, valid and not compiled", (t) => {
   const intent = sample();
   intent.networks[0].access.networks.push("vpn");
-  intent.vpn.enabled = false;
+  intent.vpn.remote_access.enabled = false;
   t.true(intentSchema.safeParse(intent).success);
   const config = compileIntent(intent);
   const forwardings = JSON.stringify(config.config.firewall?.forwarding ?? []);
@@ -121,7 +126,7 @@ test("dynamic DNS: Cloudflare's record@zone for deeper names, the main connectio
 
 test("remote access's address: a name or an address without a port; IPv6 bracketed in what clients get", (t) => {
   const intent = sample();
-  const ok = (endpoint: string) => intentSchema.safeParse({ ...intent, vpn: { ...intent.vpn, endpoint } }).success;
+  const ok = (endpoint: string) => intentSchema.safeParse({ ...intent, vpn: { ...intent.vpn, remote_access: { ...intent.vpn.remote_access, endpoint } } }).success;
   t.true(ok("home.example.com"));
   t.true(ok("203.0.113.7"));
   t.true(ok("2001:db8::7"));
@@ -167,19 +172,20 @@ test("an .ovpn may not read a file of the router's, nor blur where its key block
 
 test("remote access that may reach the linked sites: clients route to them, and the invitation asks them to route back", (t) => {
   const intent = sample();
-  intent.vpn = { ...intent.vpn, enabled: true, private_key: newPrivateKey(), access: { ...intent.vpn.access, networks: ["sites"] } };
-  intent.sites = {
-    ...intent.sites,
+  const remote = intent.vpn.remote_access;
+  intent.vpn.remote_access = { ...remote, enabled: true, private_key: newPrivateKey(), access: { ...remote.access, networks: ["sites"] } };
+  intent.vpn.sites = {
+    ...intent.vpn.sites,
     private_key: newPrivateKey(),
     peers: [{ id: "s1", name: "Cabin", public_key: publicKeyOf(newPrivateKey()), subnets: ["192.168.50.0/24"] }],
   };
   const allowed = parseWgConf(clientConf(intent, { host: 2, route: "home" }, newPrivateKey())).peer.allowedIps;
   t.true(allowed.includes("192.168.50.0/24"));
-  t.true(inviteOf(intent)!.subnets.includes(intent.vpn.subnet));
+  t.true(inviteOf(intent)!.subnets.includes(intent.vpn.remote_access.subnet));
   // Not when remote access may not reach them.
-  intent.vpn.access.networks = [];
+  intent.vpn.remote_access.access.networks = [];
   t.false(parseWgConf(clientConf(intent, { host: 2, route: "home" }, newPrivateKey())).peer.allowedIps.includes("192.168.50.0/24"));
-  t.false(inviteOf(intent)!.subnets.includes(intent.vpn.subnet));
+  t.false(inviteOf(intent)!.subnets.includes(intent.vpn.remote_access.subnet));
 });
 
 test("an .ovpn line over 255 bytes is refused: OpenVPN would read its rest as another option", (t) => {

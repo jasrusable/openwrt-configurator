@@ -15,7 +15,7 @@ import { defineList, ListPage } from "../../form/ListPage";
 import { ItemIcon, ItemName, Section, SettingRow, SettingsPage } from "../../kit/layout";
 import { Experimental, ZoneAccess } from "./shared";
 
-type Site = Intent["sites"]["peers"][number];
+type Site = Intent["vpn"]["sites"]["peers"][number];
 
 const NewSitePage = () => {
   const navigate = useNavigate();
@@ -37,8 +37,8 @@ const NewSitePage = () => {
     }
   };
   const add = () => {
-    const id = `s${Math.max(0, ...intent.sites.peers.map((p) => Number(p.id.slice(1)))) + 1}`;
-    draft.replace({ ...intent, sites: { ...intent.sites, peers: [...intent.sites.peers, { id, ...site }] } });
+    const id = `s${Math.max(0, ...intent.vpn.sites.peers.map((p) => Number(p.id.slice(1)))) + 1}`;
+    draft.replace({ ...intent, vpn: { ...intent.vpn, sites: { ...intent.vpn.sites, peers: [...intent.vpn.sites.peers, { id, ...site }] } } });
     back();
   };
   return (
@@ -89,18 +89,18 @@ const NewSitePage = () => {
 };
 
 const sitesList = defineList({
-  name: "sites.peers",
+  name: "vpn.sites.peers",
   title: "Linked sites",
   addLabel: "Add site",
   newPage: <NewSitePage />,
-  itemTitle: (i) => <Value name={`sites.peers.${i}.name`} fallback="Site" />,
+  itemTitle: (i) => <Value name={`vpn.sites.peers.${i}.name`} fallback="Site" />,
   empty: "No sites linked yet.",
   columns: [
     {
       header: "Name",
       cell: (i) => (
         <ItemName icon={<ItemIcon icon={IconBuildingCommunity} color="cyan" />}>
-          <Value name={`sites.peers.${i}.name`} fallback="Unnamed" />
+          <Value name={`vpn.sites.peers.${i}.name`} fallback="Unnamed" />
         </ItemName>
       ),
     },
@@ -108,17 +108,17 @@ const sitesList = defineList({
       header: "Its networks",
       cell: (i) => (
         <Text size="sm" c="dimmed" ff="monospace">
-          <Value name={`sites.peers.${i}.subnets`} format={(s) => ((s as string[]) ?? []).join(", ")} />
+          <Value name={`vpn.sites.peers.${i}.subnets`} format={(s) => ((s as string[]) ?? []).join(", ")} />
         </Text>
       ),
     },
   ],
   editor: (i) => (
     <Section>
-      <TextField name={`sites.peers.${i}.name`} label="Name" />
-      <TextField name={`sites.peers.${i}.public_key`} label="Its key" />
-      <TextField name={`sites.peers.${i}.endpoint`} label="Its address" placeholder="cabin.example.com:51821" />
-      <TagsField name={`sites.peers.${i}.subnets`} label="Its networks" placeholder="Add a range" />
+      <TextField name={`vpn.sites.peers.${i}.name`} label="Name" />
+      <TextField name={`vpn.sites.peers.${i}.public_key`} label="Its key" />
+      <TextField name={`vpn.sites.peers.${i}.endpoint`} label="Its address" placeholder="cabin.example.com:51821" />
+      <TagsField name={`vpn.sites.peers.${i}.subnets`} label="Its networks" placeholder="Add a range" />
     </Section>
   ),
 });
@@ -132,7 +132,7 @@ const ThisSite = () => {
     return (
       <Section title="This site">
         <SettingRow label="Link sites" description="Makes this site's key, for others to link to it.">
-          <Button size="xs" onClick={() => draft.set("sites.private_key", newPrivateKey())}>
+          <Button size="xs" onClick={() => draft.set("vpn.sites.private_key", newPrivateKey())}>
             Start
           </Button>
         </SettingRow>
@@ -162,7 +162,7 @@ const ThisSite = () => {
             </CopyButton>
           </Group>
         </SettingRow>
-        <NumberField name="sites.port" label="Port" min={1} max={65535} integer />
+        <NumberField name="vpn.sites.port" label="Port" min={1} max={65535} integer />
       </Section>
       <ZoneAccess base="sites" />
     </>
@@ -171,7 +171,7 @@ const ThisSite = () => {
 
 export const SitesPage = ({ sub }: { sub: string }) => {
   const intent: Intent = useDraftValue();
-  return intent.sites.private_key ? (
+  return intent.vpn.sites.private_key ? (
     <ListPage
       list={sitesList}
       sub={sub}

@@ -133,7 +133,7 @@ test("the firewall derives from each network's access; own rules come first", (t
   intent.networks[1].access = { internet: false, networks: ["lan"], router: "full" };
   intent.firewall.rules.push(
     { name: "No IoT out", from: "guest", to: "internet", protocol: "any", action: "block" },
-    { name: "Scanners", from: "internet", to: "*", source_addresses: ["2001:db8::/32"], action: "block" }
+    { name: "Scanners", from: "internet", to: "*", from_addresses: ["2001:db8::/32"], action: "block" }
   );
   const fw = (compile(intent).config as any).firewall;
   t.deepEqual(
@@ -172,7 +172,7 @@ const iface = (config: any, name: string) =>
   config.network.interface.find((i: any) => i[".name"] === name);
 
 test("internet: a tagged line, its queueing counting the tag", (t) => {
-  const config = router((i) => (i.internet.connections[0].vlan = 10));
+  const config = router((i) => (i.internet.lines[0].vlan = 10));
   t.is(iface(config, "wan").device, "eth1.10", "@wan_port.10 is the WAN port's VLAN 10");
   t.is(config.sqm.queue[0].interface, "eth1", "shaped on the port, under the tag");
   t.like(config.sqm.queue[0], { linklayer: "ethernet", overhead: "42" });
@@ -181,7 +181,7 @@ test("internet: a tagged line, its queueing counting the tag", (t) => {
 
 test("internet: the line type sets queueing's overhead", (t) => {
   const line = (type: string) =>
-    router((i) => (i.internet.connections[0].speed.line = type)).sqm.queue[0];
+    router((i) => (i.internet.lines[0].shaping.medium = type)).sqm.queue[0];
   t.like(line("cable"), { linklayer: "ethernet", overhead: "18", tcMPU: 64 });
   t.like(line("vdsl"), { linklayer: "ethernet", overhead: "34" });
   t.like(line("adsl"), { linklayer: "atm", overhead: "44" });
@@ -197,13 +197,10 @@ test("internet: the line type sets queueing's overhead", (t) => {
 
 test("internet: a static address", (t) => {
   const config = router((i) => {
-    i.internet.connections[0].connection = {
+    Object.assign(i.internet.lines[0], {
       type: "static",
-      address: "203.0.113.10",
-      prefix_length: 29,
-      gateway: "203.0.113.9",
-      dns: ["9.9.9.9"],
-    };
+      static: { address: "203.0.113.10", prefix_length: 29, gateway: "203.0.113.9", dns: ["9.9.9.9"] },
+    });
   });
   t.like(iface(config, "wan"), {
     device: "eth1",
@@ -217,41 +214,41 @@ test("internet: a static address", (t) => {
 
   const issues = (connection: any, dohOn = true) => {
     const intent = sample();
-    intent.internet.connections[0].connection = { type: "static", prefix_length: 29, ...connection };
+    Object.assign(intent.internet.lines[0], { type: "static", static: { prefix_length: 29, ...connection } });
     if (!dohOn) intent.dns.upstream = { type: "provider" };
     return intentSchema.safeParse(intent).error?.issues.map(
       (i) => `${i.path.join(".")}: ${i.message}`
     );
   };
   t.deepEqual(issues({ address: "203.0.113.8", gateway: "203.0.113.9" }), [
-    "internet.connections.0.connection.address: the subnet's own or broadcast address, not a host's",
+    "internet.lines.0.static.address: the subnet's own or broadcast address, not a host's",
   ]);
   t.deepEqual(issues({ address: "203.0.113.10", gateway: "203.0.113.20" }), [
-    "internet.connections.0.connection.gateway: not in the address's subnet",
+    "internet.lines.0.static.gateway: not in the address's subnet",
   ]);
   t.deepEqual(issues({ address: "203.0.113.10", gateway: "203.0.113.9" }, false), [
-    "internet.connections.0.connection.dns: add a DNS server, or choose other DNS servers under DNS & DHCP",
+    "internet.lines.0.static.dns: add a DNS server, or choose other DNS servers under DNS & DHCP",
   ]);
   t.deepEqual(issues({ address: "203.0.113.300", gateway: "203.0.113.9" }), [
-    "internet.connections.0.connection.address: an IPv4 address, like 203.0.113.10",
+    "internet.lines.0.static.address: an IPv4 address, like 203.0.113.10",
   ]);
 });
 
 test("internet: IPv6 asks for the prefix size; PPPoE gets an explicit wan6", (t) => {
   const config = router((i) => {
-    i.internet.connections[0].connection = { type: "pppoe", username: "u", password: "p" };
-    i.internet.connections[0].ipv6_prefix = "56";
+    Object.assign(i.internet.lines[0], { type: "pppoe", pppoe: { username: "u", password: "p" } });
+    i.internet.lines[0].ipv6.prefix = "56";
   });
   t.like(iface(config, "wan"), { proto: "pppoe", ipv6: "1" });
   t.like(iface(config, "wan6"), { device: "@wan", proto: "dhcpv6", reqprefix: "56" });
   t.false("reqprefix" in iface(router(() => {}), "wan6"), "automatic asks for nothing");
 
   const intent = sample();
-  intent.internet.connections[0].ipv6_prefix = "64";
+  intent.internet.lines[0].ipv6.prefix = "64";
   intent.networks[1].ipv6 = true;
   t.deepEqual(
     intentSchema.safeParse(intent).error?.issues.map((i) => `${i.path.join(".")}: ${i.message}`),
-    ["internet.connections.0.ipv6_prefix: 2 networks have IPv6, and a /64 has room for 1."]
+    ["internet.lines.0.ipv6.prefix: 2 networks have IPv6, and a /64 has room for 1."]
   );
 });
 
@@ -259,7 +256,7 @@ test("packages are fixed per role; a setting off is config, not a removal", (t) 
   const packages = (intent: any) =>
     (compile(intent).package_profiles ?? []).flatMap((p: any) => p.packages);
   const off = sample();
-  delete off.internet.connections[0].speed;
+  delete off.internet.lines[0].shaping;
   off.dns.upstream = { type: "provider" };
   t.deepEqual(packages(off), packages(sample()));
 
@@ -294,42 +291,42 @@ test("IPv6: per network, announced only with a public prefix, and only with the 
   t.regex(on.network.globals[0].ula_prefix, /^fd/);
 
   // No IPv6 on the internet side: no network gets any, not even local-only.
-  const off = router((i) => (i.internet.connections[0].ipv6 = false));
+  const off = router((i) => (i.internet.lines[0].ipv6.enabled = false));
   t.false("ip6assign" in off.network.interface.find((i: any) => i[".name"] === "lan"));
   t.like(off.dhcp.dhcp.find((d: any) => d.interface === "lan"), { ra: "disabled", dhcpv6: "disabled" });
   t.is(off.network.globals[0].ula_prefix, "");
   t.false(off.network.interface.some((i: any) => i[".name"] === "wan6"));
 
   const intent = sample();
-  intent.internet.connections[0].ipv6 = false;
+  intent.internet.lines[0].ipv6.enabled = false;
   const ap = onDevice("home-ap-1", "zyxel,nwa50ax-pro", intent);
   t.false(ap.network.interface.some((i: any) => i[".name"] === "lan6"), "the AP takes no IPv6 address either");
 });
 
 test("reserved addresses: a fixed lease and a DNS name, checked against the network", (t) => {
   const config = router((i) => {
-    i.networks[0].reservations = [{ name: "nas", mac: "aa:bb:cc:dd:ee:01", address: "10.0.0.20" }];
+    i.networks[0].dhcp.reservations = [{ name: "nas", mac: "aa:bb:cc:dd:ee:01", address: "10.0.0.20" }];
   });
   t.is(config.dhcp.host.length, 1);
   t.like(config.dhcp.host[0], { name: "nas", mac: "aa:bb:cc:dd:ee:01", ip: "10.0.0.20", dns: true });
   const issues = (reservations: any[], network = 0) => {
     const intent = sample();
-    intent.networks[network].reservations = reservations;
+    intent.networks[network].dhcp.reservations = reservations;
     return intentSchema.safeParse(intent).error?.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
   };
   const nas = { name: "nas", mac: "aa:bb:cc:dd:ee:01", address: "10.0.0.20" };
-  t.deepEqual(issues([{ ...nas, address: "10.0.20.5" }]), ["networks.0.reservations.0.address: an address in 10.0.0.x"]);
+  t.deepEqual(issues([{ ...nas, address: "10.0.20.5" }]), ["networks.0.dhcp.reservations.0.address: an address in 10.0.0.x"]);
   t.deepEqual(issues([{ ...nas, address: "10.0.0.1" }]), [
-    "networks.0.reservations.0.address: 10.0.0.2 to 10.0.0.254 (.1 is the router)",
+    "networks.0.dhcp.reservations.0.address: 10.0.0.2 to 10.0.0.254 (.1 is the router)",
   ]);
   t.deepEqual(issues([nas, { ...nas, address: "10.0.0.21" }]), [
-    "networks.0.reservations.1.name: already used",
-    "networks.0.reservations.1.mac: already used",
+    "networks.0.dhcp.reservations.1.name: already used",
+    "networks.0.dhcp.reservations.1.mac: already used",
   ]);
   t.deepEqual(issues([{ ...nas, name: "home-router" }]), [
-    "networks.0.reservations.0.name: already a device's name",
+    "networks.0.dhcp.reservations.0.name: already a device's name",
   ]);
-  t.deepEqual(issues([{ ...nas, mac: "AA-BB" }]), ["networks.0.reservations.0.mac: like aa:bb:cc:dd:ee:ff"]);
+  t.deepEqual(issues([{ ...nas, mac: "AA-BB" }]), ["networks.0.dhcp.reservations.0.mac: like aa:bb:cc:dd:ee:ff"]);
 });
 
 test("sharing devices: avahi reflects between sharing networks, never on WAN", (t) => {
@@ -354,23 +351,23 @@ test("sharing devices: avahi reflects between sharing networks, never on WAN", (
 test("SSIDs: security mode, hidden, off, and fast roaming", (t) => {
   const iface = (change: (wifi: any) => void) => {
     const intent = sample();
-    change(intent.wifi[1]);
+    change(intent.wifi.networks[1]);
     return onDevice("home-ap-1", "zyxel,nwa50ax-pro", intent).wireless["wifi-iface"].find(
-      (w: any) => w.ssid === intent.wifi[1].ssid
+      (w: any) => w.ssid === intent.wifi.networks[1].ssid
     );
   };
   t.like(iface(() => {}), { encryption: "psk2+ccmp", ieee80211r: true });
   t.is(iface((w) => (w.security = "wpa2-wpa3")).encryption, "sae-mixed");
   t.is(iface((w) => (w.security = "wpa3")).encryption, "sae");
   t.like(iface((w) => Object.assign(w, { hidden: true, enabled: false })), { hidden: true, disabled: true });
-  const slow = iface((w) => (w.fast_roaming = false));
+  const slow = iface((w) => (w.roaming = { ...w.roaming, fast: false }));
   t.is(slow.ieee80211r, false);
   t.true(slow.bss_transition, "802.11v stays on");
   t.is(iface(() => {}).ft_over_ds, false, "over the air, said rather than left to the default");
-  t.like(iface((w) => (w.roaming_assistance = false)), { ieee80211k: false, bss_transition: false });
+  t.like(iface((w) => (w.roaming = { ...w.roaming, assisted: false })), { ieee80211k: false, bss_transition: false });
   // Steering Off turns neighbour lists off on every SSID, whatever each says.
   const offEverywhere = sample();
-  offEverywhere.roaming = { steering: "off", prefer_5g: false };
+  offEverywhere.wifi.roaming = { steering: "off", prefer_5g: false };
   t.true(
     onDevice("home-ap-1", "zyxel,nwa50ax-pro", offEverywhere).wireless["wifi-iface"].every(
       (w: any) => w.ieee80211k === false && w.bss_transition === false
@@ -385,11 +382,11 @@ test("SSIDs: security mode, hidden, off, and fast roaming", (t) => {
   };
   t.like(usteer(() => {}), { assoc_steering: "0", probe_steering: "0", band_steering_interval: "0" });
   t.deepEqual(usteer(() => {}).ssid_list, ["Home", "Home Guests"]);
-  t.deepEqual(usteer((i) => (i.wifi[1].roaming_assistance = false)).ssid_list, ["Home"]);
-  t.deepEqual(usteer((i) => (i.wifi[0].enabled = false)).ssid_list, ["Home Guests"]);
+  t.deepEqual(usteer((i) => (i.wifi.networks[1].roaming = { ...i.wifi.networks[1].roaming, assisted: false })).ssid_list, ["Home"]);
+  t.deepEqual(usteer((i) => (i.wifi.networks[0].enabled = false)).ssid_list, ["Home Guests"]);
   // An empty ssid_list would mean every SSID: with none taking part, usteer stops.
   t.like(
-    usteer((i) => i.wifi.forEach((w: any) => (w.roaming_assistance = false))),
+    usteer((i) => i.wifi.networks.forEach((w: any) => (w.roaming = { ...w.roaming, assisted: false }))),
     { enabled: false }
   );
 
@@ -397,7 +394,7 @@ test("SSIDs: security mode, hidden, off, and fast roaming", (t) => {
   // nothing; nudge asks; push asks, then disconnects. aggressiveness is
   // always set: its default (3) would kick.
   const roaming = (steering: string, prefer_5g = false) =>
-    usteer((i) => (i.roaming = { steering, prefer_5g }));
+    usteer((i) => (i.wifi.roaming = { steering, prefer_5g }));
   t.like(roaming("off"), { enabled: false });
   t.like(roaming("advise"), {
     enabled: true,
@@ -424,10 +421,10 @@ test("SSIDs: security mode, hidden, off, and fast roaming", (t) => {
   });
 
   const intent = sample();
-  intent.wifi[0].security = "wpa3";
+  intent.wifi.networks[0].security = "wpa3";
   t.deepEqual(
     intentSchema.safeParse(intent).error?.issues.map((i) => `${i.path.join(".")}: ${i.message}`),
-    ["wifi.0.extra_passwords: Only with WPA2: WPA3 has one password per network."]
+    ["wifi.networks.0.extra_passwords: Only with WPA2: WPA3 has one password per network."]
   );
 });
 
@@ -451,7 +448,7 @@ test("DNS: where names are looked up, rebind protection, own names, DHCP's DNS",
   // Off is written off: dnsmasq turns it on when unset.
   t.is(dns((i) => (i.dns.rebind_protection = false)).dnsmasq.rebind_protection, false);
 
-  const named = dns((i) => (i.dns.records = [{ name: "printer", address: "10.0.0.30" }])).config;
+  const named = dns((i) => (i.dns.hosts = [{ name: "printer", address: "10.0.0.30" }])).config;
   t.like(named.dhcp.domain[0], { name: "printer", ip: "10.0.0.30" });
 
   // A Pi-hole on the home network: guests must be able to reach it.
@@ -466,9 +463,9 @@ test("DNS: where names are looked up, rebind protection, own names, DHCP's DNS",
     change(intent);
     return intentSchema.safeParse(intent).error?.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
   };
-  t.deepEqual(issues((i) => (i.dns.records = [{ name: "a", address: "x" }, { name: "a", address: "10.0.0.2" }])), [
-    "dns.records.0.address: an IP address, like 10.0.0.20",
-    "dns.records.1.name: already used",
+  t.deepEqual(issues((i) => (i.dns.hosts = [{ name: "a", address: "x" }, { name: "a", address: "10.0.0.2" }])), [
+    "dns.hosts.0.address: an IP address, like 10.0.0.20",
+    "dns.hosts.1.name: already used",
   ]);
   t.deepEqual(issues((i) => (i.dns.upstream = { type: "custom", servers: [] })), [
     "dns.upstream.servers: at least one server",
@@ -497,7 +494,7 @@ test("patches apply only where they say: by model, by role", (t) => {
     "/usr/libexec/onc/ubihealthd-config",
   ]);
   t.deepEqual(
-    files("home-router", "friendlyarm,nanopi-r6s", (i) => (i.internet.connections[0].ipv6 = false)).filter(
+    files("home-router", "friendlyarm,nanopi-r6s", (i) => (i.internet.lines[0].ipv6.enabled = false)).filter(
       (p: string) => !p.includes("avahi")
     ),
     ["/usr/libexec/platform/packet-steering.sh", "/usr/libexec/onc/ubihealthd-config", "/usr/libexec/onc/leases-to-ram"],
@@ -508,7 +505,7 @@ test("patches apply only where they say: by model, by role", (t) => {
 test("airtime: each band's queue limits, on the access points", (t) => {
   const aql = (radios: object) => {
     const intent = sample();
-    intent.radios = { ...(intent.radios ?? {}), ...radios };
+    intent.wifi.radios = { ...(intent.wifi.radios ?? {}), ...radios };
     return (compile(intent).files ?? []).find((f: any) => f.path.endsWith("20-aql"))!.content;
   };
   t.regex(aql({}), /in "2G 5000 12000" "5G 5000 12000"; do/, "balanced on each band by default");
@@ -554,12 +551,12 @@ test("on the access point: bridged, a DHCP client, Wi-Fi on both bands", (t) => 
 
 test("radios are set per band; an SSID can keep to some bands; 6 GHz is WPA3", (t) => {
   const intent = sample();
-  intent.radios = {
+  intent.wifi.radios = {
     "2g": { enabled: true, width: "auto", power: "low", cell_density: "off" },
     "5g": { enabled: true, width: "160", power: "auto", cell_density: "high" },
     "6g": { enabled: true },
   };
-  intent.wifi[1].bands = ["2g"];
+  intent.wifi.networks[1].bands = ["2g"];
   const config = compile(intent).config.wireless as any;
   const radio = (band: string) => config["wifi-device"].find((d: any) => d.band === band);
   // The best mode at the width: which one, the engine decides per radio.
@@ -587,10 +584,10 @@ test("the intent is checked before it compiles", (t) => {
     bad((i) => i.hardware.push({ name: "second", role: "router" })),
     { message: /exactly one device must be the router/ }
   );
-  t.throws(bad((i) => (i.site.timezone = "Mars/Olympus")), {
+  t.throws(bad((i) => (i.system.timezone = "Mars/Olympus")), {
     message: /IANA zone/,
   });
-  t.throws(bad((i) => (i.wifi[0].password = "short")), {
+  t.throws(bad((i) => (i.wifi.networks[0].password = "short")), {
     message: /at least 8/,
   });
   t.throws(bad((i) => (i.hardware[0].model_id = "x")), {
@@ -614,8 +611,8 @@ test("rules across settings are checked, at the field they concern", (t) => {
   t.deepEqual(issues((i) => (i.networks[1].subnet = "10.0.0.0/24")), [
     "networks.1.subnet: already used by another network",
   ]);
-  t.deepEqual(issues((i) => (i.wifi[1].network = "gone")), [
-    "wifi.1.network: pick a network",
+  t.deepEqual(issues((i) => (i.wifi.networks[1].network = "gone")), [
+    "wifi.networks.1.network: pick a network",
   ]);
   t.deepEqual(issues((i) => (i.networks[1].vlan = 1)), [
     "networks.1.vlan: 2 to 4094 (1 is the main network)",
@@ -626,7 +623,7 @@ test("rules across settings are checked, at the field they concern", (t) => {
   ]);
   t.deepEqual(issues((i) => (i.networks[1].id = "router")), [
     "networks.1.id: reserved",
-    "wifi.1.network: pick a network",
+    "wifi.networks.1.network: pick a network",
     'networks.0.access.networks: no network "guest"',
     "firewall.rules.0.from: pick a network, the internet or anywhere",
   ]);
@@ -641,18 +638,18 @@ test("rules across settings are checked, at the field they concern", (t) => {
     (r: any) => r.name === icmp.firewall.rules[0].name
   );
   t.is(compiledRule?.dest_port, undefined);
-  t.deepEqual(issues((i) => i.firewall.rules[0].destination_addresses.push("fd00::1")), [
-    "firewall.rules.0.destination_addresses: IPv4 and IPv6 addresses cannot share a rule",
+  t.deepEqual(issues((i) => i.firewall.rules[0].to_addresses.push("fd00::1")), [
+    "firewall.rules.0.to_addresses: IPv4 and IPv6 addresses cannot share a rule",
   ]);
   t.deepEqual(
-    issues((i) => (i.firewall.port_forwards[0].internal_address = "192.168.9.9")),
-    ["firewall.port_forwards.0.internal_address: not on any of your networks"]
+    issues((i) => (i.firewall.port_forwards[0].to.address = "192.168.9.9")),
+    ["firewall.port_forwards.0.to.address: not on any of your networks"]
   );
   t.deepEqual(
     issues((i) =>
       i.firewall.port_forwards.push({ ...i.firewall.port_forwards[0], name: "Again", protocol: "tcp+udp" })
     ),
-    ["firewall.port_forwards.1.external_port: already forwarded"]
+    ["firewall.port_forwards.1.port: already forwarded"]
   );
 });
 
@@ -707,15 +704,15 @@ test("services: each role's kept enabled and started; those that must run are ch
 test("two internet connections: a line on a LAN port, mwan3 over both, queueing on each", (t) => {
   const twoLines = (mode: "failover" | "balance") => {
     const intent = sample();
-    intent.internet.mode = mode;
-    intent.internet.connections.push({
+    intent.internet.use_lines = { ...intent.internet.use_lines, mode: mode };
+    intent.internet.lines.push({
       id: "wanb",
       name: "LTE",
       port: "eth2",
-      connection: { type: "dhcp" },
-      ipv6: true,
-      speed: { down_mbps: 50, up_mbps: 10 },
-      weight: 3,
+      type: "dhcp",
+      ipv6: { enabled: true },
+      shaping: { down_mbps: 50, up_mbps: 10 },
+      failover: { weight: 3 },
     });
     return intent;
   };
@@ -739,14 +736,14 @@ test("two internet connections: a line on a LAN port, mwan3 over both, queueing 
 
   // A network kept to the backup line has no IPv6, which only the main line carries.
   const pinned = twoLines("failover");
-  pinned.networks[0].line = { connection: "wanb", fallback: true };
+  pinned.networks[0].access = { ...pinned.networks[0].access, via: "wanb", fallback: true };
   const pinnedConfig = onDevice("home-router", "friendlyarm,nanopi-r6s", pinned);
   t.is(pinnedConfig.network.interface.find((i: any) => i[".name"] === "lan").ip6assign, undefined);
-  t.truthy(availability(pinned, "networks.0.ipv6").option(true).unavailable);
+  t.truthy(availability(intentSchema.parse(pinned), "networks.0.ipv6").option(true).unavailable);
 
   // A metered line, even listed first, is failover's last resort.
   const meteredFirst = twoLines("failover");
-  meteredFirst.internet.connections[0].metered = true;
+  meteredFirst.internet.lines[0].failover = { ...meteredFirst.internet.lines[0].failover, metered: true };
   const last = onDevice("home-router", "friendlyarm,nanopi-r6s", meteredFirst);
   t.deepEqual(last.mwan3.policy[0].use_member, ["wan_m2", "wanb_m1"]);
 
@@ -777,36 +774,33 @@ test("connections: one per port, the WAN port once, ids of their own", (t) => {
     const result = intentSchema.safeParse(intent);
     return result.success ? [] : result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
   };
-  const second = { id: "wanb", name: "LTE", connection: { type: "dhcp" } };
-  t.deepEqual(issues((i) => i.internet.connections.push(second)), [
-    "internet.connections.1.port: Fibre uses the WAN port.",
+  const second = { id: "wanb", name: "LTE", type: "dhcp" };
+  t.deepEqual(issues((i) => i.internet.lines.push(second)), [
+    "internet.lines.1.port: Fibre uses the WAN port.",
   ]);
   t.deepEqual(
     issues((i) => {
-      i.internet.connections[0].port = "eth2";
-      i.internet.connections.push({ ...second, port: "eth2" });
+      i.internet.lines[0].port = "eth2";
+      i.internet.lines.push({ ...second, port: "eth2" });
     }),
-    ["internet.connections.1.port: Fibre uses it."]
+    ["internet.lines.1.port: Fibre uses it."]
   );
   t.true(issues((i) => (i.networks[1].id = "wanx")).some((m) => m.endsWith("reserved")));
 });
 
 test("several lines: a network keeps to one, a metered line is a last resort, a slow line counts as down, devices keep to a line", (t) => {
   const intent = sample();
-  intent.internet.mode = "balance";
-  intent.internet.share_per_device = true;
-  intent.internet.connections.push({
+  intent.internet.use_lines = { ...intent.internet.use_lines, mode: "balance" };
+  intent.internet.use_lines = { ...intent.internet.use_lines, sticky_per_device: true };
+  intent.internet.lines.push({
     id: "wanb",
     name: "LTE",
     port: "eth2",
-    connection: { type: "dhcp" },
-    ipv6: false,
-    ipv6_prefix: "auto",
-    weight: 1,
-    metered: true,
-    down_when_slow: true,
+    type: "dhcp",
+    ipv6: { enabled: false, prefix: "auto" },
+    failover: { weight: 1, metered: true, down_when_slow: true },
   });
-  intent.networks[1].line = { connection: "wanb", fallback: false };
+  intent.networks[1].access = { ...intent.networks[1].access, via: "wanb", fallback: false };
   const { mwan3 } = onDevice("home-router", "friendlyarm,nanopi-r6s", intent);
   const policy = (name: string) => mwan3.policy.find((p: any) => p[".name"] === name).use_member;
   const memberOf = (name: string) => mwan3.member.find((m: any) => m[".name"] === name);
@@ -819,20 +813,20 @@ test("several lines: a network keeps to one, a metered line is a last resort, a 
   t.like(lte, { interval: 30, track_ip: ["1.1.1.1"], check_quality: true, failure_latency: 500, count: 5 });
   t.is(mwan3.interface.find((i: any) => i[".name"] === "wan").check_quality, undefined);
 
-  intent.networks[1].line = { connection: "wanb", fallback: true };
+  intent.networks[1].access = { ...intent.networks[1].access, via: "wanb", fallback: true };
   const fallback = onDevice("home-router", "friendlyarm,nanopi-r6s", intent).mwan3;
   t.deepEqual(fallback.policy.find((p: any) => p[".name"] === "via_guest").use_member, ["wanb_m1", "wan_m2"]);
 
-  intent.networks[1].line = { connection: "wanz", fallback: true };
+  intent.networks[1].access = { ...intent.networks[1].access, via: "wanz", fallback: true };
   t.true(
-    (intentSchema.safeParse(intent) as any).error.issues.some((i: any) => i.path.join(".") === "networks.1.line.connection")
+    (intentSchema.safeParse(intent) as any).error.issues.some((i: any) => i.path.join(".") === "networks.1.access.via")
   );
 });
 
 test("mesh: access points (and a router with a radio) link over 802.11s with batman-adv, the bridge carrying every network over it", (t) => {
   const meshed = () => {
     const intent = sample();
-    intent.mesh = { enabled: true, band: "5g", channel: 44, key: "mesh-key-123456", dedicated: false, wired: false, jumbo: true };
+    intent.wifi.mesh = { enabled: true, band: "5g", channel: 44, key: "mesh-key-123456", band_reserved: false, over_cable: false, large_frames: true };
     intent.hardware.push({ name: "home-ap-2", role: "access-point", uplink: "mesh" });
     return intent;
   };
@@ -870,19 +864,19 @@ test("mesh: access points (and a router with a radio) link over 802.11s with bat
 
 test("mesh: turning it on makes its key; a channel a radar could move is refused", (t) => {
   const intent = intentSchema.parse(sample());
-  const on = availability(intent, "mesh.enabled").option(true).swap!.apply(intent);
-  t.true(on.mesh.enabled);
-  t.regex(on.mesh.key!, /^[A-Za-z0-9]{32}$/);
-  t.not(availability(intent, "mesh.enabled").option(true).swap!.apply(intent).mesh.key, on.mesh.key);
-  const issues = intentSchema.safeParse({ ...on, mesh: { ...on.mesh, channel: 52 } });
-  t.true(!issues.success && issues.error.issues.some((i) => i.path.join(".") === "mesh.channel"));
+  const on = availability(intent, "wifi.mesh.enabled").option(true).swap!.apply(intent);
+  t.true(on.wifi.mesh.enabled);
+  t.regex(on.wifi.mesh.key!, /^[A-Za-z0-9]{32}$/);
+  t.not(availability(intent, "wifi.mesh.enabled").option(true).swap!.apply(intent).wifi.mesh.key, on.wifi.mesh.key);
+  const issues = intentSchema.safeParse({ ...on, wifi: { ...on.wifi, mesh: { ...on.wifi.mesh, channel: 52 } } });
+  t.true(!issues.success && issues.error.issues.some((i) => i.path.join(".") === "wifi.mesh.channel"));
 });
 
 test("mesh: its band is at most 80 MHz wide, as 160 reaches radar channels", (t) => {
   const intent = sample();
-  intent.radios = { ...(intent.radios ?? {}), "5g": { enabled: true, width: "160" } };
+  intent.wifi.radios = { ...(intent.wifi.radios ?? {}), "5g": { enabled: true, width: "160" } };
   const width = (mesh: boolean) => {
-    intent.mesh = { enabled: mesh, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false, jumbo: true };
+    intent.wifi.mesh = { enabled: mesh, band: "5g", channel: 36, key: "mesh-key-123456", band_reserved: false, over_cable: false, large_frames: true };
     return (compile(intent).config.wireless as any)["wifi-device"].find((d: any) => d.band === "5g").htmode;
   };
   t.is(width(false), "@best/160");
@@ -891,8 +885,8 @@ test("mesh: its band is at most 80 MHz wide, as 160 reaches radar channels", (t)
 
 test("mesh: a band kept for it carries no SSID", (t) => {
   const intent = sample();
-  intent.radios = { ...(intent.radios ?? {}), "6g": { enabled: true } };
-  intent.mesh = { enabled: true, band: "6g", channel: 37, key: "mesh-key-123456", dedicated: true, wired: false, jumbo: true };
+  intent.wifi.radios = { ...(intent.wifi.radios ?? {}), "6g": { enabled: true } };
+  intent.wifi.mesh = { enabled: true, band: "6g", channel: 37, key: "mesh-key-123456", band_reserved: true, over_cable: false, large_frames: true };
   const ifaces = (compile(intent).config.wireless as any)["wifi-iface"];
   t.false(ifaces.some((w: any) => w.mode === "ap" && w.device.includes("radio2")), "no SSID on 6 GHz");
   t.true(ifaces.some((w: any) => w.mode === "mesh" && w.device.includes("radio2")));
@@ -900,7 +894,7 @@ test("mesh: a band kept for it carries no SSID", (t) => {
 
 test("mesh over cables: a VLAN of its own on every device's physical ports, batman on it on the nodes", (t) => {
   const intent = sample();
-  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: true, jumbo: true };
+  intent.wifi.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", band_reserved: false, over_cable: true, large_frames: true };
   const ap = onDevice("home-ap-1", "zyxel,nwa50ax-pro", intent);
   t.deepEqual(ap.network["bridge-vlan"].find((v: any) => v.vlan === 4000).ports, ["eth0:t"], "the cable, not bat0");
   t.like(ap.network.interface.find((i: any) => i[".name"] === "batwired"), { proto: "batadv_hardif", master: "bat0", device: "br-lan.4000" });
@@ -914,7 +908,7 @@ test("mesh over cables: a VLAN of its own on every device's physical ports, batm
 
 test("mesh rescue: a repeater gets a rescue Wi-Fi (off), its own link-local address, and the watcher", (t) => {
   const intent = sample();
-  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false, jumbo: true };
+  intent.wifi.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", band_reserved: false, over_cable: false, large_frames: true };
   intent.hardware[1].uplink = "mesh";
   const ap = onDevice("home-ap-1", "zyxel,nwa50ax-pro", intent);
   const rescue = ap.wireless["wifi-iface"].find((w: any) => w.ifname === "rescue0");
@@ -936,20 +930,22 @@ test("remote access, sites and a provider's tunnel: WireGuard on the router, zon
   const { newPrivateKey, publicKeyOf } = await import("../../wireguard");
   const intent = sample();
   intent.vpn = {
-    enabled: true,
-    port: 51820,
-    subnet: "10.0.99.0/24",
-    private_key: newPrivateKey(),
-    access: { internet: true, networks: ["lan"], router: "full" },
-    clients: [{ id: "c1", name: "Phone", public_key: publicKeyOf(newPrivateKey()), host: 2, route: "home" }],
+    remote_access: {
+      enabled: true,
+      port: 51820,
+      subnet: "10.0.99.0/24",
+      private_key: newPrivateKey(),
+      access: { internet: true, networks: ["lan"], router: "full" },
+      clients: [{ id: "c1", name: "Phone", public_key: publicKeyOf(newPrivateKey()), host: 2, route: "home" }],
+    },
   };
-  intent.sites = {
+  intent.vpn.sites = {
     private_key: newPrivateKey(),
     port: 51821,
     access: { internet: false, networks: ["lan"], router: "services" },
     peers: [{ id: "s1", name: "Cabin", public_key: publicKeyOf(newPrivateKey()), endpoint: "cabin.example.com:51821", subnets: ["192.168.50.0/24"] }],
   };
-  intent.tunnels = [
+  intent.vpn.providers = [
     {
       id: "tun1",
       name: "Mullvad",
@@ -959,7 +955,7 @@ test("remote access, sites and a provider's tunnel: WireGuard on the router, zon
       peer: { public_key: publicKeyOf(newPrivateKey()), endpoint: "203.0.113.5:51820" },
     },
   ];
-  intent.networks[1].line = { connection: "tun1", fallback: false };
+  intent.networks[1].access = { ...intent.networks[1].access, via: "tun1", fallback: false };
   const r = onDevice("home-router", "friendlyarm,nanopi-r6s", intent);
   const iface = (name: string) => r.network.interface.find((i: any) => i[".name"] === name);
   t.like(iface("vpn"), { proto: "wireguard", listen_port: 51820 });
@@ -991,27 +987,27 @@ test("remote access, sites and a provider's tunnel: WireGuard on the router, zon
   t.is(r.network.rule.find((x: any) => x[".name"] === "local_lan").dest, "10.0.0.0/24", "local ranges by name, not suppress_prefixlength");
   t.is(iface("guest").ip6assign, undefined, "no IPv6 around the tunnel");
 
-  intent.sites.peers[0].subnets = ["10.0.0.0/16"];
+  intent.vpn.sites.peers[0].subnets = ["10.0.0.0/16"];
   const clash = intentSchema.safeParse(intent);
   t.true(!clash.success && clash.error.issues.some((i) => i.message.includes("overlaps")));
 
   // Without internet access, the tunnel is no way out either.
-  intent.sites.peers[0].subnets = ["192.168.50.0/24"];
+  intent.vpn.sites.peers[0].subnets = ["192.168.50.0/24"];
   // Never a fallback to the plain line; with no DNS from the provider, public ones through the tunnel.
-  t.truthy(availability(intent, "networks.1.line.fallback").option(true).unavailable);
-  delete intent.tunnels[0].dns;
+  t.truthy(availability(intent, "networks.1.access.fallback").option(true).unavailable);
+  delete intent.vpn.providers[0].dns;
   const noDns = onDevice("home-router", "friendlyarm,nanopi-r6s", intent);
   t.true(noDns.dhcp.dhcp.find((d: any) => d[".name"] === "guest").dhcp_option.includes("6,9.9.9.9,1.1.1.1"));
   intent.networks[1].access.internet = false;
   const off = onDevice("home-router", "friendlyarm,nanopi-r6s", intent);
   t.falsy(off.firewall.forwarding.find((f: any) => f.src === "guest" && f.dest === "tun1"));
   t.deepEqual(off.network.rule ?? [], []);
-  t.truthy(availability(intent, "networks.1.line").unavailable);
+  t.truthy(availability(intent, "networks.1.access.via").unavailable);
 });
 
 test("mesh rescue watcher: on once after the quiet, off once when the mesh is back, gone when its network is", (t) => {
   const intent = sample();
-  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false, jumbo: true };
+  intent.wifi.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", band_reserved: false, over_cable: false, large_frames: true };
   intent.hardware[1].uplink = "mesh";
   const state = getOpenWrtState({
     oncConfig: compile(intent),
@@ -1052,26 +1048,26 @@ test("an internet line on a swconfig router: a switch VLAN of its own, out of th
   const intent = sample();
   // The WAN port: OpenWrt's own layout (VLAN 2, the CPU tagged).
   t.deepEqual(vlans(intent), { switch: ["1: 6t 1 2 3 4", "20: 6t 1t 2t 3t 4t", "2: 6t 0"], wan: "eth0.2" });
-  intent.internet.connections[0].port = "eth2";
+  intent.internet.lines[0].port = "eth2";
   t.deepEqual(vlans(intent), { switch: ["1: 6t 0 1 3 4", "20: 6t 0t 1t 3t 4t", "2: 6t 2"], wan: "eth0.2" });
-  delete intent.internet.connections[0].port;
-  intent.internet.connections[0].vlan = 7;
+  delete intent.internet.lines[0].port;
+  intent.internet.lines[0].vlan = 7;
   t.deepEqual(vlans(intent), { switch: ["1: 6t 1 2 3 4", "20: 6t 1t 2t 3t 4t", "7: 6t 0t"], wan: "eth0.7" });
-  intent.internet.connections[0].vlan = 20;
+  intent.internet.lines[0].vlan = 20;
   t.throws(() => vlans(intent), { message: /VLAN 20 is both a network's and the line's/ });
 });
 
 test("the main connection's IPv6 moves with the role: promoting a backup or removing the main keeps it", (t) => {
-  const main = { ...sample().internet.connections[0], ipv6: true, ipv6_prefix: "56" as const };
-  const backup = { ...main, id: "wanb", name: "LTE", ipv6: false, ipv6_prefix: "auto" as const };
-  t.like(withMain([main, backup], 1)[0], { id: "wanb", ipv6: true, ipv6_prefix: "56" });
-  t.deepEqual(withoutConnection([main, backup], 0).map((c) => [c.id, c.ipv6]), [["wanb", true]]);
+  const main = { ...sample().internet.lines[0], ipv6: { enabled: true, prefix: "56" as const } };
+  const backup = { ...main, id: "wanb", name: "LTE", ipv6: { enabled: false, prefix: "auto" as const } };
+  t.like(withMain([main, backup], 1)[0], { id: "wanb", ipv6: { enabled: true, prefix: "56" } });
+  t.deepEqual(withoutConnection([main, backup], 0).map((c) => [c.id, c.ipv6.enabled]), [["wanb", true]]);
   t.deepEqual(withoutConnection([main, backup], 1).map((c) => c.id), ["wan"]);
 });
 
 test("a radio that cannot mesh (facts say so) makes its device no mesh node", (t) => {
   const intent = sample();
-  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false, jumbo: true };
+  intent.wifi.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", band_reserved: false, over_cable: false, large_frames: true };
   const oncConfig = compile(intent);
   const schema = deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", "zyxel,nwa50ax-pro.json"), "utf8")));
   const on = (deviceSchema: typeof schema) =>
@@ -1083,18 +1079,18 @@ test("a radio that cannot mesh (facts say so) makes its device no mesh node", (t
 
 test("two connections on one port (the WAN port unset and by name) are refused where the port is known", (t) => {
   const intent = sample();
-  intent.internet.connections.push({ ...intent.internet.connections[0], id: "wanb", name: "Second", port: "eth1" });
+  intent.internet.lines.push({ ...intent.internet.lines[0], id: "wanb", name: "Second", port: "eth1" });
   t.throws(() => onDevice("home-router", "friendlyarm,nanopi-r6s", intent), { message: /wan and wanb are both on port eth1/ });
 });
 
 test("port forwards: a range overlapping another's port is a clash; IPv6 sources are refused", (t) => {
   const intent = sample();
-  const forward = (external_port: string, extra = {}) => ({
-    name: `F ${external_port}`,
+  const forward = (port: string, extra = {}) => ({
+    name: `F ${port}`,
     enabled: true,
     protocol: "tcp" as const,
-    external_port,
-    internal_address: "10.0.0.20",
+    port,
+    to: { address: "10.0.0.20" },
     reflection: true,
     ...extra,
   });
@@ -1102,7 +1098,7 @@ test("port forwards: a range overlapping another's port is a clash; IPv6 sources
     (intentSchema.safeParse({ ...intent, firewall: { ...intent.firewall, port_forwards } }).error?.issues ?? []).map((i) => i.message);
   t.true(issues([forward("8000-8100"), forward("8080")]).includes("already forwarded"));
   t.deepEqual(issues([forward("8000-8100"), forward("8101")]), []);
-  t.true(issues([forward("443", { source_addresses: ["2001:db8::1"] })]).some((m) => m.includes("IPv4 addresses only")));
+  t.true(issues([forward("443", { from_addresses: ["2001:db8::1"] })]).some((m) => m.includes("IPv4 addresses only")));
 });
 
 test("a DNS server on a network this one cannot reach is refused", (t) => {
@@ -1116,7 +1112,7 @@ test("a DNS server on a network this one cannot reach is refused", (t) => {
 
 test("the mesh over cables: 1532-byte frames on every DSA port, bridge and VLAN 4000; the networks' own devices held to 1500", (t) => {
   const intent = sample();
-  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: true, jumbo: true };
+  intent.wifi.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", band_reserved: false, over_cable: true, large_frames: true };
   const mtus = (host: string, model: string) =>
     Object.fromEntries(onDevice(host, model, intent).network.device.filter((d: any) => d.mtu).map((d: any) => [d.name, d.mtu]));
   t.deepEqual(mtus("home-router", "friendlyarm,nanopi-r6s"), {
@@ -1128,13 +1124,13 @@ test("the mesh over cables: 1532-byte frames on every DSA port, bridge and VLAN 
     "br-lan.4000": 1532,
   }, "the WAN port (eth1) is not the bridge's: untouched");
   t.like(mtus("home-ap-1", "zyxel,nwa50ax-pro"), { "br-lan": 1532, eth0: 1532, mesh0: 1532, "br-lan.1": 1500 });
-  intent.mesh.wired = false;
+  intent.wifi.mesh.over_cable = false;
   t.deepEqual(mtus("home-router", "friendlyarm,nanopi-r6s"), {}, "not over cables: nothing changes");
 });
 
 test("larger frames over cable off: the mesh splits its packets there, and no MTU is touched", (t) => {
   const intent = sample();
-  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: true, jumbo: false };
+  intent.wifi.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", band_reserved: false, over_cable: true, large_frames: false };
   const devices = onDevice("home-router", "friendlyarm,nanopi-r6s", intent).network.device;
   t.deepEqual(devices.filter((d: any) => d.mtu), []);
 });
@@ -1181,21 +1177,21 @@ test("on an access point, a network only carried has no IPv6, link-local include
 test("a rule's ports reach fw4 separated by spaces, however they were typed", (t) => {
   for (const typed of ["631,9100", "631, 9100", "631  9100"]) {
     const intent = sample();
-    intent.firewall.rules[0].destination_port = typed;
+    intent.firewall.rules[0].ports = typed;
     const rule = (compile(intent).config as any).firewall.rule.find((r: any) => r.name === "Guests may print");
     t.is(rule.dest_port, "631 9100", typed);
   }
   const bad = sample();
-  bad.firewall.rules[0].destination_port = "631,,";
+  bad.firewall.rules[0].ports = "631,,";
   t.false(intentSchema.safeParse(bad).success);
 });
 
 
 test("IPv6 follows the main line with several: a hook withdraws it while mwan3 has the line offline", (t) => {
   const intent = sample();
-  intent.internet.connections[0].ipv6 = true;
+  intent.internet.lines[0].ipv6.enabled = true;
   t.false((compile(intent).files ?? []).some((f: any) => f.path.includes("ipv6-follows-line")), "one line: no hook");
-  intent.internet.connections.push({ id: "wanb", name: "LTE", port: "eth2", connection: { type: "dhcp" }, ipv6: false });
+  intent.internet.lines.push({ id: "wanb", name: "LTE", port: "eth2", type: "dhcp", ipv6: { enabled: false } });
   const hook = (compile(intent).files ?? []).find((f: any) => f.path === "/etc/hotplug.d/iface/17-onc-ipv6-follows-line") as any;
   t.truthy(hook);
   t.regex(hook.content, /disconnected\) .*ifdown wan6/);
@@ -1204,7 +1200,7 @@ test("IPv6 follows the main line with several: a hook withdraws it while mwan3 h
 
 test("a network with its own DNS servers: odhcpd does not announce the router as IPv6 DNS", (t) => {
   const intent = sample();
-  intent.internet.connections[0].ipv6 = true;
+  intent.internet.lines[0].ipv6.enabled = true;
   intent.networks[0].dhcp.dns_servers = ["10.0.0.53"];
   const dhcp = (compile(intent).config as any).dhcp.dhcp.find((d: any) => d[".name"] === intent.networks[0].id);
   const onRouter = dhcp[".overrides"].find((o: any) => /router/.test(o[".if"])).override;
@@ -1215,7 +1211,7 @@ test("a network with its own DNS servers: odhcpd does not announce the router as
 test("a port forward into a network that goes out through a VPN provider is refused: its replies would take the tunnel", async (t) => {
   const { newPrivateKey, publicKeyOf } = await import("../../wireguard");
   const intent = sample();
-  intent.tunnels = [
+  intent.vpn = { ...intent.vpn, providers: [
     {
       id: "tun1",
       name: "Mullvad",
@@ -1224,13 +1220,13 @@ test("a port forward into a network that goes out through a VPN provider is refu
       dns: ["10.64.0.1"],
       peer: { public_key: publicKeyOf(newPrivateKey()), endpoint: "203.0.113.5:51820" },
     },
-  ];
+  ] };
   const forwardTo = (n: number) => {
     const net = intent.networks[n];
-    return { ...intent, firewall: { ...intent.firewall, port_forwards: [{ ...intent.firewall.port_forwards[0], internal_address: net.subnet.replace(/\.0\/24$/, ".9") }] } };
+    return { ...intent, firewall: { ...intent.firewall, port_forwards: [{ ...intent.firewall.port_forwards[0], to: { address: net.subnet.replace(/\.0\/24$/, ".9") } }] } };
   };
   t.true(intentSchema.safeParse(forwardTo(1)).success, "out the plain line: fine");
-  intent.networks[1].line = { connection: "tun1", fallback: false };
+  intent.networks[1].access = { ...intent.networks[1].access, via: "tun1", fallback: false };
   const refused = intentSchema.safeParse(forwardTo(1));
   t.false(refused.success);
   t.regex(JSON.stringify(refused.error?.issues), /goes out through a VPN provider/);
@@ -1239,8 +1235,8 @@ test("a port forward into a network that goes out through a VPN provider is refu
 test("the router's mesh radio is as wide as the access points' in the mesh's band", (t) => {
   for (const [band, channel] of [["6g", 37], ["5g", 36]] as const) {
     const intent = sample();
-    intent.radios = { ...(intent.radios ?? {}), "6g": { enabled: true } };
-    intent.mesh = { enabled: true, band, channel, key: "mesh-key-123456", dedicated: false, wired: false, jumbo: true };
+    intent.wifi.radios = { ...(intent.wifi.radios ?? {}), "6g": { enabled: true } };
+    intent.wifi.mesh = { enabled: true, band, channel, key: "mesh-key-123456", band_reserved: false, over_cable: false, large_frames: true };
     const devices = (compile(intent).config as any).wireless["wifi-device"].filter((d: any) => d.band === band);
     const widths = new Set(devices.map((d: any) => d.htmode));
     t.is(widths.size, 1, `${band}: ${[...widths].join(", ")}`);

@@ -37,12 +37,12 @@ const securityLabels: Record<string, string> = {
 
 /** An SSID, crossed out while it is off. */
 const SsidIcon = ({ index }: { index: number }) => {
-  const on = useDraftValue(`wifi.${index}.enabled`) !== false;
+  const on = useDraftValue(`wifi.networks.${index}.enabled`) !== false;
   return <ItemIcon icon={on ? IconWifi : IconWifiOff} color="blue" off={!on} />;
 };
 
 const wifiNetworks = defineList({
-  name: "wifi",
+  name: "wifi.networks",
   title: "SSIDs",
   description:
     "Broadcast by every access point.",
@@ -57,10 +57,9 @@ const wifiNetworks = defineList({
     network: intent.networks.find((n) => n.vlan === undefined)?.id ?? "",
     hidden: false,
     isolate_clients: false,
-    fast_roaming: true,
-    roaming_assistance: true,
+    roaming: { fast: true, assisted: true },
   }),
-  itemTitle: (i) => <Value name={`wifi.${i}.ssid`} fallback="New network" />,
+  itemTitle: (i) => <Value name={`wifi.networks.${i}.ssid`} fallback="New network" />,
   empty: "No Wi-Fi networks yet.",
   columns: [
     {
@@ -68,10 +67,10 @@ const wifiNetworks = defineList({
       cell: (i) => (
         <Group gap={8} wrap="nowrap">
           <ItemName icon={<SsidIcon index={i} />}>
-            <Value name={`wifi.${i}.ssid`} fallback="Unnamed" />
+            <Value name={`wifi.networks.${i}.ssid`} fallback="Unnamed" />
           </ItemName>
           <Value
-            name={`wifi.${i}.hidden`}
+            name={`wifi.networks.${i}.hidden`}
             format={(hidden) =>
               hidden && (
                 <Badge variant="light" color="gray">
@@ -96,7 +95,7 @@ const wifiNetworks = defineList({
       cell: (i) => (
         <Text size="sm" c="dimmed">
           <Value
-            name={`wifi.${i}.security`}
+            name={`wifi.networks.${i}.security`}
             format={(mode) => securityLabels[mode ?? "wpa2"]}
           />
         </Text>
@@ -107,7 +106,7 @@ const wifiNetworks = defineList({
       cell: (i) => (
         <Text size="sm" c="dimmed">
           <Value
-            name={`wifi.${i}.bands`}
+            name={`wifi.networks.${i}.bands`}
             format={(bands?: string[]) =>
               bands ? bands.map((b) => bandLabels[b]).join(", ") : "All enabled"
             }
@@ -119,14 +118,14 @@ const wifiNetworks = defineList({
   editor: (i) => (
     <>
       <Section>
-        <TextField name={`wifi.${i}.ssid`} label="Name" />
+        <TextField name={`wifi.networks.${i}.ssid`} label="Name" />
         <SwitchField
-          name={`wifi.${i}.enabled`}
+          name={`wifi.networks.${i}.enabled`}
           label="Enabled"
           description="Off: kept here, but no access point broadcasts it."
         />
         <ReferenceField
-          name={`wifi.${i}.network`}
+          name={`wifi.networks.${i}.network`}
           label="Network"
           description="Devices that join this Wi-Fi land on that network."
           to="networks"
@@ -136,7 +135,7 @@ const wifiNetworks = defineList({
       </Section>
       <Section title="Security">
         <SegmentedField
-          name={`wifi.${i}.security`}
+          name={`wifi.networks.${i}.security`}
           label="Mode"
           description="WPA2/WPA3 lets older devices join too."
           options={[
@@ -145,25 +144,25 @@ const wifiNetworks = defineList({
             { value: "wpa3", label: "WPA3" },
           ]}
         />
-        <PasswordField name={`wifi.${i}.password`} label="Password" />
+        <PasswordField name={`wifi.networks.${i}.password`} label="Password" />
         <ExtraPasswordsField index={i} />
       </Section>
       <Section title="Broadcast">
         <BandsField index={i} />
         <SwitchField
-          name={`wifi.${i}.hidden`}
+          name={`wifi.networks.${i}.hidden`}
           label="Hidden"
           description="Not announced; devices must be told the name."
         />
         <SwitchField
-          name={`wifi.${i}.isolate_clients`}
+          name={`wifi.networks.${i}.isolate_clients`}
           label="Isolate clients"
           description="Its devices cannot reach each other on the same access point."
         />
       </Section>
       <RoamingSection index={i}>
         <SwitchField
-          name={`wifi.${i}.fast_roaming`}
+          name={`wifi.networks.${i}.roaming.fast`}
           label="Fast roaming"
           description="Seamless handover between access points."
         />
@@ -174,7 +173,7 @@ const wifiNetworks = defineList({
 
 /** The name of the network Wi-Fi `index` joins. */
 const NetworkName = ({ index }: { index: number }) => {
-  const id = useDraftValue(`wifi.${index}.network`);
+  const id = useDraftValue(`wifi.networks.${index}.network`);
   const networks: { id: string; name: string }[] =
     useDraftValue("networks") ?? [];
   return <>{networks.find((n) => n.id === id)?.name ?? "—"}</>;
@@ -187,9 +186,9 @@ export const WifiPage = ({ sub }: { sub: string }) => <ListPage list={wifiNetwor
  * now, from the same words the Roaming tab and the compiler use.
  */
 const RoamingSection = ({ index, children }: { index: number; children: ReactNode }) => {
-  const level: SteeringLevel = useDraftValue("roaming.steering") ?? "advise";
+  const level: SteeringLevel = useDraftValue("wifi.roaming.steering") ?? "advise";
   const intent: Intent = useDraftValue();
-  const ssid: Intent["wifi"][number] | undefined = useDraftValue(`wifi.${index}`);
+  const ssid: Intent["wifi"]["networks"][number] | undefined = useDraftValue(`wifi.networks.${index}`);
   const assisted = level === "off" || (!!ssid && takesPart(intent, ssid));
   return (
     <Section
@@ -199,7 +198,7 @@ const RoamingSection = ({ index, children }: { index: number; children: ReactNod
       }.`}
     >
       <SwitchField
-        name={`wifi.${index}.roaming_assistance`}
+        name={`wifi.networks.${index}.roaming.assisted`}
         label="Roaming assistance"
         description="Neighbour lists help devices find a better access point."
       />
@@ -211,7 +210,7 @@ const RoamingSection = ({ index, children }: { index: number; children: ReactNod
 /** Bands whose radios are off are greyed out, with why (choices.ts). */
 const BandsField = ({ index }: { index: number }) => (
   <MultiSelectField
-    name={`wifi.${index}.bands`}
+    name={`wifi.networks.${index}.bands`}
     label="Bands"
     description={`Empty: every band that is on.`}
     options={(Object.entries(bandLabels) as [Band, string][]).map(([value, label]) => ({
@@ -226,7 +225,7 @@ const BandsField = ({ index }: { index: number }) => (
 /** Only with WPA2, which has per-device passwords: greyed out otherwise, with why (choices.ts). */
 const ExtraPasswordsField = ({ index }: { index: number }) => (
   <PasswordListField
-    name={`wifi.${index}.extra_passwords`}
+    name={`wifi.networks.${index}.extra_passwords`}
     label="More passwords"
     description="Each works on its own, e.g. one per person."
     addLabel="Add password"

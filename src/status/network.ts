@@ -96,18 +96,18 @@ export const networkStatus = (
   const lineOf = (id: string) => routerUp?.lines.find((l) => l.id === id);
   // A line works when mwan3 says so (still, while it is only failing); with
   // one connection and no mwan3, when its interface is up.
-  const works = (c: Intent["internet"]["connections"][number]) => {
+  const works = (c: Intent["internet"]["lines"][number]) => {
     const line = lineOf(c.id);
     return line ? line.state === "online" || line.state === "disconnecting" : !!iface(c.id)?.up;
   };
-  const all = intent.internet.connections;
+  const all = intent.internet.lines;
   const working = all.filter(works);
   // Which carry traffic now: the first working one in failover; sharing,
   // every working one, a metered line only when nothing else works.
   const carrying =
-    intent.internet.mode === "balance" && all.length > 1
-      ? working.some((c) => !c.metered)
-        ? working.filter((c) => !c.metered)
+    intent.internet.use_lines.mode === "balance" && all.length > 1
+      ? working.some((c) => !c.failover.metered)
+        ? working.filter((c) => !c.failover.metered)
         : working
       : failoverOrder(working).slice(0, 1);
   const connections = all.map((c) => {
@@ -134,14 +134,14 @@ export const networkStatus = (
   // Every interface the compiler writes on the router: its lines, networks,
   // VPN (features/vpn.ts) and mesh (features/mesh.ts).
   const known = new Set([
-    ...intent.internet.connections.flatMap((c) => [c.id, ipv6Interface(c)]),
+    ...intent.internet.lines.flatMap((c) => [c.id, ipv6Interface(c)]),
     ...intent.networks.map((n) => n.id),
-    ...(intent.vpn?.enabled ? ["vpn"] : []),
-    ...(intent.sites?.peers.length ? ["sites"] : []),
-    ...(intent.tunnels ?? []).map((t) => t.id),
-    ...(intent.mesh?.enabled ? ["bat0", "batmesh", "batwired"] : []),
+    ...(intent.vpn.remote_access.enabled ? ["vpn"] : []),
+    ...(intent.vpn.sites?.peers.length ? ["sites"] : []),
+    ...(intent.vpn.providers ?? []).map((t) => t.id),
+    ...(intent.wifi.mesh?.enabled ? ["bat0", "batmesh", "batwired"] : []),
   ]);
-  const ssids = new Set(intent.wifi.map((w) => w.ssid));
+  const ssids = new Set(intent.wifi.networks.map((w) => w.ssid));
   return {
     ...(routerUp
       ? {
@@ -154,26 +154,26 @@ export const networkStatus = (
         }
       : {}),
     connections,
-    ...(routerUp && (intent.vpn?.enabled || intent.sites?.peers.length || intent.tunnels?.length)
+    ...(routerUp && (intent.vpn.remote_access.enabled || intent.vpn.sites?.peers.length || intent.vpn.providers?.length)
       ? {
           vpn: {
-            clients: (intent.vpn?.enabled ? intent.vpn.clients : []).map((c) => ({
+            clients: (intent.vpn.remote_access.enabled ? intent.vpn.remote_access.clients : []).map((c) => ({
               name: c.name,
               since: routerUp.wireguard.find((p) => p.iface === "vpn" && p.publicKey === c.public_key)?.since,
             })),
-            sites: (intent.sites?.peers ?? []).map((s) => ({
+            sites: (intent.vpn.sites?.peers ?? []).map((s) => ({
               name: s.name,
               since: routerUp.wireguard.find((p) => p.iface === "sites" && p.publicKey === s.public_key)?.since,
             })),
             // A tunnel is up when its interface is, and a WireGuard one has a recent handshake.
-            tunnels: (intent.tunnels ?? []).map((t) => {
+            tunnels: (intent.vpn.providers ?? []).map((t) => {
               const shake = routerUp.wireguard.find((p) => p.iface === t.id)?.since;
               return { name: t.name, up: !!iface(t.id)?.up && (t.type !== "wireguard" || (shake !== undefined && shake < 180)) };
             }),
           },
         }
       : {}),
-    ...(intent.mesh?.enabled
+    ...(intent.wifi.mesh?.enabled
       ? {
           mesh: intent.hardware.flatMap((d) => {
             const status = byName.get(d.name);
@@ -187,10 +187,10 @@ export const networkStatus = (
                 name: d.name,
                 links: direct.map((n) => ({ to: nameOf(n.mac), throughput: n.throughput })),
                 // Over cables, a port that would not take batman's frames: it fragments there.
-                ...(intent.mesh.wired && status.meshWiredMtu !== undefined && status.meshWiredMtu < meshMtu
+                ...(intent.wifi.mesh.over_cable && status.meshWiredMtu !== undefined && status.meshWiredMtu < meshMtu
                   ? { fragmentsOverCable: true }
                   : {}),
-                ...(intent.mesh.wired && status.meshWiredPath && status.meshWiredPath.large < status.meshWiredPath.small
+                ...(intent.wifi.mesh.over_cable && status.meshWiredPath && status.meshWiredPath.large < status.meshWiredPath.small
                   ? { dropsLargeFrames: true }
                   : {}),
               },
@@ -222,7 +222,7 @@ export const networkStatus = (
       ...(routerUp ? { up: !!iface(n.id)?.up } : {}),
       clients: leases.filter((l) => l.address.startsWith(prefixOf(n.subnet))).length,
     })),
-    ssids: intent.wifi.map((w) => {
+    ssids: intent.wifi.networks.map((w) => {
       const on = radios.filter((r) => r.ssid === w.ssid);
       return {
         ssid: w.ssid,

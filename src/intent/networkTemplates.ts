@@ -61,7 +61,8 @@ export const withTemplate = (intent: Intent, index: number, template: NetworkTem
       const settings = templateSettings(template, others);
       // Access to remote access and sites is its own choice, kept.
       const vpn = network.access.networks.filter((id) => vpnZoneIds.includes(id));
-      return { ...network, ...settings, access: { ...settings.access, networks: [...settings.access.networks, ...vpn] } };
+      // Which way its internet goes (via, fallback) is not the template's either.
+      return { ...network, ...settings, access: { ...network.access, ...settings.access, networks: [...settings.access.networks, ...vpn] } };
     }),
   };
 };

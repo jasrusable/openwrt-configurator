@@ -52,6 +52,6 @@ export const useRuleSummary = (rule?: Intent["firewall"]["rules"][number]) => {
     rule.protocol === "any"
       ? "Anything"
       : protocolOptions.find((p) => p.value === rule.protocol)?.label;
-  const ports = rule.destination_port ? `, port ${rule.destination_port}` : "";
-  return `${protocol} from ${end(rule.from, rule.source_addresses)} to ${end(rule.to, rule.destination_addresses)}${ports}`;
+  const ports = rule.ports ? `, port ${rule.ports}` : "";
+  return `${protocol} from ${end(rule.from, rule.from_addresses)} to ${end(rule.to, rule.to_addresses)}${ports}`;
 };

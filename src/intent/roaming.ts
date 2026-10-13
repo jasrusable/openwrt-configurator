@@ -38,12 +38,12 @@ export const steeringValues: Record<
 };
 
 /** Whether an SSID takes part: roaming is not Off, and its roaming assistance is on. */
-export const takesPart = (intent: Intent, ssid: Intent["wifi"][number]) =>
-  (intent.roaming?.steering ?? "advise") !== "off" && ssid.roaming_assistance !== false;
+export const takesPart = (intent: Intent, ssid: Intent["wifi"]["networks"][number]) =>
+  (intent.wifi.roaming?.steering ?? "advise") !== "off" && ssid.roaming?.assisted !== false;
 
 /** The SSIDs usteer manages: those taking part that are broadcast. */
 export const steeredSsids = (intent: Intent) =>
-  intent.wifi.filter((ssid) => ssid.enabled && takesPart(intent, ssid));
+  intent.wifi.networks.filter((ssid) => ssid.enabled && takesPart(intent, ssid));
 
 /** How much stronger (dB) another access point or band must be to move to. */
 export const betterBy = 8;

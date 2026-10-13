@@ -77,7 +77,7 @@ const ClientRow = ({ client }: { client: ClientView }) => {
   const reserve = () => {
     const n = intent.networks[network];
     const name = (client.name ?? `device-${client.mac.slice(-5).replace(":", "")}`).toLowerCase().replace(/[^a-z0-9-]/g, "-");
-    draft.set(`networks.${network}.reservations` as never, [...n.reservations, { name, mac: client.mac, address: client.ipv4! }] as never);
+    draft.set(`networks.${network}.dhcp.reservations` as never, [...n.dhcp.reservations, { name, mac: client.mac, address: client.ipv4! }] as never);
     navigate(`/networks/${network}`);
   };
   const [, icon, color] = kindOf(client);
@@ -158,7 +158,7 @@ export const ClientsPage = () => {
     )
     .sort(sorts[sort]);
   return (
-    <SettingsPage title="Clients" description={liveLine(intent.site.name, status.dataUpdatedAt, status.isFetching, !!status.data)}>
+    <SettingsPage title="Clients" description={liveLine(intent.system.name, status.dataUpdatedAt, status.isFetching, !!status.data)}>
       <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
         <Tile label="Online" value={status.data ? online.length : "—"} color="cyan" sub={status.data ? `${all.length} known` : undefined}>
           <AreaChart series={[history]} colors={["cyan"]} height={28} />

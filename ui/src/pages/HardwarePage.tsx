@@ -155,13 +155,13 @@ const UplinkSection = ({ index }: { index: number }) => {
   const intent: Intent = useDraftValue();
   const facts = useDevices().data?.facts;
   const device = intent.hardware[index];
-  if (!intent.mesh.enabled || device?.role !== "access-point") return null;
-  const radios = facts?.[device.name]?.schema.radios?.filter((r) => r.band === intent.mesh.band);
+  if (!intent.wifi.mesh.enabled || device?.role !== "access-point") return null;
+  const radios = facts?.[device.name]?.schema.radios?.filter((r) => r.band === intent.wifi.mesh.band);
   const cannot =
     radios === undefined
       ? undefined
       : !radios.length
-        ? `It has no ${{ "2g": "2.4", "5g": "5", "6g": "6" }[intent.mesh.band]} GHz radio.`
+        ? `It has no ${{ "2g": "2.4", "5g": "5", "6g": "6" }[intent.wifi.mesh.band]} GHz radio.`
         : !radios.some((r) => r.mesh !== false)
           ? "Its radio cannot mesh."
           : undefined;
@@ -265,13 +265,13 @@ const hardware = defineList({
           description="Pin one only to avoid a crowded channel."
         >
           <SelectField
-            name={`hardware.${i}.wifi.channel.2g`}
+            name={`hardware.${i}.radios.2g.channel`}
             label="2.4 GHz channel"
             options={channels2g}
             emptyLabel="Automatic"
           />
           <SelectField
-            name={`hardware.${i}.wifi.channel.5g`}
+            name={`hardware.${i}.radios.5g.channel`}
             label="5 GHz channel"
             options={channels5g}
             emptyLabel="Automatic"

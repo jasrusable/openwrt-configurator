@@ -1,4 +1,4 @@
-// Settings bound to the intent by name: <TextField name="site.name" />. Each
+// Settings bound to the intent by name: <TextField name="system.name" />. Each
 // renders a SettingRow with its control and its validation error, so a page
 // only says which settings it shows, in what order, and how they are labelled.
 import {
@@ -374,9 +374,23 @@ export const SegmentedField = <T extends string>({
  */
 export const VariantField = <T extends { type: string }>({
   variants,
+  within = false,
   ...row
-}: RowProps & { variants: (Option<T["type"]> & { initial: T })[] }) => {
+}: RowProps & {
+  variants: (Option<T["type"]> & { initial: T })[];
+  /**
+   * The variants' settings sit beside others in the same object (a line's
+   * name and port beside its type's own settings): switching keeps those and
+   * swaps only the keys the variants bring.
+   */
+  within?: boolean;
+}) => {
   const field = useField(row.name);
+  const variantKeys = new Set(variants.flatMap((v) => Object.keys(v.initial)));
+  const switched = (initial: T) =>
+    within
+      ? { ...Object.fromEntries(Object.entries(field.value ?? {}).filter(([key]) => !variantKeys.has(key))), ...initial }
+      : initial;
   // The rules are about the variant's type (e.g. dns.upstream.type).
   const types = useAvailability(`${row.name}.type`);
   return (
@@ -386,7 +400,7 @@ export const VariantField = <T extends { type: string }>({
         disabled={!!field.unavailable}
         value={field.value?.type}
         onChange={(type) =>
-          field.onChange(variants.find((variant) => variant.value === type)!.initial)
+          field.onChange(switched(variants.find((variant) => variant.value === type)!.initial))
         }
       />
     </FieldRow>

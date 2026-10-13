@@ -12,15 +12,17 @@ const sample = () =>
 
 const withIot = () => {
   const intent = sample();
+  const iot = templateSettings("iot", ["lan", "guest"]);
   intent.networks.push({
     id: "net2",
     name: "Gadgets",
     vlan: 30,
     subnet: "10.0.30.0/24",
-    dhcp: { size: 50, lease: "12h" },
+    dhcp: { pool_size: 50, lease: "12h", reservations: [] },
     ipv6: false,
-    reservations: [],
-    ...templateSettings("iot", ["lan", "guest"]),
+    share_devices: iot.share_devices,
+    // A template says who it may reach, not which way out: the default, any line.
+    access: { ...iot.access, fallback: true },
   });
   return intent;
 };
@@ -64,13 +66,13 @@ test("removing a network removes every reference to it", (t) => {
   const result = intentSchema.safeParse(intent);
   t.deepEqual(
     result.success ? [] : result.error.issues.map((i) => i.path.join(".")),
-    ["wifi.1.network"]
+    ["wifi.networks.1.network"]
   );
 });
 
 test("removing a network removes the port forwards into it", (t) => {
   const intent = sample();
-  intent.firewall.port_forwards[0].internal_address = "10.0.20.9";
+  intent.firewall.port_forwards[0].to.address = "10.0.20.9";
   t.deepEqual(withoutNetwork(intent, 1).firewall.port_forwards, []);
   t.is(withoutNetwork(sample(), 1).firewall.port_forwards.length, 1, "others stay");
 });

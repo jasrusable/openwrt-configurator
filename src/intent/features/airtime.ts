@@ -18,8 +18,8 @@ export const airtime: Feature = (intent) => {
   // Tightest first: a phy serving several bands (one wiphy, several
   // radios) has one queue limit, and the first of its bands listed wins.
   const entries = bands
-    .filter((band) => intent.radios[band].enabled)
-    .map((band) => [band.toUpperCase(), ...aqlLimits[intent.radios[band].airtime]] as const)
+    .filter((band) => intent.wifi.radios[band].enabled)
+    .map((band) => [band.toUpperCase(), ...aqlLimits[intent.wifi.radios[band].airtime]] as const)
     .sort((a, b) => a[1] - b[1]);
   const [, low, high] = entries[0] ?? ["", ...aqlLimits.balanced];
   return {

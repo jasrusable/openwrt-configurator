@@ -1,5 +1,5 @@
-// Who may log in to the devices is the intent's (admin.authorized_keys,
-// admin.password_login); this app logs in with admin.ssh_key_path. An apply
+// Who may log in to the devices is the intent's (system.ssh.authorized_keys,
+// system.ssh.password_login); this app logs in with system.app_login.key. An apply
 // that turns password login off without this app's own key authorized would
 // lock it out, so it is refused before any device is touched.
 import type { Intent } from "./intent/schema";
@@ -37,7 +37,8 @@ export const lockoutReason = async (
   intent: Intent,
   platform: Pick<Platform, "readTextFile" | "run" | "homedir">
 ): Promise<string | undefined> => {
-  const { password_login, password, ssh_key_path: keyPath, authorized_keys: keys } = intent.admin;
+  const { password_login, authorized_keys: keys } = intent.system.ssh;
+  const { password, key: keyPath } = intent.system.app_login;
   if (password_login && password) return undefined;
   const off = password_login ? "This app has no password to log in with" : "Password login would be off";
   if (!keyPath) {

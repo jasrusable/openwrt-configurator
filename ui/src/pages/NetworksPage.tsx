@@ -93,6 +93,7 @@ const newNetwork = (
     Array.from({ length: 256 }, (_, i) => `${a}.${b}.${(vlan + i) % 256}.0/24`),
     networks.map((n) => n.subnet),
   );
+  const guest = templateSettings("guest", []);
   return {
     id: free(
       Array.from({ length: 99 }, (_, i) => `net${i + 2}`),
@@ -101,11 +102,11 @@ const newNetwork = (
     name: "",
     vlan,
     subnet,
-    dhcp: { size: 100, lease: "12h" },
+    dhcp: { pool_size: 100, lease: "12h", reservations: [] },
     // As the internet side has it.
     ipv6: internetIpv6(intent),
-    reservations: [],
-    ...templateSettings("guest", []),
+    ...guest,
+    access: { ...guest.access, fallback: true },
   };
 };
 
@@ -183,7 +184,7 @@ const networks = defineList({
       </Section>
       <Section title="Handing out addresses (DHCP)">
         <NumberField
-          name={`networks.${i}.dhcp.size`}
+          name={`networks.${i}.dhcp.pool_size`}
           label="Addresses for devices"
           min={1}
           max={253}
@@ -334,11 +335,11 @@ const tidyMac = (typed: string) => {
 /** Devices that always get the same address on this network, and a name in DNS. */
 const ReservationsSection = ({ index }: { index: number }) => {
   const draft = useDraft();
-  const base = `networks.${index}.reservations`;
+  const base = `networks.${index}.dhcp.reservations`;
   const reservations: Reservation[] = useDraftValue(base as never) ?? [];
   const subnet: string = useDraftValue(`networks.${index}.subnet`) ?? "";
   const prefix = subnet.split(".").slice(0, 3).join(".");
-  const domain: string = useDraftValue("dns.local_domain") ?? "lan";
+  const domain: string = useDraftValue("dns.domain") ?? "lan";
   const set = (next: Reservation[]) => draft.set(base, next);
   const used = reservations.map((r) => Number(r.address.split(".")[3]));
   return (
@@ -499,11 +500,11 @@ const ReservationRow = ({
 const LineSection = ({ index }: { index: number }) => {
   const draft = useDraft();
   const intent: Intent = useDraftValue();
-  const path = `networks.${index}.line` as const;
-  const line = intent.networks[index]?.line;
-  const error = useFieldError(`${path}.connection`);
-  const { connections } = intent.internet;
-  if (connections.length < 2 && !intent.tunnels.length) return null;
+  const path = `networks.${index}.access` as const;
+  const access = intent.networks[index]?.access;
+  const error = useFieldError(`${path}.via`);
+  const connections = intent.internet.lines;
+  if (connections.length < 2 && !intent.vpn.providers.length) return null;
   const automatic = "\u0000";
   return (
     <Section title="Internet">
@@ -512,24 +513,26 @@ const LineSection = ({ index }: { index: number }) => {
           data={[
             { value: automatic, label: "Automatic" },
             ...connections.map((c) => ({ value: c.id, label: c.name || "Unnamed" })),
-            ...intent.tunnels.map((t) => ({ value: t.id, label: `${t.name || "Unnamed"} (VPN)` })),
+            ...intent.vpn.providers.map((t) => ({ value: t.id, label: `${t.name || "Unnamed"} (VPN)` })),
           ]}
-          value={line?.connection ?? automatic}
-          onChange={(value) =>
+          value={access?.via ?? automatic}
+          onChange={(value) => {
+            const { via: _, ...rest } = access ?? { fallback: true };
             draft.set(
               path,
               value === null || value === automatic
-                ? undefined
-                : { connection: value, fallback: !intent.tunnels.some((t) => t.id === value) && (line?.fallback ?? true) }
-            )
-          }
+                ? { ...rest, fallback: true }
+                : // A VPN provider never falls back: its kill switch.
+                  { ...rest, via: value, fallback: !intent.vpn.providers.some((t) => t.id === value) && (access?.fallback ?? true) }
+            );
+          }}
           allowDeselect={false}
           error={!!error}
           aria-label="Internet line"
           w={220}
         />
       </FieldRow>
-      {line && <SwitchField name={`${path}.fallback`} label="Use the others when it is down" />}
+      {access?.via && <SwitchField name={`${path}.fallback`} label="Use the others when it is down" />}
     </Section>
   );
 };

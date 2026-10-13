@@ -26,10 +26,10 @@ const countryOptions = countries
  */
 const AuthorizedKeys = () => {
   const draft = useDraft();
-  const keys: string[] = useDraftValue("admin.authorized_keys") ?? [];
+  const keys: string[] = useDraftValue("system.ssh.authorized_keys") ?? [];
   const own = useOwnKey().data;
   const [adding, setAdding] = useState("");
-  const set = (next: string[]) => draft.set("admin.authorized_keys", next);
+  const set = (next: string[]) => draft.set("system.ssh.authorized_keys", next);
   const ownMissing = !!own && !keys.some((k) => keyIdentity(k) === keyIdentity(own));
   return (
     <Section
@@ -74,7 +74,7 @@ const AuthorizedKeys = () => {
 
 /** One key, shown short; a key that is not one says so, at its row. */
 const KeyRow = ({ index, line, onRemove }: { index: number; line: string; onRemove: () => void }) => {
-  const error = useFieldError(`admin.authorized_keys.${index}`);
+  const error = useFieldError(`system.ssh.authorized_keys.${index}`);
   const { type, comment, tail } = describeKey(line);
   return (
     <SettingRow label={comment || "No comment"} description={`${type} · …${tail}`} error={error}>
@@ -91,16 +91,16 @@ export const SystemPage = () => (
     description="Name, time and administration."
   >
     <Section>
-      <TextField name="site.name" label="Name" />
+      <TextField name="system.name" label="Name" />
       <SelectField
-        name="site.country"
+        name="system.country"
         label="Country"
         description="Sets the Wi-Fi channels and power allowed."
         options={countryOptions}
         searchable
       />
       <SelectField
-        name="site.timezone"
+        name="system.timezone"
         label="Time zone"
         description="Wi-Fi devices can set their clocks from it."
         options={timezoneOptions}
@@ -112,16 +112,16 @@ export const SystemPage = () => (
       description="How this app signs in to your devices."
     >
       <TextField
-        name="admin.ssh_key_path"
+        name="system.app_login.key"
         label="SSH key"
         placeholder="~/.ssh/id_ed25519"
       />
-      <PasswordField name="admin.password" label="Password" />
+      <PasswordField name="system.app_login.password" label="Password" />
     </Section>
     <AuthorizedKeys />
     <Section>
       <SwitchField
-        name="admin.password_login"
+        name="system.ssh.password_login"
         label="Password login"
         description="Off: only the authorized keys can log in. Recommended."
       />

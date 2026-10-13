@@ -22,7 +22,7 @@ const providers = {
 const proxyPort = 5053;
 
 export const dns: Feature = (intent) => {
-  const domain = intent.dns.local_domain;
+  const domain = intent.dns.domain;
   const { upstream } = intent.dns;
   const provider = upstream.type === "encrypted" && providers[upstream.provider];
   // dnsmasq asks these instead of the provider's resolvers (resolv.conf).
@@ -82,7 +82,7 @@ export const dns: Feature = (intent) => {
           },
         ],
         // Your own names: name.<local domain> answers with the address.
-        domain: intent.dns.records.map((r) => ({
+        domain: intent.dns.hosts.map((r) => ({
           ".if": onRouter,
           name: r.name,
           ip: r.address,

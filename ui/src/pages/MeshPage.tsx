@@ -16,7 +16,7 @@ const bandLabels = { "2g": "2.4 GHz", "5g": "5 GHz", "6g": "6 GHz" } as const;
 const Nodes = () => {
   const intent: Intent = useDraftValue();
   const facts = useDevices().data?.facts;
-  const { band } = intent.mesh;
+  const { band } = intent.wifi.mesh;
   const rows = intent.hardware.map((device) => {
     const radios = facts?.[device.name]?.schema.radios?.filter((r) => r.band === band);
     const known = facts?.[device.name] !== undefined;
@@ -58,7 +58,7 @@ const Nodes = () => {
 
 export const MeshPage = () => {
   const intent: Intent = useDraftValue();
-  const { enabled, band } = intent.mesh;
+  const { enabled, band } = intent.wifi.mesh;
   return (
     <SettingsPage
       title={
@@ -70,19 +70,19 @@ export const MeshPage = () => {
       description="Access points link over Wi-Fi, so they need only power."
     >
       <Section>
-        <SwitchField name="mesh.enabled" label="Mesh" />
+        <SwitchField name="wifi.mesh.enabled" label="Mesh" />
       </Section>
       {enabled && (
         <>
           <Section
             description={
-              intent.mesh.dedicated
+              intent.wifi.mesh.band_reserved
                 ? "Devices use your other bands; the mesh has this one to itself."
                 : "The mesh shares this band's radio with devices: Wi-Fi in it is slower."
             }
           >
             <SegmentedField
-              name="mesh.band"
+              name="wifi.mesh.band"
               label="Band"
               options={[
                 { value: "5g", label: "5 GHz" },
@@ -91,14 +91,14 @@ export const MeshPage = () => {
               ]}
             />
             <SelectField
-              name="mesh.channel"
+              name="wifi.mesh.channel"
               label="Channel"
               options={meshChannels[band].map((channel) => ({ value: channel, label: String(channel) }))}
             />
-            <SwitchField name="mesh.dedicated" label="Only for the mesh" />
-            <SwitchField name="mesh.wired" label="Also over cables" />
-            <SwitchField name="mesh.jumbo" label="Larger frames over cable" />
-            <PasswordField name="mesh.key" label="Mesh key" />
+            <SwitchField name="wifi.mesh.band_reserved" label="Only for the mesh" />
+            <SwitchField name="wifi.mesh.over_cable" label="Also over cables" />
+            <SwitchField name="wifi.mesh.large_frames" label="Larger frames over cable" />
+            <PasswordField name="wifi.mesh.key" label="Mesh key" />
           </Section>
           <Nodes />
         </>

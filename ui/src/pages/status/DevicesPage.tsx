@@ -99,7 +99,7 @@ export const DevicesPage = () => {
   const latest = useLatestRelease().data?.version;
   const devices = status.data?.deviceViews ?? [];
   return (
-    <SettingsPage title="Devices" description={liveLine(intent.site.name, status.dataUpdatedAt, status.isFetching, !!status.data)}>
+    <SettingsPage title="Devices" description={liveLine(intent.system.name, status.dataUpdatedAt, status.isFetching, !!status.data)}>
       {devices.length === 0 && (
         <Section>
           <EmptyState>{status.data ? "No devices in Hardware." : "Reading the devices…"}</EmptyState>

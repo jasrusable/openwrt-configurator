@@ -36,7 +36,7 @@ export const meshRouting = "BATMAN_V";
 export const meshInterface = "mesh0";
 
 /** The mesh's name on the air, from the site: the same on every node, never typed. */
-export const meshId = (intent: Pick<Intent, "site">) => `onc-${fnv(`${intent.site.name}/mesh`)}`;
+export const meshId = (intent: Pick<Intent, "system">) => `onc-${fnv(`${intent.system.name}/mesh`)}`;
 
 /**
  * A repeater's rescue network: the address it has there, link-local and from
@@ -58,10 +58,10 @@ const rescueScript = "/usr/libexec/onc/mesh-rescue";
 const rescueService = "onc-mesh-rescue";
 
 /** A node: any device with a radio in the mesh's band that can mesh (facts say which). */
-export const meshNode = (intent: Pick<Intent, "mesh">) => `device.mesh_${intent.mesh.band} == true`;
+export const meshNode = (intent: Pick<Intent, "wifi">) => `device.mesh_${intent.wifi.mesh.band} == true`;
 
 export const mesh: Feature = (intent) => {
-  const { enabled, band, channel, key } = intent.mesh;
+  const { enabled, band, channel, key } = intent.wifi.mesh;
   const node = meshNode(intent);
   const radio = radios.find((r) => r.band === band)!;
   const repeater = "device.tag.uplink == 'mesh'";
@@ -185,7 +185,7 @@ start_service() {
                   ipaddr: rescueAddress(d.name),
                   netmask: "255.255.0.0",
                 })),
-                ...(intent.mesh.wired
+                ...(intent.wifi.mesh.over_cable
                   ? [
                       {
                         ".if": `${node} AND device.sw_config == false`,
@@ -202,7 +202,7 @@ start_service() {
                 // Over cables, on every DSA device (the router switches it
                 // too): its ports and VLAN take batman's frames whole. A port
                 // that cannot keeps 1500 and batman fragments there; status says so.
-                ...(intent.mesh.wired && intent.mesh.jumbo
+                ...(intent.wifi.mesh.over_cable && intent.wifi.mesh.large_frames
                   ? [
                       { ".if": "device.sw_config == false", ".name": "meshport", name: "@bridge_ports", mtu: meshMtu },
                       { ".if": "device.sw_config == false", ".name": "meshwired", name: `br-lan.${meshWiredVlan}`, mtu: meshMtu },
@@ -213,7 +213,7 @@ start_service() {
               // (switched through those that are not nodes, the router
               // without Wi-Fi included), batman on it where there is one.
               // DSA nodes only: on a swconfig switch it is carried, not used.
-              ...(intent.mesh.wired
+              ...(intent.wifi.mesh.over_cable
                 ? {
                     "bridge-vlan": [
                       {
@@ -241,7 +241,7 @@ start_service() {
                   band,
                   channel,
                   htmode: `@best/${radioWidth(intent, band)}`,
-                  country: intent.site.country,
+                  country: intent.system.country,
                 },
               ],
               "wifi-iface": [
@@ -283,8 +283,8 @@ start_service() {
               dropbear: repeaters.map((d) => ({
                 ".if": onDevice(d.name),
                 ".name": "rescue",
-                PasswordAuth: intent.admin.password_login ? "on" : "off",
-                RootPasswordAuth: intent.admin.password_login ? "on" : "off",
+                PasswordAuth: intent.system.ssh.password_login ? "on" : "off",
+                RootPasswordAuth: intent.system.ssh.password_login ? "on" : "off",
                 Port: 22,
                 Interface: "rescue",
               })),

@@ -87,43 +87,43 @@ test("making an access point the router hands the role over", (t) => {
 test("why a value is not available, in words the UI and the schema share", (t) => {
   const intent = sample();
   t.is(
-    availability(intent, "radios.2g.width").option("80").unavailable,
+    availability(intent, "wifi.radios.2g.width").option("80").unavailable,
     "2.4 GHz is at most 40 MHz wide."
   );
-  t.is(availability(intent, "radios.5g.width").option("80").unavailable, undefined);
+  t.is(availability(intent, "wifi.radios.5g.width").option("80").unavailable, undefined);
 
-  intent.wifi[0].bands = ["5g"];
-  t.regex(availability(intent, "radios.5g.enabled").option(false).unavailable!, /only on 5 GHz: give it another band first/);
-  t.is(availability(intent, "radios.2g.enabled").option(false).unavailable, undefined);
+  intent.wifi.networks[0].bands = ["5g"];
+  t.regex(availability(intent, "wifi.radios.5g.enabled").option(false).unavailable!, /only on 5 GHz: give it another band first/);
+  t.is(availability(intent, "wifi.radios.2g.enabled").option(false).unavailable, undefined);
 
-  intent.internet.connections[0].ipv6 = false;
+  intent.internet.lines[0].ipv6.enabled = false;
   t.deepEqual(availability(intent, "networks.0.ipv6").unavailable, {
     reason: "Turn on IPv6 for Fibre under Internet first.",
     refuses: false,
   });
 
   // Steering moves devices between bands too, so one access point is enough while two bands are on.
-  t.is(availability(intent, "roaming.steering").option("push").unavailable, undefined);
+  t.is(availability(intent, "wifi.roaming.steering").option("push").unavailable, undefined);
   const lone = sample();
-  lone.radios["2g"].enabled = false;
-  t.regex(availability(lone, "roaming.steering").option("nudge").unavailable!, /nowhere to steer/);
-  t.regex(availability(lone, "roaming.prefer_5g").option(true).unavailable!, /Needs 2.4 GHz/);
+  lone.wifi.radios["2g"].enabled = false;
+  t.regex(availability(lone, "wifi.roaming.steering").option("nudge").unavailable!, /nowhere to steer/);
+  t.regex(availability(lone, "wifi.roaming.prefer_5g").option(true).unavailable!, /Needs 2.4 GHz/);
 
   // The schema reports a refused value with the rule's words; an ignored one not at all.
-  intent.radios["2g"].width = "80";
+  intent.wifi.radios["2g"].width = "80";
   intent.networks[0].ipv6 = true;
-  t.deepEqual(choiceIssues(intent), [{ path: ["radios", "2g", "width"], message: "2.4 GHz is at most 40 MHz wide." }]);
+  t.deepEqual(choiceIssues(intent), [{ path: ["wifi", "radios", "2g", "width"], message: "2.4 GHz is at most 40 MHz wide." }]);
 });
 
 test("mesh dead ends: 6 GHz moves the channel, turning the mesh off or making a repeater the router leaves no problem", (t) => {
   const intent = structuredClone(sample());
-  intent.mesh = { ...intent.mesh, enabled: true, key: "mesh-key-123456", band: "5g", channel: 36 };
-  intent.radios["6g"].enabled = true;
-  const six = availability(intent, "mesh.band").option("6g").swap!.apply(intent);
-  t.is(six.mesh.channel, meshChannels["6g"][0]);
+  intent.wifi.mesh = { ...intent.wifi.mesh, enabled: true, key: "mesh-key-123456", band: "5g", channel: 36 };
+  intent.wifi.radios["6g"].enabled = true;
+  const six = availability(intent, "wifi.mesh.band").option("6g").swap!.apply(intent);
+  t.is(six.wifi.mesh.channel, meshChannels["6g"][0]);
   const ap = intent.hardware.findIndex((d) => d.role === "access-point");
   intent.hardware[ap].uplink = "mesh";
-  t.deepEqual(issues({ ...intent, mesh: { ...intent.mesh, enabled: false } }), []);
+  t.deepEqual(issues({ ...intent, wifi: { ...intent.wifi, mesh: { ...intent.wifi.mesh, enabled: false } } }), []);
   const swapped = availability(intent, `hardware.${ap}.role`).option("router").swap!.apply(intent);
   t.is(swapped.hardware[ap].uplink, "cable");
   t.deepEqual(issues(swapped), []);

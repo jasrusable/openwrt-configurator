@@ -61,9 +61,9 @@ test("a setting's change shows as the UCI lines it changes", (t) => {
 
 test("a Wi-Fi password change shows, but never the password on either side", (t) => {
   const before = sample();
-  before.wifi[0].password = "the-old-secret-1";
+  before.wifi.networks[0].password = "the-old-secret-1";
   const after = sample();
-  after.wifi[0].password = "a-new-secret-1";
+  after.wifi.networks[0].password = "a-new-secret-1";
   const d = diff(stateFor(after, "home-ap-1"), appliedWith(stateFor(before, "home-ap-1")));
   const keys = d.config.filter((c) => c.key.endsWith(".key"));
   t.true(keys.length > 0);

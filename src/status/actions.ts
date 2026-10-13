@@ -244,7 +244,7 @@ export const neighboursOf = (surveys: SurveyRead[], ssids: string[], complete: b
 export const wifiSurvey = ({ intentPath, platform }: { intentPath: string; platform: Platform }) =>
   oneAtATime(platform, intentPath, "survey", async () => {
     const { oncConfig, intent } = await loadOncConfig({ path: intentPath, platform });
-    const ssids = (intent?.wifi ?? []).map((w) => w.ssid);
+    const ssids = (intent?.wifi.networks ?? []).map((w) => w.ssid);
     const hosts = provisionableDevices(oncConfig).ready.map((d) => d.hostname);
     const read: SurveyRead[] = [];
     const failed: { accessPoint: string; error: string }[] = [];

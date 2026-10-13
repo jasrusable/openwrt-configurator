@@ -15,7 +15,7 @@ const other = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBBBBBBBBBBBBBBBBBBBBBBBBBBBB
 
 test("keys and password login compile to dropbear's authorized_keys and options", (t) => {
   const intent = sample();
-  intent.admin = { ...intent.admin, authorized_keys: [key], password_login: false };
+  intent.system = { ...intent.system, ssh: { authorized_keys: [key], password_login: false } };
   const compiled = compileIntent(intent) as any;
   t.like(compiled.config.dropbear.dropbear[0], { PasswordAuth: "off", RootPasswordAuth: "off" });
   t.deepEqual(
@@ -28,20 +28,28 @@ test("keys and password login compile to dropbear's authorized_keys and options"
 });
 
 test("password login off needs a key; a key must look like one", (t) => {
-  const issues = (admin: object) => {
-    const r = intentSchema.safeParse({ ...JSON.parse(readFileSync(join(root, "sampleConfigs", "intent.json"), "utf8")), admin });
+  const issues = (ssh: object) => {
+    const sample = JSON.parse(readFileSync(join(root, "sampleConfigs", "intent.json"), "utf8"));
+    const r = intentSchema.safeParse({ ...sample, system: { ...sample.system, ssh } });
     return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
   };
-  t.deepEqual(issues({ password_login: false }), ["admin.password_login"]);
+  t.deepEqual(issues({ password_login: false }), ["system.ssh.password_login"]);
   t.deepEqual(issues({ password_login: false, authorized_keys: [key] }), []);
-  t.deepEqual(issues({ authorized_keys: ["not a key"] }), ["admin.authorized_keys.0"]);
+  t.deepEqual(issues({ authorized_keys: ["not a key"] }), ["system.ssh.authorized_keys.0"]);
 });
 
 test("an apply that would lock this app out is refused, and says why", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "onc-key-"));
   const keyPath = join(dir, "id_ed25519");
   writeFileSync(`${keyPath}.pub`, `${key}\n`);
-  const intent = (admin: Partial<Intent["admin"]>) => ({ ...sample(), admin: { authorized_keys: [], password_login: true, ...admin } }) as Intent;
+  // A key (this app's login) and the login rules, as one flat set for the cases below.
+  const intent = ({ ssh_key_path, password, ...ssh }: { ssh_key_path?: string; password?: string; authorized_keys?: string[]; password_login?: boolean }) => {
+    const s = sample();
+    return {
+      ...s,
+      system: { ...s.system, app_login: { key: ssh_key_path, password }, ssh: { authorized_keys: [], password_login: true, ...ssh } },
+    } as Intent;
+  };
   t.is(await lockoutReason(intent({ ssh_key_path: keyPath }), nodePlatform), undefined, "password login on: nothing to lose");
   t.is(await lockoutReason(intent({ ssh_key_path: keyPath, password_login: false, authorized_keys: [key.replace("you@mac", "a different comment")] }), nodePlatform), undefined, "the comment does not matter");
   t.regex((await lockoutReason(intent({ ssh_key_path: keyPath, password_login: false, authorized_keys: [other] }), nodePlatform))!, /not among the authorized keys/);

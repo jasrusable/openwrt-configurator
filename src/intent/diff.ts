@@ -88,9 +88,9 @@ export const diffIntent = (before: unknown, after: unknown): Change[] => {
     // A secret object changes as a whole; anything else, field by field.
     if (isObject(b) && isObject(a) && !info?.secret) {
       const keys = [...new Set([...Object.keys(b), ...Object.keys(a)])];
-      // A variant switch (DHCP to PPPoE) is one change, not three.
+      // A variant switch (DHCP to PPPoE) is one change, not three: its type's.
       if (b.type !== undefined && b.type !== a.type) {
-        changes.push(change(b, a, path, from));
+        changes.push(change(b.type, a.type, [...path, "type"], [...from, "type"]));
         return;
       }
       keys.forEach((key) => walk(b[key], a[key], [...path, key], [...from, key]));

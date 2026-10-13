@@ -50,7 +50,7 @@ const lines = [
 
 const types: Record<string, string> = { dhcp: "DHCP", pppoe: "PPPoE", static: "Static IP" };
 
-type Connection = Intent["internet"]["connections"][number];
+type Connection = Intent["internet"]["lines"][number];
 
 /** The router's ports, from its facts: the WAN one, and the rest. */
 const useRouterPorts = () => {
@@ -68,11 +68,11 @@ const usePortLabel = () => {
 /** Its place: the main one, a backup in order, or its share of traffic. */
 const useRole = (index: number) => {
   const intent: Intent = useDraftValue();
-  const { connections, mode } = intent.internet;
+  const connections = intent.internet.lines;
   if (connections.length < 2) return "Main";
-  if (mode === "balance") return `Share ${connections[index]?.weight ?? 1}`;
+  if (intent.internet.use_lines.mode === "balance") return `Share ${connections[index]?.failover.weight ?? 1}`;
   // Failover tries a metered line after all the others.
-  if (connections[index]?.metered) return "Last resort";
+  if (connections[index]?.failover.metered) return "Last resort";
   return index === 0 ? "Main" : connections.length > 2 ? `Backup ${index}` : "Backup";
 };
 
@@ -84,7 +84,7 @@ const RoleText = ({ index }: { index: number }) => (
 
 const PortText = ({ index }: { index: number }) => {
   const label = usePortLabel();
-  const port: string | undefined = useDraftValue(`internet.connections.${index}.port`);
+  const port: string | undefined = useDraftValue(`internet.lines.${index}.port`);
   return (
     <Text size="sm" c="dimmed" ff="monospace">
       {label(port)}
@@ -101,8 +101,8 @@ const PortField = ({ index }: { index: number }) => {
   const intent: Intent = useDraftValue();
   const ports = useRouterPorts();
   const label = usePortLabel();
-  const name = `internet.connections.${index}.port` as const;
-  const current = intent.internet.connections[index]?.port;
+  const name = `internet.lines.${index}.port` as const;
+  const current = intent.internet.lines[index]?.port;
   if (!ports) {
     return <TextField name={name} label="Port" placeholder="eth2" description="Unset: the router's WAN port." />;
   }
@@ -138,7 +138,7 @@ const PortField = ({ index }: { index: number }) => {
  */
 const lastLanPort = (lan: string[], intent: Intent, index: number) => {
   // The WAN port joins the home network when no other connection is on it.
-  const wanFree = !intent.internet.connections.some((c, i) => i !== index && c.port === undefined);
+  const wanFree = !intent.internet.lines.some((c, i) => i !== index && c.port === undefined);
   const free = lan.filter((p) => !portTakenBy(intent, index, p));
   return free.length === 1 && !wanFree ? free[0] : undefined;
 };
@@ -151,10 +151,10 @@ const PriorityRow = ({ index }: { index: number }) => {
   const role = useRole(index);
   // Not on a connection being added: it is not in the list yet.
   const adding = useLocation().pathname.endsWith("/new");
-  const { connections } = intent.internet;
+  const connections = intent.internet.lines;
   if (connections.length < 2) return null;
   const makeMain = () => {
-    draft.replace({ ...intent, internet: { ...intent.internet, connections: withMain(connections, index) } });
+    draft.replace({ ...intent, internet: { ...intent.internet, lines: withMain(connections, index) } });
     navigate("/internet/0");
   };
   return index === 0 ? (
@@ -173,17 +173,14 @@ const PriorityRow = ({ index }: { index: number }) => {
 const newConnection = (items: Connection[]): Connection => ({
   id: [..."bcdefghijklmnopqrstuvwxyz"].map((l) => `wan${l}`).find((id) => !items.some((c) => c.id === id))!,
   name: "",
-  connection: { type: "dhcp" },
-  // The networks' IPv6 comes from the main connection.
-  ipv6: false,
-  ipv6_prefix: "auto",
-  weight: 1,
-  metered: false,
-  down_when_slow: false,
+  type: "dhcp",
+  // The networks' IPv6 comes from the main line.
+  ipv6: { enabled: false, prefix: "auto" },
+  failover: { weight: 1, metered: false, down_when_slow: false },
 });
 
 const connections = defineList({
-  name: "internet.connections",
+  name: "internet.lines",
   title: "Connections",
   addLabel: "Add connection",
   newItem: newConnection,
@@ -204,23 +201,25 @@ const connections = defineList({
   canRemove: (_, items) => items.length > 1,
   // Networks keeping to it go back to Automatic.
   onRemove: (intent, index) => {
-    const gone = intent.internet.connections[index];
+    const gone = intent.internet.lines[index];
     return {
       ...intent,
-      internet: { ...intent.internet, connections: withoutConnection(intent.internet.connections, index) },
-      networks: intent.networks.map(({ line, ...network }) =>
-        line?.connection === gone?.id ? network : { ...network, ...(line ? { line } : {}) }
-      ),
+      internet: { ...intent.internet, lines: withoutConnection(intent.internet.lines, index) },
+      networks: intent.networks.map((network) => {
+        if (network.access.via !== gone?.id) return network;
+        const { via: _, ...access } = network.access;
+        return { ...network, access };
+      }),
     };
   },
-  itemTitle: (i) => <Value name={`internet.connections.${i}.name`} fallback="New connection" />,
+  itemTitle: (i) => <Value name={`internet.lines.${i}.name`} fallback="New connection" />,
   empty: "No connections.",
   columns: [
     {
       header: "Name",
       cell: (i) => (
         <ItemName icon={<ItemIcon icon={IconWorld} color="indigo" />}>
-          <Value name={`internet.connections.${i}.name`} fallback="Unnamed" />
+          <Value name={`internet.lines.${i}.name`} fallback="Unnamed" />
         </ItemName>
       ),
     },
@@ -229,14 +228,14 @@ const connections = defineList({
       header: "Type",
       cell: (i) => (
         <Text size="sm" c="dimmed">
-          <Value name={`internet.connections.${i}.connection.type`} format={(t) => types[t as string] ?? t} />
+          <Value name={`internet.lines.${i}.type`} format={(t) => types[t as string] ?? t} />
         </Text>
       ),
     },
     { header: "Role", cell: (i) => <RoleText index={i} /> },
   ],
   editor: (i) => {
-    const at = `internet.connections.${i}` as const;
+    const at = `internet.lines.${i}` as const;
     return (
       <>
         <Section>
@@ -246,28 +245,29 @@ const connections = defineList({
         </Section>
         <Section title="Connection">
           <VariantField
-            name={`${at}.connection`}
+            name={at}
             label="Type"
+            within
             variants={[
               { value: "dhcp", label: "DHCP", initial: { type: "dhcp" } },
-              { value: "pppoe", label: "PPPoE", initial: { type: "pppoe", username: "", password: "" } },
+              { value: "pppoe", label: "PPPoE", initial: { type: "pppoe", pppoe: { username: "", password: "" } } },
               {
                 value: "static",
                 label: "Static IP",
-                initial: { type: "static", address: "", prefix_length: 24, gateway: "" },
+                initial: { type: "static", static: { address: "", prefix_length: 24, gateway: "" } },
               },
             ]}
           />
-          <When name={`${at}.connection.type`} is="pppoe">
-            <TextField name={`${at}.connection.username`} label="Username" />
-            <PasswordField name={`${at}.connection.password`} label="Password" />
+          <When name={`${at}.type`} is="pppoe">
+            <TextField name={`${at}.pppoe.username`} label="Username" />
+            <PasswordField name={`${at}.pppoe.password`} label="Password" />
           </When>
-          <When name={`${at}.connection.type`} is="static">
-            <TextField name={`${at}.connection.address`} label="IP address" placeholder="203.0.113.10" chars={address} />
-            <SelectField name={`${at}.connection.prefix_length`} label="Subnet mask" options={masks} />
-            <TextField name={`${at}.connection.gateway`} label="Gateway" placeholder="203.0.113.1" chars={address} />
+          <When name={`${at}.type`} is="static">
+            <TextField name={`${at}.static.address`} label="IP address" placeholder="203.0.113.10" chars={address} />
+            <SelectField name={`${at}.static.prefix_length`} label="Subnet mask" options={masks} />
+            <TextField name={`${at}.static.gateway`} label="Gateway" placeholder="203.0.113.1" chars={address} />
             <TagsField
-              name={`${at}.connection.dns`}
+              name={`${at}.static.dns`}
               label="DNS servers"
               description="From your provider. Not needed with encrypted DNS."
               placeholder="Add a server"
@@ -283,10 +283,10 @@ const connections = defineList({
           </OptionalField>
         </Section>
         <Section>
-          <SwitchField name={`${at}.ipv6`} label="IPv6" />
-          <When name={`${at}.ipv6`} is={true}>
+          <SwitchField name={`${at}.ipv6.enabled`} label="IPv6" />
+          <When name={`${at}.ipv6.enabled`} is={true}>
             <SelectField
-              name={`${at}.ipv6_prefix`}
+              name={`${at}.ipv6.prefix`}
               label="Prefix size"
               description="Each network with IPv6 needs a /64."
               options={[...prefixes]}
@@ -294,11 +294,11 @@ const connections = defineList({
           </When>
         </Section>
         <Section description="Keeps calls smooth under load. Set just below this line's speed.">
-          <OptionalField name={`${at}.speed`} label="Smart queueing" initial={{ down_mbps: 100, up_mbps: 20, line: "fibre" }}>
-            <NumberField name={`${at}.speed.down_mbps`} label="Download" unit="Mbit/s" min={1} />
-            <NumberField name={`${at}.speed.up_mbps`} label="Upload" unit="Mbit/s" min={1} />
+          <OptionalField name={`${at}.shaping`} label="Smart queueing" initial={{ down_mbps: 100, up_mbps: 20, medium: "fibre" }}>
+            <NumberField name={`${at}.shaping.down_mbps`} label="Download" unit="Mbit/s" min={1} />
+            <NumberField name={`${at}.shaping.up_mbps`} label="Upload" unit="Mbit/s" min={1} />
             <SelectField
-              name={`${at}.speed.line`}
+              name={`${at}.shaping.medium`}
               label="Line type"
               description="Sets the per-packet overhead."
               options={[...lines]}
@@ -314,15 +314,15 @@ const connections = defineList({
 /** How it works with the others: shown once there are several. */
 const ShareSection = ({ index }: { index: number }) => {
   const intent: Intent = useDraftValue();
-  const at = `internet.connections.${index}` as const;
-  if (intent.internet.connections.length < 2) return null;
+  const at = `internet.lines.${index}` as const;
+  if (intent.internet.lines.length < 2) return null;
   return (
     <Section title="With your other connections">
-      {intent.internet.mode === "balance" && (
-        <NumberField name={`${at}.weight`} label="Share" min={1} max={100} integer />
+      {intent.internet.use_lines.mode === "balance" && (
+        <NumberField name={`${at}.failover.weight`} label="Share" min={1} max={100} integer />
       )}
-      <SwitchField name={`${at}.metered`} label="Metered" />
-      <SwitchField name={`${at}.down_when_slow`} label="Down when slow" />
+      <SwitchField name={`${at}.failover.metered`} label="Metered" />
+      <SwitchField name={`${at}.failover.down_when_slow`} label="Down when slow" />
     </Section>
   );
 };
@@ -332,18 +332,18 @@ const Together = () => {
   const intent: Intent = useDraftValue();
   return (
     <>
-      {intent.internet.connections.length > 1 && (
+      {intent.internet.lines.length > 1 && (
         <Section>
           <SegmentedField
-            name="internet.mode"
+            name="internet.use_lines.mode"
             label="Using several"
             options={[
               { value: "failover", label: "Failover" },
               { value: "balance", label: "Share traffic" },
             ]}
           />
-          {intent.internet.mode === "balance" && (
-            <SwitchField name="internet.share_per_device" label="Keep each device on one line" />
+          {intent.internet.use_lines.mode === "balance" && (
+            <SwitchField name="internet.use_lines.sticky_per_device" label="Keep each device on one line" />
           )}
         </Section>
       )}
@@ -356,12 +356,12 @@ const Together = () => {
         }
       >
         <OptionalField
-          name="internet.ddns"
+          name="internet.dynamic_dns"
           label="Name on the internet"
           initial={{ provider: "duckdns", hostname: "", token: "" }}
         >
           <SelectField
-            name="internet.ddns.provider"
+            name="internet.dynamic_dns.provider"
             label="Provider"
             options={[
               { value: "duckdns", label: "Duck DNS" },
@@ -369,10 +369,10 @@ const Together = () => {
               { value: "dynv6", label: "dynv6" },
             ]}
           />
-          <TextField name="internet.ddns.hostname" label="Name" placeholder="myhome.duckdns.org" />
-          <PasswordField name="internet.ddns.token" label="API token" />
-          <When name="internet.ddns.provider" is="cloudflare">
-            <TextField name="internet.ddns.zone" label="Zone" placeholder="example.com" />
+          <TextField name="internet.dynamic_dns.hostname" label="Name" placeholder="myhome.duckdns.org" />
+          <PasswordField name="internet.dynamic_dns.token" label="API token" />
+          <When name="internet.dynamic_dns.provider" is="cloudflare">
+            <TextField name="internet.dynamic_dns.zone" label="Zone" placeholder="example.com" />
           </When>
         </OptionalField>
       </Section>

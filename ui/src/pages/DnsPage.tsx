@@ -20,9 +20,9 @@ type DnsRecord = { name: string; address: string };
 
 const LocalNames = () => {
   const draft = useDraft();
-  const records: DnsRecord[] = useDraftValue("dns.records") ?? [];
-  const domain: string = useDraftValue("dns.local_domain") ?? "lan";
-  const set = (next: DnsRecord[]) => draft.set("dns.records", next);
+  const records: DnsRecord[] = useDraftValue("dns.hosts") ?? [];
+  const domain: string = useDraftValue("dns.domain") ?? "lan";
+  const set = (next: DnsRecord[]) => draft.set("dns.hosts", next);
   return (
     <Section
       title="Local names"
@@ -68,8 +68,8 @@ const RecordRow = ({
   onChange: (next: DnsRecord) => void;
   onRemove: () => void;
 }) => {
-  const nameError = useFieldError(`dns.records.${index}.name`);
-  const addressError = useFieldError(`dns.records.${index}.address`);
+  const nameError = useFieldError(`dns.hosts.${index}.name`);
+  const addressError = useFieldError(`dns.hosts.${index}.address`);
   return (
     <Group gap="xs" px="md" py="sm" wrap="nowrap" align="flex-start">
       <TextInput
@@ -122,7 +122,7 @@ const DhcpOverview = () => {
   const networks: Intent["networks"] = useDraftValue("networks") ?? [];
   const pool = (n: Intent["networks"][number]) => {
     const prefix = n.subnet.split(".").slice(0, 3).join(".");
-    return `${prefix}.${255 - n.dhcp.size} – ${prefix}.254`;
+    return `${prefix}.${255 - n.dhcp.pool_size} – ${prefix}.254`;
   };
   return (
     <Section
@@ -163,7 +163,7 @@ const DhcpOverview = () => {
             header: "Reserved",
             cell: (i) => (
               <Text size="sm" c="dimmed">
-                {networks[i].reservations?.length ?? 0}
+                {networks[i].dhcp.reservations?.length ?? 0}
               </Text>
             ),
           },
@@ -234,7 +234,7 @@ export const DnsPage = () => (
     </Section>
     <Section>
       <TextField
-        name="dns.local_domain"
+        name="dns.domain"
         label="Local domain"
         description="Devices are reachable as name.domain."
       />

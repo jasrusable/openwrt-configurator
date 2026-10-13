@@ -59,12 +59,12 @@ export const ruleSchema = z
     /** A network id, "router", "internet", or "*". */
     to: z.string(),
     /** Only from these devices or ranges; their IP version sets the rule's. */
-    source_addresses: z.array(address).optional(),
+    from_addresses: z.array(address).optional(),
     /** Only to these devices or ranges. */
-    destination_addresses: z.array(address).optional(),
+    to_addresses: z.array(address).optional(),
     protocol: z.enum(ruleProtocols).default("tcp+udp"),
-    /** For TCP and UDP. */
-    destination_port: ports.optional(),
+    /** The ports it goes to, for TCP and UDP. */
+    ports: ports.optional(),
     action: z.enum(["allow", "block"]),
   })
   .strict();
@@ -74,15 +74,17 @@ export const portForwardSchema = z
     name: z.string().min(1, "required").max(64),
     enabled: z.boolean().default(true),
     protocol: z.enum(["tcp+udp", "tcp", "udp"]),
-    external_port: port,
-    /** A host on one of the networks. */
-    internal_address: z
-      .string()
-      .regex(/^(\d{1,3}\.){3}\d{1,3}$/, "an IPv4 address on one of your networks"),
-    /** Defaults to the external port. */
-    internal_port: port.optional(),
+    /** The port (or range) on the internet side. */
+    port,
+    /** The device it goes to, and its port there (unset, the same). */
+    to: z
+      .object({
+        address: z.string().regex(/^(\d{1,3}\.){3}\d{1,3}$/, "an IPv4 address on one of your networks"),
+        port: port.optional(),
+      })
+      .strict(),
     /** Only from these addresses, if set. */
-    source_addresses: z.array(address).optional(),
+    from_addresses: z.array(address).optional(),
     /** Also reachable from inside, by the public address (NAT loopback). */
     reflection: z.boolean().default(true),
   })
@@ -110,4 +112,17 @@ export const accessSchema = z
   .strict();
 
 export type Access = z.infer<typeof accessSchema>;
+
+/**
+ * A network's: also which way its internet goes, with several lines or a VPN
+ * provider: `via` a line's or provider's id, with the others as `fallback`
+ * when it is down (never for a provider: its kill switch). Unset, the
+ * internet's mode decides.
+ */
+export const networkAccessSchema = accessSchema
+  .extend({
+    via: z.string().min(1, "pick a line").optional(),
+    fallback: z.boolean().default(true),
+  })
+  .strict();
 

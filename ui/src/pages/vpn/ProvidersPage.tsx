@@ -15,7 +15,7 @@ import { defineList, ListPage } from "../../form/ListPage";
 import { Experimental } from "./shared";
 import { ItemIcon, ItemName, Section, SettingRow, SettingsPage } from "../../kit/layout";
 
-type Tunnel = Intent["tunnels"][number];
+type Tunnel = Intent["vpn"]["providers"][number];
 
 /** A tunnel from a provider's file, or why the file will not do. */
 const fromFile = (kind: Tunnel["type"], id: string, name: string, text: string, login: { username: string; password: string }): Tunnel => {
@@ -62,12 +62,12 @@ const NewProviderPage = () => {
   const [login, setLogin] = useState({ username: "", password: "" });
   const [error, setError] = useState<string>();
   const back = () => navigate("/vpn/providers");
-  const free = [...Array(9).keys()].map((n) => `tun${n + 1}`).find((id) => !intent.tunnels.some((t) => t.id === id));
+  const free = [...Array(9).keys()].map((n) => `tun${n + 1}`).find((id) => !intent.vpn.providers.some((t) => t.id === id));
   const add = () => {
     try {
       if (!free) throw new Error("Nine providers at most.");
       const tunnel = fromFile(kind, free, name.trim(), text, login);
-      draft.replace({ ...intent, tunnels: [...intent.tunnels, tunnel] });
+      draft.replace({ ...intent, vpn: { ...intent.vpn, providers: [...intent.vpn.providers, tunnel] } });
       back();
     } catch (e) {
       setError((e as Error).message);
@@ -136,8 +136,8 @@ const NewProviderPage = () => {
 /** The networks out through it, by their Internet line. */
 const UsedBy = ({ index }: { index: number }) => {
   const intent: Intent = useDraftValue();
-  const tunnel = intent.tunnels[index];
-  const users = intent.networks.filter((n) => n.line?.connection === tunnel?.id).map((n) => n.name);
+  const tunnel = intent.vpn.providers[index];
+  const users = intent.networks.filter((n) => n.access.via === tunnel?.id).map((n) => n.name);
   return (
     <SettingRow label="Used by" description={`A network's Internet line sends it here (${where("networks")}).`}>
       <Text size="sm" c="dimmed">
@@ -148,27 +148,32 @@ const UsedBy = ({ index }: { index: number }) => {
 };
 
 const providers = defineList({
-  name: "tunnels",
+  name: "vpn.providers",
   title: "Providers",
   addLabel: "Add provider",
   newPage: <NewProviderPage />,
   // Networks out through it go back to their usual line.
   onRemove: (intent, index) => {
-    const gone = intent.tunnels[index];
+    const gone = intent.vpn.providers[index];
     return {
       ...intent,
-      tunnels: intent.tunnels.filter((_, i) => i !== index),
-      networks: intent.networks.map(({ line, ...n }) => (line?.connection === gone?.id ? n : { ...n, ...(line ? { line } : {}) })),
+      vpn: { ...intent.vpn, providers: intent.vpn.providers.filter((_, i) => i !== index) },
+      // Back to Automatic, with the others as fallback again.
+      networks: intent.networks.map((n) => {
+        if (n.access.via !== gone?.id) return n;
+        const { via: _, ...access } = n.access;
+        return { ...n, access: { ...access, fallback: true } };
+      }),
     };
   },
-  itemTitle: (i) => <Value name={`tunnels.${i}.name`} fallback="Provider" />,
+  itemTitle: (i) => <Value name={`vpn.providers.${i}.name`} fallback="Provider" />,
   empty: "No VPN providers. Add one, then choose it as a network's Internet line.",
   columns: [
     {
       header: "Name",
       cell: (i) => (
         <ItemName icon={<ItemIcon icon={IconShieldLock} color="grape" />}>
-          <Value name={`tunnels.${i}.name`} fallback="Unnamed" />
+          <Value name={`vpn.providers.${i}.name`} fallback="Unnamed" />
         </ItemName>
       ),
     },
@@ -176,7 +181,7 @@ const providers = defineList({
       header: "Kind",
       cell: (i) => (
         <Text size="sm" c="dimmed">
-          <Value name={`tunnels.${i}.type`} format={(t) => (t === "openvpn" ? "OpenVPN" : "WireGuard")} />
+          <Value name={`vpn.providers.${i}.type`} format={(t) => (t === "openvpn" ? "OpenVPN" : "WireGuard")} />
         </Text>
       ),
     },
@@ -185,8 +190,8 @@ const providers = defineList({
 });
 
 const ProviderEditor = ({ index }: { index: number }) => {
-  const tunnel: Tunnel | undefined = useDraftValue(`tunnels.${index}`);
-  const at = `tunnels.${index}` as const;
+  const tunnel: Tunnel | undefined = useDraftValue(`vpn.providers.${index}`);
+  const at = `vpn.providers.${index}` as const;
   return (
     <>
       <Section>

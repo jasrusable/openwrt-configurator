@@ -30,12 +30,15 @@ const NewClientPage = () => {
   const [made, setMade] = useState<{ client: VpnClient; privateKey: string }>();
   const back = () => navigate("/vpn");
   const add = () => {
-    const host = nextClientHost(intent.vpn.clients);
+    const host = nextClientHost(intent.vpn.remote_access.clients);
     if (!host || !name.trim()) return;
     const privateKey = newPrivateKey();
-    const id = `c${Math.max(0, ...intent.vpn.clients.map((c) => Number(c.id.slice(1)))) + 1}`;
+    const id = `c${Math.max(0, ...intent.vpn.remote_access.clients.map((c) => Number(c.id.slice(1)))) + 1}`;
     const client: VpnClient = { id, name: name.trim(), public_key: publicKeyOf(privateKey), host, route };
-    draft.replace({ ...intent, vpn: { ...intent.vpn, clients: [...intent.vpn.clients, client] } });
+    draft.replace({
+      ...intent,
+      vpn: { ...intent.vpn, remote_access: { ...intent.vpn.remote_access, clients: [...intent.vpn.remote_access.clients, client] } },
+    });
     setMade({ client, privateKey });
   };
   return (
@@ -75,7 +78,7 @@ const ReplaceKey = ({ index }: { index: number }) => {
   const draft = useDraft();
   const intent: Intent = useDraftValue();
   const [privateKey, setPrivateKey] = useState<string>();
-  const client = intent.vpn.clients[index];
+  const client = intent.vpn.remote_access.clients[index];
   if (!client) return null;
   if (privateKey) {
     return <KeyPanel name={client.name} conf={clientConf(intent, client, privateKey)} onDone={() => setPrivateKey(undefined)} />;
@@ -88,7 +91,7 @@ const ReplaceKey = ({ index }: { index: number }) => {
           size="xs"
           onClick={() => {
             const key = newPrivateKey();
-            draft.set(`vpn.clients.${index}.public_key`, publicKeyOf(key));
+            draft.set(`vpn.remote_access.clients.${index}.public_key`, publicKeyOf(key));
             setPrivateKey(key);
           }}
         >
@@ -100,18 +103,18 @@ const ReplaceKey = ({ index }: { index: number }) => {
 };
 
 const clients = defineList({
-  name: "vpn.clients",
+  name: "vpn.remote_access.clients",
   title: "Clients",
   addLabel: "Add client",
   newPage: <NewClientPage />,
-  itemTitle: (i) => <Value name={`vpn.clients.${i}.name`} fallback="Client" />,
+  itemTitle: (i) => <Value name={`vpn.remote_access.clients.${i}.name`} fallback="Client" />,
   empty: "No clients yet.",
   columns: [
     {
       header: "Name",
       cell: (i) => (
         <ItemName icon={<ItemIcon icon={IconDeviceMobile} color="teal" />}>
-          <Value name={`vpn.clients.${i}.name`} fallback="Unnamed" />
+          <Value name={`vpn.remote_access.clients.${i}.name`} fallback="Unnamed" />
         </ItemName>
       ),
     },
@@ -120,7 +123,7 @@ const clients = defineList({
       header: "Through home",
       cell: (i) => (
         <Text size="sm" c="dimmed">
-          <Value name={`vpn.clients.${i}.route`} format={(r) => (r === "all" ? "Everything" : "Your networks")} />
+          <Value name={`vpn.remote_access.clients.${i}.route`} format={(r) => (r === "all" ? "Everything" : "Your networks")} />
         </Text>
       ),
     },
@@ -128,8 +131,8 @@ const clients = defineList({
   editor: (i) => (
     <>
       <Section>
-        <TextField name={`vpn.clients.${i}.name`} label="Name" />
-        <SegmentedField name={`vpn.clients.${i}.route`} label="Through home" options={[...routes]} />
+        <TextField name={`vpn.remote_access.clients.${i}.name`} label="Name" />
+        <SegmentedField name={`vpn.remote_access.clients.${i}.route`} label="Through home" options={[...routes]} />
         <SettingRow label="Address">
           <ClientAddress index={i} />
         </SettingRow>
@@ -141,7 +144,7 @@ const clients = defineList({
 
 const ClientAddress = ({ index }: { index: number }) => {
   const intent: Intent = useDraftValue();
-  const client = intent.vpn.clients[index];
+  const client = intent.vpn.remote_access.clients[index];
   return (
     <Text size="sm" c="dimmed" ff="monospace">
       {client ? clientAddresses(intent, client)[0] : ""}
@@ -154,9 +157,9 @@ const Settings = () => {
   return (
     <>
       <Section>
-        <SwitchField name="vpn.enabled" label="Remote access" />
+        <SwitchField name="vpn.remote_access.enabled" label="Remote access" />
       </Section>
-      {intent.vpn.enabled && (
+      {intent.vpn.remote_access.enabled && (
         <>
           {!vpnEndpoint(intent) && (
             <Alert color="orange" title="Where should clients connect?">
@@ -165,12 +168,12 @@ const Settings = () => {
           )}
           <Section>
             <TextField
-              name="vpn.endpoint"
+              name="vpn.remote_access.endpoint"
               label="Address"
-              placeholder={intent.internet.ddns?.hostname ?? "home.example.com"}
+              placeholder={intent.internet.dynamic_dns?.hostname ?? "home.example.com"}
             />
-            <NumberField name="vpn.port" label="Port" min={1} max={65535} integer />
-            <TextField name="vpn.subnet" label="Addresses" />
+            <NumberField name="vpn.remote_access.port" label="Port" min={1} max={65535} integer />
+            <TextField name="vpn.remote_access.subnet" label="Addresses" />
           </Section>
           <ZoneAccess base="vpn" />
         </>
@@ -181,7 +184,7 @@ const Settings = () => {
 
 export const RemoteAccessPage = ({ sub }: { sub: string }) => {
   const intent: Intent = useDraftValue();
-  return intent.vpn.enabled ? (
+  return intent.vpn.remote_access.enabled ? (
     <ListPage
       list={clients}
       sub={sub}

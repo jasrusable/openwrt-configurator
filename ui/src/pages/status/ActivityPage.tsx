@@ -40,7 +40,7 @@ export const ActivityPage = () => {
   const events = all.filter((e) => (!device || e.device === device) && shows[which](e.kind ?? "note"));
   const days = [...new Set(events.map((e) => day(e.at)))];
   return (
-    <SettingsPage title="Activity" description={liveLine(intent.site.name, status.dataUpdatedAt, status.isFetching, !!status.data)}>
+    <SettingsPage title="Activity" description={liveLine(intent.system.name, status.dataUpdatedAt, status.isFetching, !!status.data)}>
       <Group gap="sm">
         <SegmentedControl
           size="xs"

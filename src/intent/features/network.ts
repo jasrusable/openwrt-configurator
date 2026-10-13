@@ -56,8 +56,8 @@ const routerInterface = (network: Network, ipv6: boolean, ipv6Upstream: string) 
 const dhcpServer = (network: Network, ipv6: boolean, tunnelDns: string[] = []) => ({
   force: true,
   // The pool ends at .254, so the low addresses stay free.
-  start: 255 - network.dhcp.size,
-  limit: network.dhcp.size,
+  start: 255 - network.dhcp.pool_size,
+  limit: network.dhcp.pool_size,
   leasetime: network.dhcp.lease,
   dhcpv4: "server",
   ...(ipv6
@@ -96,7 +96,7 @@ export const network: Feature = (intent) => {
   // A network's IPv6 needs the internet's: without it there is only a
   // local range, which would be announced as if it went somewhere.
   // A provider's tunnel a network goes out through (its Internet line).
-  const tunnelOf = (n: Network) => intent.tunnels.find((t) => t.id === n.line?.connection);
+  const tunnelOf = (n: Network) => intent.vpn.providers.find((t) => t.id === n.access.via);
   // Not a network out through a provider's tunnel, or kept to a line other
   // than the main one: its IPv6 would go around it, as IPv6 only has the main's.
   const ipv6 = (n: Network) => networkHasIpv6(intent, n);
@@ -106,9 +106,9 @@ export const network: Feature = (intent) => {
   // The mesh over cables: the bridge and its ports carry 1532-byte frames
   // (DSA), so each network's own VLAN device is held to 1500, or it would
   // take the bridge's and send its clients frames they cannot take.
-  const wiredMesh = intent.mesh.enabled && intent.mesh.wired && intent.mesh.jumbo;
+  const wiredMesh = intent.wifi.mesh.enabled && intent.wifi.mesh.over_cable && intent.wifi.mesh.large_frames;
   const onMeshNode = (override: Record<string, unknown>) =>
-    intent.mesh.enabled ? { ".overrides": [{ ".if": meshNode(intent), override }] } : {};
+    intent.wifi.mesh.enabled ? { ".overrides": [{ ".if": meshNode(intent), override }] } : {};
   // An access point only carries the networks other than the main one, for
   // its Wi-Fi to join: it has no address on them, and must not have IPv6's
   // link-local one either, or its own services (LuCI, on every address)
@@ -168,7 +168,7 @@ export const network: Feature = (intent) => {
           ...networks.map((n) => {
             // A mesh node: the mesh in each network's bridge, the main one
             // untagged, as on DSA.
-            const meshPorts = intent.mesh.enabled
+            const meshPorts = intent.wifi.mesh.enabled
               ? [{ ".if": meshNode(intent), override: { ports: [`@cpu_port.${vlanOf(n)}`, isMain(n) ? "bat0" : `bat0.${vlanOf(n)}`] } }]
               : [];
             return {
@@ -234,7 +234,7 @@ export const network: Feature = (intent) => {
                 ".if": onRouter,
                 override: {
                   ula_prefix: networks.some(ipv6)
-                    ? ulaPrefix(intent.site.name)
+                    ? ulaPrefix(intent.system.name)
                     : "",
                 },
               },
@@ -263,7 +263,7 @@ export const network: Feature = (intent) => {
         })),
         // Reservations: the same address every time, and a name in DNS.
         host: named("host", networks.flatMap((n) =>
-          n.reservations.map((r) => ({
+          n.dhcp.reservations.map((r) => ({
             ".if": onRouter,
             name: r.name,
             mac: r.mac,

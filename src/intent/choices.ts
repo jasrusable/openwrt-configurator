@@ -33,7 +33,7 @@ export const portsApply = (protocol: string | undefined) =>
 
 export const channelWidths = ["auto", "20", "40", "80", "160"] as const;
 
-/** The VLAN that carries the mesh over cables (mesh.wired): no network may use it. */
+/** The VLAN that carries the mesh over cables (wifi.mesh.over_cable): no network may use it. */
 export const meshWiredVlan = 4000;
 
 /** The bands a mesh can use, and their channels no radar (DFS) can move it off. */
@@ -121,18 +121,18 @@ export const choices: Choice[] = [
     refuses: false,
   },
   {
-    path: "radios.*.width",
+    path: "wifi.radios.*.width",
     values: ["80", "160"],
     unavailable: (_, [band]) => band === "2g" && "2.4 GHz is at most 40 MHz wide.",
   },
   {
     // 160 MHz on 5 GHz spans 36 to 64, radar channels among them: a radar
     // would move the access point off the mesh's channel.
-    path: "radios.*.width",
+    path: "wifi.radios.*.width",
     values: ["160"],
     unavailable: (intent, [band]) =>
-      intent.mesh?.enabled &&
-      intent.mesh.band === band &&
+      intent.wifi.mesh?.enabled &&
+      intent.wifi.mesh.band === band &&
       band === "5g" &&
       `The mesh keeps to channels without radar (${where("mesh")}): 80 MHz at most.`,
     // Capped at 80 by the compiler meanwhile.
@@ -140,11 +140,11 @@ export const choices: Choice[] = [
   },
   {
     // Off would leave an SSID that only uses this band broadcasting nowhere.
-    path: "radios.*.enabled",
+    path: "wifi.radios.*.enabled",
     values: [false],
     unavailable: (intent, [band]) => {
-      const stranded = intent.wifi.find(
-        (w) => w.bands && !w.bands.some((b) => b !== band && intent.radios[b]?.enabled)
+      const stranded = intent.wifi.networks.find(
+        (w) => w.bands && !w.bands.some((b) => b !== band && intent.wifi.radios[b]?.enabled)
       );
       return (
         stranded &&
@@ -154,25 +154,25 @@ export const choices: Choice[] = [
     refuses: false,
   },
   {
-    path: "wifi.*.bands",
+    path: "wifi.networks.*.bands",
     values: ["2g", "5g", "6g"],
     unavailable: (intent, _, band) =>
-      !intent.radios[band as Band]?.enabled &&
+      !intent.wifi.radios[band as Band]?.enabled &&
       `${bandLabels[band as Band]} radios are off (${where("radios")}).`,
     // The schema reports an SSID none of whose bands is on.
     refuses: false,
   },
   {
-    path: "wifi.*.extra_passwords",
+    path: "wifi.networks.*.extra_passwords",
     unavailable: (intent, [i]) =>
-      intent.wifi[Number(i)]?.security !== "wpa2" &&
+      intent.wifi.networks[Number(i)]?.security !== "wpa2" &&
       "Only with WPA2: WPA3 has one password per network.",
   },
   {
-    path: "wifi.*.security",
+    path: "wifi.networks.*.security",
     values: ["wpa2-wpa3", "wpa3"],
     unavailable: (intent, [i]) =>
-      !!intent.wifi[Number(i)]?.extra_passwords?.length &&
+      !!intent.wifi.networks[Number(i)]?.extra_passwords?.length &&
       "It has more passwords, which only WPA2 allows: remove them first.",
     // The extra passwords' own rule reports it.
     refuses: false,
@@ -196,7 +196,7 @@ export const choices: Choice[] = [
     path: "networks.*.ipv6",
     values: [true],
     unavailable: (intent, [i]) => {
-      const prefix = primaryConnection(intent).ipv6_prefix;
+      const prefix = primaryConnection(intent).ipv6.prefix;
       if (!internetIpv6(intent) || prefix === "auto") return undefined;
       const others = intent.networks.filter((n, j) => n.ipv6 && j !== Number(i)).length;
       const room = roomIn(prefix);
@@ -209,7 +209,7 @@ export const choices: Choice[] = [
     refuses: false,
   },
   {
-    path: "internet.connections.*.ipv6_prefix",
+    path: "internet.lines.*.ipv6.prefix",
     values: ["48", "56", "60", "64"],
     unavailable: (intent, [c], prefix) => {
       const want = intent.networks.filter((n) => n.ipv6).length;
@@ -226,64 +226,64 @@ export const choices: Choice[] = [
     path: "dns.upstream.type",
     values: ["provider"],
     unavailable: (intent) => {
-      const bare = intent.internet.connections.find((c) => c.connection.type === "static" && !c.connection.dns?.length);
+      const bare = intent.internet.lines.find((l) => l.type === "static" && !l.static.dns?.length);
       return (
         bare &&
-        `${bare.name || "An internet connection"} is set by hand, without DNS servers: add them under ${where("internet")} first.`
+        `${bare.name || "An internet line"} is set by hand, without DNS servers: add them under ${where("internet")} first.`
       );
     },
-    // Reported at the connection's DNS servers, where they are missing.
+    // Reported at the line's DNS servers, where they are missing.
     refuses: false,
   },
   {
-    // The networks' IPv6 comes from the main connection alone: two
-    // providers' prefixes at once leave clients on a dead one when a line fails.
-    path: "internet.connections.*.ipv6",
+    // The networks' IPv6 comes from the main line alone: two providers'
+    // prefixes at once leave clients on a dead one when a line fails.
+    path: "internet.lines.*.ipv6.enabled",
     unavailable: (intent, [c]) =>
-      c !== "0" && `Your networks get IPv6 from the first connection, ${primaryConnection(intent).name || "the main one"}.`,
+      c !== "0" && `Your networks get IPv6 from the first line, ${primaryConnection(intent).name || "the main one"}.`,
     refuses: false,
   },
   {
-    path: "internet.connections.*.ipv6_prefix",
-    unavailable: (intent, [c]) => c !== "0" && "Only the first connection's prefix is used.",
+    path: "internet.lines.*.ipv6.prefix",
+    unavailable: (intent, [c]) => c !== "0" && "Only the first line's prefix is used.",
     refuses: false,
   },
   {
     // A port carries one line: reported at the later of two (the UI greys
-    // a port any other connection uses, with portTakenBy). Unset (the
-    // router's WAN port) is checked by the schema.
-    path: "internet.connections.*.port",
+    // a port any other line uses, with portTakenBy). Unset (the router's
+    // WAN port) is checked by the schema.
+    path: "internet.lines.*.port",
     unavailable: (intent, [c], port) => {
-      const other = intent.internet.connections.slice(0, Number(c)).find((o) => o.port === port);
-      return port !== undefined && other && `${other.name || "Another connection"} uses it.`;
+      const other = intent.internet.lines.slice(0, Number(c)).find((o) => o.port === port);
+      return port !== undefined && other && `${other.name || "Another line"} uses it.`;
     },
   },
   {
-    // Unset is the router's WAN port, which one connection can have: the
-    // earliest that has it keeps it.
-    path: "internet.connections.*.port",
+    // Unset is the router's WAN port, which one line can have: the earliest
+    // that has it keeps it.
+    path: "internet.lines.*.port",
     values: [undefined],
     unavailable: (intent, [c]) => {
-      const other = intent.internet.connections.slice(0, Number(c)).find((o) => o.port === undefined);
-      return other && `${other.name || "Another connection"} uses the WAN port.`;
+      const other = intent.internet.lines.slice(0, Number(c)).find((o) => o.port === undefined);
+      return other && `${other.name || "Another line"} uses the WAN port.`;
     },
   },
   {
     // Ignored with one line; kept for when there are several again.
-    path: "networks.*.line",
+    path: "networks.*.access.via",
     unavailable: (intent, [i]) =>
       (intent.networks[Number(i)]?.access?.internet === false && "This network has no internet access.") ||
       (!multiWan(intent) &&
-        !intent.tunnels?.length &&
-        `With one internet connection and no VPN provider (${where("vpnProviders")}), every network uses it.`),
+        !intent.vpn.providers?.length &&
+        `With one internet line and no VPN provider (${where("vpnProviders")}), every network uses it.`),
     refuses: false,
   },
   {
     // A provider's tunnel never falls back (features/vpn.ts): the kill switch, always.
-    path: "networks.*.line.fallback",
+    path: "networks.*.access.fallback",
     values: [true],
     unavailable: (intent, [i]) => {
-      const tunnel = intent.tunnels?.find((t) => t.id === intent.networks[Number(i)]?.line?.connection);
+      const tunnel = intent.vpn.providers?.find((t) => t.id === intent.networks[Number(i)]?.access.via);
       return tunnel && `Never through a VPN provider: the plain line would leak what ${tunnel.name} hides.`;
     },
     refuses: false,
@@ -293,118 +293,124 @@ export const choices: Choice[] = [
     path: "networks.*.ipv6",
     values: [true],
     unavailable: (intent, [i]) => {
-      const line = intent.networks[Number(i)]?.line?.connection;
-      const tunnel = intent.tunnels?.find((t) => t.id === line);
-      const connection = intent.internet.connections.find((c, j) => j > 0 && c.id === line);
+      const via = intent.networks[Number(i)]?.access.via;
+      const tunnel = intent.vpn.providers?.find((t) => t.id === via);
+      const line = intent.internet.lines.find((c, j) => j > 0 && c.id === via);
       return (
         (tunnel && `It goes out through ${tunnel.name}: IPv6 would go around the tunnel.`) ||
-        (connection && `It keeps to ${connection.name || "a backup line"}: IPv6 only goes out the main connection.`)
+        (line && `It keeps to ${line.name || "a backup line"}: IPv6 only goes out the main line.`)
       );
     },
     refuses: false,
   },
   {
     // Turning it on makes the router's key, and lets clients reach the main network.
-    path: "vpn.enabled",
+    path: "vpn.remote_access.enabled",
     values: [true],
     swap: (intent) =>
-      intent.vpn.private_key
+      intent.vpn.remote_access.private_key
         ? undefined
         : {
             note: "Makes the router's WireGuard key.",
-            apply: (next) => ({
-              ...next,
-              vpn: {
-                ...next.vpn,
-                enabled: true,
-                private_key: newPrivateKey(),
-                access: next.vpn.access.networks.length
-                  ? next.vpn.access
-                  : { ...next.vpn.access, networks: next.networks.filter((n) => n.vlan === undefined).map((n) => n.id) },
-              },
-            }),
+            apply: (next) => {
+              const remote = next.vpn.remote_access;
+              return {
+                ...next,
+                vpn: {
+                  ...next.vpn,
+                  remote_access: {
+                    ...remote,
+                    enabled: true,
+                    private_key: newPrivateKey(),
+                    access: remote.access.networks.length
+                      ? remote.access
+                      : { ...remote.access, networks: next.networks.filter((n) => n.vlan === undefined).map((n) => n.id) },
+                  },
+                },
+              };
+            },
           },
   },
   {
-    path: "internet.connections.*.metered",
-    unavailable: (intent) => !multiWan(intent) && "With one connection it is used for everything anyway.",
+    path: "internet.lines.*.failover.metered",
+    unavailable: (intent) => !multiWan(intent) && "With one line it is used for everything anyway.",
     refuses: false,
   },
   {
-    path: "internet.connections.*.down_when_slow",
-    unavailable: (intent) => !multiWan(intent) && "With one connection there is nothing to switch to.",
+    path: "internet.lines.*.failover.down_when_slow",
+    unavailable: (intent) => !multiWan(intent) && "With one line there is nothing to switch to.",
     refuses: false,
   },
   {
-    path: "internet.share_per_device",
+    path: "internet.use_lines.sticky_per_device",
     unavailable: (intent) =>
-      (!multiWan(intent) || intent.internet.mode !== "balance") && "Only used when connections share traffic.",
+      (!multiWan(intent) || intent.internet.use_lines.mode !== "balance") && "Only used when lines share traffic.",
     refuses: false,
   },
   {
-    path: "internet.mode",
-    unavailable: (intent) => !multiWan(intent) && "With one connection there is nothing to share or fail over to.",
+    path: "internet.use_lines.mode",
+    unavailable: (intent) => !multiWan(intent) && "With one line there is nothing to share or fail over to.",
     refuses: false,
   },
   {
-    path: "internet.connections.*.weight",
+    path: "internet.lines.*.failover.weight",
     unavailable: (intent) =>
-      (!multiWan(intent) || intent.internet.mode !== "balance") && "Only used when connections share traffic.",
+      (!multiWan(intent) || intent.internet.use_lines.mode !== "balance") && "Only used when lines share traffic.",
     refuses: false,
   },
   {
     // The mesh carries everything between its nodes on one radio band.
-    path: "mesh.enabled",
+    path: "wifi.mesh.enabled",
     values: [true],
     unavailable: (intent) =>
-      !intent.radios[intent.mesh.band]?.enabled &&
-      `The ${bandLabels[intent.mesh.band]} radios are off (${where("radios")}).`,
+      !intent.wifi.radios[intent.wifi.mesh.band]?.enabled &&
+      `The ${bandLabels[intent.wifi.mesh.band]} radios are off (${where("radios")}).`,
     // Turning it on makes its key: every node must have the same, and nobody types it.
     swap: (intent) =>
-      intent.mesh.key
+      intent.wifi.mesh.key
         ? undefined
         : {
             note: "Makes a key the access points share.",
-            apply: (next) => ({ ...next, mesh: { ...next.mesh, enabled: true, key: newMeshKey() } }),
+            apply: (next) => ({ ...next, wifi: { ...next.wifi, mesh: { ...next.wifi.mesh, enabled: true, key: newMeshKey() } } }),
           },
   },
   {
-    path: "mesh.band",
+    path: "wifi.mesh.band",
     values: [...meshBands],
     unavailable: (intent, _, band) =>
-      intent.mesh.enabled && !intent.radios[band as Band]?.enabled && `The ${bandLabels[band as Band]} radios are off.`,
+      intent.wifi.mesh.enabled && !intent.wifi.radios[band as Band]?.enabled && `The ${bandLabels[band as Band]} radios are off.`,
     // Each band has its own channels: the channel moves with it.
     swap: (intent, _, band) => {
       const channels = meshChannels[band as MeshBand];
-      return channels.includes(intent.mesh.channel)
+      return channels.includes(intent.wifi.mesh.channel)
         ? undefined
         : {
             note: `Moves the mesh to channel ${channels[0]}.`,
-            apply: (next) => ({ ...next, mesh: { ...next.mesh, band: band as MeshBand, channel: channels[0] } }),
+            apply: (next) => ({ ...next, wifi: { ...next.wifi, mesh: { ...next.wifi.mesh, band: band as MeshBand, channel: channels[0] } } }),
           };
     },
   },
   {
-    path: "radios.*.enabled",
+    path: "wifi.radios.*.enabled",
     values: [false],
     unavailable: (intent, [band]) =>
-      intent.mesh.enabled &&
-      intent.mesh.band === band &&
+      intent.wifi.mesh.enabled &&
+      intent.wifi.mesh.band === band &&
       `The mesh links your access points on this band (${where("mesh")}): turn it off, or move it, first.`,
   },
   {
     // An SSID only on the mesh's band would be broadcast nowhere.
-    path: "mesh.dedicated",
+    path: "wifi.mesh.band_reserved",
     values: [true],
     unavailable: (intent) => {
-      const only = intent.wifi.find((w) => w.bands?.length && w.bands.every((b) => b === intent.mesh.band));
+      const only = intent.wifi.networks.find((w) => w.bands?.length && w.bands.every((b) => b === intent.wifi.mesh.band));
       return only && `“${only.ssid || "An SSID"}” only uses this band (${where("ssids")}).`;
     },
   },
   {
     // Only over cables: the Wi-Fi links always take them.
-    path: "mesh.jumbo",
-    unavailable: (intent) => !intent.mesh?.wired && "Only for the mesh over cables.",
+    path: "wifi.mesh.large_frames",
+    unavailable: (intent) => !intent.wifi.mesh?.over_cable && "Only for the mesh over cables.",
     refuses: false,
   },
   {
@@ -417,58 +423,58 @@ export const choices: Choice[] = [
     // Kept for when the mesh is back; until then every device is cabled (features/devices.ts).
     path: "hardware.*.uplink",
     values: ["mesh"],
-    unavailable: (intent) => !intent.mesh.enabled && `Turn on the mesh first (${where("mesh")}).`,
+    unavailable: (intent) => !intent.wifi.mesh.enabled && `Turn on the mesh first (${where("mesh")}).`,
     refuses: false,
   },
   // Every mesh node is on the mesh's channel: one access point elsewhere would drop out of it.
   ...(["2g", "5g"] as const).map(
     (band): Choice => ({
-      path: `hardware.*.wifi.channel.${band}`,
+      path: `hardware.*.radios.${band}.channel`,
       unavailable: (intent) =>
-        intent.mesh.enabled && band === intent.mesh.band && `Set by the mesh (${where("mesh")}): every node uses its channel.`,
+        intent.wifi.mesh.enabled && band === intent.wifi.mesh.band && `Set by the mesh (${where("mesh")}): every node uses its channel.`,
       refuses: false,
     })
   ),
   {
-    path: "admin.password_login",
+    path: "system.ssh.password_login",
     values: [false],
     unavailable: (intent) =>
-      !intent.admin?.authorized_keys?.length &&
+      !intent.system.ssh?.authorized_keys?.length &&
       "Add an authorized key first: with neither a password nor a key, nobody could log in.",
   },
   {
     // usteer moves devices between access points and between bands on one.
-    path: "roaming.steering",
+    path: "wifi.roaming.steering",
     values: ["nudge", "push"],
     unavailable: (intent) =>
       intent.hardware.filter((d) => d.role === "access-point").length <= 1 &&
-      (["2g", "5g", "6g"] as Band[]).filter((b) => intent.radios[b]?.enabled).length <= 1 &&
+      (["2g", "5g", "6g"] as Band[]).filter((b) => intent.wifi.radios[b]?.enabled).length <= 1 &&
       "One access point with one band on: there is nowhere to steer a device to.",
     // Harmless: with nowhere to go, nothing is steered.
     refuses: false,
   },
   {
     // Off stops usteer and turns neighbour lists off on every SSID.
-    path: "wifi.*.roaming_assistance",
+    path: "wifi.networks.*.roaming.assisted",
     unavailable: (intent) =>
-      intent.roaming?.steering === "off" &&
+      intent.wifi.roaming?.steering === "off" &&
       `Steering is ${steeringLabels.off} (${where("roaming")}): no SSID gives neighbour lists.`,
     // Ignored meanwhile, and kept for when steering is back on.
     refuses: false,
   },
   {
-    path: "roaming.prefer_5g",
+    path: "wifi.roaming.prefer_5g",
     values: [true],
     unavailable: (intent) =>
-      intent.roaming?.steering === "off" &&
+      intent.wifi.roaming?.steering === "off" &&
       `Steering is ${steeringLabels.off}: usteer, which moves devices between bands, is stopped.`,
     refuses: false,
   },
   {
-    path: "roaming.prefer_5g",
+    path: "wifi.roaming.prefer_5g",
     values: [true],
     unavailable: (intent) =>
-      !(intent.radios["2g"]?.enabled && (intent.radios["5g"]?.enabled || intent.radios["6g"]?.enabled)) &&
+      !(intent.wifi.radios["2g"]?.enabled && (intent.wifi.radios["5g"]?.enabled || intent.wifi.radios["6g"]?.enabled)) &&
       `Needs 2.4 GHz and a faster band on (${where("radios")}).`,
     refuses: false,
   },
@@ -488,7 +494,7 @@ export const choices: Choice[] = [
     refuses: false,
   },
   {
-    path: "firewall.rules.*.destination_port",
+    path: "firewall.rules.*.ports",
     unavailable: (intent, [i]) =>
       !portsApply(intent.firewall.rules[Number(i)]?.protocol) && "Ports only apply to TCP and UDP.",
     // Ignored for other protocols, and kept for when it is TCP or UDP again.
@@ -556,7 +562,7 @@ export type Availability = {
   option: (value: unknown) => { unavailable?: string; swap?: Swap };
 };
 
-/** The rules for one setting, by its path (like "radios.2g.width"), given the rest of the intent. */
+/** The rules for one setting, by its path (like "wifi.radios.2g.width"), given the rest of the intent. */
 export const availability = (intent: Intent, path: string): Availability => {
   const rules = choices.flatMap((choice) => {
     const at = matchPath(choice.path, path);

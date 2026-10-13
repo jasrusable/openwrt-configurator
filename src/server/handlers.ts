@@ -333,7 +333,7 @@ export const ownKeyApi =
   ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
   async ({ method }) => {
     if (method !== "GET") return json(405, { error: "GET" });
-    const keyPath = readIntent(platform, intentPath)?.admin?.ssh_key_path as string | undefined;
+    const keyPath = (readIntent(platform, intentPath)?.system as { app_login?: { key?: string } } | undefined)?.app_login?.key;
     const publicKey = keyPath ? await ownPublicKey(platform, keyPath) : undefined;
     return json(200, { publicKey: publicKey ?? null });
   };

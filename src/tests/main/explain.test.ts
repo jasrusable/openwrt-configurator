@@ -27,10 +27,10 @@ const usteerOn = (intent: Intent) => {
 test("the roaming explainers quote what the access points are given", (t) => {
   for (const steering of steeringLevels) {
     const intent = sample();
-    intent.roaming = { steering, prefer_5g: true };
+    intent.wifi.roaming = { steering, prefer_5g: true };
     const usteer = usteerOn(intent);
-    const assistance = explainFor(["wifi", "0", "roaming_assistance"], intent)!;
-    const prefer5g = explainFor(["roaming", "prefer_5g"], intent)!;
+    const assistance = explainFor(["wifi", "networks", "0", "roaming", "assisted"], intent)!;
+    const prefer5g = explainFor(["wifi", "roaming", "prefer_5g"], intent)!;
     // Each threshold the device gets, in the words the UI shows for it.
     if (usteer.roam_trigger_snr !== "0") t.true(assistance.includes(`below ${usteer.roam_trigger_snr} dBm`), steering);
     if (usteer.min_snr !== "0") t.true(assistance.includes(`below ${usteer.min_snr} dBm`), steering);
@@ -40,9 +40,9 @@ test("the roaming explainers quote what the access points are given", (t) => {
     t.is(prefer5g.includes("disconnected after"), usteer.aggressiveness === "3", steering);
   }
   const off = sample();
-  off.wifi[0].roaming_assistance = false;
-  off.roaming = { steering: "push", prefer_5g: false };
-  t.regex(explainFor(["wifi", "0", "roaming_assistance"], off)!, /Off for this SSID: no neighbour lists/);
+  off.wifi.networks[0].roaming.assisted = false;
+  off.wifi.roaming = { steering: "push", prefer_5g: false };
+  t.regex(explainFor(["wifi", "networks", "0", "roaming", "assisted"], off)!, /Off for this SSID: no neighbour lists/);
 });
 
 const sources = (dir: string): string[] =>

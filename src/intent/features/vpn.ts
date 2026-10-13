@@ -18,7 +18,7 @@ export const tunnelTable = (id: string) => 100 + Number(id.replace(/\D/g, ""));
 /** Mobile carriers' NAT forgets an idle mapping: a packet every 25 s keeps it. */
 const keepalive = 25;
 
-type Tunnel = Intent["tunnels"][number];
+type Tunnel = Intent["vpn"]["providers"][number];
 type WgTunnel = Extract<Tunnel, { type: "wireguard" }>;
 type OvpnTunnel = Extract<Tunnel, { type: "openvpn" }>;
 
@@ -52,12 +52,13 @@ const endpoint = (hostPort: string) => {
 
 export const vpn: Feature = (intent) => {
   const routerOnly = (sections: Record<string, unknown>[]) => sections.map((s) => ({ ".if": onRouter, ...s }));
-  const { vpn: remote, sites, tunnels, networks } = intent;
+  const { remote_access: remote, sites, providers: tunnels } = intent.vpn;
+  const { networks } = intent;
   const wgTunnels = tunnels.filter((t): t is WgTunnel => t.type === "wireguard");
   const ovpnTunnels = tunnels.filter((t): t is OvpnTunnel => t.type === "openvpn");
   // A network without internet access has no way out, the tunnel's included (firewall.ts).
   const viaTunnel = networks.flatMap((n, i) => {
-    const tunnel = tunnels.find((t) => t.id === n.line?.connection);
+    const tunnel = tunnels.find((t) => t.id === n.access.via);
     return tunnel && n.access.internet ? [{ network: n, tunnel, priority: 100 + i * 2 }] : [];
   });
   const localRanges = [

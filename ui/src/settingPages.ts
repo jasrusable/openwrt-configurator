@@ -5,23 +5,24 @@
  * URL of one item's page. The problems list and the sidebar's marks use it.
  */
 export const settingPages: { path: string; page: string; item?: (index: string) => string }[] = [
-  { path: "site", page: "system" },
-  { path: "admin", page: "system" },
-  { path: "internet.connections", page: "internet", item: (i) => `/internet/${i}` },
+  { path: "system", page: "system" },
+  { path: "internet.lines", page: "internet", item: (i) => `/internet/${i}` },
   { path: "internet", page: "internet" },
   { path: "firewall.rules", page: "firewall", item: (i) => `/firewall/rules/${i}` },
   { path: "firewall.port_forwards", page: "firewall", item: (i) => `/firewall/${i}` },
   { path: "networks", page: "networks", item: (i) => `/networks/${i}` },
-  { path: "wifi", page: "wifi", item: (i) => `/wifi/${i}` },
-  { path: "radios", page: "wifi", item: (band) => `/wifi/radios/${band}` },
-  { path: "roaming", page: "wifi", item: () => "/wifi/roaming" },
-  { path: "mesh", page: "wifi", item: () => "/wifi/mesh" },
+  { path: "wifi.networks", page: "wifi", item: (i) => `/wifi/${i}` },
+  { path: "wifi.radios", page: "wifi", item: (band) => `/wifi/radios/${band}` },
+  { path: "wifi.roaming", page: "wifi", item: () => "/wifi/roaming" },
+  { path: "wifi.mesh", page: "wifi", item: () => "/wifi/mesh" },
   { path: "dns", page: "dns" },
-  { path: "vpn.clients", page: "vpn", item: (i) => `/vpn/${i}` },
+  // Most specific first: the first whose path starts the setting's is its page.
+  { path: "vpn.remote_access.clients", page: "vpn", item: (i) => `/vpn/${i}` },
+  { path: "vpn.remote_access", page: "vpn" },
+  { path: "vpn.sites.peers", page: "vpn", item: (i) => `/vpn/sites/${i}` },
+  { path: "vpn.sites", page: "vpn", item: () => "/vpn/sites" },
+  { path: "vpn.providers", page: "vpn", item: (i) => `/vpn/providers/${i}` },
   { path: "vpn", page: "vpn" },
-  { path: "sites.peers", page: "vpn", item: (i) => `/vpn/sites/${i}` },
-  { path: "sites", page: "vpn", item: () => "/vpn/sites" },
-  { path: "tunnels", page: "vpn", item: (i) => `/vpn/providers/${i}` },
   { path: "hardware", page: "hardware", item: (i) => `/hardware/${i}` },
 ];
 

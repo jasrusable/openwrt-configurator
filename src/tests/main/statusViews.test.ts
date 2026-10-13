@@ -38,7 +38,7 @@ const lanUp = [{ id: "lan", up: true, device: "br-lan", ipv4: [], ipv6: [] }, { 
 
 test("needs attention: the router silent on IPv6 (solicits heard, no adverts) is a problem, with its fix", (t) => {
   const intent = sample();
-  intent.internet.connections[0].ipv6 = true;
+  intent.internet.lines[0].ipv6.enabled = true;
   const router = device("home-router", { interfaces: lanUp, adverts: [{ device: "br-lan", sent: 0, solicits: 84 }] });
   const found = attentionOf({ intent, devices: [router, device("home-ap-1", {})], facts: {} });
   t.like(found[0], { id: "ipv6:silent", severity: "problem", fix: { device: "home-router", service: "odhcpd" } });
@@ -53,8 +53,8 @@ test("needs attention: the router silent on IPv6 (solicits heard, no adverts) is
   t.false(silentOf([{ device: "br-lan", sent: 2, solicits: 90, before: { sent: 0, solicits: 84, seconds: 130 } }]));
   // A network the compiler gives no IPv6 (kept to another line) is never silent.
   const offMain = structuredClone(intent);
-  offMain.internet.connections.push({ ...offMain.internet.connections[0], id: "wanb", name: "Backup" });
-  offMain.networks[0] = { ...offMain.networks[0], line: { connection: "wanb", fallback: true } } as never;
+  offMain.internet.lines.push({ ...offMain.internet.lines[0], id: "wanb", name: "Backup" });
+  offMain.networks[0] = { ...offMain.networks[0], access: { ...offMain.networks[0].access, via: "wanb", fallback: true } };
   t.false(silentOf([{ device: "br-lan", sent: 0, solicits: 84 }], offMain));
 });
 
@@ -133,7 +133,7 @@ test("activity: log lines in words, newest first; the rest left out", (t) => {
     { at: 6000, text: "dnsmasq-dhcp[1]: DHCPACK(br-lan) 10.0.0.9 aa:bb onc-ipv6: all clear" },
   ];
   t.deepEqual(activityOf(intent, [device("home-router", { log })]).map(({ text, kind }) => [text, kind]), [
-    [`${intent.internet.connections[0].name} is offline`, "down"],
+    [`${intent.internet.lines[0].name} is offline`, "down"],
     ["Wan6 has an IPv6 default route, restarting odhcpd", "note"],
     ["Port eth1 disconnected", "down"],
     [`${intent.networks[0].name} came up`, "up"],
@@ -172,7 +172,7 @@ test("survey: our own radios left out by BSSID, on any access point; another rad
 
 test("needs attention: an SSID is missed only where the access point has a radio in one of its bands", (t) => {
   const intent = sample();
-  intent.wifi = [{ ...intent.wifi[0], ssid: "Fast", bands: ["5g"] }];
+  intent.wifi.networks = [{ ...intent.wifi.networks[0], ssid: "Fast", bands: ["5g"] }];
   const facts = (band: "2g" | "5g") => ({
     "home-ap-1": { hostname: "home-ap-1", readAt: 0, schema: { name: "ap", version: "25.12.5", radios: [{ name: "radio0", type: "mac80211" as const, band }] } },
   });

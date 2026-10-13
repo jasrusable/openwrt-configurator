@@ -192,8 +192,8 @@ export const inspect = async ({
   platform: Platform;
 }): Promise<Inspected> => {
   const tries: ONCDeviceConfig["provisioning_config"][] = [
-    ...(intent.admin.ssh_key_path
-      ? [{ ssh_auth: { username: "root", private_key_path: intent.admin.ssh_key_path } }]
+    ...(intent.system.app_login.key
+      ? [{ ssh_auth: { username: "root", private_key_path: intent.system.app_login.key } }]
       : []),
     { ssh_auth: { username: "root", password: stockPassword } },
   ];

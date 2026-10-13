@@ -119,7 +119,7 @@ test("interpreted against the settings: what matches, and what does not", (t) =>
   t.deepEqual(status.ssids[0], { ssid: "Home", accessPoints: ["home-ap-1"], clients: 2 });
   t.deepEqual(status.clients, { total: 3, wifi: 2 });
   t.deepEqual(status.unexpected, { interfaces: ["oldvpn"], ssids: ["Not Ours"] });
-  const withVpn = { ...intent, vpn: { ...intent.vpn, enabled: true }, mesh: { ...intent.mesh, enabled: true } };
+  const withVpn = { ...intent, vpn: { ...intent.vpn, remote_access: { ...intent.vpn.remote_access, enabled: true } }, wifi: { ...intent.wifi, mesh: { ...intent.wifi.mesh, enabled: true } } };
   const ours = device("home-router", {
     interfaces: ["vpn", "bat0", "batmesh", "oldvpn"].map((id) => ({ id, up: true, ipv4: [], ipv6: [] })),
   });
@@ -146,16 +146,13 @@ test("several lines: mwan3's view of each, and which carry traffic", (t) => {
   t.deepEqual(parseLines({}), [], "no mwan3: no lines");
 
   const intent = sample();
-  intent.internet.connections.push({
+  intent.internet.lines.push({
     id: "wanb",
     name: "LTE",
     port: "eth2",
-    connection: { type: "dhcp" },
-    ipv6: false,
-    ipv6_prefix: "auto",
-    weight: 1,
-    metered: true,
-    down_when_slow: false,
+    type: "dhcp",
+    ipv6: { enabled: false, prefix: "auto" },
+    failover: { weight: 1, metered: true, down_when_slow: false },
   });
   const router = (wan: string, wanb: string) =>
     device("home-router", {
@@ -170,7 +167,7 @@ test("several lines: mwan3's view of each, and which carry traffic", (t) => {
   t.deepEqual(using(onBackup), ["wanb"]);
   t.like(onBackup.connections[0], { line: { state: "offline", since: 600 }, inUse: false });
   t.true(onBackup.internet!.up);
-  intent.internet.mode = "balance";
+  intent.internet.use_lines.mode = "balance";
   t.deepEqual(using(networkStatus(intent, [router("online", "online")])), ["wan"], "sharing: a metered line held back");
   t.deepEqual(using(networkStatus(intent, [router("disconnecting", "online")])), ["wan"], "failing is still working");
 });
@@ -189,7 +186,7 @@ test("the mesh: each node's direct neighbours and their throughput, named by any
   t.deepEqual(parseOriginators(""), [], "no batman: no neighbours");
 
   const intent = sample();
-  intent.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", dedicated: false, wired: false, jumbo: true };
+  intent.wifi.mesh = { enabled: true, band: "5g", channel: 36, key: "mesh-key-123456", band_reserved: false, over_cable: false, large_frames: true };
   const status = networkStatus(intent, [device("home-ap-1", { mesh: parseOriginators(table) })], {
     "home-router": ["02:aa:00:00:00:02"],
     "home-ap-2": ["02:cc:00:00:00:04", "02:dd:00:00:00:04"],
@@ -203,7 +200,7 @@ test("the mesh: each node's direct neighbours and their throughput, named by any
       ],
     },
   ]);
-  const wired = { ...intent, mesh: { ...intent.mesh, wired: true, jumbo: true } };
+  const wired = { ...intent, wifi: { ...intent.wifi, mesh: { ...intent.wifi.mesh, over_cable: true, large_frames: true } } };
   const split = networkStatus(wired, [device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1500 })], {});
   t.true(split.mesh![0].fragmentsOverCable, "a port at 1500: batman splits its frames over cable");
   const whole = networkStatus(wired, [device("home-ap-1", { mesh: parseOriginators(table), meshWiredMtu: 1532 })], {});

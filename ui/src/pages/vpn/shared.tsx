@@ -32,8 +32,10 @@ const useTargets = (self: "vpn" | "sites") => {
 };
 
 /** Internet, networks and router access for the VPN's clients or the linked sites, as for a network. */
-export const ZoneAccess = ({ base }: { base: "vpn" | "sites" }) => {
-  const targets = useTargets(base);
+export const ZoneAccess = ({ base: zone }: { base: "vpn" | "sites" }) => {
+  const targets = useTargets(zone);
+  // The zones' settings: remote access's, or the linked sites'.
+  const base = zone === "vpn" ? "vpn.remote_access" : "vpn.sites";
   return (
     <Section title="Access" description="Replies always get back.">
       <SwitchField name={`${base}.access.internet`} label="Internet" />

@@ -105,7 +105,7 @@ export const clientsOf = (
   const routerName = intent.hardware.find((d) => d.role === "router")?.name;
   const router = devices.find((d) => d.hostname === routerName);
   const ours = new Set(Object.values(facts).flatMap((f) => f?.macs ?? []));
-  const reservations = intent.networks.flatMap((n) => n.reservations.map((r) => ({ ...r, mac: r.mac.toLowerCase() })));
+  const reservations = intent.networks.flatMap((n) => n.dhcp.reservations.map((r) => ({ ...r, mac: r.mac.toLowerCase() })));
   const wifi = devices.filter(reached).flatMap((d) =>
     d.wifi.flatMap((w) => w.clients.map((c) => ({ ...c, accessPoint: d.hostname, ssid: w.ssid, band: bandOf(w.freq) })))
   );
@@ -113,7 +113,7 @@ export const clientsOf = (
   // Not what is seen on an internet line (the provider's modem): those are not your devices.
   const lineDevices = new Set(
     reached(router)
-      ? intent.internet.connections.flatMap((c) => router.interfaces.filter((i) => i.id === c.id || i.id === `${c.id}6`).map((i) => i.device))
+      ? intent.internet.lines.flatMap((c) => router.interfaces.filter((i) => i.id === c.id || i.id === `${c.id}6`).map((i) => i.device))
       : []
   );
   const neighbours = reached(router) ? router.neighbours.filter((n) => !n.device || !lineDevices.has(n.device)) : [];
@@ -236,7 +236,7 @@ export const internetOf = (intent: Intent, devices: Reachability[]): InternetChe
 export const activityOf = (intent: Intent, devices: Reachability[]): ActivityView[] => {
   const nameOf = (id: string) =>
     intent.networks.find((n) => n.id === id)?.name ??
-    intent.internet.connections.find((c) => c.id === id || `${c.id}6` === id)?.name ??
+    intent.internet.lines.find((c) => c.id === id || `${c.id}6` === id)?.name ??
     id;
   const say = (text: string): { text: string; kind: ActivityKind } | undefined => {
     let m: RegExpExecArray | null;
@@ -333,9 +333,9 @@ export const attentionOf = ({
     if (d.role === "access-point") {
       const here = new Set(status.wifi.map((w) => w.ssid));
       const radios = facts[d.name]?.schema.radios;
-      const canCarry = (w: Intent["wifi"][number]) =>
-        !radios || (w.bands ?? bands.filter((b) => intent.radios[b].enabled)).some((b) => radios.some((r) => r.band === b));
-      for (const w of intent.wifi.filter((w) => w.enabled !== false && !here.has(w.ssid) && canCarry(w))) {
+      const canCarry = (w: Intent["wifi"]["networks"][number]) =>
+        !radios || (w.bands ?? bands.filter((b) => intent.wifi.radios[b].enabled)).some((b) => radios.some((r) => r.band === b));
+      for (const w of intent.wifi.networks.filter((w) => w.enabled !== false && !here.has(w.ssid) && canCarry(w))) {
         out.push({
           id: `ssid:${d.name}:${w.ssid}`,
           severity: "warning",
@@ -347,7 +347,7 @@ export const attentionOf = ({
     }
   }
   if (reached(router)) {
-    const connections = intent.internet.connections;
+    const connections = intent.internet.lines;
     const up = connections.filter((c) => {
       const line = router.lines.find((l) => l.id === c.id);
       return line ? line.state === "online" || line.state === "disconnecting" : !!router.interfaces.find((i) => i.id === c.id)?.up;
@@ -405,7 +405,7 @@ export const internetCountersOf = (intent: Intent, devices: Reachability[]) => {
   const router = devices.find((d) => d.hostname === routerName);
   if (!reached(router)) return undefined;
   const lines = Object.fromEntries(
-    intent.internet.connections.flatMap((c) => {
+    intent.internet.lines.flatMap((c) => {
       const device = router.interfaces.find((i) => i.id === c.id)?.device;
       return device && router.counters[device] ? [[c.id, router.counters[device]] as const] : [];
     })

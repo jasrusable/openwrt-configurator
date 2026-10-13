@@ -69,7 +69,7 @@ const serviceRules = (zone: string): Section[] => [
 const zoneOf = (end: string) => (end === internet ? wan : end);
 
 const userRule = (rule: Rule): Section => {
-  const addresses = [...(rule.source_addresses ?? []), ...(rule.destination_addresses ?? [])];
+  const addresses = [...(rule.from_addresses ?? []), ...(rule.to_addresses ?? [])];
   const family = addresses.length === 0 ? undefined : isIpv6(addresses[0]) ? "ipv6" : "ipv4";
   const protocol = rule.protocol ?? "tcp+udp";
   return {
@@ -78,10 +78,10 @@ const userRule = (rule: Rule): Section => {
     src: zoneOf(rule.from),
     // To the router is fw4's input: a rule with no destination zone.
     ...(rule.to === router ? {} : { dest: rule.to === anywhere ? "*" : zoneOf(rule.to) }),
-    ...(rule.source_addresses?.length ? { src_ip: rule.source_addresses } : {}),
-    ...(rule.destination_addresses?.length ? { dest_ip: rule.destination_addresses } : {}),
+    ...(rule.from_addresses?.length ? { src_ip: rule.from_addresses } : {}),
+    ...(rule.to_addresses?.length ? { dest_ip: rule.to_addresses } : {}),
     // Kept in the intent for when the protocol is TCP or UDP again.
-    ...(rule.destination_port && portsApply(protocol) ? { dest_port: fw4Ports(rule.destination_port) } : {}),
+    ...(rule.ports && portsApply(protocol) ? { dest_port: fw4Ports(rule.ports) } : {}),
     proto: protocol === "tcp+udp" ? ["tcp", "udp"] : protocol === "any" ? ["all"] : [protocol],
     ...(family ? { family } : {}),
     // Blocked from the internet: dropped, so a scan learns nothing. From
@@ -97,20 +97,20 @@ export const firewall: Feature = (intent) => {
     sections.map((section) => ({ ".if": onRouter, ...section }));
   const main = networks.find((n) => n.vlan === undefined) ?? networks[0];
   // The interfaces the internet connection makes (features/internet.ts).
-  const wanInterfaces = intent.internet.connections.flatMap((c, i) =>
-    i === 0 && c.ipv6 ? [c.id, ipv6Interface(c)] : [c.id]
+  const wanInterfaces = intent.internet.lines.flatMap((c, i) =>
+    i === 0 && c.ipv6.enabled ? [c.id, ipv6Interface(c)] : [c.id]
   );
   // What has a zone and an access: each network, and remote access's clients
   // and the linked sites when there are any, which networks may reach in turn.
   const areas = [
     ...networks.map((n) => ({ id: n.id, access: n.access })),
-    ...(intent.vpn.enabled ? [{ id: "vpn", access: intent.vpn.access }] : []),
-    ...(intent.sites.peers.length ? [{ id: "sites", access: intent.sites.access }] : []),
+    ...(intent.vpn.remote_access.enabled ? [{ id: "vpn", access: intent.vpn.remote_access.access }] : []),
+    ...(intent.vpn.sites.peers.length ? [{ id: "sites", access: intent.vpn.sites.access }] : []),
   ];
   // Networks out through a provider's tunnel (their Internet line).
   // Only a network with internet access: the tunnel is a way to the internet.
   const viaTunnel = networks.flatMap((n) => {
-    const tunnel = intent.tunnels.find((t) => t.id === n.line?.connection);
+    const tunnel = intent.vpn.providers.find((t) => t.id === n.access.via);
     return tunnel && n.access.internet ? [{ network: n, tunnel }] : [];
   });
   // The network an address is on: where a port forward lands.
@@ -147,7 +147,7 @@ export const firewall: Feature = (intent) => {
             network: [area.id],
           })),
           // A provider's tunnel: out like the internet, masqueraded.
-          ...intent.tunnels.map((tunnel) => ({
+          ...intent.vpn.providers.map((tunnel) => ({
             ".name": tunnel.id,
             name: tunnel.id,
             input: "REJECT",
@@ -187,11 +187,11 @@ export const firewall: Feature = (intent) => {
           ...stockRules(main.id),
           ...areas.filter((a) => a.access.router === "services").flatMap((a) => serviceRules(a.id)),
           // WireGuard from the internet: remote access's clients, the sites.
-          ...(intent.vpn.enabled
-            ? [{ name: "Allow-WireGuard", src: wan, proto: ["udp"], dest_port: String(intent.vpn.port), target: "ACCEPT" }]
+          ...(intent.vpn.remote_access.enabled
+            ? [{ name: "Allow-WireGuard", src: wan, proto: ["udp"], dest_port: String(intent.vpn.remote_access.port), target: "ACCEPT" }]
             : []),
-          ...(intent.sites.peers.length
-            ? [{ name: "Allow-WireGuard-sites", src: wan, proto: ["udp"], dest_port: String(intent.sites.port), target: "ACCEPT" }]
+          ...(intent.vpn.sites.peers.length
+            ? [{ name: "Allow-WireGuard-sites", src: wan, proto: ["udp"], dest_port: String(intent.vpn.sites.port), target: "ACCEPT" }]
             : []),
           // Sharing devices: the router's reflector must hear the network's mDNS.
           ...networks
@@ -212,12 +212,12 @@ export const firewall: Feature = (intent) => {
               ...(forward.enabled ? {} : { enabled: false }),
               target: "DNAT",
               src: wan,
-              src_dport: forward.external_port,
+              src_dport: forward.port,
               proto: forward.protocol === "tcp+udp" ? ["tcp", "udp"] : [forward.protocol],
-              ...(forward.source_addresses?.length ? { src_ip: forward.source_addresses } : {}),
-              dest: networkOf(forward.internal_address),
-              dest_ip: forward.internal_address,
-              dest_port: forward.internal_port ?? forward.external_port,
+              ...(forward.from_addresses?.length ? { src_ip: forward.from_addresses } : {}),
+              dest: networkOf(forward.to.address),
+              dest_ip: forward.to.address,
+              dest_port: forward.to.port ?? forward.port,
               family: "ipv4",
               reflection: forward.reflection,
             })),

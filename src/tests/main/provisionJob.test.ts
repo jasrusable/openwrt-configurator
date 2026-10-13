@@ -16,7 +16,7 @@ const withJob = async (
 ) => {
   const dir = mkdtempSync(join(tmpdir(), "onc-job-"));
   const intentPath = join(dir, "intent.json");
-  writeFileSync(intentPath, JSON.stringify({ schema: 1, site: { name: "A" } }));
+  writeFileSync(intentPath, JSON.stringify({ schema: 1, system: { name: "A" } }));
   const files = { ...nodePlatform, selfCommand: () => ["sh", "-c", script, "onc"] };
   try {
     await run(intentPath, files);
@@ -40,14 +40,14 @@ test.serial("a successful run makes the provisioned snapshot live", async (t) =>
     t.true((await startProvision({ intentPath, files, now: () => 42 })).started);
     t.is((await provisionStatus({ intentPath, files })).state, "running");
     // An edit during the run is not what gets provisioned.
-    writeFileSync(intentPath, JSON.stringify({ schema: 1, site: { name: "B" } }));
+    writeFileSync(intentPath, JSON.stringify({ schema: 1, system: { name: "B" } }));
 
     const status = await settle(intentPath, files);
     t.is(status.state, "succeeded");
     t.is(status.startedAt, 42);
     t.regex(status.log, /ran provision .*provisioning\.json/);
     t.is(
-      JSON.parse(readFileSync(jobPaths(intentPath).live, "utf8")).site.name,
+      JSON.parse(readFileSync(jobPaths(intentPath).live, "utf8")).system.name,
       "A"
     );
     t.is(status.live, "differs", "the draft moved on during the run");

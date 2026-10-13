@@ -77,7 +77,7 @@ const RadiosTable = () => {
     format: (v: any) => string | undefined,
   ) => (
     <Text size="sm" c="dimmed">
-      <Value name={`radios.${band}.${key}` as never} format={format} />
+      <Value name={`wifi.radios.${band}.${key}` as never} format={format} />
     </Text>
   );
   return (
@@ -91,7 +91,7 @@ const RadiosTable = () => {
         onRowClick={(i) => navigate(`/wifi/radios/${bands[i].band}`)}
         rowMarker={(i) =>
           issues.some((issue) =>
-            issue.path.startsWith(`radios.${bands[i].band}.`),
+            issue.path.startsWith(`wifi.radios.${bands[i].band}.`),
           ) && (
             <ThemeIcon size={18} radius="xl" color="red" variant="light">
               <IconAlertCircle size={14} />
@@ -112,7 +112,7 @@ const RadiosTable = () => {
             header: "Status",
             cell: (i) => (
               <Value
-                name={`radios.${bands[i].band}.enabled`}
+                name={`wifi.radios.${bands[i].band}.enabled`}
                 format={(on) => (
                   <Badge variant="light" color={on ? "green" : "gray"}>
                     {on ? "On" : "Off"}
@@ -159,11 +159,11 @@ const useHaveBand = (label: string) => {
 
 const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
   const navigate = useNavigate();
-  const { mesh }: Intent = useDraftValue();
+  const { mesh } = (useDraftValue() as Intent).wifi;
   // The mesh's band is on its channel, on every node.
   const meshChannel = mesh.enabled && mesh.band === band ? mesh.channel : undefined;
   const haveBand = useHaveBand(label);
-  const at = (key: string) => `radios.${band}.${key}` as never;
+  const at = (key: string) => `wifi.radios.${band}.${key}` as never;
   return (
     <SettingsPage
       title={[

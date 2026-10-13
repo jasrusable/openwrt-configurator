@@ -97,14 +97,14 @@ const rules = defineList({
       <Section title="Traffic">
         <EndSelectField name={`firewall.rules.${i}.from`} label="From" />
         <TagsField
-          name={`firewall.rules.${i}.source_addresses`}
+          name={`firewall.rules.${i}.from_addresses`}
           label="From devices"
           description="Addresses or ranges, like 10.0.0.20 or 10.0.0.0/28."
           placeholder="Any"
         />
         <EndSelectField name={`firewall.rules.${i}.to`} label="To" destination />
         <TagsField
-          name={`firewall.rules.${i}.destination_addresses`}
+          name={`firewall.rules.${i}.to_addresses`}
           label="To devices"
           placeholder="Any"
         />
@@ -114,7 +114,7 @@ const rules = defineList({
           options={protocolOptions}
         />
         <TextField
-          name={`firewall.rules.${i}.destination_port`}
+          name={`firewall.rules.${i}.ports`}
           label="Ports"
           description="Like 443, 8000-8100 or 80 443."
           placeholder="Any"

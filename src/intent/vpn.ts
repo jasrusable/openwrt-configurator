@@ -9,35 +9,35 @@ import { fromBase64, toBase64 } from "../wireguard";
 import { ulaPrefix } from "./features/network";
 import type { Intent } from "./schema";
 
-export type VpnClient = Intent["vpn"]["clients"][number];
-export type Site = Intent["sites"]["peers"][number];
+export type VpnClient = Intent["vpn"]["remote_access"]["clients"][number];
+export type Site = Intent["vpn"]["sites"]["peers"][number];
 
 /** The zones remote access and sites add: targets of an access, like networks. */
-export const vpnZones = (intent: Pick<Intent, "vpn" | "sites">) => [
-  ...(intent.vpn.enabled ? ["vpn"] : []),
-  ...(intent.sites.peers.length ? ["sites"] : []),
+export const vpnZones = (intent: Pick<Intent, "vpn">) => [
+  ...(intent.vpn.remote_access.enabled ? ["vpn"] : []),
+  ...(intent.vpn.sites.peers.length ? ["sites"] : []),
 ];
 
 /** The first three parts of a /24: "10.0.99" for 10.0.99.0/24. */
 const prefixOf = (subnet: string) => subnet.split(".").slice(0, 3).join(".");
 
 /** The router's address among the clients: .1. */
-export const vpnRouterAddress = (intent: Pick<Intent, "vpn">) => `${prefixOf(intent.vpn.subnet)}.1`;
+export const vpnRouterAddress = (intent: Pick<Intent, "vpn">) => `${prefixOf(intent.vpn.remote_access.subnet)}.1`;
 
 /**
  * Its IPv6, from the networks' ULA prefix: the /64 numbered ffff. A network's
  * is its VLAN in hex (features/network.ts), at most ffe (VLAN 4094), so never this.
  */
-const vpnUla = (intent: Pick<Intent, "site">) => ulaPrefix(intent.site.name).replace("::/48", ":ffff::");
+const vpnUla = (intent: Pick<Intent, "system">) => ulaPrefix(intent.system.name).replace("::/48", ":ffff::");
 
-export const vpnRouterAddresses = (intent: Pick<Intent, "vpn" | "site">) => [
+export const vpnRouterAddresses = (intent: Pick<Intent, "vpn" | "system">) => [
   `${vpnRouterAddress(intent)}/24`,
   `${vpnUla(intent)}1/64`,
 ];
 
 /** A client's addresses: IPv4 by its host number, IPv6 in the VPN's /64. */
-export const clientAddresses = (intent: Pick<Intent, "vpn" | "site">, client: Pick<VpnClient, "host">) => [
-  `${prefixOf(intent.vpn.subnet)}.${client.host}`,
+export const clientAddresses = (intent: Pick<Intent, "vpn" | "system">, client: Pick<VpnClient, "host">) => [
+  `${prefixOf(intent.vpn.remote_access.subnet)}.${client.host}`,
   `${vpnUla(intent)}${client.host.toString(16)}`,
 ];
 
@@ -48,29 +48,29 @@ export const nextClientHost = (clients: Pick<VpnClient, "host">[]) => {
 };
 
 /** Where clients and sites connect to: the address set, else the dynamic DNS name. */
-export const vpnEndpoint = (intent: Pick<Intent, "vpn" | "internet">) => intent.vpn.endpoint ?? intent.internet.ddns?.hostname;
+export const vpnEndpoint = (intent: Pick<Intent, "vpn" | "internet">) => intent.vpn.remote_access.endpoint ?? intent.internet.dynamic_dns?.hostname;
 
 /** host:port, an IPv6 address in brackets. */
 export const withPort = (host: string, port: number) => (host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`);
 
 /** Remote access may reach the linked sites: its clients route to them, and they route back. */
-const vpnReachesSites = (intent: Pick<Intent, "vpn" | "sites">) =>
-  intent.vpn.enabled && intent.sites.peers.length > 0 && intent.vpn.access.networks.includes("sites");
+const vpnReachesSites = (intent: Pick<Intent, "vpn">) =>
+  intent.vpn.remote_access.enabled && intent.vpn.sites.peers.length > 0 && intent.vpn.remote_access.access.networks.includes("sites");
 
 /** What a client sends through the tunnel: everything, or only home's ranges (and the linked sites', when it may reach them). */
-const clientRoutes = (intent: Pick<Intent, "vpn" | "networks" | "site" | "sites">, client: Pick<VpnClient, "route">) =>
+const clientRoutes = (intent: Pick<Intent, "vpn" | "networks" | "system">, client: Pick<VpnClient, "route">) =>
   client.route === "all"
     ? ["0.0.0.0/0", "::/0"]
     : [
         ...intent.networks.map((n) => n.subnet),
-        intent.vpn.subnet,
-        ulaPrefix(intent.site.name),
-        ...(vpnReachesSites(intent) ? intent.sites.peers.flatMap((p) => p.subnets) : []),
+        intent.vpn.remote_access.subnet,
+        ulaPrefix(intent.system.name),
+        ...(vpnReachesSites(intent) ? intent.vpn.sites.peers.flatMap((p) => p.subnets) : []),
       ];
 
 /** A client's .conf (and QR code), with its private key, which only the page that made it has. */
 export const clientConf = (
-  intent: Pick<Intent, "vpn" | "networks" | "site" | "internet" | "sites">,
+  intent: Pick<Intent, "vpn" | "networks" | "system" | "internet">,
   client: Pick<VpnClient, "host" | "route">,
   privateKey: string
 ) => {
@@ -79,8 +79,8 @@ export const clientConf = (
     addresses: clientAddresses(intent, client).map((a, i) => `${a}/${i === 0 ? 32 : 128}`),
     dns: [vpnRouterAddress(intent)],
     peer: {
-      publicKey: intent.vpn.private_key ? publicKeyOf(intent.vpn.private_key) : "",
-      endpoint: withPort(vpnEndpoint(intent) ?? "your-address", intent.vpn.port),
+      publicKey: intent.vpn.remote_access.private_key ? publicKeyOf(intent.vpn.remote_access.private_key) : "",
+      endpoint: withPort(vpnEndpoint(intent) ?? "your-address", intent.vpn.remote_access.port),
       allowedIps: clientRoutes(intent, client),
     },
     // Keeps a phone's tunnel open through mobile carriers' NAT.
@@ -92,15 +92,15 @@ export const clientConf = (
 /** What another site needs to link to this one: its key, where it is, its ranges. */
 export type SiteInvite = { name: string; public_key: string; endpoint?: string; subnets: string[] };
 
-export const inviteOf = (intent: Pick<Intent, "site" | "sites" | "networks" | "vpn" | "internet">): SiteInvite | undefined =>
-  intent.sites.private_key
+export const inviteOf = (intent: Pick<Intent, "system" | "vpn" | "networks" | "internet">): SiteInvite | undefined =>
+  intent.vpn.sites.private_key
     ? {
-        name: intent.site.name,
-        public_key: publicKeyOf(intent.sites.private_key),
-        ...(vpnEndpoint(intent) ? { endpoint: withPort(vpnEndpoint(intent)!, intent.sites.port) } : {}),
+        name: intent.system.name,
+        public_key: publicKeyOf(intent.vpn.sites.private_key),
+        ...(vpnEndpoint(intent) ? { endpoint: withPort(vpnEndpoint(intent)!, intent.vpn.sites.port) } : {}),
         // Remote access's range too when its clients may reach the other
         // site: that site then routes their replies back here.
-        subnets: [...intent.networks.map((n) => n.subnet), ...(vpnReachesSites(intent) ? [intent.vpn.subnet] : [])],
+        subnets: [...intent.networks.map((n) => n.subnet), ...(vpnReachesSites(intent) ? [intent.vpn.remote_access.subnet] : [])],
       }
     : undefined;
 

@@ -20,7 +20,7 @@ const steering = steeringLevels.map((value) => ({ value, label: steeringLabels[v
 /** The SSIDs it applies to: those with roaming assistance on. */
 const AppliesTo = () => {
   const intent: Intent = useDraftValue();
-  const off = intent.roaming?.steering === "off";
+  const off = intent.wifi.roaming?.steering === "off";
   // The compiler's own list (usteer's ssid_list).
   const names = off ? [] : steeredSsids(intent).map((w) => w.ssid || "Unnamed");
   return (
@@ -37,11 +37,11 @@ const AppliesTo = () => {
 
 /** Says what the chosen level does, in the words the SSIDs' pages use too. */
 const SteeringField = () => {
-  const level: SteeringLevel = useDraftValue("roaming.steering") ?? "advise";
+  const level: SteeringLevel = useDraftValue("wifi.roaming.steering") ?? "advise";
   const summary = steeringSummary[level];
   return (
     <SegmentedField
-      name="roaming.steering"
+      name="wifi.roaming.steering"
       label="Steering"
       description={summary[0].toUpperCase() + summary.slice(1) + "."}
       options={steering}
@@ -57,7 +57,7 @@ export const RoamingPage = () => (
     <Section>
       <SteeringField />
       <SwitchField
-        name="roaming.prefer_5g"
+        name="wifi.roaming.prefer_5g"
         label="Prefer 5 GHz"
         description="Moves strong dual-band devices off 2.4 GHz."
       />

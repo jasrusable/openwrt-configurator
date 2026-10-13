@@ -8,19 +8,19 @@ export const devices: Feature = (intent) => ({
     hostname: device.name,
     // Reached over the mesh, through a cabled one: changed first, while the
     // path to it is still the one it has.
-    ...(intent.mesh.enabled && device.uplink === "mesh" ? { provision_order: -1 } : {}),
-    tags: { role: device.role, ...(intent.mesh.enabled && device.uplink === "mesh" ? { uplink: "mesh" } : {}) },
+    ...(intent.wifi.mesh.enabled && device.uplink === "mesh" ? { provision_order: -1 } : {}),
+    tags: { role: device.role, ...(intent.wifi.mesh.enabled && device.uplink === "mesh" ? { uplink: "mesh" } : {}) },
     ipaddr:
       device.role === "router"
         ? routerAddress(intent)
-        : `${device.name}.${intent.dns.local_domain}`,
+        : `${device.name}.${intent.dns.domain}`,
     provisioning_config: {
       ssh_auth: {
         username: "root",
-        ...(intent.admin.ssh_key_path
-          ? { private_key_path: intent.admin.ssh_key_path }
+        ...(intent.system.app_login.key
+          ? { private_key_path: intent.system.app_login.key }
           : {}),
-        ...(intent.admin.password ? { password: intent.admin.password } : {}),
+        ...(intent.system.app_login.password ? { password: intent.system.app_login.password } : {}),
       },
     },
   })),

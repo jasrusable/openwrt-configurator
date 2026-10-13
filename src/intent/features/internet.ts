@@ -54,7 +54,7 @@ const ddnsServices = { cloudflare: "cloudflare.com-v4", duckdns: "duckdns.org", 
 const ddnsIpUrl = "https://api.ipify.org";
 
 /** The ddns-scripts service for a name that follows the internet address. */
-export const ddnsService = (ddns: NonNullable<Intent["internet"]["ddns"]>, wan: string) => {
+export const ddnsService = (ddns: NonNullable<Intent["internet"]["dynamic_dns"]>, wan: string) => {
   // Cloudflare's script takes "record@zone": vpn.home@example.com for
   // vpn.home.example.com in example.com, @example.com for the zone itself.
   const zone = ddns.zone ?? ddns.hostname.split(".").slice(-2).join(".");
@@ -85,7 +85,8 @@ export const ddnsService = (ddns: NonNullable<Intent["internet"]["ddns"]>, wan: 
 };
 
 export const internet: Feature = (intent) => {
-  const { connections, mode, upnp } = intent.internet;
+  const { lines: connections, upnp } = intent.internet;
+  const { mode } = intent.internet.use_lines;
   const main = mainNetwork(intent);
   const several = multiWan(intent);
   // Only with the provider's DNS are the resolvers it hands out used.
@@ -94,25 +95,26 @@ export const internet: Feature = (intent) => {
     sections.map((section) => ({ ".if": onRouter, ...section }));
 
   const interfaces = connections.flatMap((c, i) => {
-    const { connection, vlan, ipv6_prefix } = c;
-    // Only the main connection's IPv6: the networks take their prefixes from it.
-    const ipv6 = i === 0 && c.ipv6;
+    const { vlan } = c;
+    const ipv6Prefix = c.ipv6.prefix;
+    // Only the main line's IPv6: the networks take their prefixes from it.
+    const ipv6 = i === 0 && c.ipv6.enabled;
     const proto =
-      connection.type === "pppoe"
+      c.type === "pppoe"
         ? {
             proto: "pppoe",
-            username: connection.username,
-            password: connection.password,
+            username: c.pppoe.username,
+            password: c.pppoe.password,
             // IPv6CP only: the IPv6 interface below asks for the prefix, at the size wanted.
             ipv6: ipv6 ? "1" : false,
           }
-        : connection.type === "static"
+        : c.type === "static"
           ? {
               proto: "static",
-              ipaddr: connection.address,
-              netmask: netmask(connection.prefix_length),
-              gateway: connection.gateway,
-              ...(connection.dns?.length ? { dns: connection.dns } : {}),
+              ipaddr: c.static.address,
+              netmask: netmask(c.static.prefix_length),
+              gateway: c.static.gateway,
+              ...(c.static.dns?.length ? { dns: c.static.dns } : {}),
             }
           : { proto: "dhcp" };
     return [
@@ -120,7 +122,7 @@ export const internet: Feature = (intent) => {
         ".name": c.id,
         // A tagged line: netifd makes the VLAN device from the name.
         device: vlan ? `${portOf(c)}.${vlan}` : portOf(c),
-        ...(connection.type === "static" ? {} : { peerdns }),
+        ...(c.type === "static" ? {} : { peerdns }),
         // Several default routes need distinct metrics (mwan3 then chooses).
         ...(several ? { metric: (i + 1) * 10 } : {}),
         ...proto,
@@ -132,7 +134,7 @@ export const internet: Feature = (intent) => {
               device: `@${c.id}`,
               proto: "dhcpv6",
               peerdns,
-              ...(ipv6_prefix === "auto" ? {} : { reqprefix: ipv6_prefix }),
+              ...(ipv6Prefix === "auto" ? {} : { reqprefix: ipv6Prefix }),
             },
           ]
         : []),
@@ -140,8 +142,8 @@ export const internet: Feature = (intent) => {
   });
 
   const queue = (c: Connection) => {
-    const { speed, vlan, id } = c;
-    const ptm = speed?.line === "vdsl" ? " ptm" : "";
+    const { shaping: speed, vlan, id } = c;
+    const ptm = speed?.medium === "vdsl" ? " ptm" : "";
     return speed
       ? {
           ".name": id,
@@ -153,7 +155,7 @@ export const internet: Feature = (intent) => {
           qdisc: "cake",
           script: "piece_of_cake.qos",
           linklayer_advanced: "1",
-          ...lineOverhead(speed.line, vlan !== undefined, c.connection.type === "pppoe"),
+          ...lineOverhead(speed.medium, vlan !== undefined, c.type === "pppoe"),
           // Fair per device behind the NAT; "ingress" counts what cake
           // drops too, so the download rate holds. VDSL2's 64/65
           // encoding is "ptm". The flags only make LuCI show them.
@@ -177,20 +179,20 @@ export const internet: Feature = (intent) => {
     return name;
   };
   const internetPolicy = connections.map((c) =>
-    mode === "failover" ? member(c, failoverOrder(connections).indexOf(c) + 1) : c.metered ? member(c, 2) : member(c, 1, c.weight)
+    mode === "failover" ? member(c, failoverOrder(connections).indexOf(c) + 1) : c.failover.metered ? member(c, 2) : member(c, 1, c.failover.weight)
   );
   const byNetwork = intent.networks.flatMap((n) => {
-    const line = n.line && connections.find((c) => c.id === n.line!.connection);
+    const line = n.access.via && connections.find((c) => c.id === n.access.via);
     if (!line) return [];
     const others = connections.filter((c) => c !== line);
     return [
       {
         network: n,
-        use: [member(line, 1), ...(n.line!.fallback ? others.map((c, j) => member(c, j + 2)) : [])],
+        use: [member(line, 1), ...(n.access.fallback ? others.map((c, j) => member(c, j + 2)) : [])],
       },
     ];
   });
-  const perDevice = mode === "balance" && intent.internet.share_per_device;
+  const perDevice = mode === "balance" && intent.internet.use_lines.sticky_per_device;
   const sticky = { sticky: true, timeout: stickySeconds };
   const mwan3 = several
     ? {
@@ -206,12 +208,12 @@ export const internet: Feature = (intent) => {
               track_method: "ping",
               track_ip: [...check.ips],
               reliability: check.reliability,
-              count: c.down_when_slow ? slowLine.count : 1,
+              count: c.failover.down_when_slow ? slowLine.count : 1,
               timeout: check.timeoutS,
               interval: check.intervalS,
               down: check.missesDown,
               up: check.missesDown,
-              ...(c.down_when_slow
+              ...(c.failover.down_when_slow
                 ? {
                     check_quality: true,
                     failure_latency: slowLine.failMs,
@@ -269,7 +271,7 @@ export const internet: Feature = (intent) => {
   // backup, rather than keep sending IPv6 into the dead line (the router
   // advertises itself on the prefix alone, ra_default 1). Back with the line.
   const mainLine = primaryConnection(intent);
-  const ipv6Failover = several && !!mainLine.ipv6;
+  const ipv6Failover = several && mainLine.ipv6.enabled;
   return {
     ...(ipv6Failover
       ? {
@@ -316,7 +318,7 @@ esac
       // With one line, off: stopped and disabled, as with no config it still
       // marks every packet and keeps four monitors running (verified on 25.12.5).
       serviceWhen(onRouter, "mwan3", several),
-      serviceWhen(onRouter, "ddns", !!intent.internet.ddns),
+      serviceWhen(onRouter, "ddns", !!intent.internet.dynamic_dns),
     ],
     config: {
       network: { interface: routerOnly(interfaces) },
@@ -338,7 +340,7 @@ esac
             port: 5000,
             upnp_lease_file: "/var/run/miniupnpd.leases",
             igdv1: true,
-            uuid: upnpUuid(intent.site.name),
+            uuid: upnpUuid(intent.system.name),
           },
         ]),
         perm_rule: routerOnly(named("perm", [
@@ -362,7 +364,7 @@ esac
       // Declared on or off: no service is no updating.
       ddns: {
         ddns: routerOnly([{ ".name": "global", upd_privateip: false }]),
-        service: routerOnly(intent.internet.ddns ? [ddnsService(intent.internet.ddns, primaryConnection(intent).id)] : []),
+        service: routerOnly(intent.internet.dynamic_dns ? [ddnsService(intent.internet.dynamic_dns, primaryConnection(intent).id)] : []),
       },
       mwan3,
     },

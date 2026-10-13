@@ -14,6 +14,7 @@ import {
   firewallSchema,
   internet,
   isIpv6,
+  networkAccessSchema,
   reservedIds,
   router,
 } from "./firewall";
@@ -189,29 +190,72 @@ export const isPrivateRange = (cidr: string) => {
 export const vpnRoutes = ["home", "all"] as const;
 export const ddnsProviders = ["cloudflare", "duckdns", "dynv6"] as const;
 
-/** One way to the internet: a line on a port of the router. */
-const internetConnection = z
-  .object({
-    /** Hidden and stable: it names the connection's interfaces (wan and wan6; wanb and wanb6). */
-    id: z.string().regex(/^wan[b-z]?$/, "an id like wan or wanb"),
-    name: z.string().min(1, "required").max(32, "at most 32 characters"),
-    /** The router port it plugs into; unset, the one the router's maker marked WAN. */
-    port: z
-      .string()
-      .regex(/^[A-Za-z0-9._-]+$/, "a port name, like eth2")
-      .optional(),
-    connection: z.discriminatedUnion("type", [
-      z.object({ type: z.literal("dhcp") }).strict(),
-      z
+/** What every line has, whatever its type. */
+const lineBase = {
+  /** Hidden and stable: it names the line's interfaces (wan and wan6; wanb and wanb6). */
+  id: z.string().regex(/^wan[b-z]?$/, "an id like wan or wanb"),
+  name: z.string().min(1, "required").max(32, "at most 32 characters"),
+  /** The router port it plugs into; unset, the one the router's maker marked WAN. */
+  port: z
+    .string()
+    .regex(/^[A-Za-z0-9._-]+$/, "a port name, like eth2")
+    .optional(),
+  /** The provider's VLAN, for a line that must be tagged. */
+  vlan: z.number().int().min(1, "1 to 4094").max(4094, "1 to 4094").optional(),
+  /** The first line's: the networks' IPv6 comes from it. */
+  ipv6: z
+    .object({
+      enabled: z.boolean().default(true),
+      /** How much to ask the provider for: each network takes a /64. */
+      prefix: z.enum(ipv6Prefixes).default("auto"),
+    })
+    .strict()
+    .default({}),
+  /** Smart queueing (less lag under load), on when the line's speeds are set. */
+  shaping: z
+    .object({
+      down_mbps: z.number().positive(),
+      up_mbps: z.number().positive(),
+      /** What carries it: the per-packet overhead queueing counts. */
+      medium: z.enum(lineTypes).default("fibre"),
+    })
+    .strict()
+    .optional(),
+  /** With several lines. */
+  failover: z
+    .object({
+      /** Sharing traffic: its share of new connections, against the others'. */
+      weight: z.number().int().min(1, "1 to 100").max(100, "1 to 100").default(1),
+      /** Paid by the amount (LTE): checked sparingly, and only a backup, never shared. */
+      metered: z.boolean().default(false),
+      /** A line that is up but too slow to use counts as down. */
+      down_when_slow: z.boolean().default(false),
+    })
+    .strict()
+    .default({}),
+};
+
+/** One way to the internet: a line on a port of the router, and how it connects. */
+const internetLine = z.discriminatedUnion("type", [
+  z.object({ ...lineBase, type: z.literal("dhcp") }).strict(),
+  z
+    .object({
+      ...lineBase,
+      type: z.literal("pppoe"),
+      pppoe: z
         .object({
-          type: z.literal("pppoe"),
           username: z.string().min(1, "required"),
           password: z.string().min(1, "required"),
         })
         .strict(),
-      z
+    })
+    .strict(),
+  z
+    .object({
+      ...lineBase,
+      type: z.literal("static"),
+      static: z
         .object({
-          type: z.literal("static"),
           address: ipv4,
           prefix_length: z.number().int().min(8).max(30),
           gateway: ipv4,
@@ -219,29 +263,9 @@ const internetConnection = z
           dns: z.array(dnsServer).optional(),
         })
         .strict(),
-    ]),
-    /** The provider's VLAN, for a line that must be tagged. */
-    vlan: z.number().int().min(1, "1 to 4094").max(4094, "1 to 4094").optional(),
-    /** The first connection's: the networks' IPv6 comes from it. */
-    ipv6: z.boolean().default(true),
-    ipv6_prefix: z.enum(ipv6Prefixes).default("auto"),
-    /** The line's speed. Set, it turns on smart queueing on this line (less lag under load). */
-    speed: z
-      .object({
-        down_mbps: z.number().positive(),
-        up_mbps: z.number().positive(),
-        line: z.enum(lineTypes).default("fibre"),
-      })
-      .strict()
-      .optional(),
-    /** Sharing traffic: its share of new connections, against the others'. */
-    weight: z.number().int().min(1, "1 to 100").max(100, "1 to 100").default(1),
-    /** Paid by the amount (LTE): checked sparingly, and only a backup, never shared. */
-    metered: z.boolean().default(false),
-    /** A line that is up but too slow to use counts as down. */
-    down_when_slow: z.boolean().default(false),
-  })
-  .strict();
+    })
+    .strict(),
+]);
 
 /** A MAC address, as aa:bb:cc:dd:ee:ff. */
 export const macAddress = z
@@ -301,35 +325,25 @@ const network = z
       .max(4094, "2 to 4094")
       .optional(),
     subnet: ipv4Subnet,
+    ipv6: z.boolean().default(true),
     dhcp: z
       .object({
-        size: z.number().int().min(1).max(253),
-        lease: leaseTime,
+        /** How many addresses it hands out (the pool ends at .254). */
+        pool_size: z.number().int().min(1).max(253).default(150),
+        lease: leaseTime.default("12h"),
         /** DNS servers handed to devices instead of the router (a Pi-hole, say). */
         dns_servers: z.array(ipv4).min(1, "at least one").optional(),
+        /** Devices that always get the same address, and a name in DNS. */
+        reservations: z.array(reservation).default([]),
       })
       .strict()
-      .default({ size: 150, lease: "12h" }),
-    ipv6: z.boolean().default(true),
-    access: accessSchema.default({}),
-    reservations: z.array(reservation).default([]),
+      .default({}),
+    access: networkAccessSchema.default({}),
     /**
      * Devices on it (AirPlay, printers, Chromecast) are seen on the other
      * networks that share theirs, and theirs here: mDNS, reflected.
      */
     share_devices: z.boolean().default(false),
-    /**
-     * With several internet connections: its devices go out this one
-     * (`connection`, by id), or the others too when it is down (`fallback`).
-     * Unset, they go as the internet's mode says.
-     */
-    line: z
-      .object({
-        connection: z.string().min(1, "pick a connection"),
-        fallback: z.boolean().default(true),
-      })
-      .strict()
-      .optional(),
   })
   .strict();
 
@@ -338,7 +352,8 @@ export const intentSchema = z
     /** This file's format version; older files are migrated (migrations.ts). */
     schema: z.literal(intentVersion),
 
-    site: z
+    /** The site, and who logs in to its devices. */
+    system: z
       .object({
         name: z.string().min(1, "required"),
         timezone: z
@@ -348,79 +363,54 @@ export const intentSchema = z
         country: z
           .string()
           .refine((code) => countries.includes(code), "pick a country"),
-      })
-      .strict(),
-
-    /** How the tool logs in to every device, as root. */
-    /**
-     * How this app logs in to the devices (ssh_key_path, password), and who
-     * may log in as root at all: the compiler installs authorized_keys and
-     * can turn password login off, so a device fresh from stock (which lets
-     * root in with any password) is closed by its first apply.
-     */
-    admin: z
-      .object({
-        ssh_key_path: z.string().optional(),
-        password: z.string().optional(),
-        /** Public keys allowed to log in as root, as `ssh-keygen` writes them. */
-        authorized_keys: z.array(sshPublicKey).default([]),
-        /** Whether root may log in with a password; off needs an authorized key. */
-        password_login: z.boolean().default(true),
-      })
-      .strict()
-      .default({}),
-
-    /** The routers and access points: what each is called and does. */
-    hardware: z
-      .array(
-        z
+        /** How this app logs in to the devices, as root. */
+        app_login: z
           .object({
-            name,
-            role: z.enum(["router", "access-point"]),
-            /** Where it is, like "Living room": shown in LuCI. */
-            location: z.string().max(64).optional(),
-            /** How an access point reaches the network: a cable, or the mesh. */
-            uplink: z.enum(["cable", "mesh"]).default("cable"),
-            wifi: z
-              .object({
-                /** Pin a channel per band; "auto" (the default) lets it choose. */
-                channel: z
-                  .object({
-                    "2g": channel.optional().refine((c) => c === undefined || c === "auto" || channelsOf["2g"](c), "a 2.4 GHz channel is 1 to 14"),
-                    "5g": channel.optional().refine((c) => c === undefined || c === "auto" || channelsOf["5g"](c), "a 5 GHz channel, like 36 or 149"),
-                  })
-                  .strict()
-                  .optional(),
-              })
-              .strict()
-              .optional(),
+            /** The private key on this computer; else the agent's. */
+            key: z.string().optional(),
+            password: z.string().optional(),
           })
           .strict()
-      )
-      .refine(
-        (devices) => devices.filter((d) => d.role === "router").length === 1,
-        "exactly one device must be the router"
-      )
-      .refine(
-        (devices) => new Set(devices.map((d) => d.name)).size === devices.length,
-        "device names must be unique"
-      ),
+          .default({}),
+        /**
+         * Who may log in as root at all: the compiler installs
+         * authorized_keys and can turn password login off, so a device fresh
+         * from stock (which lets root in with any password) is closed by its
+         * first apply.
+         */
+        ssh: z
+          .object({
+            /** Public keys allowed to log in as root, as `ssh-keygen` writes them. */
+            authorized_keys: z.array(sshPublicKey).default([]),
+            /** Whether root may log in with a password; off needs an authorized key. */
+            password_login: z.boolean().default(true),
+          })
+          .strict()
+          .default({}),
+      })
+      .strict(),
 
     internet: z
       .object({
         /**
          * The ways out, in order: the first is the main one, and gives the
-         * networks their IPv6; with more, `mode` says how they are used.
+         * networks their IPv6; with more, `use_lines` says how they are used.
          */
-        connections: z.array(internetConnection).min(1, "at least one connection"),
-        /** With two or more: the next takes over when one fails, or they share traffic by weight. */
-        mode: z.enum(internetModes).default("failover"),
+        lines: z.array(internetLine).min(1, "at least one line"),
+        /** With two or more lines. */
+        use_lines: z
+          .object({
+            /** The next takes over when one fails, or they share traffic by weight. */
+            mode: z.enum(internetModes).default("failover"),
+            /** Sharing traffic: each device keeps to one line (not only for secure websites). */
+            sticky_per_device: z.boolean().default(false),
+          })
+          .strict()
+          .default({}),
         /** Devices on the main network may open ports for themselves (UPnP, NAT-PMP). */
         upnp: z.boolean().default(false),
-        /** Sharing traffic: each device keeps to one line (not only for secure websites). */
-        share_per_device: z.boolean().default(false),
         /** A name that follows the internet address (dynamic DNS), for remote access and sites. */
-        ddns: z
+        dynamic_dns: z
           .object({
             provider: z.enum(ddnsProviders),
             hostname: z.string().regex(/^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/, "like home.example.com"),
@@ -444,198 +434,209 @@ export const intentSchema = z
      */
     networks: z.array(network).min(1, "at least one network"),
 
-    firewall: firewallSchema,
-
-    wifi: z.array(
-      z
+    /** Wi-Fi: its networks (SSIDs), the radios, roaming between access points, the mesh. */
+    wifi: z
+      .object({
+      networks: z.array(
+        z
+          .object({
+            ssid: z.string().min(1, "required").max(32, "at most 32 characters"),
+            /** Off: kept, but not broadcast. */
+            enabled: z.boolean().default(true),
+            /** The id of the network it joins. */
+            network: z.string().min(1, "pick a network"),
+            /** Where it is broadcast; unset, on every enabled band. */
+            bands: z.array(z.enum(bands)).min(1, "at least one band").optional(),
+            /**
+             * Clients cannot reach each other: hostapd's isolation, within one
+             * access point and band.
+             */
+            isolate_clients: z.boolean().default(false),
+            /** WPA2; WPA2 and WPA3 side by side; or WPA3 only. 6 GHz is always WPA3. */
+            security: z.enum(securityModes).default("wpa2"),
+            password: wifiPassword,
+            /** More passwords for the same network, e.g. one per person (WPA2 only). */
+            extra_passwords: z.array(wifiPassword).optional(),
+            /** Not announced: devices must be told its name. */
+            hidden: z.boolean().default(false),
+            roaming: z
+              .object({
+                /** 802.11r: devices move between access points without a pause. */
+                fast: z.boolean().default(true),
+                /** 802.11k/v: access points tell devices their neighbours, so they roam well. */
+                assisted: z.boolean().default(true),
+              })
+              .strict()
+              .default({}),
+          })
+          .strict()
+      ),
+      /** Per band, on every access point. */
+      radios: z
         .object({
-          ssid: z.string().min(1, "required").max(32, "at most 32 characters"),
-          /** Off: kept, but not broadcast. */
-          enabled: z.boolean().default(true),
-          /** The id of the network it joins. */
-          network: z.string().min(1, "pick a network"),
-          /** Where it is broadcast; unset, on every enabled band. */
-          bands: z.array(z.enum(bands)).min(1, "at least one band").optional(),
-          /**
-           * Clients cannot reach each other: hostapd's isolation, within one
-           * access point and band.
-           */
-          isolate_clients: z.boolean().default(false),
-          /** WPA2; WPA2 and WPA3 side by side; or WPA3 only. 6 GHz is always WPA3. */
-          security: z.enum(securityModes).default("wpa2"),
-          password: wifiPassword,
-          /** More passwords for the same network, e.g. one per person (WPA2 only). */
-          extra_passwords: z.array(wifiPassword).optional(),
-          /** Not announced: devices must be told its name. */
-          hidden: z.boolean().default(false),
-          /** 802.11r: devices move between access points without a pause. */
-          fast_roaming: z.boolean().default(true),
-          /** 802.11k/v: access points tell devices their neighbours, so they roam well. */
-          roaming_assistance: z.boolean().default(true),
+          "2g": radio({ enabled: true }),
+          "5g": radio({ enabled: true }),
+          // Off by default: few access points have it, and it needs WPA3.
+          "6g": radio({ enabled: false }),
         })
         .strict()
-    ),
-
-    /** Per band, on every access point. */
-    radios: z
-      .object({
-        "2g": radio({ enabled: true }),
-        "5g": radio({ enabled: true }),
-        // Off by default: few access points have it, and it needs WPA3.
-        "6g": radio({ enabled: false }),
+        .default({}),
+      /**
+       * How the access points move devices to a better access point or band
+       * (usteer), on the SSIDs with roaming assistance. Off gives no neighbour
+       * lists at all; advise only gives them; nudge asks a fading device to
+       * move; push also disconnects one that will not, or that stays too weak.
+       * The values per level are in roaming.ts.
+       */
+      roaming: z
+        .object({
+          steering: z.enum(steeringLevels).default("advise"),
+          /** Ask dual-band devices with a strong signal to leave 2.4 GHz. */
+          prefer_5g: z.boolean().default(false),
+        })
+        .strict()
+        .default({}),
+      /**
+       * Wireless backhaul: access points (and the router, with a radio) link
+       * to each other over Wi-Fi (802.11s, with batman-adv routing over it), so
+       * an access point needs no cable. Every node uses one band and channel.
+       */
+      mesh: z
+        .object({
+          enabled: z.boolean().default(false),
+          band: z.enum(meshBands).default("5g"),
+          /** Fixed: every node must be on it. Never a radar (DFS) channel, which a radar would move. */
+          channel: z.number().int().default(36),
+          /** Generated when the mesh is turned on; every node must have the same. */
+          key: wifiPassword.optional(),
+          /** The band is the mesh's alone: no SSID uses it (a tri-band access point's 6 GHz, say). */
+          band_reserved: z.boolean().default(false),
+          /** batman also over the cables between nodes, on a VLAN of its own: a cable when there is one, Wi-Fi when not. */
+          over_cable: z.boolean().default(false),
+          /** Over cables, batman's whole 1532-byte frames: every switch between nodes must pass them. Off, it splits its packets there. */
+          large_frames: z.boolean().default(true),
+        })
+        .strict()
+        .default({}),
       })
-      .strict()
-      .default({}),
+      .strict(),
 
-    /**
-     * How the access points move devices to a better access point or band
-     * (usteer), on the SSIDs with roaming assistance. Off gives no neighbour
-     * lists at all; advise only gives them; nudge asks a fading device to
-     * move; push also disconnects one that will not, or that stays too weak.
-     * The values per level are in roaming.ts.
-     */
-    roaming: z
-      .object({
-        steering: z.enum(steeringLevels).default("advise"),
-        /** Ask dual-band devices with a strong signal to leave 2.4 GHz. */
-        prefer_5g: z.boolean().default(false),
-      })
-      .strict()
-      .default({}),
+    firewall: firewallSchema,
 
-    /**
-     * Remote access: phones and laptops reach home over WireGuard, as a zone
-     * of their own with an access like a network's. Each client's private
-     * key stays with the client; only its public key is kept.
-     */
+    /** VPN: remote access for phones and laptops, linked sites, and VPN providers to go out through. */
     vpn: z
       .object({
-        enabled: z.boolean().default(false),
-        port: z.number().int().min(1).max(65535).default(51820),
-        /** The clients' addresses. */
-        subnet: ipv4Subnet.default("10.0.99.0/24"),
-        /** Where clients connect to: a name or an address; unset, the dynamic DNS name. */
-        /** A name or an address, without a port (the port is its own setting). */
-        endpoint: z
-          .string()
-          .regex(/^([A-Za-z0-9.-]+|[0-9A-Fa-f]*:[0-9A-Fa-f:]*:[0-9A-Fa-f:]*)$/, "a name or an address, without a port")
-          .optional(),
-        /** The router's; made when remote access is turned on. */
-        private_key: wgKey.optional(),
-        access: accessSchema.default({ internet: true, networks: [], router: "full" }),
-        clients: z
-          .array(
+      /**
+       * Remote access: phones and laptops reach home over WireGuard, as a zone
+       * of their own with an access like a network's. Each client's private
+       * key stays with the client; only its public key is kept.
+       */
+      remote_access: z
+        .object({
+          enabled: z.boolean().default(false),
+          port: z.number().int().min(1).max(65535).default(51820),
+          /** The clients' addresses. */
+          subnet: ipv4Subnet.default("10.0.99.0/24"),
+          /** Where clients connect to: a name or an address; unset, the dynamic DNS name. */
+          /** A name or an address, without a port (the port is its own setting). */
+          endpoint: z
+            .string()
+            .regex(/^([A-Za-z0-9.-]+|[0-9A-Fa-f]*:[0-9A-Fa-f:]*:[0-9A-Fa-f:]*)$/, "a name or an address, without a port")
+            .optional(),
+          /** The router's; made when remote access is turned on. */
+          private_key: wgKey.optional(),
+          access: accessSchema.default({ internet: true, networks: [], router: "full" }),
+          clients: z
+            .array(
+              z
+                .object({
+                  id: z.string().regex(/^c\d{1,3}$/, "an id like c1"),
+                  name: z.string().min(1, "required").max(32),
+                  public_key: wgKey,
+                  /** Its address in the subnet: .2 to .254, fixed so its config keeps working. */
+                  host: z.number().int().min(2).max(254),
+                  /** Everything through home, or only home's networks. */
+                  route: z.enum(vpnRoutes).default("home"),
+                })
+                .strict()
+            )
+            .default([]),
+        })
+        .strict()
+        .default({}),
+      /** Other sites linked over WireGuard: each reaches the other's networks, as its access says. */
+      sites: z
+        .object({
+          private_key: wgKey.optional(),
+          port: z.number().int().min(1).max(65535).default(51821),
+          access: accessSchema.default({ internet: false, networks: [], router: "services" }),
+          peers: z
+            .array(
+              z
+                .object({
+                  id: z.string().regex(/^s\d{1,2}$/, "an id like s1"),
+                  name: z.string().min(1, "required").max(32),
+                  public_key: wgKey,
+                  /** Where it is; unset, it connects to this site. */
+                  endpoint: hostPort.optional(),
+                  /** Its networks, which this site routes to it. */
+                  subnets: z.array(ipv4Cidr).min(1, "at least one range"),
+                })
+                .strict()
+            )
+            .default([]),
+        })
+        .strict()
+        .default({}),
+      /**
+       * VPN providers (Mullvad, Proton, …): tunnels a network's internet can
+       * go out through (its Internet line), from the provider's .conf.
+       */
+      providers: z
+        .array(
+          z.union([
             z
               .object({
-                id: z.string().regex(/^c\d{1,3}$/, "an id like c1"),
-                name: z.string().min(1, "required").max(32),
-                public_key: wgKey,
-                /** Its address in the subnet: .2 to .254, fixed so its config keeps working. */
-                host: z.number().int().min(2).max(254),
-                /** Everything through home, or only home's networks. */
-                route: z.enum(vpnRoutes).default("home"),
+                id: tunnelId,
+                name: tunnelName,
+                type: z.literal("wireguard").default("wireguard"),
+                private_key: wgKey,
+                address: ipv4WithPrefix,
+                /** The provider's DNS servers: the networks out through it use them (DHCP's option 6: IPv4 only, as the tunnel is). */
+                dns: z.array(ipv4).optional(),
+                peer: z
+                  .object({ public_key: wgKey, preshared_key: wgKey.optional(), endpoint: hostPort })
+                  .strict(),
               })
-              .strict()
-          )
-          .default([]),
-      })
-      .strict()
-      .default({}),
-
-    /**
-     * VPN providers (Mullvad, Proton, …): tunnels a network's internet can
-     * go out through (its Internet line), from the provider's .conf.
-     */
-    tunnels: z
-      .array(
-        z.union([
-          z
-            .object({
-              id: tunnelId,
-              name: tunnelName,
-              type: z.literal("wireguard").default("wireguard"),
-              private_key: wgKey,
-              address: ipv4WithPrefix,
-              /** The provider's DNS servers: the networks out through it use them (DHCP's option 6: IPv4 only, as the tunnel is). */
-              dns: z.array(ipv4).optional(),
-              peer: z
-                .object({ public_key: wgKey, preshared_key: wgKey.optional(), endpoint: hostPort })
-                .strict(),
-            })
-            .strict(),
-          z
-            .object({
-              id: tunnelId,
-              name: tunnelName,
-              type: z.literal("openvpn"),
-              /** The provider's .ovpn, as given (its keys inline). */
-              config: z
-                .string()
-                .min(1, "paste the provider's .ovpn")
-                .refine((c) => /^\s*remote\s/m.test(c), "no remote in it")
-                .superRefine((c, ctx) => {
-                  const unsafe = ovpnUnsafe(c);
-                  if (unsafe.length) {
-                    ctx.addIssue({
-                      code: "custom",
-                      message: `options a provider's file may not set here, as they could run or write things on the router: ${unsafe.join(", ")}`,
-                    });
-                  }
-                }),
-              /** Where the provider asks for them: one line each in its login file. */
-              username: z.string().regex(/^[^\r\n]*$/, "one line").optional(),
-              password: z.string().regex(/^[^\r\n]*$/, "one line").optional(),
-              dns: z.array(ipv4).optional(),
-            })
-            .strict(),
-        ])
-      )
-      .default([]),
-
-    /** Other sites linked over WireGuard: each reaches the other's networks, as its access says. */
-    sites: z
-      .object({
-        private_key: wgKey.optional(),
-        port: z.number().int().min(1).max(65535).default(51821),
-        access: accessSchema.default({ internet: false, networks: [], router: "services" }),
-        peers: z
-          .array(
+              .strict(),
             z
               .object({
-                id: z.string().regex(/^s\d{1,2}$/, "an id like s1"),
-                name: z.string().min(1, "required").max(32),
-                public_key: wgKey,
-                /** Where it is; unset, it connects to this site. */
-                endpoint: hostPort.optional(),
-                /** Its networks, which this site routes to it. */
-                subnets: z.array(ipv4Cidr).min(1, "at least one range"),
+                id: tunnelId,
+                name: tunnelName,
+                type: z.literal("openvpn"),
+                /** The provider's .ovpn, as given (its keys inline). */
+                config: z
+                  .string()
+                  .min(1, "paste the provider's .ovpn")
+                  .refine((c) => /^\s*remote\s/m.test(c), "no remote in it")
+                  .superRefine((c, ctx) => {
+                    const unsafe = ovpnUnsafe(c);
+                    if (unsafe.length) {
+                      ctx.addIssue({
+                        code: "custom",
+                        message: `options a provider's file may not set here, as they could run or write things on the router: ${unsafe.join(", ")}`,
+                      });
+                    }
+                  }),
+                /** Where the provider asks for them: one line each in its login file. */
+                username: z.string().regex(/^[^\r\n]*$/, "one line").optional(),
+                password: z.string().regex(/^[^\r\n]*$/, "one line").optional(),
+                dns: z.array(ipv4).optional(),
               })
-              .strict()
-          )
-          .default([]),
-      })
-      .strict()
-      .default({}),
-
-    /**
-     * Wireless backhaul: access points (and the router, with a radio) link
-     * to each other over Wi-Fi (802.11s, with batman-adv routing over it), so
-     * an access point needs no cable. Every node uses one band and channel.
-     */
-    mesh: z
-      .object({
-        enabled: z.boolean().default(false),
-        band: z.enum(meshBands).default("5g"),
-        /** Fixed: every node must be on it. Never a radar (DFS) channel, which a radar would move. */
-        channel: z.number().int().default(36),
-        /** Generated when the mesh is turned on; every node must have the same. */
-        key: wifiPassword.optional(),
-        /** The band is the mesh's alone: no SSID uses it (a tri-band access point's 6 GHz, say). */
-        dedicated: z.boolean().default(false),
-        /** batman also over the cables between nodes, on a VLAN of its own: a cable when there is one, Wi-Fi when not. */
-        wired: z.boolean().default(false),
-        /** Over cables, batman's whole 1532-byte frames: every switch between nodes must pass them. Off, it splits its packets there. */
-        jumbo: z.boolean().default(true),
+              .strict(),
+          ])
+        )
+        .default([]),
       })
       .strict()
       .default({}),
@@ -663,20 +664,57 @@ export const intentSchema = z
               .strict(),
           ])
           .default({ type: "provider" }),
-        /** Devices are reachable as <name>.<local_domain>. */
-        local_domain: name.default("lan"),
+        /** Devices are reachable as <name>.<domain>. */
+        domain: name.default("lan"),
         /**
          * Refuse answers from the internet that point at your own addresses
          * (DNS rebinding), so a web page cannot reach devices inside.
          */
         rebind_protection: z.boolean().default(true),
-        /** Your own names, like nas → 10.0.0.20: name.<local_domain>. */
-        records: z
+        /** Your own names, like nas → 10.0.0.20: name.<domain>. */
+        hosts: z
           .array(z.object({ name, address: z.string() }).strict())
           .default([]),
       })
       .strict()
       .default({}),
+
+    /** The routers and access points: what each is called and does. */
+    hardware: z
+      .array(
+        z
+          .object({
+            name,
+            role: z.enum(["router", "access-point"]),
+            /** Where it is, like "Living room": shown in LuCI. */
+            location: z.string().max(64).optional(),
+            /** How an access point reaches the network: a cable, or the mesh. */
+            uplink: z.enum(["cable", "mesh"]).default("cable"),
+            /** Its own radios: a channel pinned per band; "auto" (the default) lets it choose. */
+            radios: z
+              .object({
+                "2g": z
+                  .object({ channel: channel.optional().refine((c) => c === undefined || c === "auto" || channelsOf["2g"](c), "a 2.4 GHz channel is 1 to 14") })
+                  .strict()
+                  .optional(),
+                "5g": z
+                  .object({ channel: channel.optional().refine((c) => c === undefined || c === "auto" || channelsOf["5g"](c), "a 5 GHz channel, like 36 or 149") })
+                  .strict()
+                  .optional(),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict()
+      )
+      .refine(
+        (devices) => devices.filter((d) => d.role === "router").length === 1,
+        "exactly one device must be the router"
+      )
+      .refine(
+        (devices) => new Set(devices.map((d) => d.name)).size === devices.length,
+        "device names must be unique"
+      ),
   })
   .strict()
   .superRefine((intent, ctx) => {
@@ -685,17 +723,18 @@ export const intentSchema = z
     const issue = (path: (string | number)[], message: string) =>
       ctx.addIssue({ code: z.ZodIssueCode.custom, path, message });
     intent.networks.forEach((network, i) => {
-      const line = network.line?.connection;
-      if (line && !intent.internet.connections.some((c) => c.id === line) && !intent.tunnels.some((t) => t.id === line)) {
-        issue(["networks", i, "line", "connection"], "pick a connection");
+      const via = network.access.via;
+      if (via && !intent.internet.lines.some((l) => l.id === via) && !intent.vpn.providers.some((t) => t.id === via)) {
+        issue(["networks", i, "access", "via"], "pick a line");
       }
     });
-    intent.internet.connections.forEach(({ connection, id }, c) => {
-      if (intent.internet.connections.slice(0, c).some((other) => other.id === id)) {
-        issue(["internet", "connections", c, "id"], "already used by another connection");
+    intent.internet.lines.forEach((line, c) => {
+      if (intent.internet.lines.slice(0, c).some((other) => other.id === line.id)) {
+        issue(["internet", "lines", c, "id"], "already used by another line");
       }
-      if (connection.type !== "static") return;
-      const at = (key: string) => ["internet", "connections", c, "connection", key];
+      if (line.type !== "static") return;
+      const connection = line.static;
+      const at = (key: string) => ["internet", "lines", c, "static", key];
       const address = parseIpv4(connection.address);
       const gateway = parseIpv4(connection.gateway);
       if (address !== undefined) {
@@ -714,15 +753,16 @@ export const intentSchema = z
         issue(at("dns"), `add a DNS server, or choose other DNS servers under ${where("dns")}`);
       }
     });
-    if (intent.mesh.enabled) {
-      if (!intent.mesh.key) issue(["mesh", "key"], "required");
-      if (intent.mesh.wired) {
+    const mesh = intent.wifi.mesh;
+    if (mesh.enabled) {
+      if (!mesh.key) issue(["wifi", "mesh", "key"], "required");
+      if (mesh.over_cable) {
         intent.networks.forEach((n, i) => {
           if (n.vlan === meshWiredVlan) issue(["networks", i, "vlan"], `VLAN ${meshWiredVlan} carries the mesh over cables`);
         });
       }
-      if (!meshChannels[intent.mesh.band].includes(intent.mesh.channel)) {
-        issue(["mesh", "channel"], `one of ${meshChannels[intent.mesh.band].join(", ")}`);
+      if (!meshChannels[mesh.band].includes(mesh.channel)) {
+        issue(["wifi", "mesh", "channel"], `one of ${meshChannels[mesh.band].join(", ")}`);
       }
     }
     // What one setting may be given the rest: the rules the UI greys out by.
@@ -744,10 +784,10 @@ export const intentSchema = z
         issue(["networks", i, "subnet"], "already used by another network");
       }
     });
-    intent.wifi.forEach((wifi, i) => {
+    intent.wifi.networks.forEach((wifi, i) => {
       // The UI cannot get here (choices.ts); a hand-edited file can.
-      if (wifi.bands && !wifi.bands.some((band) => intent.radios[band].enabled)) {
-        issue(["wifi", i, "bands"], `none of its bands is on (${where("radios")})`);
+      if (wifi.bands && !wifi.bands.some((band) => intent.wifi.radios[band].enabled)) {
+        issue(["wifi", "networks", i, "bands"], `none of its bands is on (${where("radios")})`);
       }
     });
     const ids = intent.networks.map((n) => n.id);
@@ -759,34 +799,35 @@ export const intentSchema = z
     // Remote access and sites stay valid targets while off: access to them
     // is kept for when they are back, and compiles to nothing meanwhile.
     const zones = ["vpn", "sites"];
-    if (intent.vpn.enabled && !intent.vpn.private_key) issue(["vpn", "private_key"], "required");
-    if (intent.sites.peers.length && !intent.sites.private_key) issue(["sites", "private_key"], "required");
-    intent.vpn.clients.forEach((client, i) => {
-      if (intent.vpn.clients.slice(0, i).some((c) => c.host === client.host)) {
-        issue(["vpn", "clients", i, "host"], "another client has this address");
+    const { remote_access: remote, sites, providers } = intent.vpn;
+    if (remote.enabled && !remote.private_key) issue(["vpn", "remote_access", "private_key"], "required");
+    if (sites.peers.length && !sites.private_key) issue(["vpn", "sites", "private_key"], "required");
+    remote.clients.forEach((client, i) => {
+      if (remote.clients.slice(0, i).some((c) => c.host === client.host)) {
+        issue(["vpn", "remote_access", "clients", i, "host"], "another client has this address");
       }
     });
     const unique = (list: { id: string }[], path: string[]) =>
       list.forEach((item, i) => {
         if (list.slice(0, i).some((o) => o.id === item.id)) issue([...path, i, "id"], `another has the id ${item.id}`);
       });
-    unique(intent.tunnels, ["tunnels"]);
-    unique(intent.vpn.clients, ["vpn", "clients"]);
-    unique(intent.sites.peers, ["sites", "peers"]);
-    if (intent.vpn.enabled && intent.sites.peers.length && intent.vpn.port === intent.sites.port) {
-      issue(["sites", "port"], "remote access uses this port");
+    unique(providers, ["vpn", "providers"]);
+    unique(remote.clients, ["vpn", "remote_access", "clients"]);
+    unique(sites.peers, ["vpn", "sites", "peers"]);
+    if (remote.enabled && sites.peers.length && remote.port === sites.port) {
+      issue(["vpn", "sites", "port"], "remote access uses this port");
     }
-    const clash = intent.vpn.enabled && intent.networks.find((n) => overlaps(n.subnet, intent.vpn.subnet));
-    if (clash) issue(["vpn", "subnet"], `overlaps ${clash.name}'s ${clash.subnet}`);
-    const local = [...intent.networks.map((n) => n.subnet), ...(intent.vpn.enabled ? [intent.vpn.subnet] : [])];
-    intent.sites.peers.forEach((site, i) =>
+    const clash = remote.enabled && intent.networks.find((n) => overlaps(n.subnet, remote.subnet));
+    if (clash) issue(["vpn", "remote_access", "subnet"], `overlaps ${clash.name}'s ${clash.subnet}`);
+    const local = [...intent.networks.map((n) => n.subnet), ...(remote.enabled ? [remote.subnet] : [])];
+    sites.peers.forEach((site, i) =>
       site.subnets.forEach((range) => {
-        const at = ["sites", "peers", i, "subnets"];
+        const at = ["vpn", "sites", "peers", i, "subnets"];
         // Routed to the site: an internet range would send that traffic there.
         if (!isPrivateRange(range)) return issue(at, `${range} is not a private range`);
         const mine = local.find((l) => overlaps(l, range));
         if (mine) return issue(at, `${range} overlaps this site's ${mine}`);
-        const other = intent.sites.peers.slice(0, i).find((p) => p.subnets.some((s) => overlaps(s, range)));
+        const other = sites.peers.slice(0, i).find((p) => p.subnets.some((s) => overlaps(s, range)));
         if (other) issue(at, `${range} overlaps ${other.name}'s`);
       })
     );
@@ -794,20 +835,20 @@ export const intentSchema = z
       access.networks.forEach((id) => {
         if (id === own || (!ids.includes(id) && !zones.includes(id))) issue([...path, "access", "networks"], `no network "${id}"`);
       });
-    if (intent.vpn.enabled) accessOf(["vpn"], intent.vpn.access, "vpn");
-    if (intent.sites.peers.length) accessOf(["sites"], intent.sites.access, "sites");
-    intent.wifi.forEach((wifi, i) => {
+    if (remote.enabled) accessOf(["vpn", "remote_access"], remote.access, "vpn");
+    if (sites.peers.length) accessOf(["vpn", "sites"], sites.access, "sites");
+    intent.wifi.networks.forEach((wifi, i) => {
       if (!ids.includes(wifi.network)) {
-        issue(["wifi", i, "network"], "pick a network");
+        issue(["wifi", "networks", i, "network"], "pick a network");
       }
     });
 
-    intent.dns.records.forEach((record, i) => {
+    intent.dns.hosts.forEach((record, i) => {
       if (parseIpv4(record.address) === undefined && !(record.address.includes(":") && /^[0-9a-f:]+$/i.test(record.address))) {
-        issue(["dns", "records", i, "address"], "an IP address, like 10.0.0.20");
+        issue(["dns", "hosts", i, "address"], "an IP address, like 10.0.0.20");
       }
-      if (intent.dns.records.slice(0, i).some((r) => r.name === record.name)) {
-        issue(["dns", "records", i, "name"], "already used");
+      if (intent.dns.hosts.slice(0, i).some((r) => r.name === record.name)) {
+        issue(["dns", "hosts", i, "name"], "already used");
       }
     });
 
@@ -816,8 +857,8 @@ export const intentSchema = z
     const seen = { name: new Set<string>(), mac: new Set<string>(), address: new Set<string>() };
     intent.networks.forEach((network, i) => {
       const prefix = network.subnet.split(".").slice(0, 3).join(".");
-      network.reservations.forEach((r, j) => {
-        const at = (key: string) => ["networks", i, "reservations", j, key];
+      network.dhcp.reservations.forEach((r, j) => {
+        const at = (key: string) => ["networks", i, "dhcp", "reservations", j, key];
         const host = Number(r.address.split(".")[3]);
         if (parseIpv4(r.address) === undefined || !r.address.startsWith(`${prefix}.`)) {
           issue(at("address"), `an address in ${prefix}.x`);
@@ -851,9 +892,9 @@ export const intentSchema = z
       if (![internet, anywhere, router].includes(rule.to) && !ids.includes(rule.to)) {
         issue(at("to"), "pick a network, the router, the internet or anywhere");
       }
-      const addresses = [...(rule.source_addresses ?? []), ...(rule.destination_addresses ?? [])];
+      const addresses = [...(rule.from_addresses ?? []), ...(rule.to_addresses ?? [])];
       if (addresses.some(isIpv6) && addresses.some((a) => !isIpv6(a))) {
-        issue(at("destination_addresses"), "IPv4 and IPv6 addresses cannot share a rule");
+        issue(at("to_addresses"), "IPv4 and IPv6 addresses cannot share a rule");
       }
     });
     const inANetwork = (address: string) =>
@@ -870,22 +911,23 @@ export const intentSchema = z
       })
     );
     port_forwards.forEach((forward, i) => {
-      if (!inANetwork(forward.internal_address)) {
-        issue(["firewall", "port_forwards", i, "internal_address"], "not on any of your networks");
+      const toAddress = ["firewall", "port_forwards", i, "to", "address"];
+      if (!inANetwork(forward.to.address)) {
+        issue(toAddress, "not on any of your networks");
       }
       // Into a network that goes out through a VPN provider's tunnel: its
       // replies would take the tunnel (policy routing by source), never
       // reaching whoever called in over the line.
-      const target = intent.networks.find((n) => overlaps(n.subnet, `${forward.internal_address}/32`));
-      if (target?.line && intent.tunnels.some((t) => t.id === target.line!.connection)) {
+      const target = intent.networks.find((n) => overlaps(n.subnet, `${forward.to.address}/32`));
+      if (target?.access.via && providers.some((t) => t.id === target.access.via)) {
         issue(
-          ["firewall", "port_forwards", i, "internal_address"],
+          toAddress,
           `on ${target.name}, which goes out through a VPN provider: replies would leave through the tunnel, so the forward could never work`
         );
       }
       // A port forward is IPv4's (fw4 redirect, NAT): an IPv6 source would never match.
-      if ((forward.source_addresses ?? []).some(isIpv6)) {
-        issue(["firewall", "port_forwards", i, "source_addresses"], "IPv4 addresses only: a port forward is IPv4's");
+      if ((forward.from_addresses ?? []).some(isIpv6)) {
+        issue(["firewall", "port_forwards", i, "from_addresses"], "IPv4 addresses only: a port forward is IPv4's");
       }
       // "8000-8100" and "8080" are the same port twice.
       const range = (ports: string) => {
@@ -900,13 +942,13 @@ export const intentSchema = z
         .slice(0, i)
         .some(
           (other) =>
-            overlap(other.external_port, forward.external_port) &&
+            overlap(other.port, forward.port) &&
             (other.protocol === forward.protocol ||
               other.protocol === "tcp+udp" ||
               forward.protocol === "tcp+udp")
         );
       if (clash) {
-        issue(["firewall", "port_forwards", i, "external_port"], "already forwarded");
+        issue(["firewall", "port_forwards", i, "port"], "already forwarded");
       }
     });
   });
