@@ -15,26 +15,31 @@ Object.assign(globalThis, {
   },
 });
 const now = Date.now();
+// The format this build keeps, as the module says (kept in step by the last test).
+const current = 3;
 stored.set("onc-cache:/", JSON.stringify({ devices: { data: "format 1", updatedAt: now } }));
+stored.set("onc-cache:2:/", JSON.stringify({ devices: { data: "format 2", updatedAt: now } }));
 stored.set(
-  "onc-cache:2:/",
+  `onc-cache:${current}:/`,
   JSON.stringify({
     devices: { data: "fresh", updatedAt: now - 1000 },
-    "network-status:clients": { data: "stale", updatedAt: now - 25 * 3600 * 1000 },
+    "network-status": { data: "stale", updatedAt: now - 25 * 3600 * 1000 },
     "not-a-device-read": { data: "other", updatedAt: now },
   })
 );
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { persistDeviceReads } = require("../../../ui/src/data/persist") as typeof import("../../../ui/src/data/persist");
+const { format, persistDeviceReads } = require("../../../ui/src/data/persist") as typeof import("../../../ui/src/data/persist");
 
 test("an older format's reads are dropped as the app loads", (t) => {
+  t.is(format, current, "this test's fixture is in the current format");
   t.false(stored.has("onc-cache:/"));
+  t.false(stored.has("onc-cache:2:/"));
 });
 
 test("only device reads under a day old are put back", (t) => {
   const client = new QueryClient();
   persistDeviceReads(client);
   t.is(client.getQueryData(["devices"]), "fresh");
-  t.is(client.getQueryData(["network-status", "clients"]), undefined);
+  t.is(client.getQueryData(["network-status"]), undefined);
   t.is(client.getQueryData(["not-a-device-read"]), undefined);
 });

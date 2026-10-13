@@ -4,7 +4,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
-import { trackHistory } from "./data/history";
 import { persistDeviceReads } from "./data/persist";
 import { cssVariables, theme } from "./kit/theme";
 
@@ -13,9 +12,7 @@ const queryClient = new QueryClient({
   // fight with what they are typing.
   defaultOptions: { queries: { refetchOnWindowFocus: false, retry: 1 } },
 });
-// Readings over time for the Status graphs, then what the devices last said,
-// shown at once after a reload while it is read again.
-trackHistory(queryClient);
+// What the devices last said, shown at once after a reload while it is read again.
 persistDeviceReads(queryClient);
 
 createRoot(document.getElementById("root")!).render(

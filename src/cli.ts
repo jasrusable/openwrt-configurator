@@ -3,6 +3,8 @@ import { rpcdAuth } from "./server/auth";
 import { routerNames } from "./server/hosts";
 import { redactor } from "./secretOptions";
 import { cgiRequest } from "./server/cgi";
+import { runCollector } from "./status/collector";
+
 import { loopbackHosts } from "./platform";
 import { AppliedWithProblems, appliedWithProblemsExit } from "./devicePhases";
 import { assertSupportedRelease } from "./release";
@@ -50,6 +52,9 @@ import {
 } from "./buildImage";
 
 /** The largest request body the CGI program reads. */
+
+/** On a router: what the collector reads, in RAM (never flash: it is rewritten every few seconds). */
+const routerStatusDir = "/tmp/onc-collector";
 
 /**
  * Every device located (src/locate.ts) before any is touched; one that cannot
@@ -254,10 +259,26 @@ export const main = async ({
         throw new Error(`--host ${options.host}: the UI listens on this machine only (127.0.0.1, ::1 or localhost); it has no login here.`);
       }
       console.log(`Serving ${intentPath} at http://${options.host.includes(":") ? `[${options.host}]` : options.host}:${options.port}/`);
+      // The Status pages' reads, kept beside the intent while this serves.
+      const statusDir = `${intentPath}.state/status`;
+      void runCollector({ intentPath, platform, dir: statusDir });
       await platform.serve(
-        uiHandler({ intentPath, uiRoot: options.uiDir, platform }),
+        uiHandler({ intentPath, uiRoot: options.uiDir, platform, statusDir }),
         { host: options.host, port: Number(options.port) }
       );
+    },
+  });
+
+  commands.push({
+    name: "collect",
+    description:
+      "keep reading the devices for the web UI's Status pages (a router's service; `ui` does it itself)",
+    args: [{ name: "intent-file", description: "the intent file whose devices to read" }],
+    options: [
+      { flags: "--dir <dir>", description: "where to keep what it reads", default: routerStatusDir },
+    ],
+    action: async ([intentPath], options) => {
+      await runCollector({ intentPath, platform, dir: options.dir });
     },
   });
 
@@ -293,6 +314,8 @@ export const main = async ({
               auth: rpcdAuth(platform),
               // Counted in RAM, not flash: every attempt is a file.
               loginAttemptsDir: "/tmp/onc-login-attempts",
+              // What the collector service (`collect`) keeps, in RAM.
+              statusDir: routerStatusDir,
             })(request);
       console.log(cgiResponse(response));
       // Answered: a timer still pending (a device read's time limit) must not

@@ -75,6 +75,10 @@ export type NetworkStatus = {
   activity?: ActivityView[];
   /** Each internet line's byte counters, and when: two reads give the throughput. */
   internetCounters?: { lines: Record<string, { rx: number; tx: number }>; at: number };
+  /** Bits per second now, from this read's counters and the one before (the collector's). */
+  throughput?: { down?: number; up?: number };
+  /** When this was read, by the server's clock. */
+  readAt?: number;
 };
 
 export const reached = (r: Reachability | undefined): r is DeviceStatus => !!r && !("error" in r);

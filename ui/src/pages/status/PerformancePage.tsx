@@ -7,9 +7,9 @@ import { Button, Group, Progress, SimpleGrid, Stack, Text } from "@mantine/core"
 import { where } from "../../../../src/intent/places";
 import type { Intent } from "../../../../src/intent/schema";
 import type { Survey } from "../../../../src/status/actions";
-import { latest, useSeries } from "../../data/history";
+import { useSeries } from "../../data/history";
 import { bitsWords, bytes } from "../../kit/format";
-import { useNetworkStatus, useSpeedTest, useWifiSurvey } from "../../data/status";
+import { throughputNow, useNetworkStatus, useSpeedTest, useWifiSurvey } from "../../data/status";
 import { duration } from "../../facts";
 import { useDraftValue } from "../../form/draft";
 import { AreaChart, ChartCard, SignalBars, Tile } from "../../kit/charts";
@@ -26,18 +26,19 @@ const modeWords = (htmode?: string) => {
 };
 
 const Internet = ({ intent }: { intent: Intent }) => {
-  const status = useNetworkStatus("performance");
+  const status = useNetworkStatus();
   const speed = useSpeedTest();
   const down = useSeries("down");
   const up = useSeries("up");
   const latency = useSeries("latency");
   const check = status.data?.internetCheck;
+  const now = throughputNow(status.data);
   const peak = Math.max(0, ...down.map((p) => p[1]));
   return (
     <>
       <SimpleGrid cols={{ base: 1, xs: 3 }} spacing="sm">
-        <Tile label="Downloading now" value={bitsWords(latest(down))} color="blue" sub={peak ? `Peak ${bitsWords(peak)}` : "Measured between reads"} />
-        <Tile label="Uploading now" value={bitsWords(latest(up))} color="teal" sub="All devices together" />
+        <Tile label="Downloading now" value={bitsWords(now.down)} color="blue" sub={peak ? `Peak ${bitsWords(peak)}` : "Measured between reads"} />
+        <Tile label="Uploading now" value={bitsWords(now.up)} color="teal" sub="All devices together" />
         <Tile
           label="Latency"
           value={check?.latencyMs !== undefined ? `${Math.round(check.latencyMs)} ms` : check ? "No answer" : "—"}
@@ -173,7 +174,7 @@ const SurveyCard = ({ survey }: { survey: Survey }) => {
 };
 
 const Wifi = () => {
-  const status = useNetworkStatus("performance");
+  const status = useNetworkStatus();
   const survey = useWifiSurvey();
   const radios = status.data?.radios ?? [];
   const accessPoints = [...new Set(radios.map((r) => r.accessPoint))];
@@ -290,7 +291,7 @@ const Wifi = () => {
 
 export const PerformancePage = () => {
   const intent: Intent = useDraftValue();
-  const status = useNetworkStatus("performance");
+  const status = useNetworkStatus();
   return (
     <SettingsPage title="Performance" description={liveLine(intent.system.name, status)}>
       <Internet intent={intent} />

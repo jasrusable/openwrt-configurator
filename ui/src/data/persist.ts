@@ -5,17 +5,16 @@
 // "(hidden)" for them, and facts and status hold none. Dropped when a router
 // session ends (a 401), so a logged-out browser keeps nothing of the network.
 import { QueryClient } from "@tanstack/react-query";
-import { clearHistory } from "./history";
 
 /** The queries worth keeping: device reads, slow to make again. */
-const kept = ["devices", "network-status", "apply-diff"];
+const kept = ["devices", "network-status", "status-history", "apply-diff"];
 
 /**
  * The shape of what is kept: raised when a kept read's shape changes, so a
  * read kept by an older build is dropped rather than shown to code that
  * expects the new one.
  */
-const format = 2;
+export const format = 3;
 
 /** Per place the app is served (the Mac's server, or a router's /cgi-bin/onc/), and per format. */
 const storageKey = () => `onc-cache:${format}:${location.pathname}`;
@@ -72,7 +71,6 @@ export const persistDeviceReads = (queryClient: QueryClient) => {
 
 /** Forget everything kept, the Status graphs' history too: a router session ended. */
 export const forgetDeviceReads = () => {
-  clearHistory();
   try {
     localStorage.removeItem(storageKey());
   } catch {

@@ -133,7 +133,7 @@ const sorts: Record<string, (a: ClientView, b: ClientView) => number> = {
 
 export const ClientsPage = () => {
   const intent: Intent = useDraftValue();
-  const status = useNetworkStatus("clients");
+  const status = useNetworkStatus();
   const history = useSeries("clients");
   const [search, setSearch] = useState("");
   const [network, setNetwork] = useState<string | null>(null);

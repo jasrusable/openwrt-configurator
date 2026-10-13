@@ -174,20 +174,30 @@ export const staleDevices = ({
   });
 
 /** Keep what was learnt while locating a device: where it is, its MACs and host key, its schema. */
+/** How old stored facts may grow before a read that learnt nothing new writes them again (only their age). */
+const rewriteAfterMs = 3600_000;
+
 export const rememberLocated = (
   files: Pick<Platform, "mkdirp" | "writeTextFile" | "readTextFile">,
   intentPath: string,
   located: Located,
   now: number
-) =>
-  writeFacts(files, intentPath, {
+) => {
+  const facts: DeviceFacts = {
     hostname: located.hostname,
     readAt: now,
     schema: located.schema,
     address: located.address,
     macs: located.macs,
     ...(located.hostKey ? { hostKey: located.hostKey } : {}),
-  });
+  };
+  // Read every few seconds while a page shows status (a router keeps facts
+  // in flash): written only when something changed, or to renew their age.
+  const before = readFacts(files, intentPath, [located.hostname])[located.hostname];
+  const same = before && JSON.stringify({ ...before, readAt: 0 }) === JSON.stringify({ ...before, ...facts, readAt: 0 });
+  if (same && now - before.readAt < rewriteAfterMs) return;
+  writeFacts(files, intentPath, facts);
+};
 
 /** A read that failed: the device is rested for a while (staleDevices). */
 export const recordFailure = (

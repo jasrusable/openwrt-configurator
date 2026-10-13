@@ -33,7 +33,7 @@ const shows: Record<string, (k: ActivityKind) => boolean> = {
 
 export const ActivityPage = () => {
   const intent: Intent = useDraftValue();
-  const status = useNetworkStatus("activity");
+  const status = useNetworkStatus();
   const [device, setDevice] = useState<string | null>(null);
   const [which, setWhich] = useState("all");
   const all = status.data?.activity ?? [];

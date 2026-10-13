@@ -50,6 +50,21 @@ define Package/openwrt-configurator/install
 	$(INSTALL_DIR) $(1)/www/cgi-bin
 	$(INSTALL_BIN) ./files/onc.cgi $(1)/www/cgi-bin/onc
 	$(INSTALL_DIR) $(1)/etc/onc
+	# What the Status pages show, read by a service of its own (the CGI only answers).
+	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/onc-collector.init $(1)/etc/init.d/onc-collector
+endef
+
+define Package/openwrt-configurator/postinst
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] || { /etc/init.d/onc-collector enable; /etc/init.d/onc-collector start; }
+exit 0
+endef
+
+define Package/openwrt-configurator/prerm
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] || { /etc/init.d/onc-collector stop; /etc/init.d/onc-collector disable; }
+exit 0
 endef
 
 $(eval $(call BuildPackage,openwrt-configurator))

@@ -56,7 +56,7 @@ const useFactsOf = (index: number) => {
  */
 const useOnline = (index: number) => {
   const name: string | undefined = useDraftValue(`hardware.${index}.name`);
-  const status = useNetworkStatus("devices");
+  const status = useNetworkStatus();
   const now = status.data?.devices.find((d) => d.name === name);
   const health = now?.health;
   return !now

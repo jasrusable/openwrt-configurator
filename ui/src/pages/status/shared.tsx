@@ -19,7 +19,9 @@ const failure = (read: Read) =>
 /** "live, read from the devices 5 s ago", that it is reading, or why it could not. */
 export const liveLine = (site: string, read: Read) => {
   const failed = failure(read);
-  const when = read.data ? `read from the devices ${ago(read.dataUpdatedAt)}` : undefined;
+  // When the server read it (its collector may have read it a little before this page asked).
+  const at = (read.data as NetworkStatus | undefined)?.readAt ?? read.dataUpdatedAt;
+  const when = read.data ? `read from the devices ${ago(at)}` : undefined;
   if (failed) return `${site} · ${failed}${when ? `; showing what was ${when}` : ""}`;
   return when ? `${site} · live, ${when}` : read.isFetching ? `${site} · reading the devices…` : site;
 };

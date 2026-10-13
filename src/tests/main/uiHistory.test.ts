@@ -1,8 +1,9 @@
-// The web UI's rules for graphs and pages, which are pure: a rate only between
-// reads close together, "now" only for a recent reading, every setting on a page.
+// The graphs' rules, which are pure: a rate only between reads close
+// together, a minute's mean, what is new merged over what is held; and
+// every setting on a page.
 import test from "ava";
 import { fields } from "../../intent/fields";
-import { freshMs, latest, rate } from "../../../ui/src/data/history";
+import { bucketMs, historySince, keepMs, mergeHistory, rate, throughputOf, withReadings, withSample } from "../../status/history";
 import { whereIs } from "../../../ui/src/settingPages";
 
 const at = (seconds: number) => seconds * 1000;
@@ -18,11 +19,35 @@ test("no rate from counts too far apart, gone backwards, out of order or alone",
   t.is(rate(undefined, { v: 1000, at: at(10) }), undefined);
 });
 
-test("the latest value is now only while it is recent", (t) => {
-  const points: [number, number][] = [[0, 1], [at(60), 2]];
-  t.is(latest(points, at(60) + freshMs - 1), 2);
-  t.is(latest(points, at(60) + freshMs), undefined);
-  t.is(latest([], at(0)), undefined);
+test("throughput is each line's rate from its own last count, summed", (t) => {
+  const first = throughputOf({ at: at(0), lines: { wan: { rx: 0, tx: 0 } } }, {});
+  t.is(first.down, undefined, "one count says nothing yet");
+  const second = throughputOf({ at: at(10), lines: { wan: { rx: 1000, tx: 500 }, wanb: { rx: 9e9, tx: 9e9 } } }, first.counts);
+  t.is(second.down, 800, "a line just come up counts from its next read");
+  t.is(second.up, 400);
+});
+
+test("reads in one minute are one point, their mean; a day is kept", (t) => {
+  const start = 100 * bucketMs;
+  let h = withSample({}, "latency", start + at(5), 10);
+  h = withSample(h, "latency", start + at(15), 20);
+  h = withSample(h, "latency", start + bucketMs, 40);
+  t.deepEqual(h.latency, [[start, 15, 2], [start + bucketMs, 40, 1]]);
+  t.deepEqual(withSample(h, "latency", start + keepMs + at(30), 1).latency.map((p) => p[0]), [start + bucketMs, start + keepMs], "the first minute is past a day");
+  t.deepEqual(historySince(h, start + bucketMs + at(30)), { latency: [[start + bucketMs, 40, 1]] }, "the minute still filling comes again");
+});
+
+test("a device gone from the settings keeps no history", (t) => {
+  const h = withReadings({ "load:old": [[0, 1, 1]], down: [[0, 1, 1]] }, bucketMs, { "load:ap": 0.5 }, ["ap"]);
+  t.deepEqual(Object.keys(h).sort(), ["down", "load:ap"]);
+});
+
+test("what is new replaces the minutes it repeats", (t) => {
+  const now = 10 * bucketMs;
+  const kept = { down: [[8 * bucketMs, 1, 1], [9 * bucketMs, 2, 1]] as [number, number, number][] };
+  const merged = mergeHistory(kept, { down: [[9 * bucketMs, 3, 2], [10 * bucketMs, 4, 1]], up: [[10 * bucketMs, 5, 1]] }, now);
+  t.deepEqual(merged.down, [[8 * bucketMs, 1, 1], [9 * bucketMs, 3, 2], [10 * bucketMs, 4, 1]]);
+  t.deepEqual(merged.up, [[10 * bucketMs, 5, 1]]);
 });
 
 test("every labelled setting is on a page", (t) => {

@@ -14,9 +14,9 @@ import { internetIpv6 } from "../../../src/intent/connections";
 import { templateOf } from "../../../src/intent/networkTemplates";
 import { useFreshDevices } from "../data/devices";
 import { useProvision } from "../data/provision";
-import { latest, useSeries } from "../data/history";
+import { useSeries } from "../data/history";
 import { bitsWords } from "../kit/format";
-import { useNetworkStatus } from "../data/status";
+import { throughputNow, useNetworkStatus } from "../data/status";
 import { useMeasureLink } from "../data/mesh";
 import { duration, portsOf, routerFacts } from "../facts";
 import { useDraftValue } from "../form/draft";
@@ -95,8 +95,7 @@ const Wire = () => <Box w={2} h={18} mx="auto" style={{ background: "var(--onc-s
 /** The network as it hangs together now: the internet, the router, each access point and who is on it. */
 const Topology = ({ intent }: { intent: Intent }) => {
   const live = useNetworkStatus().data;
-  const down = useSeries("down");
-  const up = useSeries("up");
+  const now = throughputNow(live);
   const clients = live?.clientList?.filter((c) => c.state === "online") ?? [];
   const onWifi = (name: string) => clients.filter((c) => c.connection.kind === "wifi" && c.connection.accessPoint === name).length;
   const reached = (name: string) => (live ? !!live.devices.find((d) => d.name === name)?.health : undefined);
@@ -110,7 +109,7 @@ const Topology = ({ intent }: { intent: Intent }) => {
           icon={IconWorld}
           name="Internet"
           up={live?.internet?.up}
-          sub={latest(down) !== undefined ? `↓ ${bitsWords(latest(down))} · ↑ ${bitsWords(latest(up))}` : undefined}
+          sub={now.down !== undefined ? `↓ ${bitsWords(now.down)} · ↑ ${bitsWords(now.up)}` : undefined}
         />
         {router && (
           <>
@@ -154,6 +153,7 @@ const Topology = ({ intent }: { intent: Intent }) => {
 /** The four numbers that say how the network is: internet, clients, devices, Wi-Fi. */
 const Tiles = ({ intent }: { intent: Intent }) => {
   const live = useNetworkStatus().data;
+  const now = throughputNow(live);
   const down = useSeries("down");
   const up = useSeries("up");
   const history = useSeries("clients");
@@ -172,7 +172,7 @@ const Tiles = ({ intent }: { intent: Intent }) => {
         label="Internet"
         value={!live ? "—" : live.internet?.up ? "Online" : "Down"}
         color={!live ? undefined : live.internet?.up ? "green" : "red"}
-        sub={latest(down) !== undefined ? `↓ ${bitsWords(latest(down))} · ↑ ${bitsWords(latest(up))}` : "Throughput after two reads"}
+        sub={now.down !== undefined ? `↓ ${bitsWords(now.down)} · ↑ ${bitsWords(now.up)}` : "Throughput after two reads"}
       >
         <AreaChart series={[down, up]} colors={["blue", "teal"]} height={28} />
       </Tile>

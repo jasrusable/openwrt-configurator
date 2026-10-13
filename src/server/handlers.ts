@@ -12,7 +12,8 @@ import { readFacts, readFailures, renameFacts, staleDevices } from "../deviceFac
 import { refreshStale } from "../readEach";
 import { compileIntent } from "../intent/compile";
 import { lockoutReason, ownPublicKey } from "../loginAccess";
-import { readNetworkStatus, StatusView, statusViews } from "../status/read";
+import { markWanted, readAndKeep, readHistory, readSnapshot, snapshotFreshMs } from "../status/collector";
+import { historySince } from "../status/history";
 import { latestRelease, restartService, speedTest, wifiSurvey } from "../status/actions";
 import { diffIntent } from "../intent/diff";
 import { migrateIntent } from "../intent/migrations";
@@ -345,16 +346,31 @@ export const ownKeyApi =
     return json(200, { publicKey: publicKey ?? null });
   };
 
-/** GET: what the network is doing now, read from the devices (src/status/). Polled only while a page shows it. */
+/**
+ * GET: what the network is doing, as the collector last read it
+ * (src/status/collector.ts), at once; and a mark that someone is looking, so
+ * it reads fast. With no collector running (its snapshot old or missing),
+ * the request reads the devices itself.
+ */
 export const statusApi =
-  ({ intentPath, platform }: { intentPath: string; platform: Platform }): HttpHandler =>
+  ({ intentPath, platform, statusDir, now = Date.now }: { intentPath: string; platform: Platform; statusDir: string; now?: () => number }): HttpHandler =>
+  async ({ method }) => {
+    if (method !== "GET") return json(405, { error: "GET" });
+    markWanted(platform, statusDir, now());
+    const kept = readSnapshot(platform, statusDir);
+    const snapshot =
+      kept && now() - kept.at < snapshotFreshMs ? kept : await readAndKeep({ intentPath, platform, dir: statusDir, now });
+    return snapshot ? json(200, snapshot.status) : json(409, { error: "The saved settings are not valid." });
+  };
+
+/** GET /api/history, or /api/history/<since ms>: the graphs' points, whole or what is new. */
+export const historyApi =
+  ({ platform, statusDir }: { platform: Platform; statusDir: string }): HttpHandler =>
   async ({ method, path }) => {
     if (method !== "GET") return json(405, { error: "GET" });
-    // /api/status, or /api/status/<view>: what each Status tab reads.
-    const view = path.split("/")[3] ?? "overview";
-    if (!statusViews.includes(view as StatusView)) return json(404, { error: "No such view." });
-    const status = await readNetworkStatus({ intentPath, platform, view: view as StatusView });
-    return status ? json(200, status) : json(409, { error: "The saved settings are not valid." });
+    const since = Number(path.split("/")[3] ?? 0);
+    if (!Number.isFinite(since)) return json(404, { error: "Not a time." });
+    return json(200, historySince(readHistory(platform, statusDir), since));
   };
 
 /** POST {device, service}: restart a service the settings declare on that device (a Status fix). */
@@ -551,10 +567,13 @@ export const uiHandler = ({
   platform,
   auth,
   loginAttemptsDir,
+  statusDir = `${intentPath}.state/status`,
 }: {
   intentPath: string;
   uiRoot: string;
   platform: Platform;
+  /** Where the status collector keeps what it read (on a router, RAM). */
+  statusDir?: string;
   /** Where wrong passwords are counted (see sessionApi). */
   loginAttemptsDir?: string;
   /** On a router: every API request must carry a session (src/server/auth.ts). None on the Mac's loopback server. */
@@ -565,7 +584,8 @@ export const uiHandler = ({
     "/api/provision": provisionApi({ intentPath, platform }),
     "/api/devices": devicesApi({ intentPath, platform }),
     "/api/apply/diff": applyDiffApi({ intentPath, platform }),
-    "/api/status": statusApi({ intentPath, platform }),
+    "/api/status": statusApi({ intentPath, platform, statusDir }),
+    "/api/history": historyApi({ platform, statusDir }),
     "/api/admin/key": ownKeyApi({ intentPath, platform }),
     "/api/discover": discoverApi({ intentPath, platform }),
     "/api/discover/inspect": discoverApi({ intentPath, platform }),
@@ -575,7 +595,6 @@ export const uiHandler = ({
     "/api/internet/speed": internetSpeedApi({ intentPath, platform }),
     "/api/firmware": firmwareApi({ intentPath, platform }),
     "/api/wifi/survey": surveyApi({ intentPath, platform }),
-    ...Object.fromEntries(statusViews.map((v) => [`/api/status/${v}`, statusApi({ intentPath, platform })])),
   };
   const ui = staticFiles({ root: uiRoot, files: platform });
   const session = auth && sessionApi({ auth, platform, intentPath, attemptsDir: loginAttemptsDir });
@@ -596,7 +615,8 @@ export const uiHandler = ({
     if (session && (request.path === "/api/login" || request.path === "/api/logout")) return session(request);
     // On a router, logged in: the UI's own files are no secret, the API is.
     if (api && auth && !(await auth.check(request))) return json(401, { error: "Log in first.", login: true });
-    return (routes[request.path] ?? ui)(request);
+    const route = routes[request.path] ?? (request.path.startsWith("/api/history/") ? routes["/api/history"] : undefined);
+    return (route ?? ui)(request);
   }
 };
 

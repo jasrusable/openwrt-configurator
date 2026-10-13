@@ -95,7 +95,7 @@ const DeviceCard = ({ device: d, latest }: { device: DeviceView; latest?: string
 
 export const DevicesPage = () => {
   const intent: Intent = useDraftValue();
-  const status = useNetworkStatus("devices");
+  const status = useNetworkStatus();
   const latest = useLatestRelease().data?.version;
   const devices = status.data?.deviceViews ?? [];
   return (

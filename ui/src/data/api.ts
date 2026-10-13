@@ -5,7 +5,7 @@ import type { Candidate, Inspected } from "../../../src/discover";
 import type { DeviceFacts, ReadAttempt } from "../../../src/deviceFacts";
 import type { Change } from "../../../src/intent/diff";
 import type { NetworkStatus } from "../../../src/status/network";
-import type { StatusView } from "../../../src/status/read";
+import type { History } from "../../../src/status/history";
 import type { Survey } from "../../../src/status/actions";
 import type { Intent } from "../../../src/intent/schema";
 import type { ProvisionStatus } from "../../../src/server/provisionJob";
@@ -149,8 +149,11 @@ export const refreshDevices = () => postJson<Devices>("api/devices", undefined, 
 export const loadApplyDiff = async () =>
   (await getJson<{ devices: DeviceDiff[] }>("api/apply/diff", "Could not work out the changes.")).devices;
 
-export const loadNetworkStatus = (view: StatusView = "overview") =>
-  getJson<NetworkStatus>(`api/status/${view}`, "Could not read the network's status.");
+export const loadNetworkStatus = () => getJson<NetworkStatus>("api/status", "Could not read the network's status.");
+
+/** The graphs' points: all of them, or from `since` (ms) on. */
+export const loadHistory = (since = 0) =>
+  getJson<History>(since ? `api/history/${since}` : "api/history", "Could not read the graphs.");
 
 /** Restart a service the settings declare on a device: a Status fix. */
 export const restartService = (device: string, service: string) =>

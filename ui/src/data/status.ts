@@ -1,43 +1,42 @@
-// What the network is doing now, read from the devices: polled only while a
-// Status page that shows it is open (React Query stops when it unmounts, and
-// when the browser tab is in the background), each page at its own pace and
-// with its own reads (the Internet checks, the log).
+// What the network is doing now, as the server's collector last read it
+// (src/status/collector.ts): one read every page shares, so moving between
+// pages shows it at once. Asked while a page that shows it is open (React
+// Query stops when it unmounts, and when the browser tab is in the
+// background); each ask also tells the server someone is looking, so it
+// reads the devices fast.
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { StatusView } from "../../../src/status/read";
+import type { NetworkStatus } from "../../../src/status/network";
 import { loadLatestRelease, loadNetworkStatus, restartService, runSpeedTest, runWifiSurvey } from "./api";
 
-export const statusKey = (view: StatusView = "overview") => ["network-status", view] as const;
+export const statusKey = ["network-status"] as const;
 
-/** How often each page reads: Performance's latency and throughput move, the devices' health less so. */
-const every: Record<StatusView, number> = {
-  overview: 30_000,
-  clients: 15_000,
-  performance: 10_000,
-  devices: 30_000,
-  activity: 30_000,
-};
+/** As fast as the collector reads while someone looks (watchedEveryMs). */
+const every = 10_000;
 
-/** Read once, in the background, as the app opens: the Overview then opens on it. */
+/** Asked once, in the background, as the app opens: every page then opens on it. */
 export const prefetchNetworkStatus = (queryClient: QueryClient) =>
-  queryClient.prefetchQuery({ queryKey: statusKey(), queryFn: () => loadNetworkStatus(), staleTime: 0 });
+  queryClient.prefetchQuery({ queryKey: statusKey, queryFn: loadNetworkStatus, staleTime: 0 });
 
-export const useNetworkStatus = (view: StatusView = "overview") =>
+export const useNetworkStatus = () =>
   useQuery({
-    queryKey: statusKey(view),
-    queryFn: () => loadNetworkStatus(view),
-    refetchInterval: every[view],
-    // Read as the app opened: the page opens on it rather than reading again at once.
-    staleTime: 15_000,
-    // A slow device should not make the page flicker between states.
+    queryKey: statusKey,
+    queryFn: loadNetworkStatus,
+    refetchInterval: every,
+    staleTime: every,
+    // A slow answer should not make the page flicker between states.
     placeholderData: (previous) => previous,
   });
+
+/** Throughput as last read, if that was lately: an old one is not what is happening now. */
+export const throughputNow = (status: NetworkStatus | undefined, now = Date.now()) =>
+  status?.throughput && status.readAt !== undefined && now - status.readAt < 90_000 ? status.throughput : {};
 
 /** A Status fix: restart a service, then read again. */
 export const useRestartService = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ device, service }: { device: string; service: string }) => restartService(device, service),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["network-status"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: statusKey }),
   });
 };
 
