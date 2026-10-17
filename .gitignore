@@ -123,3 +123,6 @@ packaging/openwrt/openwrt-configurator/files/openwrt-configurator.mjs
 # Scratch output of the Playwright browser tool.
 .playwright-mcp/
 packaging/openwrt/openwrt-configurator/files/ui/
+
+# Claude Code worktrees.
+.claude/worktrees/

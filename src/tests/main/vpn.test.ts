@@ -20,19 +20,19 @@ test("a provider's .conf, read: its key, address, DNS and server", (t) => {
   const conf = parseWgConf(
     [
       "[Interface]",
-      "PrivateKey = cJ7JfTXu6Ys8Bv0JwzOjLFw7Es9mnTqOmhHKqaVFX2Q=",
+      "PrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
       "Address = 10.64.12.34/32, fc00:bbbb::1/128",
       "DNS = 10.64.0.1",
       "",
       "[Peer]",
-      "PublicKey = Xv/v0xP1d35+5fdEp4lGh6M5O3XvQbSzrKGm8U2C8Ck=",
+      "PublicKey = BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
       "AllowedIPs = 0.0.0.0/0, ::/0",
-      "Endpoint = 185.65.134.10:51820 # a comment",
+      "Endpoint = 203.0.113.10:51820 # a comment",
     ].join("\n")
   );
   t.deepEqual(conf.addresses, ["10.64.12.34/32", "fc00:bbbb::1/128"]);
   t.deepEqual(conf.dns, ["10.64.0.1"]);
-  t.is(conf.peer.endpoint, "185.65.134.10:51820");
+  t.is(conf.peer.endpoint, "203.0.113.10:51820");
   t.throws(() => parseWgConf("[Peer]\nPublicKey = x"), { message: /PrivateKey/ });
 });
 
