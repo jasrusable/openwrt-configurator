@@ -25,7 +25,7 @@
     "url": "git+https://github.com/jasrusable/openwrt-configurator.git"
   },
   "author": "Jason Russell",
-  "license": "ISC",
+  "license": "AGPL-3.0-or-later",
   "bugs": {
     "url": "https://github.com/jasrusable/openwrt-configurator/issues"
   },

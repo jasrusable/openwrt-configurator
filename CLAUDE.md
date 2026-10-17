@@ -56,7 +56,8 @@ npm test                 # ava; all offline
 npm run test:watch
 npm run build            # tsc -> ./dist (excludes *.test.ts)
 npm run typecheck        # tsc over src, bin and the tests
-npm run bundle           # QuickJS bundle -> dist/qjs (scripts/bundle.js)
+npm run bundle           # QuickJS bundle -> dist/qjs; with dist/ui built, the Node build
+                         # and its UI -> dist/node (Homebrew's) (scripts/bundle.js)
 scripts/rig-test.sh      # end-to-end provision against OpenWrt in Docker, ~1.5 min
 npm run equivalence -- [<git-ref>] [--state]
                          # a refactor's guard: every device's script (or, --state, its

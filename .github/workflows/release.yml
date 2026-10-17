@@ -51,6 +51,8 @@ jobs:
         working-directory: artifacts
         run: |
           cp ../dist/qjs/openwrt-configurator.mjs .
+          # The Node build with its web UI, for Homebrew.
+          tar -czf openwrt-configurator-node.tar.gz -C ../dist/node openwrt-configurator
           for f in openwrt-configurator-* openwrt-configurator.mjs; do
             sha256sum "$f" > "$f.sha256"
           done
@@ -67,6 +69,8 @@ jobs:
             artifacts/openwrt-configurator-win.exe.sha256
             artifacts/openwrt-configurator.mjs
             artifacts/openwrt-configurator.mjs.sha256
+            artifacts/openwrt-configurator-node.tar.gz
+            artifacts/openwrt-configurator-node.tar.gz.sha256
           generate_release_notes: true
           fail_on_unmatched_files: true
 
@@ -154,14 +158,14 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Render the formula from the released bundle
+      - name: Render the formula from the released Node build
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download "$GITHUB_REF_NAME" --pattern openwrt-configurator.mjs
+          gh release download "$GITHUB_REF_NAME" --pattern openwrt-configurator-node.tar.gz
           packaging/homebrew/render.sh "${GITHUB_REF_NAME#v}" \
-            "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/openwrt-configurator.mjs" \
-            openwrt-configurator.mjs > "$RUNNER_TEMP/openwrt-configurator.rb"
+            "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/openwrt-configurator-node.tar.gz" \
+            openwrt-configurator-node.tar.gz > "$RUNNER_TEMP/openwrt-configurator.rb"
 
       # A deploy key with write access to the tap repository only.
       - name: Push it to the tap

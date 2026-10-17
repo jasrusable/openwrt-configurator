@@ -10,7 +10,7 @@ PKG_NAME:=openwrt-configurator
 PKG_VERSION?=0.0.0
 PKG_RELEASE:=1
 
-PKG_LICENSE:=ISC
+PKG_LICENSE:=AGPL-3.0-or-later
 PKG_MAINTAINER:=Jason Russell <me@jasonrussell.io>
 
 include $(INCLUDE_DIR)/package.mk

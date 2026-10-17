@@ -62,7 +62,7 @@ const statusDir = stateLayout(intentPath).status;
 
 // The clients: name, kind, model, where, signal, how much.
 const people: [string, ClientView["kind"], string | undefined, string, string, number][] = [
-  ["Jason's iPhone", "phone", "iPhone16,1", "loft", "5 GHz", -58],
+  ["Alex's iPhone", "phone", "iPhone16,1", "loft", "5 GHz", -58],
   ["Sam's Pixel", "phone", "Pixel 8", "office", "5 GHz", -63],
   ["MacBook Pro", "laptop", "Mac15,9", "office", "5 GHz", -52],
   ["Work laptop", "laptop", undefined, "loft", "5 GHz", -71],
