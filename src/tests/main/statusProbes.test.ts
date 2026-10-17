@@ -14,8 +14,10 @@ import {
   parseLinks,
   parseLog,
   parseNeighbourTable,
+  parsePingOutput,
   parseStorage,
   parseTemperature,
+  pingNumbers,
   readDeviceStatus,
 } from "../../status/device";
 
@@ -35,14 +37,39 @@ test("neighbours: each address with its MAC and state; one that failed has none 
   ]);
 });
 
-test("the Internet view's checks: latency, the public address, DNS, the queue's drops", (t) => {
+// Recorded by running the check's own command in OpenWrt 25.12.5's rootfs
+// (busybox 1.37's ping and nslookup; no dnsmasq or https-dns-proxy there,
+// so both fail); the public address replaced, the queue's line from an
+// earlier recording on a router.
+test("the router's checks: the internet's and the gateway's round trip, loss and jitter, the public address, DNS, each DoH instance, the queue's drops", (t) => {
   t.deepEqual(parseInternetCheck(recorded("internet-check.txt")), {
-    latencyMs: 8.806,
+    // 17.675, 7.816, 18.361 and 6.275 ms: their mean, and how much each differs from the one before.
+    latencyMs: 12.5,
+    lossPercent: 0,
+    jitterMs: 10.8,
+    gateway: "192.168.215.1",
+    gatewayMs: 0.1,
+    gatewayLossPercent: 0,
     publicIpv4: "203.0.113.7",
-    dnsOk: true,
+    dnsOk: false,
+    doh: [
+      { port: 5053, ok: false },
+      { port: 5054, ok: false },
+    ],
     queues: [{ device: "eth0", sentBytes: 1974, dropped: 0 }],
   });
-  t.deepEqual(parseInternetCheck("ping \nip \ndns fail"), { dnsOk: false, queues: [] });
+  t.deepEqual(parseInternetCheck("gateway \n== internet\n== gateway\n== end\nip \ndns ok"), { dnsOk: true, queues: [] }, "nothing pinged, nothing made up");
+  const dead = "gateway 10.0.0.1\n== internet\nPING 1.1.1.1 (1.1.1.1): 56 data bytes\n\n--- 1.1.1.1 ping statistics ---\n4 packets transmitted, 0 packets received, 100% packet loss\n== gateway\n== end\ndns fail";
+  t.like(parseInternetCheck(dead), { lossPercent: 100, gateway: "10.0.0.1", dnsOk: false });
+  t.is(parseInternetCheck(dead).latencyMs, undefined, "no reply, no round trip");
+  t.is(parseInternetCheck("gateway ;reboot\ndns ok").gateway, undefined, "only an address");
+});
+
+test("pings in numbers: the mean, the share lost, jitter between successive replies", (t) => {
+  const ping = parsePingOutput("64 bytes from 1.1.1.1: seq=0 ttl=57 time=10.000 ms\n64 bytes from 1.1.1.1: seq=2 ttl=57 time=14.000 ms\n3 packets transmitted, 2 packets received, 33% packet loss");
+  t.deepEqual(ping, { sent: 3, received: 2, times: [10, 14] });
+  t.deepEqual(pingNumbers(ping), { ms: 12, lossPercent: 33, jitterMs: 4 });
+  t.deepEqual(pingNumbers(undefined), {});
 });
 
 test("IPv6 leases: the MAC inside a DUID (LL and LLT), the hostname and addresses", (t) => {

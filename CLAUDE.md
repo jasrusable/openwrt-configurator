@@ -266,7 +266,10 @@ the channel's own streams, which a leftover process would hold open; and
   prints it (`sshFingerprint.ts`) to compare before trusting it.
 - `status/collector.ts` owns device reads for the Status pages: every 10 s
   while someone looks (a `wanted` mark), once a minute otherwise, never during
-  an apply; `/api/status` answers its snapshot. On a router it runs as the
+  an apply; `/api/status` answers its snapshot. Each read is `digest`ed with
+  what the last left: events from what changed (`events.ts`), every client
+  remembered (`registry.ts`), busy channels and client series
+  (`history.ts`); a router copies those to flash hourly and as it stops. On a router it runs as the
   `onc-collector` procd service, writing to RAM. It keeps the settings
   compiled between reads (`readStatusSettings`: loaded again only when the
   file changes, a device's state only when its facts do; 32 ms a read cold,
@@ -539,6 +542,15 @@ named.
   (agent, watchdog restore).
 - LuCI's unsaved changes are per rpcd session, untouched by `uci revert`
   (agent, `revert_pending`).
+- hostapd's ubus `get_clients` `rate` is in tens of bit/s (a double
+  conversion), with no EHT flag or connected time; rpcd's `iwinfo assoclist`
+  has them right (`status/device/wifi.ts`). rpcd's `iwinfo survey` has no
+  in-use flag: the radio's own frequency says which (same, and the survey
+  action); mt76 wraps its busy counter and counts on (`status/history.ts`
+  `airtimeOf`).
+- busybox's `ping -i` takes whole seconds and prints no mdev
+  (`status/device/internet.ts`); uclient-fetch `--post-file` holds the
+  whole body and stalls on 4 MB and more (`status/actions.ts`, speed test).
 
 ## Gotchas
 

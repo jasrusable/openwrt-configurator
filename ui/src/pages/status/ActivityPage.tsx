@@ -3,10 +3,10 @@
 // marks. Read from the devices' logs while this page is open, and kept beside
 // the settings, as logs roll over.
 import { Group, SegmentedControl, Select, Text, ThemeIcon } from "@mantine/core";
-import { IconAlertTriangle, IconArrowDown, IconArrowUp, IconCloudUpload, IconInfoCircle, IconPower } from "@tabler/icons-react";
+import { IconAlertTriangle, IconCircleCheck, IconInfoCircle } from "@tabler/icons-react";
 import { useState } from "react";
 import type { Intent } from "../../../../src/intent/schema";
-import type { ActivityKind } from "../../../../src/status/views";
+import type { NetworkEvent } from "../../../../src/status/events";
 import { useNetworkStatus } from "../../data/status";
 import { useDraftValue } from "../../form/draft";
 import { EmptyState, Section, SettingRow, SettingsPage } from "../../kit/layout";
@@ -15,20 +15,18 @@ import { liveLine, unread } from "./shared";
 const day = (at: number) => new Date(at).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
 const time = (at: number) => new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 
-const look: Record<ActivityKind, [typeof IconInfoCircle, string]> = {
-  up: [IconArrowUp, "green"],
-  down: [IconArrowDown, "orange"],
-  start: [IconPower, "blue"],
-  apply: [IconCloudUpload, "violet"],
+const look: Record<NetworkEvent["severity"], [typeof IconInfoCircle, string]> = {
   problem: [IconAlertTriangle, "red"],
-  note: [IconInfoCircle, "gray"],
+  warning: [IconAlertTriangle, "orange"],
+  ok: [IconCircleCheck, "green"],
+  info: [IconInfoCircle, "gray"],
 };
 
 /** The filter's choices: what each shows. */
-const shows: Record<string, (k: ActivityKind) => boolean> = {
+const shows: Record<string, (e: NetworkEvent) => boolean> = {
   all: () => true,
-  problems: (k) => k === "down" || k === "problem",
-  changes: (k) => k === "apply" || k === "start",
+  problems: (e) => e.severity === "problem" || e.severity === "warning",
+  changes: (e) => e.kind === "apply" || e.kind === "reboot",
 };
 
 export const ActivityPage = () => {
@@ -36,8 +34,8 @@ export const ActivityPage = () => {
   const status = useNetworkStatus();
   const [device, setDevice] = useState<string | null>(null);
   const [which, setWhich] = useState("all");
-  const all = status.data?.activity ?? [];
-  const events = all.filter((e) => (!device || e.device === device) && shows[which](e.kind ?? "note"));
+  const all = status.data?.events ?? [];
+  const events = all.filter((e) => (!device || e.device === device) && shows[which](e));
   const days = [...new Set(events.map((e) => day(e.at)))];
   return (
     <SettingsPage title="Activity" description={liveLine(intent.system.name, status)}>
@@ -52,7 +50,7 @@ export const ActivityPage = () => {
             { value: "changes", label: "Applies and restarts" },
           ]}
         />
-        <Select size="xs" placeholder="Every device" clearable data={[...new Set(all.map((e) => e.device))]} value={device} onChange={setDevice} w={180} />
+        <Select size="xs" placeholder="Every device" clearable data={[...new Set(all.flatMap((e) => (e.device ? [e.device] : [])))]} value={device} onChange={setDevice} w={180} />
       </Group>
       {events.length === 0 && (
         <Section>
@@ -64,7 +62,7 @@ export const ActivityPage = () => {
           {events
             .filter((e) => day(e.at) === d)
             .map((e, i) => {
-              const [Icon, color] = look[e.kind ?? "note"];
+              const [Icon, color] = look[e.severity];
               return (
                 <SettingRow
                   key={`${e.at}-${e.device}-${i}`}

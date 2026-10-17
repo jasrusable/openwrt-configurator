@@ -139,7 +139,8 @@ export const stateLayout = (intentPath: string) => {
     status: `${root}/status`,
     /** Wrong passwords, one marker file each (a Mac's; a router counts them in RAM). */
     loginAttempts: `${root}/login-attempts`,
-    activity: `${root}/activity.json`,
+    /** The router's speed tests, the latest first (src/status/actions.ts). */
+    speedTests: `${root}/speed-tests.json`,
     /** OpenWrt's releases by series, as ASU last listed them (src/firmware/releases.ts). */
     releases: `${root}/openwrt-releases.json`,
     /** Firmware images built for an upgrade, by what went into them (src/firmware/builds.ts). */

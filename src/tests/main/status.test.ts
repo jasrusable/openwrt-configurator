@@ -71,6 +71,53 @@ test("Wi-Fi clients per hostapd interface; leases; nothing breaks on missing fie
   );
 });
 
+// Shaped as rpcd's iwinfo.c (d99f703) answers `iwinfo assoclist` (no
+// recording yet): each client's rates in kbit/s, with the modes they use.
+test("Wi-Fi rates and generation from iwinfo's assoclist; the channel's counters from its survey on the radio's own frequency", (t) => {
+  const [radio] = parseWifi([
+    {
+      object: "hostapd.phy1-ap0",
+      status: { ssid: "Home", freq: 5180, channel: 36 },
+      clients: { clients: { "AA:BB:CC:00:00:01": { signal: -58, he: true, vht: true, ht: true }, "aa:bb:cc:00:00:02": { signal: -71, ht: true } } },
+      assoc: {
+        results: [
+          { mac: "AA:BB:CC:00:00:01", signal: -59, connected_time: 3600, rx: { rate: 680400, mhz: 80, he: true, mcs: 7, nss: 2 }, tx: { rate: 1201000, mhz: 80, eht: true, mcs: 11, nss: 2, retries: 12 } },
+          { mac: "aa:bb:cc:00:00:02", signal: -71, rx: { rate: 0 }, tx: { rate: 72200, ht: true, mcs: 7 } },
+        ],
+      },
+      survey: { results: [{ mhz: 5180, active_time: 600000, busy_time: 180000 }, { mhz: 5200, active_time: 100, busy_time: 90 }] },
+    },
+  ]);
+  t.deepEqual(radio.airtime, { active: 600000, busy: 180000 }, "its own channel's, not the next one's");
+  t.deepEqual(radio.clients, [
+    { mac: "aa:bb:cc:00:00:01", signal: -58, connected: 3600, rxRate: 680.4, txRate: 1201, generation: 7 },
+    { mac: "aa:bb:cc:00:00:02", signal: -71, txRate: 72.2, generation: 4 },
+  ]);
+});
+
+test("interfaces: how each gets its address, its gateway, the prefixes delegated to it and its DNS servers", (t) => {
+  const [wan, wan6] = parseInterfaces({
+    interface: [
+      {
+        interface: "wan",
+        up: true,
+        proto: "dhcp",
+        l3_device: "eth1",
+        "ipv4-address": [{ address: "100.64.3.2", mask: 22 }],
+        route: [
+          { target: "100.64.0.0", mask: 22, nexthop: "0.0.0.0" },
+          { target: "0.0.0.0", mask: 0, nexthop: "100.64.0.1" },
+        ],
+        "dns-server": ["100.64.0.1"],
+      },
+      { interface: "wan6", up: true, proto: "dhcpv6", "ipv6-prefix": [{ address: "2001:db8:12::", mask: 56, class: "wan6" }], route: [{ target: "::", mask: 0, nexthop: "fe80::1" }] },
+    ],
+  });
+  t.like(wan, { proto: "dhcp", gateway: "100.64.0.1", dns: ["100.64.0.1"], ipv4: ["100.64.3.2/22"] });
+  t.like(wan6, { proto: "dhcpv6", gateway: "fe80::1", prefixes: ["2001:db8:12::/56"] });
+  t.is(parseInterfaces({ interface: [{ interface: "lan", up: true, proto: "static" }] })[0].gateway, undefined);
+});
+
 const device = (hostname: string, parts: Partial<DeviceStatus>): DeviceStatus => ({
   hostname,
   readAt: 0,

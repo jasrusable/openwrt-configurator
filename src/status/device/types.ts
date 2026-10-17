@@ -10,6 +10,14 @@ export type InterfaceStatus = {
   device?: string;
   ipv4: string[];
   ipv6: string[];
+  /** How it gets its address: dhcp, pppoe, static, dhcpv6… */
+  proto?: string;
+  /** Its default route's next hop, where it has one. */
+  gateway?: string;
+  /** Prefixes delegated to it (a line's wan6), "address/length". */
+  prefixes?: string[];
+  /** The DNS servers it was given. */
+  dns?: string[];
 };
 
 export type WifiClient = {
@@ -19,6 +27,11 @@ export type WifiClient = {
   txBytes?: number;
   /** Seconds since it associated. */
   connected?: number;
+  /** The link's rates now, Mbit/s: what the access point last received from it, and last sent it. */
+  rxRate?: number;
+  txRate?: number;
+  /** The Wi-Fi generation the link uses (4, 5, 6, 7), from what the client and the access point agreed. */
+  generation?: number;
 };
 
 export type WifiInterface = {
@@ -32,6 +45,12 @@ export type WifiInterface = {
   htmode?: string;
   txpower?: number;
   noise?: number;
+  /**
+   * The channel it is on, as the radio counts it: ms on the channel, and of
+   * those, ms busy (anyone's traffic). Running totals on most drivers; how
+   * busy it is comes from two reads (history.ts, `airtimeOf`).
+   */
+  airtime?: { active: number; busy: number };
   clients: WifiClient[];
 };
 
@@ -53,14 +72,24 @@ export type NeighbourEntry = { address: string; mac: string; state: string; devi
 /** odhcpd's IPv6 leases: by DUID, the MAC where the DUID holds one. */
 export type Ipv6Lease = { duid: string; mac?: string; hostname?: string; addresses: string[] };
 
-/** Read only for the Performance view: how the line is doing from the router. */
+/** How the line is doing, from the router: read with the router's status. */
 export type InternetCheck = {
   /** Average round trip to a public resolver, ms; undefined when none answered. */
   latencyMs?: number;
+  /** Of the pings to it, the share lost, %. */
+  lossPercent?: number;
+  /** How much one round trip differs from the next, on average, ms. */
+  jitterMs?: number;
+  /** The router's next hop out (its provider's router), and the round trip and loss to it: the line itself, before the internet. */
+  gateway?: string;
+  gatewayMs?: number;
+  gatewayLossPercent?: number;
   /** The address the internet sees (another NAT may sit before the router's WAN). */
   publicIpv4?: string;
   /** The router's own DNS (dnsmasq, and its upstream) answering. */
   dnsOk: boolean;
+  /** Each DNS-over-HTTPS instance (src/intent/dns: the provider's, then the fallback's), asked directly. */
+  doh?: { port: number; ok: boolean }[];
   /** Smart queueing on each device it shapes: bytes sent and packets it dropped (to keep latency down). */
   queues: { device: string; sentBytes: number; dropped: number }[];
 };

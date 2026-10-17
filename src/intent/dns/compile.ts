@@ -25,6 +25,8 @@ const providers = {
 /** Where https-dns-proxy listens, for dnsmasq to forward to: the provider's instance, then the fallback's. */
 const proxyPort = 5053;
 const fallbackPort = 5054;
+/** The same, for Status to ask each in turn (src/status/device/internet.ts). */
+export const dohPorts = { provider: proxyPort, fallback: fallbackPort } as const;
 
 /**
  * The provider asked when the chosen one does not answer: the one set, or

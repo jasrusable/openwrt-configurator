@@ -6,6 +6,8 @@
 import type { FeatureModule } from "../feature";
 import { dnsChecks } from "./checks";
 import { dns } from "./compile";
+
+export { dohPorts, fallbackOf, providerLabels } from "./compile";
 import { dnsFields } from "./fields";
 import { dnsRules } from "./rules";
 

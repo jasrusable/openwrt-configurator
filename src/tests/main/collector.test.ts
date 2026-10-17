@@ -6,10 +6,11 @@ import { join } from "path";
 import { nodePlatform } from "../../platforms/node";
 import { jobPaths, jobRecordKey } from "../../server/provisionJob";
 import { write } from "../../store";
-import { markWanted, readHistory, runCollector, snapshotFreshMs } from "../../status/collector";
+import { copyKept, digest, eventsKey, markWanted, readEvents, readHistory, registryKey, runCollector, snapshotFreshMs, State } from "../../status/collector";
+import type { NetworkStatus } from "../../status/network";
 import { uiHandler } from "../../server/app";
 import { tempDir } from "../helpers/tempDir";
-import { mkdirSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { ok } from "../../result";
 
 const get = (path: string) => ({ method: "GET", path, body: "", headers: { "x-onc": "1" } });
@@ -126,4 +127,90 @@ test("a mark of someone looking kept before the store still counts", async (t) =
     collect: async ({ state }) => (calls++, ok(state)),
   });
   t.is(calls, 3, "every ten seconds");
+});
+
+const network = (over: Partial<NetworkStatus> = {}): NetworkStatus => ({
+  internet: { up: true, ipv4: [], ipv6: [] },
+  connections: [{ id: "wan", name: "Fibre", up: true, ipv4: [], ipv6: [], uptime: 100, inUse: true }],
+  devices: [{ name: "loft", role: "access-point" }],
+  networks: [],
+  ssids: [],
+  clients: { total: 0, wifi: 0 },
+  unexpected: { interfaces: [], ssids: [] },
+  deviceViews: [{ name: "loft", role: "access-point", reachable: true, uptime: 100, ports: [] }],
+  radios: [{ accessPoint: "loft", ifname: "phy1-ap0", band: "5 GHz", clients: 1, airtime: { active: 1_000_000, busy: 100_000 } }],
+  clientList: [],
+  reservations: [],
+  ...over,
+});
+
+const phone = { mac: "a4:83:e7:00:00:01", name: "Phone", ipv6: [], network: "lan", connection: { kind: "wifi" as const, accessPoint: "loft", signal: -60, txRate: 400 }, state: "online" as const, reserved: false, heardBy: [] };
+
+test("a read digested: busy from two reads, clients remembered and the new one told, what changed told, numbers in the history", (t) => {
+  const empty: State = { histories: { day: {}, month: {} }, counts: {} };
+  const t0 = 10_000_000;
+  const first = digest({ read: network(), at: t0, state: empty });
+  t.deepEqual(first.snapshot.status.events, []);
+  t.is(first.snapshot.status.radios?.[0].busy, undefined, "one read: not yet");
+  const second = digest({
+    read: network({
+      connections: [{ id: "wan", name: "Fibre", up: false, ipv4: [], ipv6: [], inUse: false }],
+      // Its clock moved on with the reads: no restart.
+      deviceViews: [{ name: "loft", role: "access-point", reachable: true, uptime: 100 + 15 * 60, ports: [] }],
+      radios: [{ accessPoint: "loft", ifname: "phy1-ap0", band: "5 GHz", clients: 1, airtime: { active: 1_010_000, busy: 104_000 } }],
+      clientList: [phone],
+    }),
+    at: t0 + 15 * 60_000,
+    state: first.state,
+    networkName: (id) => (id === "lan" ? "Home" : undefined),
+  });
+  const status = second.snapshot.status;
+  t.is(status.radios?.[0].busy, 40);
+  t.deepEqual(status.events?.map((e) => e.text), ["Fibre went down", "New device: Phone on Home"], "both seen by this read");
+  t.like(status.clientList?.[0], { mac: phone.mac, new: true, firstSeen: t0 + 15 * 60_000 });
+  t.deepEqual(second.state.histories.day["line:wan"]?.map((p) => p[1]), [1, 0]);
+  t.deepEqual(second.state.histories.day["busy:loft:5 GHz"]?.map((p) => p[1]), [40]);
+  t.deepEqual(Object.keys(second.state.clientHistory ?? {}).sort(), ["rate:a4:83:e7:00:00:01", "signal:a4:83:e7:00:00:01"]);
+  // An apply that ended is told once, by when it started.
+  const applied = { at: t0, kind: "apply" as const, severity: "ok" as const, subject: "app:apply", text: "Settings applied" };
+  const third = digest({
+    read: network({ clientList: [phone], deviceViews: [{ name: "loft", role: "access-point", reachable: true, uptime: 100 + 16 * 60, ports: [] }] }),
+    at: t0 + 16 * 60_000,
+    state: second.state,
+    applied,
+  });
+  t.is(third.state.applyTold, t0);
+  t.true(third.snapshot.status.events?.some((e) => e.text === "Settings applied"));
+});
+
+test("what is worth keeping is copied from RAM to flash, and back at the next start only where RAM has none", (t) => {
+  const ram = tempDir("collector-ram");
+  const flash = tempDir("collector-flash");
+  const events = [{ at: 1, kind: "line" as const, severity: "problem" as const, subject: "line:wan", text: "Fibre went down" }];
+  write(nodePlatform, eventsKey(ram), events);
+  writeFileSync(join(ram, "status.json"), JSON.stringify({ at: 1, status: {} }));
+  copyKept(nodePlatform, ram, flash);
+  t.deepEqual(readEvents(nodePlatform, flash), events);
+  t.false(existsSync(join(flash, "status.json")), "the snapshot is read again in seconds: never on flash");
+  // After a reboot RAM is empty: taken from flash. A newer RAM copy is left as it is.
+  const rebooted = tempDir("collector-ram");
+  copyKept(nodePlatform, flash, rebooted, true);
+  t.deepEqual(readEvents(nodePlatform, rebooted), events);
+  write(nodePlatform, eventsKey(rebooted), []);
+  copyKept(nodePlatform, flash, rebooted, true);
+  t.deepEqual(readEvents(nodePlatform, rebooted), []);
+});
+
+test("events are answered whole or from a time on; one client as remembered, with its own series", async (t) => {
+  const dir = tempDir("collector");
+  const e = (at: number) => ({ at, kind: "line" as const, severity: "info" as const, subject: "line:wan", text: `at ${at}` });
+  write(nodePlatform, eventsKey(dir), [e(3000), e(2000), e(1000)]);
+  write(nodePlatform, registryKey(dir), { since: 0, clients: { [phone.mac]: { mac: phone.mac, firstSeen: 5, lastSeen: 9, name: "Phone" } } });
+  writeFileSync(join(dir, "client-history.json"), JSON.stringify({ format: 1, value: { [`signal:${phone.mac}`]: [[0, -60, 1]], "signal:other": [[0, -80, 1]] } }));
+  const handle = api(dir);
+  t.is(JSON.parse((await handle(get("/api/events"))).body).length, 3);
+  t.deepEqual(JSON.parse((await handle(get("/api/events/1500"))).body).map((x: { at: number }) => x.at), [3000, 2000]);
+  const one = JSON.parse((await handle(get(`/api/clients/${encodeURIComponent(phone.mac.toUpperCase())}`))).body);
+  t.deepEqual(one, { known: { mac: phone.mac, firstSeen: 5, lastSeen: 9, name: "Phone" }, history: { signal: [[0, -60, 1]] } });
+  t.is((await handle(get("/api/clients/../../etc"))).status, 404);
 });

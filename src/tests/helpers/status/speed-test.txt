@@ -1,0 +1,42 @@
+down 8.36 493150681
+up 7.960 87031808
+== idle
+PING 1.1.1.1 (1.1.1.1): 56 data bytes
+64 bytes from 1.1.1.1: seq=0 ttl=40 time=7.042 ms
+64 bytes from 1.1.1.1: seq=1 ttl=40 time=6.183 ms
+64 bytes from 1.1.1.1: seq=2 ttl=40 time=5.488 ms
+
+--- 1.1.1.1 ping statistics ---
+3 packets transmitted, 3 packets received, 0% packet loss
+round-trip min/avg/max = 5.488/6.237/7.042 ms
+== down
+PING 1.1.1.1 (1.1.1.1): 56 data bytes
+64 bytes from 1.1.1.1: seq=0 ttl=40 time=16.744 ms
+64 bytes from 1.1.1.1: seq=1 ttl=40 time=4.746 ms
+64 bytes from 1.1.1.1: seq=2 ttl=40 time=13.337 ms
+64 bytes from 1.1.1.1: seq=3 ttl=40 time=15.655 ms
+64 bytes from 1.1.1.1: seq=4 ttl=40 time=11.884 ms
+64 bytes from 1.1.1.1: seq=5 ttl=40 time=21.116 ms
+64 bytes from 1.1.1.1: seq=6 ttl=40 time=12.812 ms
+64 bytes from 1.1.1.1: seq=7 ttl=40 time=13.807 ms
+64 bytes from 1.1.1.1: seq=8 ttl=40 time=15.521 ms
+
+--- 1.1.1.1 ping statistics ---
+9 packets transmitted, 9 packets received, 0% packet loss
+round-trip min/avg/max = 4.746/13.958/21.116 ms
+== up
+PING 1.1.1.1 (1.1.1.1): 56 data bytes
+64 bytes from 1.1.1.1: seq=0 ttl=40 time=13.423 ms
+64 bytes from 1.1.1.1: seq=1 ttl=40 time=6.241 ms
+64 bytes from 1.1.1.1: seq=2 ttl=40 time=5.262 ms
+64 bytes from 1.1.1.1: seq=3 ttl=40 time=27.707 ms
+64 bytes from 1.1.1.1: seq=4 ttl=40 time=5.985 ms
+64 bytes from 1.1.1.1: seq=5 ttl=40 time=5.367 ms
+64 bytes from 1.1.1.1: seq=6 ttl=40 time=28.885 ms
+64 bytes from 1.1.1.1: seq=7 ttl=40 time=6.180 ms
+64 bytes from 1.1.1.1: seq=8 ttl=40 time=30.995 ms
+
+--- 1.1.1.1 ping statistics ---
+9 packets transmitted, 9 packets received, 0% packet loss
+round-trip min/avg/max = 5.262/14.449/30.995 ms
+== end

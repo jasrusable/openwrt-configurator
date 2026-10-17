@@ -5,8 +5,8 @@
 // speed (src/meshSpeed.ts).
 import { measureLink } from "../../meshSpeed";
 import { fail } from "../../problem";
-import { pingFrom, rebootDevice, restartService, restartWifi, speedTest, wifiSurvey } from "../../status/actions";
-import { ApiContext, field, respond, Route, withBody } from "../router";
+import { pingFrom, rebootDevice, restartService, restartWifi, speedTest, speedTests, wifiSurvey } from "../../status/actions";
+import { ApiContext, field, json, respond, Route, withBody } from "../router";
 
 export const actionRoutes = ({ intentPath, platform, now }: ApiContext): Route[] => [
   {
@@ -38,7 +38,12 @@ export const actionRoutes = ({ intentPath, platform, now }: ApiContext): Route[]
       return respond(device ? await pingFrom({ intentPath, platform, hostname: device, target }) : fail("invalid", "Give a device."));
     }),
   },
-  { path: "/api/internet/speed", POST: async () => respond(await speedTest({ intentPath, platform })) },
+  {
+    path: "/api/internet/speed",
+    POST: async () => respond(await speedTest({ intentPath, platform })),
+    // The tests kept, the latest first.
+    GET: async () => json(200, speedTests(platform, intentPath)),
+  },
   { path: "/api/wifi/survey", POST: async () => respond(await wifiSurvey({ intentPath, platform })) },
   {
     path: "/api/mesh/speed",

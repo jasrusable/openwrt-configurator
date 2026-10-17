@@ -2,10 +2,8 @@
 // saved settings: everything every Status page shows, in one read. The
 // collector (collector.ts) makes it and keeps the result; pages read that.
 // Stored beside it: what locating learnt about where a device is
-// (src/locate.ts), kept with its facts, and the events Activity keeps
-// (written only when new ones came).
+// (src/locate.ts), kept with its facts.
 import type { OpenWrtConfig } from "../engine/openWrtState";
-import { z } from "zod";
 import { DeviceFacts, readFacts } from "../deviceFacts";
 import { loadSettings, SavedSettings } from "../settings";
 import type { Intent } from "../intent/schema";
@@ -14,53 +12,13 @@ import { Platform } from "../platform";
 import { provisionableDevices, ProvisionableDevice } from "../apply/provisionConfig";
 import { readEach } from "../readEach";
 import { getOpenWrtState } from "../engine/getOpenWrtState";
-import { jobProgress, jobState, liveState } from "../server/provisionJob";
+import { liveState } from "../server/provisionJob";
+import { dohPorts, fallbackOf } from "../intent/dns";
 import { meshWiredLink, readDeviceStatus } from "./device";
 import { NetworkStatus, networkStatus } from "./network";
-import { ActivityView, activityViewSchema, activityOf, attentionOf, clientsOf, devicesOf, internetCountersOf, internetOf, keepActivity, radiosOf } from "./views";
+import { attentionOf, clientsOf, devicesOf, internetCountersOf, internetOf, radiosOf } from "./views";
 import { ok, Result } from "../result";
 import { Problem } from "../problem";
-import { read, stateLayout, StoreKey, write } from "../store";
-
-/** This app's own last run, as an event: applied, or rolled back. */
-const appliesOf = async (intentPath: string, platform: Platform): Promise<ActivityView[]> => {
-  const run = await jobState({ intentPath, files: platform }).catch(() => undefined);
-  if (!run?.startedAt || run.state === "running" || run.state === "idle") return [];
-  const outcome = jobProgress(intentPath, platform).outcome;
-  const text =
-    run.state === "succeeded"
-      ? "Settings applied"
-      : run.state === "applied-with-problems"
-        ? "Settings applied, with a problem after"
-        : outcome === "rolled-back"
-          ? "An apply was rolled back: every device kept its settings"
-          : "An apply stopped before changing anything";
-  return [{ at: run.startedAt, device: "This app", text, kind: run.state === "succeeded" ? "apply" : "problem" }];
-};
-
-const activityKey = (intentPath: string): StoreKey<ActivityView[]> => ({
-  path: stateLayout(intentPath).activity,
-  schema: z.array(activityViewSchema),
-  format: 1,
-  // Before the store: the list as written.
-  upgrade: (stored, format) => (format === undefined ? stored : undefined),
-});
-
-/** Activity kept beside the intent across reads (device logs roll over), with what was just read. */
-const keptActivity = (intentPath: string, platform: Platform, fresh: ActivityView[], applies: ActivityView[]) => {
-  const kept = read(platform, activityKey(intentPath)) ?? [];
-  const all = keepActivity(kept, [...fresh, ...applies]);
-  // Written only when something new came, and whole (a router keeps it in
-  // flash, and two readers may overlap): a read that learnt nothing writes nothing.
-  if (JSON.stringify(all) !== JSON.stringify(kept)) {
-    try {
-      write(platform, activityKey(intentPath), all);
-    } catch {
-      // Kept next time.
-    }
-  }
-  return all.slice(0, 300);
-};
 
 /**
  * A device slower than this is reported as not reached, so one cannot hold
@@ -146,6 +104,13 @@ const statusSettingsOf = (settings: SavedSettings, intentPath: string, platform:
   };
 };
 
+/** The DNS-over-HTTPS instances the router runs, by port: the provider's, then the fallback's. */
+const dohOf = (intent: Intent) => {
+  const upstream = intent.dns.upstream;
+  if (upstream.type !== "encrypted") return [];
+  return [dohPorts.provider, ...(fallbackOf(upstream) ? [dohPorts.fallback] : [])];
+};
+
 export const readNetworkStatus = async ({
   intentPath,
   platform,
@@ -171,7 +136,7 @@ export const readNetworkStatus = async ({
       // Where its mesh over cables runs: what locating just read it is (DSA or swconfig).
       const wired = meshWiredLink(f.schema);
       return readDeviceStatus(f.hostname, f.session, now, mustRun, {
-        ...(router ? { internet: { shaped }, mdns: true } : {}),
+        ...(router ? { internet: { shaped, doh: dohOf(intent) }, mdns: true } : {}),
         log: true,
         ...(wired ? { meshWired: wired } : {}),
         traffic: true,
@@ -188,10 +153,10 @@ export const readNetworkStatus = async ({
     ...networkStatus(intent, devices, Object.fromEntries(Object.entries(facts).map(([name, f]) => [name, f?.macs]))),
     attention: attentionOf({ intent, devices, facts, ...(applied ? { applied } : {}) }),
     clientList: clientsOf(intent, devices, facts),
-    deviceViews: devicesOf(intent, devices, facts),
+    deviceViews: devicesOf(intent, devices, facts, (name) => expected(name).mustRun),
     radios: radiosOf(devices),
     ...(counters ? { internetCounters: counters } : {}),
     ...(check ? { internetCheck: check } : {}),
-    activity: keptActivity(intentPath, platform, activityOf(intent, devices), await appliesOf(intentPath, platform)),
+    reservations: intent.networks.flatMap((n) => n.dhcp.reservations.map((r) => r.mac.toLowerCase())),
   });
 };

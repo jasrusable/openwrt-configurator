@@ -1,16 +1,14 @@
 // A line's failover as mwan3 and this app's hook really log it: recorded on
 // OpenWrt 25.12.5 by scripts/mwan3-test.sh (RECORD=1), the main line's pings
-// dropped, then let through. The device's own filter keeps what Activity
-// reads, and Activity says it in words.
+// dropped, then let through. The device's own filter keeps what its page
+// shows of its log, and the page says it in words.
 import test from "ava";
 import { spawnSync } from "child_process";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { logProbe, parseLog } from "../../status/device/log";
-import { activityOf } from "../../status/views";
+import { logWords } from "../../status/views";
 import { sampleIntent } from "../helpers/fixtures";
-import { reads } from "../helpers/reads";
-import type { DeviceStatus } from "../../status/device";
 
 const recorded = readFileSync(join(__dirname, "../helpers/status/mwan3-failover.txt"), "utf8");
 
@@ -28,9 +26,11 @@ test("mwan3's real failover lines pass the device's filter and read as the line 
   const kept = filtered();
   t.regex(kept, /Interface wan \(eth1\) is offline/);
   t.notRegex(kept, /Check \(ping\) failed/, "the per-ping noise stays on the device");
-  const router = { hostname: "home-router", log: parseLog(kept) } as unknown as DeviceStatus;
-  const said = activityOf(intent, reads(router)).map(({ text, kind }) => [text, kind]);
-  t.deepEqual(said.filter(([, kind]) => kind === "down"), [[`${line.name} is offline`, "down"]]);
-  t.true(said.some(([text, kind]) => text === `${line.name} is online` && kind === "up"));
-  t.true(said.some(([text, kind]) => /IPv6 withdrawn until it is back/.test(text ?? "") && kind === "note"), "the hook's own mark");
+  const said = parseLog(kept).flatMap((l) => {
+    const words = logWords(intent, l.text);
+    return words ? [[words.text, words.tone]] : [];
+  });
+  t.deepEqual(said.filter(([, tone]) => tone === "down"), [[`${line.name} is offline`, "down"]]);
+  t.true(said.some(([text, tone]) => text === `${line.name} is online` && tone === "up"));
+  t.true(said.some(([text, tone]) => /IPv6 withdrawn until it is back/.test(text ?? "") && tone === "note"), "the hook's own mark");
 });

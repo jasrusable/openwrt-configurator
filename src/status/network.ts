@@ -9,7 +9,8 @@ import type { Intent } from "../intent/schema";
 import type { DeviceFailure } from "../readEach";
 import type { Result } from "../result";
 import { DeviceStatus, InternetCheck } from "./device";
-import type { ActivityView, Attention, ClientView, DeviceView, RadioView } from "./views";
+import type { NetworkEvent } from "./events";
+import type { Attention, ClientView, DeviceView, RadioView } from "./views";
 
 
 /** A mesh link slower than this (BATMAN_V's estimate) shows as weak: below it, a cable or a nearer node would help. */
@@ -75,7 +76,10 @@ export type NetworkStatus = {
   deviceViews?: DeviceView[];
   radios?: RadioView[];
   internetCheck?: InternetCheck;
-  activity?: ActivityView[];
+  /** What happened lately, newest first (the collector's, events.ts). */
+  events?: NetworkEvent[];
+  /** Every MAC with a fixed address in your settings, lower case. */
+  reservations?: string[];
   /** Each internet line's byte counters, and when: two reads give the throughput. */
   internetCounters?: { lines: Record<string, { rx: number; tx: number }>; at: number };
   /** Bits per second now, from this read's counters and the one before (the collector's). */

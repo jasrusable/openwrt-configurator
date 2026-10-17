@@ -2,10 +2,12 @@ import test from "ava";
 import { reads } from "../helpers/reads";
 import { sampleIntent } from "../helpers/fixtures";
 import { DeviceStatus, parseHeardBy, parseTraffic } from "../../status/device";
-import { activityOf, attentionOf, clientsOf, devicesOf, internetCountersOf, keepActivity, restartable } from "../../status/views";
+import { attentionOf, clientsOf, devicesOf, internetCountersOf, logWords, restartable } from "../../status/views";
 import { printPlan } from "../../lowLevel/print";
 import { compileIntent } from "../../intent/compile";
-import { neighboursOf, parseSpeed, parseSurvey } from "../../status/actions";
+import { bloatGrade, neighboursOf, parseSpeed, parseSpeedTest, parseSurvey } from "../../status/actions";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 const sample = () =>
   sampleIntent();
@@ -121,7 +123,7 @@ test("devices: each one's ports from its facts, with their links", (t) => {
   t.deepEqual(router.ports, [{ name: "eth0", up: true, speed: 1000 }, { name: "eth1", up: false }]);
 });
 
-test("activity: log lines in words, newest first; the rest left out", (t) => {
+test("a device's log in words: links, interfaces, mwan3 and this app's marks; the rest left as logged", (t) => {
   const intent = sample();
   const log = [
     // As parseLog leaves them: the tag first.
@@ -133,17 +135,34 @@ test("activity: log lines in words, newest first; the rest left out", (t) => {
     // A client's name in someone else's line is not this app speaking.
     { at: 6000, text: "dnsmasq-dhcp[1]: DHCPACK(br-lan) 10.0.0.9 aa:bb onc-ipv6: all clear" },
   ];
-  t.deepEqual(activityOf(intent, reads(device("home-router", { log }))).map(({ text, kind }) => [text, kind]), [
-    [`${intent.internet.lines[0].name} is offline`, "down"],
-    ["Wan6 has an IPv6 default route, restarting odhcpd", "note"],
-    ["Port eth1 disconnected", "down"],
+  t.deepEqual(log.map(({ text }) => logWords(intent, text)).map((w) => w && [w.text, w.tone]), [
     [`${intent.networks[0].name} came up`, "up"],
+    ["Port eth1 disconnected", "down"],
+    ["Wan6 has an IPv6 default route, restarting odhcpd", "note"],
+    undefined,
+    [`${intent.internet.lines[0].name} is offline`, "down"],
+    undefined,
   ]);
+  const [router] = devicesOf(intent, reads(device("home-router", { log })), {});
+  t.deepEqual(router.log?.[0], { at: 1000, text: "netifd: Interface 'lan' is now up", said: `${intent.networks[0].name} came up`, tone: "up" });
+  t.deepEqual(router.log?.[3], { at: 4000, text: "dnsmasq[1]: read /etc/hosts" }, "as logged, nothing said of it");
 });
 
 test("speed: bits over the router's uptime clock", (t) => {
   t.is(parseSpeed("0.65 25000000"), 307.7);
   t.is(parseSpeed("0 0"), undefined);
+});
+
+// Recorded by running the test's own command in OpenWrt 25.12.5's rootfs,
+// over this machine's line: eight seconds each way, pings throughout.
+test("speed test: down and up, the round trip at rest and under load, and bufferbloat's grade", (t) => {
+  const result = parseSpeedTest(readFileSync(join(__dirname, "../helpers/status/speed-test.txt"), "utf8"), 1000);
+  t.deepEqual(result, { at: 1000, downMbps: 471.9, upMbps: 87.5, idleMs: 6.2, downLoadedMs: 14, upLoadedMs: 14.4 });
+  t.deepEqual(bloatGrade(result), { addedMs: 8, grade: "B" });
+  t.deepEqual(parseSpeedTest("down 0 0\n== idle\n== end", 5), { at: 5 }, "nothing came: nothing said");
+  t.deepEqual(bloatGrade({ idleMs: 10, downLoadedMs: 12 }), { addedMs: 2, grade: "A" });
+  t.deepEqual(bloatGrade({ idleMs: 10, downLoadedMs: 50, upLoadedMs: 300 }), { addedMs: 290, grade: "F" }, "the worse direction");
+  t.is(bloatGrade({ downLoadedMs: 50 }), undefined, "no round trip at rest to compare with");
 });
 
 test("survey: our own radios left out by BSSID, on any access point; another radio with our name is an impostor", (t) => {
@@ -233,12 +252,6 @@ test("throughput counters: each line's own, by its device on the router", (t) =>
   });
   t.deepEqual(internetCountersOf(intent, reads(router)), { lines: { wan: { rx: 10, tx: 20 } }, at: 5000 });
   t.is(internetCountersOf(intent, reads({ hostname: "home-router", error: "x" })), undefined);
-});
-
-test("activity kept: newest first, the same event read twice kept once, bounded", (t) => {
-  const e = (at: number, text: string) => ({ at, device: "r", text });
-  t.deepEqual(keepActivity([e(1000, "a"), e(500, "b")], [e(1500, "a"), e(3000, "c")]), [e(3000, "c"), e(1500, "a"), e(500, "b")]);
-  t.is(keepActivity([], Array.from({ length: 20 }, (_, i) => e(i * 5000, `x${i}`)), 5).length, 5);
 });
 
 test("traffic: nlbwmon on the router only, running, its database in RAM", (t) => {

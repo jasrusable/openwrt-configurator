@@ -18,7 +18,7 @@ import { handshakes, parseHandshakes } from "./vpn";
 import { heardBy, parseHeardBy, parseWifi, wifi } from "./wifi";
 
 export { leasesCommand, parseAdverts, parseIpv6Leases, parseLeases, parseNeighbourTable, parseTraffic } from "./clients";
-export { internetCheckSeconds, latencyTarget, parseInternetCheck, parseLines } from "./internet";
+export { internetCheckSeconds, latencyTarget, parseInternetCheck, parseLines, parsePingOutput, pingNumbers } from "./internet";
 export { parseLog } from "./log";
 export { parseMdns } from "./mdns";
 export { meshWired, meshWiredLink, parseOriginators, parseRoutes } from "./mesh";
@@ -33,7 +33,8 @@ export { parseHeardBy, parseWifi } from "./wifi";
  * wired mesh's pings, nlbwmon's counts, usteer's view). Absent: not read.
  */
 export type StatusExtras = {
-  internet?: { shaped: string[] };
+  /** The router's checks: the devices smart queueing shapes, and each DNS-over-HTTPS instance's port to ask. */
+  internet?: { shaped: string[]; doh?: number[] };
   log?: boolean;
   /** The wired mesh's link there (meshWiredLink: its VLAN device, and what carries it). */
   meshWired?: MeshWiredLink;
@@ -93,7 +94,10 @@ export const readDeviceStatus = async (
     mdns: extras.mdns ? tolerant("device names (umdns)", mdns, { browse: undefined, hosts: undefined }) : skipped({ browse: undefined, hosts: undefined }),
     // Device names only (eth1, pppoe-wan): they go inside an awk program, unquoted.
     internetCheck: extras.internet
-      ? internetCheck(extras.internet.shaped.filter((d) => /^[A-Za-z0-9._@-]+$/.test(d)))
+      ? internetCheck(
+          extras.internet.shaped.filter((d) => /^[A-Za-z0-9._@-]+$/.test(d)),
+          (extras.internet.doh ?? []).filter((p) => Number.isInteger(p) && p > 0 && p < 65536)
+        )
       : raw("true"),
     log: extras.log ? logProbe : raw("true"),
   });

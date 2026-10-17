@@ -1,4 +1,27 @@
-ping 8.806
+gateway 192.168.215.1
+== internet
+PING 1.1.1.1 (1.1.1.1): 56 data bytes
+64 bytes from 1.1.1.1: seq=0 ttl=40 time=17.675 ms
+64 bytes from 1.1.1.1: seq=1 ttl=40 time=7.816 ms
+64 bytes from 1.1.1.1: seq=2 ttl=40 time=18.361 ms
+64 bytes from 1.1.1.1: seq=3 ttl=40 time=6.275 ms
+
+--- 1.1.1.1 ping statistics ---
+4 packets transmitted, 4 packets received, 0% packet loss
+round-trip min/avg/max = 6.275/12.531/18.361 ms
+== gateway
+PING 192.168.215.1 (192.168.215.1): 56 data bytes
+64 bytes from 192.168.215.1: seq=0 ttl=64 time=0.163 ms
+64 bytes from 192.168.215.1: seq=1 ttl=64 time=0.138 ms
+64 bytes from 192.168.215.1: seq=2 ttl=64 time=0.133 ms
+64 bytes from 192.168.215.1: seq=3 ttl=64 time=0.043 ms
+
+--- 192.168.215.1 ping statistics ---
+4 packets transmitted, 4 packets received, 0% packet loss
+round-trip min/avg/max = 0.043/0.119/0.163 ms
+== end
 ip 203.0.113.7
-dns ok
+dns fail
+doh 5053 fail
+doh 5054 fail
 qdisc eth0 1974 0

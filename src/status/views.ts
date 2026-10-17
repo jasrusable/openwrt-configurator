@@ -5,7 +5,6 @@
 // Pure, like networkStatus: tested against recorded output.
 import { compareReleases } from "../release";
 import { ClientKind, clientKind } from "./clientKind";
-import { z } from "zod";
 import type { DeviceFacts } from "../deviceFacts";
 import { networkHasIpv6 } from "../intent/connections";
 import { isPrivateRange } from "../intent/addresses";
@@ -41,7 +40,20 @@ export type ClientView = {
   /** The network it is on, by id: a page names it from the settings it shows. */
   network?: string;
   connection:
-    | { kind: "wifi"; accessPoint: string; ssid?: string; band?: string; signal?: number; connected?: number }
+    | {
+        kind: "wifi";
+        accessPoint: string;
+        ssid?: string;
+        band?: string;
+        channel?: number;
+        signal?: number;
+        connected?: number;
+        /** Mbit/s: the access point's rate to it (tx) and its rate to the access point (rx). */
+        txRate?: number;
+        rxRate?: number;
+        /** Wi-Fi 4, 5, 6 or 7. */
+        generation?: number;
+      }
     | { kind: "wired" }
     | { kind: "unknown" };
   /** Online now (on Wi-Fi, or answering on the network), seen lately, or only holding a lease. */
@@ -55,6 +67,13 @@ export type ClientView = {
   traffic?: { down: number; up: number; over: "month" | "connection" };
   /** Every access point that hears it, how well, and which it is on (usteer): for roaming. */
   heardBy: { accessPoint: string; band?: string; signal?: number; connected: boolean }[];
+  /** From the registry (registry.ts): when it was first and last online. */
+  firstSeen?: number;
+  lastSeen?: number;
+  /** First seen within the last day (not a private address). */
+  new?: true;
+  /** A MAC its device made up (one per network): it may come back as another. */
+  private?: true;
 };
 
 export type DeviceView = {
@@ -74,6 +93,10 @@ export type DeviceView = {
   cores?: number;
   /** Asked to reboot and not back yet (src/status/actions.ts). */
   rebooting?: boolean;
+  /** The services your settings need running there, and whether each is (or is installed at all). */
+  services?: { name: string; running: boolean; missing?: boolean }[];
+  /** Its log's lines worth reading (links, interfaces, Wi-Fi, mwan3, this app's marks), newest last: each as logged, and in words where it says something (logWords). */
+  log?: { at: number; text: string; said?: string; tone?: LogTone }[];
 };
 
 export type RadioView = {
@@ -86,20 +109,11 @@ export type RadioView = {
   txpower?: number;
   noise?: number;
   clients: number;
+  /** Its channel's counters as read (a running total): the collector turns two into `busy`. */
+  airtime?: { active: number; busy: number };
+  /** How busy its channel was since the last read, %, anyone's traffic counted. */
+  busy?: number;
 };
-
-/** What kind of event: for its icon and the page's filter. */
-export const activityKinds = ["up", "down", "start", "apply", "problem", "note"] as const;
-export type ActivityKind = (typeof activityKinds)[number];
-
-/** One event in words; also the shape Activity is kept in (src/status/read.ts). Kind is absent on events kept before kinds were. */
-export const activityViewSchema = z.object({
-  at: z.number(),
-  device: z.string(),
-  text: z.string(),
-  kind: z.enum(activityKinds).optional(),
-});
-export type ActivityView = z.infer<typeof activityViewSchema>;
 
 /**
  * A service Status may offer to restart: one the settings need running, and
@@ -120,7 +134,7 @@ export const clientsOf = (
   const ours = new Set(Object.values(facts).flatMap((f) => f?.macs ?? []));
   const reservations = intent.networks.flatMap((n) => n.dhcp.reservations.map((r) => ({ ...r, mac: r.mac.toLowerCase() })));
   const wifi = readDevices(devices).flatMap((d) =>
-    d.wifi.flatMap((w) => w.clients.map((c) => ({ ...c, accessPoint: d.hostname, ssid: w.ssid, band: bandOf(w.freq) })))
+    d.wifi.flatMap((w) => w.clients.map((c) => ({ ...c, accessPoint: d.hostname, ssid: w.ssid, band: bandOf(w.freq), channel: w.channel })))
   );
   const leases = router?.leases ?? [];
   // Not what is seen on an internet line (the provider's modem): those are not your devices.
@@ -184,8 +198,12 @@ export const clientsOf = (
               accessPoint: air.accessPoint,
               ...(air.ssid ? { ssid: air.ssid } : {}),
               ...(air.band ? { band: air.band } : {}),
+              ...(air.channel !== undefined ? { channel: air.channel } : {}),
               ...(air.signal !== undefined ? { signal: air.signal } : {}),
               ...(air.connected !== undefined ? { connected: air.connected } : {}),
+              ...(air.txRate !== undefined ? { txRate: air.txRate } : {}),
+              ...(air.rxRate !== undefined ? { rxRate: air.rxRate } : {}),
+              ...(air.generation !== undefined ? { generation: air.generation } : {}),
             }
           : seen.length
             ? { kind: "wired" as const }
@@ -203,7 +221,13 @@ export const clientsOf = (
     .sort((a, b) => (a.state === b.state ? (a.name ?? a.mac).localeCompare(b.name ?? b.mac) : a.state === "online" ? -1 : b.state === "online" ? 1 : a.state === "recent" ? -1 : 1));
 };
 
-export const devicesOf = (intent: Intent, devices: Reachability[], facts: Record<string, DeviceFacts | undefined>): DeviceView[] =>
+export const devicesOf = (
+  intent: Intent,
+  devices: Reachability[],
+  facts: Record<string, DeviceFacts | undefined>,
+  /** The services the settings need running on a device. */
+  mustRun: (name: string) => string[] = () => []
+): DeviceView[] =>
   intent.hardware.map((d) => {
     const read = readOf(devices, d.name);
     const status = reached(read);
@@ -224,6 +248,18 @@ export const devicesOf = (intent: Intent, devices: Reachability[], facts: Record
             ...(status.storage ? { storage: status.storage } : {}),
             ...(status.temperature !== undefined ? { temperature: status.temperature } : {}),
             ...(status.cores ? { cores: status.cores } : {}),
+            services: mustRun(d.name).map((name) => {
+              const stopped = status.notRunning.find((s) => s.name === name);
+              return { name, running: !stopped, ...(stopped?.missing ? { missing: true } : {}) };
+            }),
+            ...(status.log
+              ? {
+                  log: status.log.slice(-60).map((line) => {
+                    const said = logWords(intent, line.text);
+                    return said ? { ...line, said: said.text, tone: said.tone } : line;
+                  }),
+                }
+              : {}),
           }
         : {}),
       ports: portNames.map((name) => status?.links.find((l) => l.name === name) ?? { name, up: false }),
@@ -242,6 +278,7 @@ export const radiosOf = (devices: Reachability[]): RadioView[] =>
       ...(w.txpower !== undefined ? { txpower: w.txpower } : {}),
       ...(w.noise !== undefined ? { noise: w.noise } : {}),
       clients: w.clients.length,
+      ...(w.airtime ? { airtime: w.airtime } : {}),
     }))
   );
 
@@ -250,38 +287,29 @@ export const internetOf = (intent: Intent, devices: Reachability[]): InternetChe
   return reached(routerOf(intent, devices))?.internet;
 };
 
-/** A device's log lines, said in words; lines not worth telling are left out. */
-export const activityOf = (intent: Intent, devices: Reachability[]): ActivityView[] => {
+export type LogTone = "up" | "down" | "start" | "problem" | "note";
+
+/**
+ * A device's log line in words, where it says something worth telling (as
+ * parseLog leaves it: the tag first); undefined for the rest. Read on the
+ * device's page, beside the line as logged.
+ */
+export const logWords = (intent: Intent, text: string): { text: string; tone: LogTone } | undefined => {
   const nameOf = (id: string) =>
-    intent.networks.find((n) => n.id === id)?.name ??
-    intent.internet.lines.find((c) => c.id === id || `${c.id}6` === id)?.name ??
-    id;
-  const say = (text: string): { text: string; kind: ActivityKind } | undefined => {
-    let m: RegExpExecArray | null;
-    const upDown = (up: boolean, text: string) => ({ text, kind: up ? ("up" as const) : ("down" as const) });
-    if ((m = /netifd: Interface '([^']+)' is now (up|down)/.exec(text))) return upDown(m[2] === "up", `${nameOf(m[1])} ${m[2] === "up" ? "came up" : "went down"}`);
-    if ((m = /netifd: Network device '([^']+)' link is (up|down)/.exec(text))) return upDown(m[2] === "up", `Port ${m[1]} ${m[2] === "up" ? "connected" : "disconnected"}`);
-    if (/procd: - init complete -/.test(text)) return { text: "Started up", kind: "start" };
-    if ((m = /hostapd: (\S+): AP-(ENABLED|DISABLED)/.exec(text))) return upDown(m[2] === "ENABLED", `Wi-Fi ${m[1]} ${m[2] === "ENABLED" ? "on" : "off"}`);
-    // mwan3track: "Interface wan (eth1) is offline".
-    if ((m = /mwan3\S*: .*interface (\S+)(?: \([^)]*\))? is (online|offline)/i.exec(text)))
-      return upDown(m[2].toLowerCase() === "online", `${nameOf(m[1])} is ${m[2].toLowerCase()}`);
-    if (/odhcpd.*Failed to send/.test(text)) return { text: "IPv6 announcements are failing", kind: "problem" };
-    // This app's own marks, by their syslog tag only (parseLog leaves the
-    // tag first): other lines may carry any text, a client's name included.
-    if ((m = /^onc(?:-[\w-]+)?(?:\[\d+\])?: (.*)/.exec(text))) return { text: m[1].charAt(0).toUpperCase() + m[1].slice(1), kind: "note" };
-    return undefined;
-  };
-  return readDevices(devices)
-    .flatMap((d) =>
-      (d.log ?? []).flatMap((line) => {
-        const said = say(line.text);
-        return said ? [{ at: line.at, device: d.hostname, ...said }] : [];
-      })
-    )
-    .filter((e, i, all) => i === all.findIndex((o) => o.device === e.device && o.text === e.text && Math.abs(o.at - e.at) < 2000))
-    .sort((a, b) => b.at - a.at)
-    .slice(0, 150);
+    intent.networks.find((n) => n.id === id)?.name ?? intent.internet.lines.find((c) => c.id === id || `${c.id}6` === id)?.name ?? id;
+  const upDown = (up: boolean, words: string) => ({ text: words, tone: up ? ("up" as const) : ("down" as const) });
+  let m: RegExpExecArray | null;
+  if ((m = /netifd: Interface '([^']+)' is now (up|down)/.exec(text))) return upDown(m[2] === "up", `${nameOf(m[1])} ${m[2] === "up" ? "came up" : "went down"}`);
+  if ((m = /netifd: Network device '([^']+)' link is (up|down)/.exec(text))) return upDown(m[2] === "up", `Port ${m[1]} ${m[2] === "up" ? "connected" : "disconnected"}`);
+  if (/procd: - init complete -/.test(text)) return { text: "Started up", tone: "start" };
+  if ((m = /hostapd: (\S+): AP-(ENABLED|DISABLED)/.exec(text))) return upDown(m[2] === "ENABLED", `Wi-Fi ${m[1]} ${m[2] === "ENABLED" ? "on" : "off"}`);
+  // mwan3track: "Interface wan (eth1) is offline".
+  if ((m = /mwan3\S*: .*interface (\S+)(?: \([^)]*\))? is (online|offline)/i.exec(text)))
+    return upDown(m[2].toLowerCase() === "online", `${nameOf(m[1])} is ${m[2].toLowerCase()}`);
+  if (/odhcpd.*Failed to send/.test(text)) return { text: "IPv6 announcements are failing", tone: "problem" };
+  // This app's own marks, by their syslog tag only: other lines may carry any text, a client's name included.
+  if ((m = /^onc(?:-[\w-]+)?(?:\[\d+\])?: (.*)/.exec(text))) return { text: m[1].charAt(0).toUpperCase() + m[1].slice(1), tone: "note" };
+  return undefined;
 };
 
 /** What needs attention, worst first: each with what it means, and a fix or a link where there is one. */
@@ -531,13 +559,6 @@ export const internetCountersOf = (intent: Intent, devices: Reachability[]) => {
   );
   return Object.keys(lines).length ? { lines, at: router.readAt } : undefined;
 };
-
-/** What was kept from earlier reads, newer first; the same event twice kept once. Logs roll over: this does not. */
-export const keepActivity = (kept: ActivityView[], fresh: ActivityView[], limit = 1000): ActivityView[] =>
-  [...fresh, ...kept]
-    .filter((e, i, all) => i === all.findIndex((o) => o.device === e.device && o.text === e.text && Math.abs(o.at - e.at) < 2000))
-    .sort((a, b) => b.at - a.at)
-    .slice(0, limit);
 
 type MeshNode = NonNullable<NetworkStatus["mesh"]>[number];
 

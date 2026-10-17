@@ -35,6 +35,20 @@ export const parseInterfaces = (dump: unknown): InterfaceStatus[] =>
         ...arr(i["ipv6-address"]).map(obj),
         ...arr(i["ipv6-prefix-assignment"]).map((a) => obj(obj(a)["local-address"])),
       ].flatMap((a) => (str(a.address) ? [`${a.address}/${a.mask}`] : [])),
+      ...(str(i.proto) ? { proto: str(i.proto) } : {}),
+      ...(() => {
+        // The default route: target 0.0.0.0 (:: on wan6), mask 0; its next hop is the gateway.
+        const route = arr(i.route).map(obj).find((r) => (r.target === "0.0.0.0" || r.target === "::") && Number(r.mask) === 0 && str(r.nexthop));
+        return route && route.nexthop !== "0.0.0.0" && route.nexthop !== "::" ? { gateway: str(route.nexthop)! } : {};
+      })(),
+      ...(() => {
+        const prefixes = arr(i["ipv6-prefix"]).map(obj).flatMap((p) => (str(p.address) ? [`${p.address}/${p.mask}`] : []));
+        return prefixes.length ? { prefixes } : {};
+      })(),
+      ...(() => {
+        const dns = arr(i["dns-server"]).flatMap((d) => (str(d) ? [str(d)!] : []));
+        return dns.length ? { dns } : {};
+      })(),
     }));
 
 export const systemInfo: Probe<unknown> = {

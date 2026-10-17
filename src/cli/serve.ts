@@ -73,7 +73,14 @@ export const collectCommand = ({ platform }: CliContext): CommandSpec => ({
     // The first start after the router flashed itself: finished as that run would have (src/firmware/self.ts).
     const finished = await finishSelfUpgrade({ intentPath, platform }).catch(() => undefined);
     if (finished) console.error(finished.message);
-    await runCollector({ intentPath, platform, dir: options.dir, everyHour: () => readReleases({ intentPath, platform }) });
+    await runCollector({
+      intentPath,
+      platform,
+      dir: options.dir,
+      // What it reads lives in RAM; its history, events and clients are copied beside the intent (flash) every hour and as it stops.
+      persistDir: stateLayout(intentPath).status,
+      everyHour: () => readReleases({ intentPath, platform }),
+    });
   },
 });
 
