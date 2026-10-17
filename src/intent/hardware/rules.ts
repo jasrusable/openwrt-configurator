@@ -2,8 +2,7 @@
 // ones the country allows.
 import type { Choice, ChoiceAt } from "../feature";
 import { where } from "../places";
-import { channelsOf, illegalChannelReason } from "../radios";
-import { regdb } from "../wifi/regdb";
+import { channelsOf, illegalChannelReason, regulatedCountries } from "../radios";
 import type { Intent } from "../schema";
 
 /** A channel pinned on a device: one the country allows (hostapd would not start on another). */
@@ -40,7 +39,7 @@ export const hardwareRules: Choice[] = [
   {
     // A country that forbids a channel already set: that channel first.
     path: "system.country",
-    values: Object.keys(regdb),
+    values: regulatedCountries,
     unavailable: (intent, _, country) => {
       const stranded = strandedBy(intent, country);
       return stranded && `Not allowed there: ${stranded}. Change it first (${where("hardware")}).`;

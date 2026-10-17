@@ -4,11 +4,19 @@
 // from the folder's own files. Its schema slice (schema.ts) is assembled by
 // the root schema.
 import type { FeatureModule } from "../feature";
+import { systemChecks } from "./checks";
 import { system } from "./compile";
 import { systemFields } from "./fields";
 import { systemRules } from "./rules";
 
-export const systemFeature: FeatureModule = { rules: systemRules, fields: systemFields, compile: [{ order: 20, compile: system }] };
+export const systemFeature: FeatureModule = {
+  rules: systemRules,
+  fields: systemFields,
+  check: systemChecks,
+  compile: [{ order: 20, compile: system }],
+};
+
+export { sshLogin } from "./compile";
 
 export { countries } from "./countries";
 export { timezones } from "./timezones";

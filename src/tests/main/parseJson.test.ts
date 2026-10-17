@@ -18,10 +18,12 @@ test("valid JSON parses", (t) => {
   });
 });
 
-test("errors name the file, line and column", (t) => {
+test("errors name the file, line and column, never the line's text (it may hold a password)", (t) => {
   const message = errorOf('{\n  "a": 1,\n  "b": tru\n}');
   t.true(message.startsWith("net.json:3:8: Unexpected"), message);
-  t.true(message.includes('  "b": tru\n         ^'), message);
+  t.false(message.includes("tru"), message);
+  const config = t.throws(() => parseConfigJson('{\n  "password": "hunter2-SECRET" "x": 1\n}', "net.json"));
+  t.regex(config!.message, /^net\.json:2:\d+: Expected ',' between items$/);
 });
 
 test("a trailing comma is called out", (t) => {

@@ -43,6 +43,8 @@ const rules = defineList({
   description:
     `Exceptions to each network's access, in order.`,
   addLabel: "Add rule",
+  // Matched in order: the first rule a connection meets decides.
+  reorderable: true,
   newItem: (_, intent) => ({
     name: "",
     enabled: true,

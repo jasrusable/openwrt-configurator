@@ -11,6 +11,9 @@ import { duration, timeOfDay } from "./run";
 /** How many changes to list before "and N more". */
 const shownChanges = 8;
 
+/** Which devices kept a partial run's change, in words. */
+const keptWords = (kept: string[] = []) => (kept.length ? kept.join(", ") : "Some devices");
+
 /** The run's ending, in words. */
 const verdict = (info: ProvisionInfo) => {
   switch (info.state) {
@@ -23,9 +26,18 @@ const verdict = (info: ProvisionInfo) => {
     case "applied-with-problems":
       return { title: "Applied, with a problem", detail: "Your devices have the new settings, but a step after it failed. The log has the details.", ok: false };
     case "failed":
-      return info.progress.outcome === "rolled-back"
-        ? { title: "Not applied", detail: "A device could not be reached afterwards, so every device went back to its previous settings.", ok: false }
-        : { title: "Not applied", detail: "The run stopped before changing anything.", ok: false };
+      switch (info.progress.outcome) {
+        case "rolled-back":
+          return { title: "Not applied", detail: "A device could not be reached afterwards, so every device went back to its previous settings.", ok: false };
+        case "partial":
+          return {
+            title: "Applied on some devices",
+            detail: `${keptWords(info.progress.kept)} kept the new settings; the others have their previous ones. Apply again to finish.`,
+            ok: false,
+          };
+        default:
+          return { title: "Not applied", detail: "The run stopped before changing anything.", ok: false };
+      }
     case "interrupted":
       return {
         title: "Stopped before it finished",

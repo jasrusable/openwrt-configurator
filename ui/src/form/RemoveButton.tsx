@@ -58,24 +58,29 @@ export const RemoveButton = ({
   onRemoved: () => void;
 }) => {
   const draft = useDraft();
-  const [pending, setPending] = useState<{ after: Intent; also: string[]; broken: string[] }>();
+  const [pending, setPending] = useState<{ before: Intent; after: Intent; also: string[]; broken: string[] }>();
   const apply = (after: Intent) => {
     draft.replace(after);
     setPending(undefined);
     onRemoved();
+  };
+  // Asked of the draft as it is now: confirming after it changed (a change
+  // saved elsewhere merged in) asks again, rather than putting back the draft
+  // as it was when asked.
+  const consider = () => {
+    const before = draft.value;
+    const after = remove(before);
+    const also = removedWith(before, after, path);
+    const broken = brokenBy(before, after);
+    if (also.length || broken.length) setPending({ before, after, also, broken });
+    else apply(after);
   };
   return (
     <>
       <Button
         variant="light"
         color="red"
-        onClick={() => {
-          const after = remove(draft.value);
-          const also = removedWith(draft.value, after, path);
-          const broken = brokenBy(draft.value, after);
-          if (also.length || broken.length) setPending({ after, also, broken });
-          else apply(after);
-        }}
+        onClick={consider}
       >
         Remove
       </Button>
@@ -114,7 +119,7 @@ export const RemoveButton = ({
                 <Button variant="default" onClick={() => setPending(undefined)}>
                   Cancel
                 </Button>
-                <Button color="red" onClick={() => apply(pending.after)}>
+                <Button color="red" onClick={() => (draft.value === pending.before ? apply(pending.after) : consider())}>
                   Remove
                 </Button>
               </Button.Group>

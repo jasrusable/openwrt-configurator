@@ -45,7 +45,9 @@ export const planOfJson = (
   value: unknown
 ): Result<{ plan: Plan; intent?: Intent; lowLevel?: LowLevelConfig }, Problem> => {
   if (isIntent(value)) {
-    const intent = intentSchema.safeParse(migrateIntent(value));
+    const migrated = migrateIntent(value);
+    if (!migrated.ok) return migrated;
+    const intent = intentSchema.safeParse(migrated.value);
     if (!intent.success) return fail("invalid", `The intent is not valid: ${issuesText(zodIssues(intent.error))}`, { details: { issues: zodIssues(intent.error) } });
     const plan = checked(compileIntent(intent.data), "The intent compiles to a config that is not valid (a bug in the compiler)");
     return plan.ok ? ok({ plan: plan.value, intent: intent.data }) : plan;

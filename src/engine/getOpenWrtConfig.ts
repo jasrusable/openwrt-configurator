@@ -12,7 +12,7 @@ import { deviceLookup } from "../plan/device";
 import { deviceConfigIssues } from "../plan/rules";
 import { Plan, PlanDevice } from "../plan/types";
 import { resolveSections } from "./resolvePlan";
-import { orderConfigs, orderTypes } from "./uciOrder";
+import { orderConfigs, orderTypes } from "../plan/uciOrder";
 
 export const getOpenWrtConfig = ({
   plan,

@@ -40,7 +40,8 @@ export const networksRules: Choice[] = [
       const prefix = primaryConnection(intent).ipv6.prefix;
       const network = intent.networks[Number(i)];
       // Only networks that get IPv6 take a /64: not one kept to another line or a tunnel.
-      if (prefix === "auto" || !network || !networkHasIpv6(intent, { ...network, ipv6: true })) return undefined;
+      // One already on stays free to turn off: over the room, the prefix's rule refuses.
+      if (prefix === "auto" || !network || network.ipv6 || !networkHasIpv6(intent, { ...network, ipv6: true })) return undefined;
       const others = intent.networks.filter((n, j) => j !== Number(i) && networkHasIpv6(intent, n)).length;
       const room = roomIn(prefix);
       return (

@@ -55,6 +55,12 @@ export const releaseLock = (files: Pick<Platform, "readTextFile" | "removeDir">,
   if (holderOf(files, lock) === owner) files.removeDir(lock);
 };
 
+/** Whether a `withLock` lock is held now: there, and not so old it would be taken over. */
+export const lockFresh = (files: Pick<Platform, "modifiedAt">, path: string, now: () => number = Date.now, staleMinutes = 1) => {
+  const since = files.modifiedAt(path);
+  return since !== undefined && now() - since <= staleMinutes * 60_000;
+};
+
 /**
  * Run `work` holding the lock at `path`; `busy` when another holds it. One
  * not changed for `staleMinutes` is taken over, so `work` must always take less.

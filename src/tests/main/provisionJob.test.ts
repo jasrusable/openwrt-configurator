@@ -2,12 +2,12 @@
 // id, ended by the run itself saying how. Processes are faked (a pid and a
 // command line, or none); files are real.
 import test from "ava";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { main } from "../../cli";
 import { nodePlatform } from "../../platforms/node";
-import { jobEnding, jobPaths, jobRecordKey, provisionStatus, startProvision } from "../../server/provisionJob";
-import { write } from "../../store";
+import { applyRunning, jobEnding, jobPaths, jobRecordKey, provisionStatus, startProvision } from "../../apply/job";
+import { read, stateLayout, write } from "../../store";
 import { tempDir } from "../helpers/tempDir";
 import { sampleIntentText } from "../helpers/fixtures";
 import { uiHandler } from "../../server/app";
@@ -193,14 +193,69 @@ test("provision --job says how it ended, even when it ends before reaching a dev
   t.is(state.state, "failed");
   t.is(state.exitCode, 1);
   await t.throwsAsync(() => main({ argv: ["provision", "x.json", "--job", dir], platform: quiet }), { message: /go together/ });
+  // It names files in the devices' shells (the agent's, the upgrade's): nothing a shell would read as more.
+  await t.throwsAsync(() => main({ argv: ["provision", "x.json", "--job", dir, "--run-id", "r1;reboot"], platform: quiet }), { message: /--run-id: letters, digits and dashes only/ });
 });
 
 test("on this machine: a detached program is found by its run id while it runs, and not after", async (t) => {
-  const log = join(tempDir("detached"), "log");
-  const pid = nodePlatform.spawnDetached([process.execPath, "-e", "setTimeout(() => {}, 1500)", "--", "--run-id", "abc123"], { log });
+  const dir = tempDir("detached");
+  const stop = join(dir, "stop");
+  // It runs until told to stop: no race between its life and the checks.
+  const program = `setInterval(() => require("fs").existsSync(${JSON.stringify(stop)}) && process.exit(0), 20)`;
+  const pid = nodePlatform.spawnDetached([process.execPath, "-e", program, "--", "--run-id", "abc123"], { log: join(dir, "log") });
   t.true((await nodePlatform.commandLineOf(pid))?.includes("--run-id abc123"));
-  await new Promise((r) => setTimeout(r, 2500));
+  writeFileSync(stop, "");
+  const until = Date.now() + 10_000;
+  while ((await nodePlatform.commandLineOf(pid)) !== undefined && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
   t.is(await nodePlatform.commandLineOf(pid), undefined);
+});
+
+test("an apply is running while its lock is held by a live run: not before, not once it ended or died", async (t) => {
+  const m = machine();
+  const intentPath = withIntent();
+  const running = () => applyRunning({ intentPath, files: m.platform, now: m.now });
+  t.false(await running());
+  await start(intentPath, m);
+  t.true(await running());
+  m.run().exits(0);
+  t.false(await running());
+  await start(intentPath, m);
+  m.run().killed();
+  t.false(await running(), "a dead run's lock is no run");
+});
+
+test("an apply is refused while a Status action holds its lock, and refused when the settings are not the version reviewed", async (t) => {
+  const m = machine();
+  const intentPath = withIntent();
+  m.platform.mkdirp(stateLayout(intentPath).root);
+  m.platform.makeDir(stateLayout(intentPath).actionLock);
+  const refused = await start(intentPath, m);
+  t.false(refused.started);
+  t.regex(!refused.started ? refused.reason : "", /A Status action is running/);
+  t.false(existsSync(jobPaths(intentPath).lock), "its lock given back");
+  m.platform.removeDir(stateLayout(intentPath).actionLock);
+  const stale = await startProvision({ intentPath, files: m.platform, now: m.now, version: "0".repeat(64) });
+  t.false(stale.started);
+  t.regex(!stale.started ? stale.reason : "", /changed since these changes were reviewed/);
+  const version = nodePlatform.sha256(readFileSync(intentPath, "utf8"));
+  t.true((await startProvision({ intentPath, files: m.platform, now: m.now, version })).started);
+});
+
+test("provision <intent> from the command line is kept as the UI's job is: its lock, its record, how it ended", async (t) => {
+  const intentPath = withIntent();
+  const quiet = { ...nodePlatform, onStop: () => {} };
+  // An intent that does not load: it stops before any device, as a run that failed.
+  await t.throwsAsync(() => main({ argv: ["provision", intentPath], platform: quiet }));
+  const record = read(nodePlatform, jobRecordKey(jobPaths(intentPath).dir));
+  t.truthy(record?.commandLine, "told apart by its process's own command line");
+  const state = await provisionStatus({ intentPath, files: nodePlatform });
+  t.is(state.state, "failed", "said how it ended, though its process goes on");
+  t.false(existsSync(jobPaths(intentPath).lock), "the lock given back");
+  // Not while another apply runs.
+  const m = machine();
+  await start(intentPath, m);
+  const both = { ...m.platform, onStop: () => {}, commandLineOf: async (pid: number) => (await m.platform.commandLineOf(pid)) ?? nodePlatform.commandLineOf(pid) };
+  await t.throwsAsync(() => main({ argv: ["provision", intentPath], platform: both }), { message: /already being applied/ });
 });
 
 test("an apply keeps the live settings it replaces, when each was applied, and what it changed", async (t) => {
@@ -273,6 +328,9 @@ test("undo through the API: none to undo, refused while running, and restoring t
   t.true(preview.previous.changes.some((c: { path: string }) => c.path === "system.name"), "the preview: what the undo puts back");
   t.is((await undo({ restoreSettings: true })).status, 202);
   t.is(JSON.parse(readFileSync(intentPath, "utf8")).system.name, "Home", "the saved settings are the previous ones again");
+  const kept = readdirSync(dir).filter((name) => /^intent\..*\.bak$/.test(name));
+  t.is(kept.length, 1, "the settings it replaced kept as a backup");
+  t.is(JSON.parse(readFileSync(join(dir, kept[0]), "utf8")).system.name, "Elsewhere");
 });
 
 test("an upgrade through the API is the apply job with its firmware step first: one at a time, devices by name", async (t) => {
@@ -281,7 +339,9 @@ test("an upgrade through the API is the apply job with its firmware step first: 
   const intentPath = join(dir, "intent.json");
   writeFileSync(intentPath, sampleIntentText(), { mode: 0o600 });
   const handle = uiHandler({ intentPath, uiRoot: dir, platform: m.platform, now: m.now });
-  const upgrade = (body: object) => handle({ method: "POST", path: "/api/firmware/upgrade", body: JSON.stringify(body), headers: { "x-onc": "1" } });
+  // Nothing applied from here yet: the whole saved settings go after it, acknowledged (firmware.test.ts has the rest).
+  const upgrade = (body: object) =>
+    handle({ method: "POST", path: "/api/firmware/upgrade", body: JSON.stringify({ ...body, acknowledged: { unapplied: true } }), headers: { "x-onc": "1" } });
   t.is((await upgrade({ devices: ["home ap; reboot"] })).status, 400);
   t.is((await upgrade({ devices: ["home-ap-1"] })).status, 202);
   const argv = m.processes.get(m.run().pid)!.split(" ");
@@ -290,11 +350,5 @@ test("an upgrade through the API is the apply job with its firmware step first: 
   m.run().exits(0);
   t.is((await upgrade({})).status, 202);
   t.true(m.processes.get(m.run().pid)!.includes("--upgrade all"));
-  t.false(m.processes.get(m.run().pid)!.includes("--accept-new-series"), "a new series is acknowledged only when asked");
-  m.run().exits(0);
-  t.is((await upgrade({ acceptNewSeries: true })).status, 202);
-  t.true(m.processes.get(m.run().pid)!.includes("--upgrade all --accept-new-series"));
-  m.run().exits(0);
-  t.is((await upgrade({ devices: ["home-ap-1"], acceptDowngrade: true })).status, 202);
-  t.true(m.processes.get(m.run().pid)!.includes("--upgrade home-ap-1 --accept-downgrade"));
+  t.false(m.processes.get(m.run().pid)!.includes("--accept-new-series"), "a new series or a downgrade only when one is moved to, and acknowledged");
 });

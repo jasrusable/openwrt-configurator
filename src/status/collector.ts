@@ -9,9 +9,10 @@ import { z } from "zod";
 import { Platform } from "../platform";
 import { fail, Problem, problem } from "../problem";
 import { Result, attempt, map, messageOf, ok } from "../result";
-import { jobState } from "../server/provisionJob";
+import { applyRunning } from "../apply/job";
+import { withLock } from "../lock";
 import { read, StoreFiles, StoreKey, write } from "../store";
-import { bucketMs, Histories, History, LineCounts, Range, readingsOf, throughputOf, withReadingsEverywhere } from "./history";
+import { bucketMs, Histories, History, LineCounts, Range, ranges, readingsOf, rounded, throughputOf, withReadingsEverywhere } from "./history";
 import { NetworkStatus } from "./network";
 import { readNetworkStatus } from "./read";
 
@@ -44,6 +45,8 @@ export const unwatchedEveryMs = 60_000;
 const watchingForMs = 10 * 60_000;
 /** A snapshot older than this is not answered from (no collector running): the request reads itself. */
 export const snapshotFreshMs = unwatchedEveryMs + 30_000;
+/** The hourly work beside the reads is let go after this, done or not. */
+const backgroundLimitMs = 10 * 60_000;
 
 /** A page wants status: read fast for a while. */
 export const markWanted = (files: StoreFiles, dir: string, now: number) => {
@@ -66,7 +69,7 @@ const readHistories = (files: Pick<Platform, "readTextFile">, dir: string): Hist
 
 /** Whether an apply is running: its devices are mid-change, and nothing reads them meanwhile. */
 const applying = async (intentPath: string, platform: Platform) =>
-  (await jobState({ intentPath, files: platform }).catch(() => undefined))?.state === "running";
+  await applyRunning({ intentPath, files: platform }).catch(() => false);
 
 /**
  * What the status pages show now: the snapshot, when it is fresh or an apply
@@ -91,7 +94,27 @@ export const currentStatus = async ({
       : fail("conflict", "Settings are being applied: the devices are read again once that has finished.");
   }
   if (kept && now() - kept.at < snapshotFreshMs) return ok(kept.status);
-  return map(await readAndKeep({ intentPath, platform, dir, now }), (snapshot) => snapshot.status);
+  const read = await readOnce({ intentPath, platform, dir, now });
+  // Another process is reading: what was kept will do until it has.
+  if (!read.ok && read.error.kind === "busy" && kept) return ok(kept.status);
+  return map(read, (snapshot) => snapshot.status);
+};
+
+const reading = new Map<string, Promise<Result<Snapshot, Problem>>>();
+
+/**
+ * One request's read at a time: those that come while one runs share it (in
+ * this process; every page polls) or are told so (another's, a CGI request),
+ * rather than each reading every device again.
+ */
+const readOnce = (args: Parameters<typeof readAndKeep>[0]): Promise<Result<Snapshot, Problem>> => {
+  const running = reading.get(args.dir);
+  if (running) return running;
+  const started = withLock(args.platform, `${args.dir}/reading.lock`, 1, () => readAndKeep(args))
+    .then((read) => (read === "busy" ? fail("busy", "Status is being read: it shows in a moment.") : read))
+    .finally(() => reading.delete(args.dir));
+  reading.set(args.dir, started);
+  return started;
 };
 
 /** Read every device now and keep it as the snapshot (a request with no collector to answer it). */
@@ -136,11 +159,15 @@ export const collectOnce = async ({
   write(platform, snapshotKey(dir), { at, status: { ...status, throughput, readAt: at } });
   const histories = withReadingsEverywhere(state.histories, at, readingsOf(status, throughput), status.devices.map((d) => d.name));
   // Saved as each minute starts: a restart loses a minute at most, and a
-  // router's RAM (or a Mac's disk) is written once a minute, not each read.
+  // router's RAM (or a Mac's disk) is written once a minute, not each read;
+  // the month's (its points 15 minutes apart) as each of its own starts.
   const bucket = at - (at % bucketMs);
   if (bucket !== state.savedBucket) {
-    write(platform, historyKey(dir, "day"), histories.day);
-    write(platform, historyKey(dir, "month"), histories.month);
+    write(platform, historyKey(dir, "day"), rounded(histories.day));
+    const monthOf = (t: number) => t - (t % ranges.month.bucketMs);
+    if (state.savedBucket === undefined || monthOf(bucket) !== monthOf(state.savedBucket)) {
+      write(platform, historyKey(dir, "month"), rounded(histories.month));
+    }
   }
   return ok({ histories, counts, savedBucket: bucket });
 };
@@ -170,6 +197,7 @@ export const runCollector = async ({
   let state: State = { histories: readHistories(platform, dir), counts: {} };
   let lastRead = -Infinity;
   let lastHourly = -Infinity;
+  let hourly: Promise<unknown> | undefined;
   let lastError: string | undefined;
   while (!stop()) {
     const t = now();
@@ -193,10 +221,15 @@ export const runCollector = async ({
         lastError = error;
       }
     }
-    if (everyHour && t - lastHourly >= 3_600_000) {
+    if (everyHour && !hourly && t - lastHourly >= 3_600_000) {
       lastHourly = t;
-      // Its own failures are its own: a missed ask is asked next hour.
-      await attempt(everyHour, () => undefined);
+      // Beside the reads, never holding them up (one network request that
+      // stalls once stopped every read). Its failures are its own: a missed
+      // ask is asked next hour; one still going after `backgroundLimitMs` is
+      // let go, so the next hour's is not held back by it.
+      hourly = Promise.race([attempt(everyHour, () => undefined), platform.sleep(backgroundLimitMs)]).finally(() => {
+        hourly = undefined;
+      });
     }
     await platform.sleep(tickMs);
   }

@@ -27,12 +27,12 @@ export const redactValue = (
 };
 
 /**
- * A string field that holds a secret, judged as everywhere else
- * (secretOptions.ts): by its name, or as the content of an owner-only file.
+ * A field that holds a secret, judged as everywhere else (secretOptions.ts):
+ * by its name, or as the content of an owner-only file. A number is one as
+ * much as a string (a numeric password); a flag never is.
  */
-export const isSecretField = (key: string, child: unknown, parent: Record<string, unknown>): child is string =>
-  typeof child === "string" &&
-  child.length > 0 &&
+export const isSecretField = (key: string, child: unknown, parent: Record<string, unknown>): child is string | number =>
+  (typeof child === "number" || (typeof child === "string" && child.length > 0)) &&
   isSecretSource(
     key === "content" && typeof parent.path === "string"
       ? { file: { mode: typeof parent.mode === "string" ? parent.mode : undefined } }

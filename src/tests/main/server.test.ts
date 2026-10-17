@@ -122,10 +122,13 @@ test("adopting a box already in Hardware under another name is refused: its key 
       macs: [],
       hostname: "OpenWrt",
       hostKey,
+      fingerprint: "SHA256:same",
       openLogin: false,
       suggested: { name: "ap-2", role: "access-point" },
     });
-    const post = await handle(request("POST", "/api/discover/adopt", JSON.stringify({ address: "10.0.0.66", name: "ap-9" })));
+    const post = await handle(
+      request("POST", "/api/discover/adopt", JSON.stringify({ address: "10.0.0.66", name: "ap-9", fingerprint: "SHA256:same" }))
+    );
     t.is(post.status, 409);
     t.regex(JSON.parse(post.body).error, new RegExp(`This is ${existing}`));
   });
@@ -235,7 +238,7 @@ test("no page can frame the app: every answer says so", async (t) => {
   });
 });
 
-test("an IPv6 client is counted by its /64, and everyone together has a ceiling", async (t) => {
+test("an IPv6 client is counted by its /64", async (t) => {
   const dir = tempDir("auth6");
   const intentPath = join(dir, "intent.json");
   writeFileSync(intentPath, sampleIntentText());
@@ -281,7 +284,7 @@ test("logins are off while the attempts folder is not this app's own", async (t)
   t.is((await login()).status, 401);
 });
 
-test("one client hammering past its limit cannot lock everyone out: refused attempts do not fill the ceiling", async (t) => {
+test("clients guessing, from as many addresses as they like, cannot lock the owner out: counted per client only", async (t) => {
   const dir = tempDir("authdos");
   const intentPath = join(dir, "intent.json");
   writeFileSync(intentPath, sampleIntentText());
@@ -293,6 +296,7 @@ test("one client hammering past its limit cannot lock everyone out: refused atte
     handle({ method: "POST", path: "/api/login", body: JSON.stringify({ password: "nope" }), headers: { "x-onc": "1" }, remoteAddress: from });
   for (let i = 0; i < 40; i++) await guess("10.0.0.66");
   t.is((await guess("10.0.0.66")).status, 429, "the hammering client stays paused");
+  for (let a = 1; a <= 10; a++) for (let i = 0; i < 5; i++) await guess(`10.0.0.${100 + a}`);
   t.is((await guess("10.0.0.77")).status, 401, "the owner can still try");
 });
 

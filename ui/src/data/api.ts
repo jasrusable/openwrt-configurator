@@ -1,6 +1,6 @@
 // The only part of the UI that talks to the backend. URLs are relative, so
 // the same build works at / (the Mac server) and /cgi-bin/onc/ (a router).
-import type { ApplyPlan } from "../../../src/applyPlan";
+import type { ServedApplyPlan } from "../../../src/server/api/provision";
 import type { BackupReview, BackupSource } from "../../../src/backup";
 import type { Candidate, Inspected } from "../../../src/discover";
 import type { DeviceFacts, ReadAttempt } from "../../../src/deviceFacts";
@@ -11,11 +11,13 @@ import type { NetworkStatus } from "../../../src/status/network";
 import type { History, Range } from "../../../src/status/history";
 import type { Survey } from "../../../src/status/actions";
 import type { Intent } from "../../../src/intent/schema";
-import type { ProvisionStatus } from "../../../src/server/provisionJob";
+import type { ProvisionStatus } from "../../../src/apply/job";
+import type { Acknowledgements } from "../../../src/firmware/target";
 
 import { forgetDeviceReads } from "./persist";
+import { forgetEdits } from "../form/stash";
 
-import type { Issue } from "../form/draft";
+import type { Issue } from "../../../src/intent/issues";
 
 /** Every write carries it: the server refuses writes without (CSRF). */
 // On every request, reads too: a cross-site page cannot send it without a
@@ -41,6 +43,7 @@ const call = async (url: string, init: RequestInit = {}) => {
   if (response.status === 401) {
     // Logged out: keep nothing of the network in this browser.
     forgetDeviceReads();
+    forgetEdits();
     loginListeners.forEach((listener) => listener());
   }
   return response;
@@ -58,16 +61,21 @@ const bodyOf = async <T,>(response: Response, failed: string): Promise<T> => {
 
 const getJson = async <T,>(path: string, failed: string): Promise<T> => bodyOf<T>(await call(path), failed);
 
+/**
+ * Sends JSON. With `version` (a saved file's, "" for none saved), the server
+ * refuses it if the file is no longer that one: as a header, and in the URL
+ * for a router, where uhttpd passes the CGI no custom header (src/server/cgi.ts).
+ */
+const sendJson = (path: string, input: unknown, { method = "POST", version }: { method?: string; version?: string } = {}) =>
+  call(version === undefined ? path : `${path}?version=${encodeURIComponent(version)}`, {
+    method,
+    headers: { "content-type": "application/json", ...(version === undefined ? {} : { "x-onc-version": version }) },
+    body: JSON.stringify(input),
+  });
+
 /** A JSON POST that says what went wrong in words. */
-const postJson = async <T,>(path: string, input: unknown, failed: string): Promise<T> =>
-  bodyOf<T>(
-    await call(path, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
-    }),
-    failed
-  );
+const postJson = async <T,>(path: string, input: unknown, failed: string, version?: string): Promise<T> =>
+  bodyOf<T>(await sendJson(path, input, { version }), failed);
 
 /**
  * The router's root password for a session (a cookie the browser keeps).
@@ -98,34 +106,58 @@ export class SaveError extends Error {
  * save and an apply, which the server refuses if the file has changed since.
  */
 let intentVersion: string | undefined;
-const versionHeaders = (): Record<string, string> => (intentVersion ? { "x-onc-version": intentVersion } : {});
-/** The same, for a router: uhttpd passes no custom header to the CGI (src/server/cgi.ts). */
-const withVersion = (path: string) => (intentVersion ? `${path}?version=${intentVersion}` : path);
+/** The saved file's version as last read or written here (undefined: none saved, or not read yet). */
+export const savedVersion = () => intentVersion;
+
+/** Writes of the file begun and ended: a read answered across one is of the file before it. */
+let writes = 0;
+
+/** A write of the saved file: its new version kept, and reads that cross it read again. */
+const writing = async <T,>(write: () => Promise<T>): Promise<T> => {
+  writes++;
+  try {
+    return await write();
+  } finally {
+    writes++;
+  }
+};
 
 /** No settings are saved here yet: the first run, which starts a network or restores one. */
 export class NoSettingsError extends Error {}
 
+/** The saved file does not read (not JSON, from a newer app, holding refs): it can still be downloaded and replaced. */
+export class UnreadableSettingsError extends Error {}
+
 export const loadIntent = async (): Promise<Intent> => {
+  const before = writes;
   const response = await call("api/intent");
-  if (response.status === 404) throw new NoSettingsError("No settings are saved yet.");
+  // Sent before a save answered and answered after it: the file it read is
+  // gone, and its version would make the next save look out of date.
+  if (writes !== before) return loadIntent();
+  if (response.status === 404) {
+    // Nothing saved: a write must not name the version of a file now gone.
+    intentVersion = undefined;
+    throw new NoSettingsError("No settings are saved yet.");
+  }
+  if (response.status === 409) {
+    intentVersion = undefined;
+    throw new UnreadableSettingsError((await response.json().catch(() => undefined))?.error ?? "The saved settings do not read.");
+  }
   const body = await bodyOf<Intent>(response, "Could not load the configuration.");
   intentVersion = response.headers.get("x-onc-version") ?? undefined;
   return body;
 };
 
-export const saveIntent = async (intent: Intent): Promise<Intent> => {
-  const response = await call(withVersion("api/intent"), {
-    method: "PUT",
-    headers: { "content-type": "application/json", ...versionHeaders() },
-    body: JSON.stringify(intent),
+export const saveIntent = (intent: Intent): Promise<Intent> =>
+  writing(async () => {
+    const response = await sendJson("api/intent", intent, { method: "PUT", version: intentVersion });
+    const body = await response.json().catch(() => undefined);
+    if (!response.ok) {
+      throw new SaveError(body?.error ?? "Not saved.", body?.issues, !!body?.changedElsewhere);
+    }
+    intentVersion = response.headers.get("x-onc-version") ?? undefined;
+    return body;
   });
-  const body = await response.json().catch(() => undefined);
-  if (!response.ok) {
-    throw new SaveError(body?.error ?? "Not saved.", body?.issues, !!body?.changedElsewhere);
-  }
-  intentVersion = response.headers.get("x-onc-version") ?? undefined;
-  return body;
-};
 
 /** The settings file as stored, saved by the browser under the name the server gives it. */
 export const downloadBackup = async (): Promise<void> => {
@@ -137,20 +169,42 @@ export const downloadBackup = async (): Promise<void> => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
-/** What putting `source` in place of the saved settings would change, or why it cannot (src/backup.ts). */
-export const reviewBackup = (source: BackupSource) => postJson<BackupReview>("api/backup/review", { source }, "Could not review it.");
+/** A review, and the version of the saved file it was of ("" with none saved), for the restore to name. */
+export type Reviewed = { review: BackupReview; version: string };
 
-/** `source` written as the saved settings: the file as now saved, its version kept for the next save. */
-export const restoreBackup = async (source: BackupSource): Promise<Intent> => {
-  const response = await call(withVersion("api/backup/restore"), {
-    method: "POST",
-    headers: { "content-type": "application/json", ...versionHeaders() },
-    body: JSON.stringify({ source }),
-  });
-  const { intent } = await bodyOf<{ intent: Intent }>(response, "Not restored.");
-  intentVersion = response.headers.get("x-onc-version") ?? undefined;
-  return intent;
+/** What putting `source` in place of the saved settings would change, or why it cannot (src/backup.ts). */
+export const reviewBackup = async (source: BackupSource): Promise<Reviewed> => {
+  const response = await sendJson("api/backup/review", { source });
+  const review = await bodyOf<BackupReview>(response, "Could not review it.");
+  return { review, version: response.headers.get("x-onc-version") ?? "" };
 };
+
+/** Why a restore was refused: in words, the review's issues, or the saved settings changed since the review (review again). */
+export class RestoreError extends Error {
+  constructor(
+    message: string,
+    readonly issues: BackupReview["issues"] = [],
+    readonly changedElsewhere = false
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * `source` written as the saved settings, if they are still the `version`
+ * reviewed ("" for none saved; unchecked without one): the file as now
+ * saved, its version kept for the next save.
+ */
+export const restoreBackup = (source: BackupSource, version?: string): Promise<Intent> =>
+  writing(async () => {
+    const response = await sendJson("api/backup/restore", { source }, { version });
+    const body = await response.json().catch(() => undefined);
+    if (!response.ok) {
+      throw new RestoreError(body?.error ?? "Not restored.", body?.review?.issues ?? [], !!body?.changedElsewhere);
+    }
+    intentVersion = response.headers.get("x-onc-version") ?? undefined;
+    return body.intent;
+  });
 
 export type ProvisionInfo = ProvisionStatus & {
   /** The devices a provision reconfigures. */
@@ -165,50 +219,21 @@ export type ProvisionInfo = ProvisionStatus & {
 
 export const loadProvision = () => getJson<ProvisionInfo>("api/provision", "Could not load the apply status.");
 
-/** Start applying; with the reviewed plan's `verify`, the run stops before arming if a device changed since. */
 /** Upgrade these devices' firmware (every one behind, when none are named), then apply the saved settings. */
-export const startUpgrade = async ({
-  devices,
-  acceptNewSeries,
-  acceptDowngrade,
-}: {
-  devices?: string[];
-  acceptNewSeries?: boolean;
-  acceptDowngrade?: boolean;
-}) =>
-  bodyOf(
-    await call(withVersion("api/firmware/upgrade"), {
-      method: "POST",
-      headers: { "content-type": "application/json", ...versionHeaders() },
-      body: JSON.stringify({
-        ...(devices ? { devices } : {}),
-        ...(acceptNewSeries ? { acceptNewSeries } : {}),
-        ...(acceptDowngrade ? { acceptDowngrade } : {}),
-      }),
-    }),
-    "Could not start the upgrade."
-  );
+export const startUpgrade = ({ devices, acknowledged }: { devices?: string[]; acknowledged: Acknowledgements & { unapplied: boolean } }) =>
+  postJson("api/firmware/upgrade", { ...(devices ? { devices } : {}), acknowledged }, "Could not start the upgrade.", intentVersion);
 
-export const startProvision = async (verify?: Record<string, string>) =>
-  bodyOf(
-    await call(withVersion("api/provision"), {
-      method: "POST",
-      headers: { "content-type": "application/json", ...versionHeaders() },
-      body: JSON.stringify(verify ? { verify } : {}),
-    }),
-    "Could not start applying."
-  );
+/**
+ * Start applying the saved file the reviewed plan was made from (its
+ * `version`; refused if the file is another now), and with its `verify`
+ * the run stops before arming if a device changed since.
+ */
+export const startProvision = ({ verify, version }: { verify?: Record<string, string>; version?: string } = {}) =>
+  postJson("api/provision", verify ? { verify } : {}, "Could not start applying.", version ?? intentVersion);
 
 /** Apply the settings from before the last apply again; with `restoreSettings`, also make them the saved ones. */
-export const undoLastApply = async (restoreSettings: boolean) =>
-  bodyOf(
-    await call(withVersion("api/provision/undo"), {
-      method: "POST",
-      headers: { "content-type": "application/json", ...versionHeaders() },
-      body: JSON.stringify({ restoreSettings }),
-    }),
-    "Could not undo the last apply."
-  );
+export const undoLastApply = (restoreSettings: boolean) =>
+  writing(() => postJson("api/provision/undo", { restoreSettings }, "Could not undo the last apply.", intentVersion));
 
 export type FactsByDevice = Record<string, DeviceFacts | undefined>;
 
@@ -224,7 +249,7 @@ export const loadDevices = () => getJson<Devices>("api/devices", "Could not load
 /** Reads the stale devices (read-only); the server decides which, and how often. */
 export const refreshDevices = () => postJson<Devices>("api/devices", undefined, "Could not read the devices.");
 
-export const loadApplyPlan = () => getJson<ApplyPlan>("api/apply/plan", "Could not work out the changes.");
+export const loadApplyPlan = () => getJson<ServedApplyPlan>("api/apply/plan", "Could not work out the changes.");
 
 export const loadNetworkStatus = () => getJson<NetworkStatus>("api/status", "Could not read the network's status.");
 
@@ -242,7 +267,6 @@ export const restartService = (device: string, service: string) =>
 export const runWifiSurvey = () =>
   postJson<{ surveys: Survey[]; failed: { accessPoint: string; error: string }[] }>("api/wifi/survey", {}, "The survey did not finish.");
 
-/** The router's download speed now. */
 /** Reboot a device: it drops off for a minute or so. */
 export const rebootDevice = (device: string) =>
   postJson<{ rebootingSince: number }>("api/device/reboot", { device }, "It did not start rebooting.");
@@ -257,7 +281,6 @@ export const pingFrom = (device: string, target: string) =>
 
 export const runSpeedTest = () => postJson<{ downMbps: number }>("api/internet/speed", {}, "The speed test did not finish.");
 
-/** OpenWrt's latest stable release. */
 /** OpenWrt's releases, as last read (asked again when a day old), and why a fresh ask failed. */
 export const loadReleases = () =>
   getJson<{ releases?: Releases; error?: string; selfUpgrade?: SelfUpgradeResult }>("api/firmware", "Could not ask OpenWrt.");
@@ -277,13 +300,13 @@ export const inspectDevice = (address: string) =>
 export const inspectResetDevice = (address: string, name: string) =>
   postJson<Inspected>("api/discover/inspect-reset", { address, name }, "Could not read the device.");
 
-/** Takes a reset device back under its own name: only the same box (a MAC on record). */
-export const readoptDevice = (address: string, name: string) =>
-  postJson<{ ok: true }>("api/discover/readopt", { address, name }, "Could not take the device back.");
+/** Takes a reset device back under its own name, trusting the key whose fingerprint the user confirmed. */
+export const readoptDevice = (address: string, name: string, fingerprint: string) =>
+  postJson<{ ok: true }>("api/discover/readopt", { address, name, fingerprint }, "Could not take the device back.");
 
-/** Keeps the read device's facts under `name`, so it is found by identity from now on. */
-export const adoptDevice = (address: string, name: string) =>
-  postJson<{ ok: true }>("api/discover/adopt", { address, name }, "Could not take on the device.");
+/** Keeps the read device's facts under `name`, trusting the key whose fingerprint the user confirmed. */
+export const adoptDevice = (address: string, name: string, fingerprint: string) =>
+  postJson<{ ok: true }>("api/discover/adopt", { address, name, fingerprint }, "Could not take on the device.");
 
 /** A mesh link's speed, measured now from one node to the other (sends test traffic). */
 export const measureMeshLink = (link: { from: string; to: string }) =>

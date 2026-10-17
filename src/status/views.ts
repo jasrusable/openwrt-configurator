@@ -12,7 +12,7 @@ import { isPrivateRange } from "../intent/addresses";
 import { type Intent } from "../intent/schema";
 import { bands } from "../intent/radios";
 import type { DeviceStatus, InternetCheck, PortLink } from "./device";
-import { networkOfAddress, type NetworkStatus, Reachability, readDevices, readOf, reached, routerOf, weakMeshLinkMbps, whyUnread } from "./network";
+import { lineWorks, memoryUsed, networkOfAddress, type NetworkStatus, Reachability, readDevices, readOf, reached, routerOf, weakMeshLinkMbps, whyUnread } from "./network";
 import { bandOf } from "./values";
 import { droppableFixes } from "../intent/patches/status";
 
@@ -220,7 +220,7 @@ export const devicesOf = (intent: Intent, devices: Reachability[], facts: Record
         ? {
             uptime: status.uptime,
             load: status.load[0],
-            memoryUsed: status.memory.total ? 1 - status.memory.available / status.memory.total : 0,
+            memoryUsed: memoryUsed(status),
             ...(status.storage ? { storage: status.storage } : {}),
             ...(status.temperature !== undefined ? { temperature: status.temperature } : {}),
             ...(status.cores ? { cores: status.cores } : {}),
@@ -279,8 +279,8 @@ export const activityOf = (intent: Intent, devices: Reachability[]): ActivityVie
         return said ? [{ at: line.at, device: d.hostname, ...said }] : [];
       })
     )
-    .filter((e, i, all) => i === all.findIndex((o) => o.device === e.device && o.text === e.text && Math.abs(o.at - e.at) < 2000))
     .sort((a, b) => b.at - a.at)
+    .filter(once())
     .slice(0, 150);
 };
 
@@ -406,10 +406,7 @@ export const attentionOf = ({
   }
   if (router) {
     const connections = intent.internet.lines;
-    const up = connections.filter((c) => {
-      const line = router.lines.find((l) => l.id === c.id);
-      return line ? line.state === "online" || line.state === "disconnecting" : !!router.interfaces.find((i) => i.id === c.id)?.up;
-    });
+    const up = connections.filter((c) => lineWorks(router, c.id));
     if (up.length === 0) {
       out.push({ id: "internet:down", severity: "problem", title: "No internet", detail: "No internet connection is working.", link: "/internet" });
     } else {
@@ -532,12 +529,25 @@ export const internetCountersOf = (intent: Intent, devices: Reachability[]) => {
   return Object.keys(lines).length ? { lines, at: router.readAt } : undefined;
 };
 
+/**
+ * A filter over events newest first keeping each once: the same device
+ * saying the same within 2 s of one kept is that one again. In one pass:
+ * the nearest kept is the last kept of its kind.
+ */
+const once = () => {
+  const last = new Map<string, number>();
+  return (e: { device: string; text: string; at: number }) => {
+    const key = `${e.device}\n${e.text}`;
+    const kept = last.get(key);
+    if (kept !== undefined && kept - e.at < 2000) return false;
+    last.set(key, e.at);
+    return true;
+  };
+};
+
 /** What was kept from earlier reads, newer first; the same event twice kept once. Logs roll over: this does not. */
 export const keepActivity = (kept: ActivityView[], fresh: ActivityView[], limit = 1000): ActivityView[] =>
-  [...fresh, ...kept]
-    .filter((e, i, all) => i === all.findIndex((o) => o.device === e.device && o.text === e.text && Math.abs(o.at - e.at) < 2000))
-    .sort((a, b) => b.at - a.at)
-    .slice(0, limit);
+  [...fresh, ...kept].sort((a, b) => b.at - a.at).filter(once()).slice(0, limit);
 
 type MeshNode = NonNullable<NetworkStatus["mesh"]>[number];
 

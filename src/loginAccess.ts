@@ -20,7 +20,9 @@ export const ownPublicKey = async (
     // No .pub beside it: ask ssh-keygen, where there is one.
   }
   try {
-    const derived = await platform.run(["ssh-keygen", "-y", "-f", path]);
+    // -P "": a key with a passphrase fails rather than asking for it, and
+    // the time limit ends whatever else would hang an API request.
+    const derived = await platform.run(["ssh-keygen", "-y", "-P", "", "-f", path], { timeoutMs: 10_000 });
     return derived.code === 0 && derived.stdout.trim() ? derived.stdout.trim() : undefined;
   } catch {
     return undefined;
@@ -30,8 +32,8 @@ export const ownPublicKey = async (
 /**
  * Why applying `intent` would lock this app out, if it would: after it, the
  * app must still get in, by password (login on, and a password to send) or
- * by its key (authorized, when the list is the intent's; with none listed
- * the device's own file is left, and with it whatever got the app in).
+ * by its key, among the authorized keys (none listed is not counted on: a
+ * file an earlier apply installed is then removed).
  */
 export const lockoutReason = async (
   intent: Intent,
@@ -44,10 +46,15 @@ export const lockoutReason = async (
   if (!keyPath) {
     return `${off}, and no SSH key to log in with either (${where("system", "Administration", "SSH key")}).`;
   }
-  if (password_login && keys.length === 0) return undefined;
   const own = await ownPublicKey(platform, keyPath);
   if (!own) return `${off}, and this app's public key could not be read (${keyPath}.pub).`;
   return keys.some((k) => keyIdentity(k) === keyIdentity(own))
     ? undefined
     : `${off}, and this app's key is not among the authorized keys: applying would lock it out. Add it under ${where("system", "Authorized keys")}.`;
 };
+
+/** The public half of the key this app logs in with (system.app_login.key), when it can be read. */
+export const appPublicKey = async (
+  intent: Pick<Intent, "system">,
+  platform: Pick<Platform, "readTextFile" | "run" | "homedir">
+): Promise<string | undefined> => (intent.system.app_login.key ? ownPublicKey(platform, intent.system.app_login.key) : undefined);

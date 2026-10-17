@@ -1,10 +1,13 @@
 // Older intent files, upgraded one version at a time to the current one. A
 // file is migrated when read (in memory: startup, the CLI, a restored
 // backup), and written in the current format only on its next save, the old
-// file kept beside it as `.bak` (settings.ts). A migration never drops a
-// setting: it moves it to where it now lives. Until the first release the
-// format stays at 1, the chain is empty and files are edited by hand.
+// file kept beside it as a timestamped `.bak` (settings.ts). A migration
+// never drops a setting: it moves it to where it now lives. Until the first
+// release the format stays at 1, the chain is empty and files are edited by
+// hand.
 import { intentVersion } from "./schema";
+import { fail, Problem } from "../problem";
+import { map, ok, Result } from "../result";
 
 type Json = Record<string, any>;
 
@@ -20,17 +23,22 @@ export const formatOf = (json: unknown): number | undefined =>
 /**
  * The intent in the current format, and the format it was written in. Not
  * an intent file comes back as it is (the schema says what is wrong); one
- * from a newer app is refused, never half-read.
+ * from a newer app is refused, never half-read. A gap in the chain, or a
+ * step that does not move exactly one version on, is a bug: thrown.
  */
 export const migrate = (
   json: unknown,
   chain: Migrations = migrations,
   current: number = intentVersion
-): { value: unknown; from?: number } => {
+): Result<{ value: unknown; from?: number }, Problem> => {
   const from = formatOf(json);
-  if (from === undefined) return { value: json };
+  if (from === undefined) return ok({ value: json });
+  if (!Number.isInteger(from) || from < 1) {
+    return fail("invalid", `These settings say they are in format ${from}, which no version of this app wrote.`);
+  }
   if (from > current) {
-    throw new Error(
+    return fail(
+      "invalid",
       `These settings were made by a newer version of this app (format ${from}; this one reads up to ${current}). Update the app first.`
     );
   }
@@ -38,10 +46,14 @@ export const migrate = (
     if (intent.schema >= current) return intent;
     const next = chain[intent.schema];
     if (!next) throw new Error(`No migration from intent version ${intent.schema}.`);
-    return step(next(intent));
+    const moved = next(intent);
+    if (moved.schema !== intent.schema + 1) {
+      throw new Error(`The migration from intent version ${intent.schema} made version ${moved.schema}, not ${intent.schema + 1}.`);
+    }
+    return step(moved);
   };
-  return { value: step(json as Json), from };
+  return ok({ value: step(json as Json), from });
 };
 
 /** The intent in the current format, whatever version it was written in. */
-export const migrateIntent = (json: unknown): unknown => migrate(json).value;
+export const migrateIntent = (json: unknown): Result<unknown, Problem> => map(migrate(json), ({ value }) => value);

@@ -14,14 +14,13 @@ export const wifiPassword = z
   .min(8, "at least 8 characters")
   .max(63, "at most 63 characters");
 
-/** A private IPv4 /24 (RFC 1918), like 10.0.0.0/24, as "a.b.c.0/24". */
+/** A private IPv4 /24 (RFC 1918), like 10.0.0.0/24, as "a.b.c.0/24": its first three parts. */
 export const parseSubnet = (subnet: string) => {
-  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.0\/24$/.exec(subnet);
-  if (!match) return undefined;
-  const [a, b, c] = match.slice(1).map(Number);
-  const isPrivate =
-    a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
-  return isPrivate && b <= 255 && c <= 255 ? [a, b, c] : undefined;
+  const [address, length] = subnet.split("/");
+  if (length !== "24" || parseIpv4(address) === undefined || !address.endsWith(".0")) return undefined;
+  const [a, b, c] = address.split(".").map(Number);
+  const isPrivate = a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  return isPrivate ? [a, b, c] : undefined;
 };
 
 export const ipv4Subnet = z

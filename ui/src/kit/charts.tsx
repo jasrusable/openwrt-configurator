@@ -27,7 +27,7 @@ const runs = (points: Point[]) => {
   }, [[]]);
 };
 
-/** One or two series over time, filled below; the newest at the right; broken where no readings were taken. */
+/** One or two series over time, filled below; now at the right; broken where no readings were taken. */
 export const AreaChart = ({
   series,
   colors = ["blue", "teal"],
@@ -56,7 +56,10 @@ export const AreaChart = ({
       </Box>
     );
   }
-  const [t0, t1] = [Math.min(...all.map((p) => p[0])), Math.max(...all.map((p) => p[0]))];
+  // At the right, the bucket now filling, not the newest point: a series no
+  // longer read ends where it stopped rather than being drawn as current.
+  const step = Math.min(...series.map((points) => gapOf(points) / 3));
+  const [t0, t1] = [Math.min(...all.map((p) => p[0])), Math.max(Date.now() - step, ...all.map((p) => p[0]))];
   const max = Math.max(...all.map((p) => p[1]), ceiling ?? 1e-9, min + 1e-9);
   const x = (t: number) => ((t - t0) / Math.max(t1 - t0, 1)) * 100;
   const y = (v: number) => 38 - ((Math.max(v, min) - min) / (max - min)) * 36;

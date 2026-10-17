@@ -46,6 +46,8 @@ export type SshTarget = {
   /**
    * Trust-on-first-use store (OpenSSH known_hosts format): a host's key is
    * recorded on first connect and a different key is refused afterwards.
+   * Exactly this file, on every client: never the user's own ~/.ssh one. With
+   * neither it nor `hostKey`, connecting is refused, never any key accepted.
    */
   knownHostsFile?: string;
   /**
@@ -71,6 +73,8 @@ export type HttpRequest = {
   headers: Record<string, string>;
   /** The client's address, where the server knows it: for limits per client. */
   remoteAddress?: string;
+  /** It came over HTTPS (a router's uhttpd with TLS): its cookies may say Secure. */
+  secure?: boolean;
 };
 
 /** How a request is answered: a server, or CGI on the router. */
@@ -115,6 +119,13 @@ export type Platform = {
   listDir: (path: string) => string[];
   /** Make one directory, owner-only; false when it already exists (atomic: what a lock is). */
   makeDir: (path: string) => boolean;
+  /**
+   * A directory for this program's user alone, made owner-only, or one that
+   * already is: a real directory (not a symlink), this user's, mode 700. Any
+   * other is refused (throws): in /tmp anyone may take a name first, and
+   * root writing through what they left would be an arbitrary write.
+   */
+  privateDir: (path: string) => void;
   /** A directory and everything in it gone; no-op when it does not exist. */
   removeDir: (path: string) => void;
   /** When a file or directory last changed, ms since the epoch; undefined when it does not exist. */
@@ -123,6 +134,7 @@ export type Platform = {
   sha256: (text: string) => string;
   sha256File: (path: string) => Promise<string>;
 
+  /** A request ends by `httpTimeoutMs`; a download (an image, minutes on a slow line) once it stalls: a collector must never hang on one. */
   http: {
     request: (req: {
       method: "GET" | "POST";
@@ -136,8 +148,12 @@ export type Platform = {
     ) => Promise<{ bytes: number; contentLength?: number }>;
   };
 
-  /** Run a local program. Rejects only if it could not be started. */
-  run: (argv: string[], options?: { stdin?: string }) => Promise<ExecResult>;
+  /**
+   * Run a local program. Rejects only if it could not be started. With a
+   * time limit, it runs in a session of its own (no terminal to prompt on),
+   * and past it, it and whatever it started are killed (`timedOut`).
+   */
+  run: (argv: string[], options?: { stdin?: string; timeoutMs?: number }) => Promise<ExecResult>;
   /** Run a local program attached to this terminal; resolves its exit code. */
   runInteractive: (argv: string[]) => Promise<number | null>;
   /**
@@ -175,6 +191,9 @@ export type Platform = {
     options: { host: string; port: number }
   ) => Promise<void>;
 };
+
+/** How long an HTTP request may take, and a download may stall. */
+export const httpTimeoutMs = 60_000;
 
 /** What `serve` listens on: this machine only (it has no login). */
 export const loopbackHosts = ["127.0.0.1", "::1", "localhost"];

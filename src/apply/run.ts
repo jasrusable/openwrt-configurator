@@ -13,6 +13,7 @@ import { RollbackMode } from "../agent";
 import { AgentRecord } from "../agent/records";
 import { ConfirmTiming } from "./reconnect";
 import { OpenWrtState } from "../engine/openWrtState";
+import { isSecretSource, redactedText } from "../secretOptions";
 import { Session } from "../platform";
 import { problem, Problem, ProblemKind } from "../problem";
 import { attempt, messageOf, Result } from "../result";
@@ -37,8 +38,11 @@ export type DeviceRunOptions = {
   timing: ConfirmTiming;
   /** Where the device is, as data (applyEvents.ts); the log says it in words. */
   report?: Reporter;
-  /** The state hash the reviewed plan was read from (src/deviceState.ts): planning refuses a device that differs. */
-  verify?: { hash: string; sha256: (text: string) => string };
+  /**
+   * The state hash the reviewed plan was read from (src/deviceState.ts):
+   * planning refuses a device that differs, and one with none (not in the review).
+   */
+  verify?: { hash?: string; sha256: (text: string) => string };
 };
 
 export type DeviceRun = DeviceRunOptions & {
@@ -62,6 +66,8 @@ export type DeviceRun = DeviceRunOptions & {
   /** Set by arm: when the watchdog started, and when it will fire. */
   armedAt?: number;
   deadline?: number;
+  /** Set by configure: a changed file's run_after ran, whose effect (root's password) no rollback undoes. */
+  ranAfter?: boolean;
 };
 
 /** What a phase that went wrong leaves on the device. */
@@ -75,6 +81,8 @@ export type Left = {
   leftArmed: boolean;
   /** Reached, but its change cannot stand: roll it back now, not at its deadline. */
   rollBackNow: boolean;
+  /** A changed file's run_after ran (or may have): what it did, no rollback undoes. */
+  ranAfter: boolean;
 };
 
 /** A phase went wrong: why, and what that leaves on the device. */
@@ -84,7 +92,7 @@ export type Leaves = Partial<Left>;
 
 /** "failed" when the device did not do it; "unreachable" when what it did is not known. */
 export const failure = (message: string, leaves: Leaves = {}, kind: ProblemKind = "failed"): PhaseFailure =>
-  problem(kind, message, { committed: false, leftArmed: false, rollBackNow: false, ...leaves });
+  problem(kind, message, { committed: false, leftArmed: false, rollBackNow: false, ranAfter: false, ...leaves });
 
 export type PhaseResult<T = DeviceRun> = Result<T, PhaseFailure>;
 
@@ -101,6 +109,33 @@ export const guarded = async <T>(body: () => Promise<PhaseResult<T>>, ifThrown: 
 /** Say where a device is, if anyone listens. */
 export const step = (run: Pick<DeviceRunOptions, "hostname" | "now" | "report">, deviceStep: DeviceStep) =>
   run.report?.({ at: run.now(), device: run.hostname, step: deviceStep });
+
+/**
+ * The device's secret values in this run's settings: secret options' values
+ * and owner-only files' lines (secretOptions.ts), the shortest left out, as
+ * they would hide text that is no secret.
+ */
+const secretValues = (state: OpenWrtState) => {
+  const options = Object.values(state.config).flatMap((types) =>
+    Object.values(types).flatMap((sections) =>
+      sections.flatMap((section) =>
+        Object.entries(section).flatMap(([option, value]) =>
+          option !== ".name" && isSecretSource({ option }) ? (Array.isArray(value) ? value : [value]).map(String) : []
+        )
+      )
+    )
+  );
+  const files = (state.files ?? []).flatMap((file) => (isSecretSource({ file: { mode: file.mode } }) ? file.content.split("\n") : []));
+  return [...new Set([...options, ...files])].filter((value) => value.length >= 4).sort((a, b) => b.length - a.length);
+};
+
+/**
+ * What a device said (a hook's or a run_after's stderr, uci's complaint), its
+ * secrets hidden, before it reaches the log the UI shows: a command of the
+ * settings' own may print what it was given.
+ */
+export const scrubbed = (run: Pick<DeviceRunOptions, "state">, text: string) =>
+  secretValues(run.state).reduce((said, secret) => said.split(secret).join(redactedText), text);
 
 /**
  * A failing hook, as the log says it: its first line, before any heredoc, a

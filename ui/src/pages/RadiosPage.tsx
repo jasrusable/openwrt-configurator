@@ -217,6 +217,11 @@ const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
               {meshChannel} · {placeName("mesh")}
             </Button>
           </SettingRow>
+        ) : band === "6g" ? (
+          // A device pins only its 2.4 and 5 GHz channels (hardware.*.radios).
+          <SettingRow label="Channel" description="Picked automatically.">
+            <Text size="sm" c="dimmed">Auto</Text>
+          </SettingRow>
         ) : (
           <SettingRow label="Channel" description={`Picked automatically; pin one under ${where("hardware")}.`}>
             <Button variant="subtle" size="compact-sm" onClick={() => navigate("/hardware")}>

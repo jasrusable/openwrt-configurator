@@ -5,6 +5,7 @@ import {
   boardJson,
   installedPackages,
   managedFiles,
+  notRunning,
   pendingChanges,
   runProbe,
   runProbes,
@@ -151,4 +152,12 @@ test("service triggers: the configs each service's reload triggers watch, as pro
   });
   t.deepEqual(serviceTriggers.parse({ stdout, stderr: "", code: 0 }), { dnsmasq: ["dhcp", "system"], cron: [], dropbear: ["dropbear"] });
   t.deepEqual(serviceTriggers.parse({ stdout: "not json", stderr: "", code: 1 }), {});
+});
+
+test("notRunning: a service ubus could not be asked about is not called stopped", (t) => {
+  const probe = notRunning(["dnsmasq", "odhcpd", "uhttpd"]);
+  t.deepEqual(probe.parse({ stdout: "dnsmasq ?\nodhcpd 0\nuhttpd -\n", stderr: "", code: 0 }), [
+    { name: "odhcpd", missing: false },
+    { name: "uhttpd", missing: true },
+  ]);
 });

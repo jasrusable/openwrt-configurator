@@ -8,10 +8,12 @@ import {
   missingFiles,
   packageSpace,
   pendingChanges as pendingChangesProbe,
+  Probe,
   removalCascade as removalCascadeProbe,
   runProbe,
   runProbes,
 } from "../deviceProbes";
+import { deviceTmp, runDirName, watchdogPidFile } from "../agent/paths";
 import {
   getPackagesToRemove,
   hookCommands,
@@ -25,6 +27,34 @@ import { readDeviceNow, stateHash } from "../deviceState";
 import { err, ok } from "../result";
 import { knownConfigs } from "./knownConfigs";
 import { DeviceRun, DeviceRunOptions, failure, guarded, PhaseResult, step } from "./run";
+
+type ArmedRun = { run: string; seconds: number; recover: number };
+
+/**
+ * Other runs' watchdogs alive on the device (one stopped or lost before it
+ * confirmed, from this machine or another): each one's run, the seconds
+ * before it fires on the device's own clock (negative: restoring now), and
+ * how long it then waits to be reached before rebooting.
+ */
+export const armedRuns: Probe<ArmedRun[]> = {
+  command: [
+    `for f in ${deviceTmp}/${runDirName}*/${watchdogPidFile}; do`,
+    // One confirmed restores nothing: it stands down as it wakes (a disarm that could not end its sleep).
+    `[ -f "$f" ] || continue; d=\${f%/*}; { [ -f "$d/confirmed" ] && [ ! -f "$d/restoring" ]; } && continue; p=$(cat "$f")`,
+    // Its pid still a watchdog: a pid is reused once its process ends.
+    `tr '\\0' '\\n' < "/proc/$p/cmdline" 2>/dev/null | grep -qx watchdog || continue`,
+    `echo "\${d##*/${runDirName}} $(( $(cat "$d/fires" 2>/dev/null || date +%s) - $(date +%s) )) $(cat "$d/recover" 2>/dev/null || echo 60)"`,
+    "done",
+  ].join("\n"),
+  parse: ({ stdout }) =>
+    stdout.split("\n").flatMap((line) => {
+      const match = /^(\S+) (-?\d+) (\d+)$/.exec(line.trim());
+      return match ? [{ run: match[1], seconds: Number(match[2]), recover: Number(match[3]) }] : [];
+    }),
+};
+
+/** Restoring takes a while (packages reinstalled offline): allowed for in the wait said. */
+const restoreAllowanceSeconds = 60;
 
 /** Unique per device: several devices are armed within the same second. */
 const newRunId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -44,6 +74,7 @@ export const planDevice = (options: DeviceRunOptions): Promise<PhaseResult> =>
       unseeded: missingFiles(seededConfigPaths(state)),
       configNames,
       serviceTriggers,
+      armed: armedRuns,
     });
     const { boardJson, installedPackages, managedFiles, unseeded } = facts;
     if (deviceModelId !== undefined && boardJson.model?.id !== deviceModelId) {
@@ -52,8 +83,25 @@ export const planDevice = (options: DeviceRunOptions): Promise<PhaseResult> =>
       );
     }
 
+    // Another run's watchdog restores its snapshot at its deadline, over
+    // whatever this run would do: never apply under one. Checked on the
+    // device, whatever ran that run (killed, another machine) or holds a lock.
+    if (facts.armed.length > 0) {
+      const seconds = Math.max(...facts.armed.map((a) => Math.max(0, a.seconds) + restoreAllowanceSeconds + a.recover));
+      return err(
+        failure(
+          `${hostname} still has an earlier apply's rollback armed (one never confirmed: stopped, or lost): it puts back the settings from before that apply, then waits to be reached before rebooting onto them. ` +
+            `Applying now would be undone by it: apply again in about ${Math.ceil(seconds / 60)} min. Nothing was changed.`
+        )
+      );
+    }
+
     // Reviewed from what the device held then: one changed since (by hand,
-    // another tool, another apply) would have changes nobody saw.
+    // another tool, another apply) would have changes nobody saw; and one
+    // not in the review was never reviewed.
+    if (options.verify && options.verify.hash === undefined) {
+      return err(failure(`${hostname} was not in the reviewed changes: review them again. Nothing was changed.`, {}, "plan-stale"));
+    }
     if (options.verify && stateHash(await readDeviceNow(ssh, []), options.verify.sha256) !== options.verify.hash) {
       return err(
         failure(`${hostname} changed since its changes were reviewed: review them again. Nothing was changed.`, {}, "plan-stale")

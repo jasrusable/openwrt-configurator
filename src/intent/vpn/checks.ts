@@ -1,8 +1,8 @@
 // The VPN's rules across settings: keys once in use, each id, address and
-// port once, ranges that clash with nothing here, and access to networks
-// that exist.
+// port once, ranges (sites', providers') that clash with nothing here, and
+// access to networks that exist.
 import { vpnZoneIds } from "../access";
-import { overlaps } from "../addresses";
+import { overlaps, rangeOf } from "../addresses";
 import type { FeatureModule } from "../feature";
 import { isPrivateRange } from "./schema";
 
@@ -29,6 +29,12 @@ export const vpnChecks: FeatureModule["check"] = (intent, issue) => {
   const clash = remote.enabled && intent.networks.find((n) => overlaps(n.subnet, remote.subnet));
   if (clash) issue(["vpn", "remote_access", "subnet"], `overlaps ${clash.name}'s ${clash.subnet}`);
   const local = [...intent.networks.map((n) => n.subnet), ...(remote.enabled ? [remote.subnet] : [])];
+  // A provider's own address among ours: the router would route that range into the tunnel.
+  providers.forEach((provider, i) => {
+    const range = provider.type === "wireguard" ? rangeOf(provider.address) : undefined;
+    const mine = range && local.find((l) => overlaps(l, range));
+    if (mine) issue(["vpn", "providers", i, "address"], `${range} overlaps this site's ${mine}`);
+  });
   sites.peers.forEach((site, i) =>
     site.subnets.forEach((range) => {
       const at = ["vpn", "sites", "peers", i, "subnets"];

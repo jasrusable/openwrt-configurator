@@ -4,9 +4,14 @@
 // before disarming any.
 import * as agent from "../agent";
 import { reachableSession, reconnectIntervalMs, reconnectSettled } from "./reconnect";
-import { Session } from "../platform";
+import { commandTimeoutMs, Session } from "../platform";
 import { err, ok } from "../result";
-import { DeviceRun, failure, PhaseResult, step } from "./run";
+import { DeviceRun, failure, PhaseResult, scrubbed, step } from "./run";
+
+/** Left of the window for the confirm after the services start: two reconnects' worth. */
+const servicesMarginMs = 30_000;
+/** Any less, and a services step cannot do its work at all. */
+const minimumServicesMs = 15_000;
 
 /**
  * Enable and start (or stop and disable) the declared services, over a
@@ -15,9 +20,13 @@ import { DeviceRun, failure, PhaseResult, step } from "./run";
  */
 export const startServices = async (run: DeviceRun, session: Session) => {
   if (run.serviceRecords.length === 0) return;
-  const started = await agent.call(session, agent.services(run.runId, run.serviceRecords));
+  // Within what is left of the window, short of the confirm itself: one
+  // that hangs (a service's start never returning) must not use it all.
+  const left = run.deadline === undefined ? undefined : run.deadline - run.now() - servicesMarginMs;
+  const timeoutMs = left === undefined ? undefined : Math.max(minimumServicesMs, Math.min(commandTimeoutMs, left));
+  const started = await agent.call(session, agent.services(run.runId, run.serviceRecords, timeoutMs));
   if (!started.ok) console.warn(`${run.hostname}: starting its services: ${started.error.message}`);
-  else if (!started.value.done) console.warn(`${run.hostname}: starting its services, at ${started.value.step}: ${started.value.stderr}`);
+  else if (!started.value.done) console.warn(`${run.hostname}: starting its services, at ${started.value.step}: ${scrubbed(run, started.value.stderr)}`);
 };
 
 export const confirmDevice = async (run: DeviceRun): Promise<PhaseResult<Session>> => {

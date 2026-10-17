@@ -3,7 +3,7 @@
 // show`, so a mere reordering would reload every service on the next apply.
 // Changing an order here is a deliberate step, never a side effect.
 import test from "ava";
-import { orderConfigs, orderOptions, orderTypes } from "../../engine/uciOrder";
+import { orderConfigs, orderOptions, orderTypes } from "../../plan/uciOrder";
 
 const keysOf = (o: object) => Object.keys(o);
 const reversed = (names: string[], extra: string[] = []) =>

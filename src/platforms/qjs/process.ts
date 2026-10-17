@@ -17,6 +17,12 @@ const tmpDir = () => {
   }
   return privateDir;
 };
+/**
+ * This process's user. QuickJS has no getuid: Linux's /proc/self is owned by
+ * it; elsewhere, so is the private directory this process made.
+ */
+export const ownUid = () => (os.stat("/proc/self")[0] ?? os.stat(tmpDir())[0])?.uid;
+
 export const tmpPath = (label: string) =>
   `${tmpDir()}/${label}-${Math.random().toString(36).slice(2, 10)}`;
 
@@ -98,20 +104,28 @@ const openStdio = (stdin?: string) => {
   };
 };
 
-/** Run a program to completion without blocking the event loop. */
+/**
+ * Run a program to completion without blocking the event loop. In a `group`
+ * of its own (setsid, where there is one: busybox's runs the program in place,
+ * spawnDetached), the time limit kills the group: a shell's children with it,
+ * not the shell alone while a subshell runs on.
+ */
 export const spawn = async (
   argv: string[],
   {
     stdin,
     env,
     timeoutMs,
+    group = false,
   }: {
     stdin?: string;
     env?: Record<string, string>;
     timeoutMs?: number;
+    group?: boolean;
   } = {}
 ): Promise<ExecResult & { timedOut: boolean }> => {
-  const command = resolveArgv(argv);
+  const setsid = group ? which("setsid") : undefined;
+  const command = resolveArgv(setsid ? [setsid, ...argv] : argv);
   const stdio = openStdio(stdin);
   try {
     const pid = os.exec(command, {
@@ -120,6 +134,11 @@ export const spawn = async (
       env,
       ...stdio.fds,
     });
+    // The group as well as the pid: a kill sent before setsid ran still lands.
+    const kill = (signal: number) => {
+      if (setsid) os.kill(-pid, signal);
+      os.kill(pid, signal);
+    };
     const started = Date.now();
     let killedAt: number | undefined;
     let delay = 2;
@@ -133,10 +152,10 @@ export const spawn = async (
         timeoutMs !== undefined &&
         Date.now() - started > timeoutMs
       ) {
-        os.kill(pid, os.SIGTERM);
+        kill(os.SIGTERM);
         killedAt = Date.now();
       } else if (killedAt && Date.now() - killedAt > 5000) {
-        os.kill(pid, 9);
+        kill(9);
       }
       await sleep(delay);
       delay = Math.min(delay * 2, 50);
@@ -167,11 +186,32 @@ export const spawnDetached = (argv: string[], { log }: { log: string }) => {
       stderr: out,
     });
     if (pid < 0) throw new Error(`${argv[0]}: could not be started`);
+    leaveCallersCgroup(pid);
     return pid;
   } finally {
     os.close(out);
     if (none >= 0) os.close(none);
   }
+};
+
+/**
+ * A started program out of its caller's cgroup, as the device scripts move
+ * themselves (src/agent/prelude.ts): a CGI's is uhttpd's procd instance, and
+ * an apply job left there dies with it when uhttpd restarts (an apply can
+ * restart it). Into the agent's own cgroup, else the root one; with no cgroup
+ * v2 (or not root), nothing. Moved before it has started anything of its own.
+ */
+const leaveCallersCgroup = (pid: number) => {
+  const root = "/sys/fs/cgroup";
+  if (!fileExists(`${root}/cgroup.procs`)) return;
+  const into = (dir: string) => {
+    const procs = std.open(`${dir}/cgroup.procs`, "w");
+    if (!procs) return false;
+    procs.puts(`${pid}\n`);
+    return procs.close() === 0;
+  };
+  os.mkdir(`${root}/onc`, 0o755);
+  if (!into(`${root}/onc`)) into(root);
 };
 
 /** Synchronous variant, for the few interface methods that are synchronous. */

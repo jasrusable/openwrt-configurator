@@ -108,6 +108,8 @@ run_client() {
   boot_device "$dev"
   ip=$booted_ip model=$booted_model
 
+  # Every client keeps the app's own known_hosts (dbclient through a throwaway HOME).
+  hosts=/root/.config/openwrt-configurator/known_hosts
   case $client in
     dbclient | openssh)
       run_container --name "$ctl" -v "$work:/work" "$image" sleep infinity
@@ -115,13 +117,10 @@ run_client() {
       if [ "$client" = openssh ]; then
         docker exec "$ctl" sh -c 'apk add openssh-client >/dev/null 2>&1; rm -f /usr/bin/dbclient'
       fi
-      hosts=/root/.ssh/known_hosts
-      [ "$client" = openssh ] && hosts=/root/.config/openwrt-configurator/known_hosts
       ;;
     node)
       docker run -d --platform "$node_platform" --name "$ctl" -v "$work:/work" -v "$root/node_modules:/nm:ro" \
         -e NODE_PATH=/nm "$node_image" sleep infinity >/dev/null
-      hosts=/root/.config/openwrt-configurator/known_hosts
       ;;
     *) echo "unknown client $client" >&2; return 2 ;;
   esac

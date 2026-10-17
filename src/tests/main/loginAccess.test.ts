@@ -51,7 +51,8 @@ test("an apply that would lock this app out is refused, and says why", async (t)
       system: { ...s.system, app_login: { key: ssh_key_path, password }, ssh: { authorized_keys: [], password_login: true, ...ssh } },
     } as Intent;
   };
-  t.is(await lockoutReason(intent({ ssh_key_path: keyPath }), nodePlatform), undefined, "password login on: nothing to lose");
+  t.is(await lockoutReason(intent({ ssh_key_path: keyPath, password: "pw" }), nodePlatform), undefined, "password login on, with a password: nothing to lose");
+  t.regex((await lockoutReason(intent({ ssh_key_path: keyPath }), nodePlatform))!, /no password to log in with/, "no keys listed is not counted on");
   t.is(await lockoutReason(intent({ ssh_key_path: keyPath, password_login: false, authorized_keys: [key.replace("you@mac", "a different comment")] }), nodePlatform), undefined, "the comment does not matter");
   t.regex((await lockoutReason(intent({ ssh_key_path: keyPath, password_login: false, authorized_keys: [other] }), nodePlatform))!, /not among the authorized keys/);
   t.regex((await lockoutReason(intent({ password_login: false, authorized_keys: [other] }), nodePlatform))!, /no SSH key/);

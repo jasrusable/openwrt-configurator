@@ -76,38 +76,23 @@ export const findJsonError = (text: string) => {
   return describe(text, errors);
 };
 
-const locate = (text: string, offset: number) => {
-  const before = text.slice(0, offset);
-  const lineStart = before.lastIndexOf("\n") + 1;
-  const lineEnd = text.indexOf("\n", offset);
-  return {
-    line: before.split("\n").length,
-    column: offset - lineStart + 1,
-    lineText: text.slice(lineStart, lineEnd < 0 ? undefined : lineEnd),
-  };
-};
-
-const located = (
-  text: string,
-  filepath: string | undefined,
-  error: { offset: number; message: string }
-) => {
-  const { line, column, lineText } = locate(text, error.offset);
-  return new Error(
-    `${filepath ?? "JSON"}:${line}:${column}: ${error.message}\n\n` +
-      `  ${lineText}\n  ${" ".repeat(column - 1)}^`
-  );
+// Where, never what: the line may hold a password, and this message reaches
+// the terminal, the UI's Problems and logs.
+const located = (text: string, filepath: string | undefined, error: { offset: number; message: string }) => {
+  const before = text.slice(0, error.offset);
+  const line = before.split("\n").length;
+  const column = error.offset - (before.lastIndexOf("\n") + 1) + 1;
+  return new Error(`${filepath ?? "JSON"}:${line}:${column}: ${error.message}`);
 };
 
 /** Strict JSON, as devices and tools print it. */
 export const parseJson = (text: string, filepath?: string) => {
   try {
     return JSON.parse(text);
-  } catch (e) {
+  } catch {
     const error = findJsonError(text);
-    if (!error) {
-      throw new Error(`${filepath ?? "JSON"}: ${(e as Error).message}`);
-    }
+    // The engine's own message quotes the text (Node's does).
+    if (!error) throw new Error(`${filepath ?? "JSON"}: not valid JSON`);
     throw located(text, filepath, error);
   }
 };

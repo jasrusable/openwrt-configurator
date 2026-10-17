@@ -543,3 +543,71 @@ test("without channels in the facts, a band's first radio takes its channel, as 
   );
   t.deepEqual(dual.wireless["wifi-iface"] ?? [], []);
 });
+
+test("swconfig: an untagged line and a tagged one on one port: the port untagged in its own VLAN, tagged in the other's", (t) => {
+  const config = build(
+    {
+      network: {
+        interface: [
+          { ".name": "wan", device: "@port:port1", proto: "dhcp" },
+          { ".name": "wanb", device: "@port:port1.10", proto: "dhcp" },
+        ],
+      },
+      // A line's shaping names its bare port: the untagged line's here.
+      sqm: { queue: [{ ".name": "wan", interface: "@port:port1" }] },
+    },
+    swconfig
+  );
+  const device = (name: string) => config.network.interface.find((i: any) => i[".name"] === name).device;
+  t.is(device("wanb"), "eth0.10");
+  t.is(device("wan"), "eth0.2");
+  t.is(config.sqm.queue[0].interface, "eth0.2");
+  t.deepEqual(
+    config.network.switch_vlan.map((v: any) => `${v.vlan}: ${v.ports}`),
+    ["10: 0t 1t", "2: 0t 1"]
+  );
+  // A tagged line alone: its bare port (its shaping) is its VLAN, no switch VLAN of its own.
+  const tagged = build(
+    {
+      network: {
+        interface: [{ ".name": "wanb", device: "@port:port1.10", proto: "dhcp" }],
+      },
+      sqm: { queue: [{ ".name": "wanb", interface: "@port:port1" }] },
+    },
+    swconfig
+  );
+  t.is(tagged.sqm.queue[0].interface, "eth0.10");
+  t.deepEqual(tagged.network.switch_vlan.map((v: any) => v.vlan), [10]);
+});
+
+test("two radios declared for one band take that band's radios in order; more than it has is refused", (t) => {
+  const config = build(
+    {
+      wireless: {
+        "wifi-device": [
+          { ".name": "low", band: "5g", channel: 36 },
+          { ".name": "high", band: "5g", channel: 149 },
+        ],
+        "wifi-iface": [{ ".name": "fast", ssid: "fast", mode: "ap", network: "lan", device: ["high"] }],
+      },
+    },
+    triBandChannels
+  );
+  t.deepEqual(
+    config.wireless["wifi-device"].filter((d: any) => d.band === "5g").map((d: any) => [d[".name"], d.path, d.channel]),
+    [
+      ["low", "p1", 36],
+      ["high", "p2", 149],
+    ]
+  );
+  t.deepEqual(config.wireless["wifi-iface"].map((i: any) => i.device), ["high"]);
+  t.throws(
+    () => build({ wireless: { "wifi-device": [{ ".name": "low", band: "5g" }, { ".name": "high", band: "5g" }] } }, twoRadios),
+    { message: /2 radios are declared for 5g \(low, high\), but it has 1/ }
+  );
+});
+
+test("a band's default channel is one the radio has: tri-band's upper radio alone takes its own first", (t) => {
+  const config = build({ wireless: { "wifi-device": [{ ".name": "radio1", band: "5g" }] } }, { radios: [triBandChannels.radios[2]] });
+  t.is(config.wireless["wifi-device"][0].channel, 100);
+});

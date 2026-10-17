@@ -4,17 +4,16 @@
 // naming another version (the file changed in another tab, or by the CLI,
 // since) is refused rather than undoing that change.
 import { keepSiteSeed } from "../../intent/edits";
-import { checkCompiles } from "../../intent/compile";
 import { Intent, intentSchema } from "../../intent/schema";
 import { HttpRequest, HttpResponse, Platform } from "../../platform";
 import { renameFacts } from "../../deviceFacts";
 import { problem } from "../../problem";
-import { intentFileOrNothing, readIntentFile, writeIntentFile } from "../../settings";
-import { ApiContext, json, problemResponse, refuse, respond, Route, withBody } from "../router";
+import { checkedIntent, intentFileOrNothing, readIntentFile, writeIntentFile } from "../../settings";
+import { ApiContext, json, problemResponse, respond, Route, withBody } from "../router";
 
 type Files = Pick<Platform, "readTextFile" | "sha256">;
 
-const versionHeader = "x-onc-version";
+export const versionHeader = "x-onc-version";
 
 export const versionOf = (files: Files, path: string) => {
   try {
@@ -33,9 +32,6 @@ export const withVersion = (response: HttpResponse, version: string): HttpRespon
 export const changedElsewhere = (files: Files, path: string, request: HttpRequest) =>
   request.headers[versionHeader] !== undefined && request.headers[versionHeader] !== versionOf(files, path);
 
-export const issuesOf = (error: { issues: { path: (string | number)[]; message: string }[] }) =>
-  error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message }));
-
 /** A device renamed in place (same position in Hardware, its old name gone, its new one new) keeps its facts, pinned host key and all. */
 const keepRenamedFacts = (files: Parameters<typeof renameFacts>[0], intentPath: string, before: Intent, after: Intent) => {
   const oldNames = before.hardware.map((d) => d.name);
@@ -46,7 +42,7 @@ const keepRenamedFacts = (files: Parameters<typeof renameFacts>[0], intentPath: 
   });
 };
 
-export const intentRoutes = ({ intentPath, platform }: ApiContext): Route[] => [
+export const intentRoutes = ({ intentPath, platform, now }: ApiContext): Route[] => [
   {
     path: "/api/intent",
     // In the current format, the only one the UI knows, and with the
@@ -62,17 +58,14 @@ export const intentRoutes = ({ intentPath, platform }: ApiContext): Route[] => [
           })
         );
       }
-      const parsed = intentSchema.safeParse(input);
-      if (!parsed.success) return refuse("invalid", "Some settings need fixing.", { issues: issuesOf(parsed.error) });
+      // Valid and compiling, as every write of the settings is (checkedIntent).
+      const checked = checkedIntent(input);
+      if (!checked.ok) return problemResponse(checked.error);
       const before = intentSchema.safeParse(intentFileOrNothing(platform, intentPath));
-      const intent = before.success ? keepSiteSeed(before.data, parsed.data) : parsed.data;
-      // Never save what would not provision: a compiler bug shows up here,
-      // not halfway through a run.
-      const compiled = checkCompiles(intent);
-      // Valid settings that do not make a valid plan: the compiler's fault.
-      if (!compiled.ok) return refuse("internal", "The intent is valid but did not compile.", compiled.error.details);
+      const intent = before.success ? keepSiteSeed(before.data, checked.value) : checked.value;
+      const written = writeIntentFile(platform, intentPath, intent, { keepOld: "older-format", at: now() });
+      if (!written.ok) return problemResponse(written.error);
       if (before.success) keepRenamedFacts(platform, intentPath, before.data, intent);
-      writeIntentFile(platform, intentPath, intent, { keepOld: "older-format" });
       return withVersion(json(200, intent), versionOf(platform, intentPath));
     }),
   },

@@ -2,6 +2,7 @@
 // UI (kept as a fallback), and the configs this tool leaves alone.
 import { PlanFile, section } from "../../plan/types";
 import { everyDevice, Feature, mainNetwork, onAccessPoints, onDevice, onRouter, routerAddress } from "../fragment";
+import type { Intent } from "../schema";
 import { timezones } from "./timezones";
 
 // Cloudflare's by address first: with encrypted DNS the router cannot look a
@@ -16,9 +17,9 @@ const ntpPool = [
 ];
 
 /**
- * Root's password, the one this app logs in with. A stock device has none,
- * and then rpcd (LuCI, and this app on a router) takes any password, so
- * setting it is what closes the web logins. passwd reads it twice from the
+ * Root's password, the one this app logs in with (required: system/checks.ts).
+ * A stock device has none, and then rpcd (LuCI, and this app on a router)
+ * and dropbear take any password, so setting it is what closes them. passwd reads it twice from the
  * file, never from a command line; the file changes only with the password,
  * so an apply that keeps it runs nothing. Not rewound by a rollback: it is
  * the password the app then logs back in with.
@@ -32,6 +33,15 @@ const rootPassword = (password: string): PlanFile => ({
   runAfter: `passwd root < ${rootPasswordFile} > /dev/null`,
 });
 
+/**
+ * Who dropbear lets in as root, for every instance (the mesh's rescue one
+ * too): off, only the authorized keys.
+ */
+export const sshLogin = (intent: Intent) => {
+  const on = intent.system.ssh.password_login ? "on" : "off";
+  return { PasswordAuth: on, RootPasswordAuth: on, Port: 22 };
+};
+
 export const system: Feature = (intent) => {
   const router = routerAddress(intent);
   const main = mainNetwork(intent).id;
@@ -43,8 +53,11 @@ export const system: Feature = (intent) => {
       { when: everyDevice, name: "dropbear", running: true },
       { when: everyDevice, name: "uhttpd", running: true },
     ],
-    // Who may log in as root. Listed keys replace the device's file; none
-    // leaves a hand-installed one alone. dropbear reads it at each login.
+    // Who may log in as root. Listed keys replace the device's file. None
+    // declares no file: one this app wrote goes with the rest it no longer
+    // declares (getDeviceScript's stale files), one put there by hand stays;
+    // either way root's password still lets the app in, as password login
+    // stays on without a key (system/rules.ts). dropbear reads it at each login.
     files: [
       ...(intent.system.ssh.authorized_keys.length
         ? [
@@ -61,8 +74,17 @@ export const system: Feature = (intent) => {
     keep: [
       {
         when: everyDevice,
-        // LuCI's own state, and LEDs, which are per model.
-        entries: [{ config: "luci" }, { config: "rpcd" }, { config: "ucitrack" }, { config: "system", type: "led" }],
+        // LuCI's own state, and LEDs, which are per model. The board's own:
+        // where U-Boot keeps its environment (fw_setenv: the boot counter and
+        // partition of dual-firmware boards) and what is mounted (extroot).
+        entries: [
+          { config: "luci" },
+          { config: "rpcd" },
+          { config: "ucitrack" },
+          { config: "system", type: "led" },
+          { config: "ubootenv", optional: true },
+          { config: "fstab", optional: true },
+        ],
       },
     ],
     config: {
@@ -87,12 +109,7 @@ export const system: Feature = (intent) => {
       dropbear: {
         dropbear: [
           section({ name: "main" }, {
-            // Off: only the authorized keys (below) let root in. A stock
-            // device has no root password and accepts any, so this is what
-            // closes it.
-            PasswordAuth: intent.system.ssh.password_login ? "on" : "off",
-            RootPasswordAuth: intent.system.ssh.password_login ? "on" : "off",
-            Port: 22,
+            ...sshLogin(intent),
             // Only on the main network: guests and IoT get no SSH. Bound to
             // its device, not an address, so an address from DHCP (as access
             // points have) changing later does not matter.

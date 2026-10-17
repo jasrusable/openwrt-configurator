@@ -1,24 +1,25 @@
 // The review before an apply: the change plan made on the server
 // (src/applyPlan.ts), as one surface. Its verdict first; what must be
 // acknowledged, only when something warrants it; then every change, the most
-// noticed first, by change or by device. Nothing to change says so, with a
-// quiet way to apply again anyway.
-import { Alert, Badge, Button, Checkbox, Group, Loader, SegmentedControl, Stack, Text, UnstyledButton } from "@mantine/core";
+// noticed first, by change or by device. Nothing to change says so (the
+// sheet's button then applies again anyway).
+import { Alert, Badge, Checkbox, Group, Loader, SegmentedControl, Stack, Text, UnstyledButton } from "@mantine/core";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { useState } from "react";
 import { ApplyPlan, needWords, PlanNeed } from "../../../src/applyPlan";
 import { durationWords } from "../../../src/applyImpact";
+import { canonical } from "../../../src/json";
 import type { Change } from "../../../src/intent/diff";
 import { ago } from "../facts";
 import { Hint } from "../kit/Hint";
 import { Section, SettingRow } from "../kit/layout";
 import { ChangeRow, ChangeRows } from "./ChangeRows";
 
-/** An acknowledgement's key: the same need read again keeps its tick. */
-export const needKey = (need: PlanNeed) => `${need.kind}:${need.device}`;
+/** An acknowledgement's key: the whole consequence, so a tick never carries over to another. */
+export const needKey = (need: PlanNeed) => canonical(need);
 
 /** Whether every acknowledgement the plan needs is ticked, and nothing refuses it. */
-export const readyToApply = (plan: ApplyPlan | undefined, acked: Set<string>) =>
+export const readyToApply = (plan: ApplyPlan | undefined, acked: ReadonlySet<string>) =>
   !!plan && !plan.summary.blocked && plan.needs.every((need) => acked.has(needKey(need)));
 
 const chip = { variant: "light", radius: "sm", style: { textTransform: "none" } } as const;
@@ -59,7 +60,7 @@ const Chips = ({ plan, query }: { plan: ApplyPlan; query: UseQueryResult<ApplyPl
   </Group>
 );
 
-const Needs = ({ needs, acked, onAck }: { needs: PlanNeed[]; acked: Set<string>; onAck: (key: string, on: boolean) => void }) => (
+const Needs = ({ needs, acked, onAck }: { needs: PlanNeed[]; acked: ReadonlySet<string>; onAck: (key: string, on: boolean) => void }) => (
   <Section title="Before applying" description="Tick each to apply.">
     {needs.map((need) => (
       <SettingRow key={needKey(need)} label={needWords(need)}>
@@ -107,16 +108,14 @@ export const Review = ({
   acked,
   onAck,
   stale,
-  onReapply,
 }: {
   query: UseQueryResult<ApplyPlan>;
-  /** Edits not saved yet: saved as the apply starts, so not in the plan read from the saved settings. */
+  /** Edits not saved yet: not in the plan, read from the saved settings, until saved and read again. */
   draft: Change[];
-  acked: Set<string>;
+  acked: ReadonlySet<string>;
   onAck: (key: string, on: boolean) => void;
   /** The last start was refused: a device changed since this was reviewed. */
   stale: boolean;
-  onReapply: () => void;
 }) => {
   const [view, setView] = useState<"change" | "device">("change");
   const plan = query.data;
@@ -134,7 +133,6 @@ export const Review = ({
       </Group>
     );
   }
-  const upToDate = !plan.items.length && !plan.unread.length && !draft.length;
   return (
     <Stack gap="lg">
       {stale && (
@@ -158,30 +156,24 @@ export const Review = ({
       )}
       {plan.needs.length > 0 && <Needs needs={plan.needs} acked={acked} onAck={onAck} />}
       {draft.length > 0 && (
-        <Section title="Not saved yet" description="Saved as the apply starts. What they change on the devices shows here once saved.">
+        <Section title="Not saved yet" description="Save them to see what they change on the devices, then apply.">
           <ChangeRows changes={draft} />
         </Section>
       )}
-      {upToDate ? (
-        <Button variant="subtle" size="xs" color="gray" w="fit-content" onClick={onReapply}>
-          Re-apply anyway
-        </Button>
-      ) : (
-        plan.items.length > 0 && (
-          <Stack gap="xs">
-            <SegmentedControl
-              size="xs"
-              w="fit-content"
-              value={view}
-              onChange={(v) => setView(v as "change" | "device")}
-              data={[
-                { value: "change", label: "By change" },
-                { value: "device", label: "By device" },
-              ]}
-            />
-            {view === "change" ? <ByChange plan={plan} /> : <ByDevice plan={plan} />}
-          </Stack>
-        )
+      {plan.items.length > 0 && (
+        <Stack gap="xs">
+          <SegmentedControl
+            size="xs"
+            w="fit-content"
+            value={view}
+            onChange={(v) => setView(v as "change" | "device")}
+            data={[
+              { value: "change", label: "By change" },
+              { value: "device", label: "By device" },
+            ]}
+          />
+          {view === "change" ? <ByChange plan={plan} /> : <ByDevice plan={plan} />}
+        </Stack>
       )}
       {plan.unread.length > 0 && (
         <Section title="Not read">

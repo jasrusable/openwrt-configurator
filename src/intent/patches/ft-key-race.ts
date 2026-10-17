@@ -1,16 +1,30 @@
 import { when } from "../../plan/when";
+import type { Section } from "../../plan/types";
+import type { Intent } from "../schema";
 import { amendOf, Patch } from "./patch";
 
+type Ssid = Intent["wifi"]["networks"][number];
+
 /**
- * An SSID the race hurts: fast roaming on, with WPA3 (alone or beside WPA2).
+ * Where the race hurts: fast roaming with WPA3 (SAE, alone or beside WPA2).
  * On WPA2 the failure is mostly noise in the log; the long disconnects are
- * reported with SAE.
+ * reported with SAE. Decided by each section's encryption, as compiled: an
+ * SSID's 6 GHz section is SAE whatever its security (6 GHz allows nothing else).
  */
-const atRisk = (ssid: { roaming: { fast: boolean }; security: string }) => ssid.roaming.fast && ssid.security !== "wpa2";
+const atRisk = ({ item, section }: { item: Ssid; section: Section }) =>
+  item.roaming.fast && /^sae/.test(String(section.options.encryption));
+
+/** Whether any SSID has such a section: WPA3 in its security, or broadcast on 6 GHz (the mesh's spare radio there too). */
+const anyAtRisk = (intent: Intent) =>
+  intent.wifi.networks.some(
+    (ssid) =>
+      ssid.roaming.fast &&
+      (ssid.security !== "wpa2" || (intent.wifi.radios["6g"].enabled && (!ssid.bands || ssid.bands.includes("6g"))))
+  );
 
 export const ftKeyRace: Patch = {
   id: "ft-key-race",
-  title: "Fast roaming held off on WPA3 SSIDs on OpenWrt 25.12",
+  title: "Fast roaming held off with WPA3 on OpenWrt 25.12",
   why:
     "With fast roaming (802.11r), hostapd hands the kernel a roaming client's key before " +
     "mac80211 marks it associated; the kernel refuses it ('key addition failed') and a retry " +
@@ -18,7 +32,8 @@ export const ftKeyRace: Patch = {
     "in every 25.12 release. With WPA2 the roam still completes (the user's access point: 35 " +
     "failures in 11.5 h, 33 with no full reconnect after), so it is mostly noise in the log; the " +
     "multi-minute disconnects are reported with WPA3 and WPA2/WPA3, and 802.11r also stops some " +
-    "older clients joining WPA3 at all. So it is held off on those SSIDs only, until a release " +
+    "older clients joining WPA3 at all. So it is held off where an SSID uses WPA3 (on 6 GHz, " +
+    "which allows nothing else, included), until a release " +
     "has the fix: 802.11k/v and steering keep working, a roam just takes 10-50 ms longer. The " +
     "setting is kept, and its explainer says so.",
   kind: "fix",
@@ -38,9 +53,9 @@ export const ftKeyRace: Patch = {
     releases: { from: "25.12.0" },
     requires: { when: when.any(when.radio("2g"), when.radio("5g"), when.radio("6g")), note: "has Wi-Fi" },
   },
-  applies: (intent) => intent.wifi.networks.some(atRisk),
+  applies: anyAtRisk,
   note: "Held off with WPA3 on OpenWrt 25.12, where it can cut roaming clients off for minutes, until a release has the fix; the setting is kept for then",
   apply: () => ({
-    amend: [amendOf("wifi.networks.*", { config: "wireless", type: "wifi-iface", where: ({ item }) => atRisk(item), options: { ieee80211r: false } })],
+    amend: [amendOf("wifi.networks.*", { config: "wireless", type: "wifi-iface", where: atRisk, options: { ieee80211r: false } })],
   }),
 };

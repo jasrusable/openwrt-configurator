@@ -1,8 +1,10 @@
 // Text controls bound to a setting: a line of text, a password, a list of
 // passwords, a subnet (typed as the router's address), tags.
 import { Button, Group, PasswordInput, Stack, TagsInput, Text, TextInput } from "@mantine/core";
+import { useReducer } from "react";
 import { parseSubnet } from "../../../../src/intent/validators";
 import { control, RowProps, FieldRow, asText, asTexts, useField } from "./binding";
+import { RemoveItem } from "./rows";
 
 export const TextField = ({
   placeholder,
@@ -60,6 +62,9 @@ export const PasswordListField = ({
   ...row
 }: RowProps & { addLabel: string }) => {
   const field = useField(row.name);
+  // Bumped on Remove: every row starts hidden again, so a password shown in
+  // one row never stays shown when another moves up into its place.
+  const [shown, hideAll] = useReducer((n: number) => n + 1, 0);
   const items = asTexts(field.value);
   if (field.unavailable && !items.length) return null;
   const set = (next: string[]) => field.onChange(next.length ? next : undefined);
@@ -67,19 +72,25 @@ export const PasswordListField = ({
     <FieldRow {...row} error={field.error} unavailable={field.unavailable}>
       <Stack gap={6} style={control.wide}>
         {items.map((item, i) => (
-          <Group key={i} gap={4} wrap="nowrap">
+          <Group key={`${shown}.${i}`} gap={4} wrap="nowrap" align="flex-start">
             <PasswordInput
               style={{ flex: 1 }}
+              aria-label={`Password ${i + 1}`}
               value={item}
               disabled={!!field.unavailable}
               onChange={(e) => set(items.map((old, j) => (j === i ? e.currentTarget.value : old)))}
             />
-            <Button variant="subtle" color="red" size="compact-xs" onClick={() => set(items.filter((_, j) => j !== i))}>
-              Remove
-            </Button>
+            <RemoveItem
+              label={`Remove password ${i + 1}`}
+              onClick={() => {
+                hideAll();
+                set(items.filter((_, j) => j !== i));
+              }}
+            />
           </Group>
         ))}
-        <Button variant="light" size="xs" disabled={!!field.unavailable} onClick={() => set([...items, ""])}>
+        {/* A blank row is not an edit yet: it says what it needs once typed in, or on Save. */}
+        <Button variant="light" size="xs" disabled={!!field.unavailable} onClick={() => field.seed([...items, ""])}>
           {addLabel}
         </Button>
       </Stack>

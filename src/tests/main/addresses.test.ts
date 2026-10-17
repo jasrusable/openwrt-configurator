@@ -5,7 +5,9 @@ import {
   isPortRange,
   networkHolding,
   parseIpv4,
+  rangeOf,
 } from "../../intent/addresses";
+import { parseSubnet } from "../../intent/validators";
 
 test("addresses and ranges are checked as nft and fw4 take them, not by shape", (t) => {
   for (const ok of ["10.0.0.5", "10.0.0.0/24", "0.0.0.0/0", "10.0.0.5/32", "2001:db8::1", "2001:db8::/64", "::1", "::", "fe80::1/128", "1:2:3:4:5:6:7:8"]) {
@@ -19,6 +21,12 @@ test("addresses and ranges are checked as nft and fw4 take them, not by shape", 
   t.true(isIpv6Address("2001:db8::1:2:3:4"));
   t.false(isIpv6Address("10.0.0.1"));
   t.is(parseIpv4("10.0.0.999"), undefined);
+  // musl's inet_pton (OpenWrt's) refuses a leading zero, and 010 would read as another network's text.
+  for (const bad of ["010.0.0.1", "10.00.0.1", "10.0.0.01", "10.0.0.0/024"]) t.false(isAddressOrRange(bad), bad);
+  t.is(parseSubnet("010.0.0.0/24"), undefined);
+  t.deepEqual(parseSubnet("10.0.0.0/24"), [10, 0, 0]);
+  t.is(rangeOf("10.64.0.2/24"), "10.64.0.0/24");
+  t.is(rangeOf("10.64.0.2/32"), "10.64.0.2/32");
 });
 
 test("ports are 1 to 65535, a range low to high", (t) => {

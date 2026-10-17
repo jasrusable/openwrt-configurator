@@ -35,9 +35,9 @@ export const sessionOf = (request: HttpRequest) => {
   return value && sessionId.test(value) ? value : undefined;
 };
 
-/** The cookie that holds a session, or ends one (an empty value, expired). */
-export const sessionSetCookie = (sid: string | undefined) =>
-  `${sessionCookie}=${sid ?? ""}; Path=/; HttpOnly; SameSite=Strict${sid ? "" : "; Max-Age=0"}`;
+/** The cookie that holds a session, or ends one (an empty value, expired); Secure when the page came over HTTPS. */
+export const sessionSetCookie = (sid: string | undefined, secure = false) =>
+  `${sessionCookie}=${sid ?? ""}; Path=/; HttpOnly; SameSite=Strict${secure ? "; Secure" : ""}${sid ? "" : "; Max-Age=0"}`;
 
 /** One ubus call, its request read from stdin: { result, error }. */
 const ubusCall =

@@ -299,6 +299,12 @@ test("a state hash changes with the device, and never depends on a secret", (t) 
   t.not(hash(now), hash(withOption("ssid", "Other")));
   t.not(hash(now), hash({ ...now, installed: [...now.installed, "tcpdump"] }));
   t.is(hash(now), hash(withOption("key", "another-secret")), "a key's value is not in it");
+  // An owner-only managed file (root's password): there or not counts, never its content.
+  const password = { ...now, managed: [...now.managed, "/etc/onc/root-password"], secret: ["/etc/onc/root-password"] };
+  const holding = (sha: string) => hash({ ...password, hashes: { ...password.hashes, "/etc/onc/root-password": sha } });
+  t.is(holding("1".repeat(64)), holding("2".repeat(64)));
+  const { "/etc/onc/root-password": _gone, ...without } = password.hashes;
+  t.not(holding("1".repeat(64)), hash({ ...password, hashes: without }), "whether it is there still counts");
 });
 
 /** A device read for the plan: the sample applied, then `edit` made, the device changed by `drift`. */
@@ -351,6 +357,9 @@ test("the plan: items by source, the most noticed first, with what to acknowledg
   t.regex(plan.summary.blocked ?? "", /too little flash/);
   t.deepEqual(plan.unread, [{ device: "home-router", error: "No answer" }]);
   t.deepEqual(plan.verify, { "home-ap-1": ap.hash });
+  // Unread, and no flash short: refused as the run would (a device not reviewed is never applied).
+  const roomy = buildApplyPlan({ reads: [ok(readOf({ edit, drift })), err(problem("unreachable", "No answer", { hostname: "home-router" }))], edits: [], readAt: 1 });
+  t.regex(roomy.summary.blocked ?? "", /home-router could not be read.*it would be refused/);
   t.regex(plan.summary.verdict, /^\d+ changes on home-ap-1\. Devices may drop off .* Replaces \d+ changes? made on the devices .* home-router could not be read/);
   // The CLI says the same plan.
   const text = planText(plan);

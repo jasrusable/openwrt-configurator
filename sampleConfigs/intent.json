@@ -5,7 +5,8 @@
     "timezone": "Europe/Zurich",
     "country": "CH",
     "app_login": {
-      "key": "~/.ssh/id_ed25519"
+      "key": "~/.ssh/id_ed25519",
+      "password": "example-root-password"
     }
   },
   "internet": {

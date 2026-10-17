@@ -17,7 +17,7 @@ import { Platform } from "../platform";
 import type { Plan } from "../plan/types";
 import { attempt, messageOf } from "../result";
 import { read, stateLayout, StoreKey, write } from "../store";
-import { firstBootMaxBytes, firstBootOf, firstBootScript, Role } from "./firstBoot";
+import { firstBootMaxBytes, firstBootOf, firstBootScript, missingKey, Role } from "./firstBoot";
 import { findProfile } from "./profiles";
 
 export type ImagePlan = {
@@ -42,10 +42,10 @@ export const appRuntime = ["quickjs", "uhttpd"];
 /** A device the plan could not make an image for, and why. */
 export type Unbuildable = { device: string; why: string };
 
-/** The packages an apply would leave on a device at `version`, as ASU takes them. */
-const packagesAt = (plan: Plan, hostname: string, schema: DeviceSchema): string[] => {
+/** The packages an apply would leave on a device at `version`, as ASU takes them; undefined when the settings compile no such device. */
+const packagesAt = (plan: Plan, hostname: string, schema: DeviceSchema): string[] | undefined => {
   const device = plan.devices.find((d) => d.hostname === hostname);
-  if (!device) return [];
+  if (!device) return undefined;
   const { packages } = resolveDeclarations(plan, device, schema);
   const added = packages.flatMap((p) => p.add ?? []);
   const removed = packages.flatMap((p) => p.remove ?? []).filter((name) => !added.includes(name));
@@ -63,6 +63,7 @@ export const imagePlans = ({
   versions,
   sha256,
   host,
+  appKey,
 }: {
   intent: Intent;
   plan: Plan;
@@ -71,7 +72,12 @@ export const imagePlans = ({
   sha256: (text: string) => string;
   /** The device this app runs on: its image also has what the app runs with (it is reinstalled from a kept copy). */
   host?: string;
+  /** The public half of the key this app logs in with (src/loginAccess.ts appPublicKey): no image unless it is authorized. */
+  appKey: string | undefined;
 }): { images: ImagePlan[]; unbuildable: Unbuildable[] } => {
+  // The one place the key is checked: every image comes through here (an upgrade, build-images).
+  const noKey = missingKey(intent, appKey);
+  if (noKey) return { images: [], unbuildable: Object.keys(versions).map((device) => ({ device, why: noKey })) };
   const each = Object.entries(versions).map(([device, version]) => {
     const schema = facts[device];
     const role = intent.hardware.find((d) => d.name === device)?.role;
@@ -80,7 +86,10 @@ export const imagePlans = ({
     if (!schema.target) return { device, why: "Its facts do not say its target: read it again." };
     const defaults = firstBootScript(firstBootOf(intent, role));
     if (defaults.length > firstBootMaxBytes) return { device, why: "Its first-boot script is over ASU's 20 KB." };
-    const packages = [...new Set([...packagesAt(plan, device, { ...schema, version }), ...(device === host ? appRuntime : [])])].sort();
+    const roles = packagesAt(plan, device, { ...schema, version });
+    // Never an image without the role's packages: on one, a mesh repeater could not rejoin.
+    if (!roles) return { device, why: "The settings compile no such device: its packages are not known." };
+    const packages = [...new Set([...roles, ...(device === host ? appRuntime : [])])].sort();
     const what = { version, board: schema.name, target: schema.target, role, packages, defaults };
     return { device, image: { ...what, hash: sha256(JSON.stringify(what)).slice(0, 16) } };
   });
@@ -119,6 +128,26 @@ const keptImage = async (intentPath: string, image: ImagePlan, platform: BuildPl
   return whole.ok && whole.value === kept.sha256 ? kept : undefined;
 };
 
+/** One image built on ASU, nothing downloaded: the build, and the sysupgrade image in it. */
+export const buildOnAsu = async ({
+  image,
+  platform,
+  log = () => {},
+}: {
+  image: ImagePlan;
+  platform: Pick<Platform, "http" | "sleep">;
+  log?: (line: string) => void;
+}) => {
+  const profile = await findProfile({ version: image.version, target: image.target, board: image.board, platform });
+  log(`${image.board} ${image.version}: building on ASU (${image.target}/${profile})`);
+  const { requestHash } = await requestBuild({
+    req: { version: image.version, target: image.target, profile, packages: image.packages, defaults: image.defaults },
+    platform,
+  });
+  const build = await pollBuild({ requestHash, platform });
+  return { build, sysupgrade: pickSysupgradeImage(build) };
+};
+
 /** One image: kept, or built on ASU, downloaded and checked. */
 export const buildOne = async ({
   intentPath,
@@ -133,19 +162,12 @@ export const buildOne = async ({
 }): Promise<BuiltImage> => {
   const kept = await keptImage(intentPath, image, platform);
   if (kept) return kept;
-  const profile = await findProfile({ version: image.version, target: image.target, board: image.board, platform });
-  log(`${image.board} ${image.version}: building on ASU (${image.target}/${profile})`);
-  const { requestHash } = await requestBuild({
-    req: { version: image.version, target: image.target, profile, packages: image.packages, defaults: image.defaults },
-    platform,
-  });
-  const result = await pollBuild({ requestHash, platform });
-  const sysupgrade = pickSysupgradeImage(result);
+  const { build, sysupgrade } = await buildOnAsu({ image, platform, log });
   const path = `${imagesDir(intentPath)}/${image.hash}.bin`;
   log(`${image.board} ${image.version}: downloading ${sysupgrade.name}`);
   platform.mkdirp(imagesDir(intentPath), 0o700);
   const verified = await downloadImage({
-    binDir: result.bin_dir,
+    binDir: build.bin_dir,
     name: sysupgrade.name,
     outPath: path,
     expectedSha256: sysupgrade.sha256,

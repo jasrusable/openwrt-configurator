@@ -4,9 +4,10 @@
 import test from "ava";
 import { tempDir } from "../helpers/tempDir";
 import { spawnSync } from "child_process";
-import { chmodSync, readFileSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, readFileSync, symlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import type { Session } from "../../platform";
+import { withEpochs } from "../helpers/logread";
 import {
   parseAdverts,
   parseInternetCheck,
@@ -18,6 +19,8 @@ import {
   parseTemperature,
   readDeviceStatus,
 } from "../../status/device";
+import { keptInRam } from "../../status/device/common";
+import { speedCommand, speedSeconds } from "../../status/actions";
 
 const recorded = (name: string) => readFileSync(join(__dirname, "../helpers/status", name), "utf8");
 
@@ -65,11 +68,13 @@ test("IPv6 leases: the MAC inside a DUID (LL and LLT), the hostname and addresse
   ]);
 });
 
-test("the log: each line's time and what it says", (t) => {
-  const log = parseLog(recorded("logread.txt"));
+test("the log: each line's time, from its epoch (the date is the device's local time), and what it says", (t) => {
+  const log = parseLog(withEpochs(recorded("logread.txt")));
   t.true(log.length > 5);
   t.regex(log[0].text, /netifd: Interface 'lan' is enabled/);
-  t.true(Number.isFinite(log[0].at));
+  t.is(log[0].at, Date.UTC(2026, 9, 12, 22, 4, 15));
+  t.deepEqual(parseLog("Mon Oct 12 22:04:15 2026 [1791900000.250] daemon.notice x: y"), [{ at: 1791900000250, text: "x: y" }]);
+  t.deepEqual(parseLog(recorded("logread.txt")), [], "only logread -t's lines: a date alone says no zone");
 });
 
 test("ports, adverts and temperature, as the kernel prints them", (t) => {
@@ -121,4 +126,46 @@ esac`,
   t.deepEqual([...status.unread].sort(), ["mwan3", "traffic (nlbwmon)"]);
   t.deepEqual(status.lines, []);
   t.deepEqual(status.traffic, {});
+});
+
+test("status: a wedged ubus (system info says nothing) fails the read, not a device just booted", async (t) => {
+  const session = stubbedSession({ ubus: "exit 7" });
+  await t.throwsAsync(readDeviceStatus("ap", session, () => 0, ["dnsmasq"]), { message: /did not answer/ });
+});
+
+test("mDNS: one JSON answer, so a name holding anything (the old marker) cannot split it", async (t) => {
+  const browse = { "_device-info._tcp": { "__ONC_HOSTS__ x": { host: "phone.local", ipv4: ["10.0.0.5"], txt: ["model=iPhone15,2"] } } };
+  const session = stubbedSession({
+    ubus: `case "$1 $2 $3" in
+  "call system info") echo '{"uptime":60}' ;;
+  "call umdns browse") echo '${JSON.stringify(browse)}' ;;
+  "call umdns hosts") echo '{"phone.local":{"ipv4":["10.0.0.5"]}}' ;;
+  *) exit 1 ;;
+esac`,
+  });
+  const status = await readDeviceStatus("router", session, () => 0, [], { mdns: true });
+  t.deepEqual(status.unread, []);
+  t.deepEqual(status.mdns, [{ host: "phone", name: "__ONC_HOSTS__ x", addresses: ["10.0.0.5"], model: "iPhone15,2", services: ["_device-info._tcp"] }]);
+});
+
+test("the RAM dir: one planted (a symlink) is not used; a fresh one is, and removed after", (t) => {
+  const planted = join(tempDir("planted"), "onc-status");
+  symlinkSync(tempDir("elsewhere"), planted);
+  const r = spawnSync("sh", ["-c", `( ${keptInRam.replace("/var/run/onc-status", planted)}; echo "$s"; touch "$s/x" )`], { encoding: "utf8" });
+  const dir = r.stdout.trim();
+  t.truthy(dir);
+  t.not(dir, planted);
+  t.false(existsSync(dir), "nothing left behind");
+});
+
+test("speed test: a slow line is measured by what came in its time, and the download ends on the device", (t) => {
+  const bin = tempDir("speed");
+  writeFileSync(join(bin, "uclient-fetch"), "#!/bin/sh\nwhile :; do head -c 1000 /dev/zero; sleep 1; done\n", { mode: 0o755 });
+  // The uptime clock as whole seconds, and a 2 s limit, so the test is quick.
+  const command = speedCommand.replace(/cut -d' ' -f1 \/proc\/uptime/g, "date +%s").replace(`-lt ${speedSeconds}`, "-lt 2");
+  const r = spawnSync("sh", ["-c", command], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, encoding: "utf8", timeout: 10_000 });
+  const [seconds, bytes] = r.stdout.trim().split(/\s+/).map(Number);
+  t.true(seconds >= 1 && seconds <= 3, r.stdout);
+  t.true(bytes >= 1000 && bytes <= 3000, r.stdout);
+  t.is(spawnSync("pgrep", ["-f", `${bin}/uclient-fetch`]).status, 1, "killed");
 });

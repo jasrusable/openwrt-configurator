@@ -1,1 +1,1 @@
-[]
+[{ "from": "\"system.led\",\n", "to": "\"system.led\",\n  \"?ubootenv.*\",\n  \"?fstab.*\",\n" }]

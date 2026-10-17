@@ -4,7 +4,7 @@ import { useDisclosure } from "@mantine/hooks";
 import { IconTopologyStar3 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { logIn, NoSettingsError, onLoginNeeded } from "./data/api";
+import { logIn, NoSettingsError, onLoginNeeded, UnreadableSettingsError } from "./data/api";
 import { prefetchApplyPlan, useFreshDevices } from "./data/devices";
 import { prefetchNetworkStatus } from "./data/status";
 import {
@@ -36,19 +36,26 @@ import { ProvisionButton } from "./provision/ProvisionButton";
  * that fails says why beside them, no toast.
  */
 const SaveBar = () => {
-  const { save, revert, dirty, valid, saving, error } = useSaveActions();
+  const { save, revert, dirty, valid, saving, error, merged } = useSaveActions();
+  // A failed save, and a change saved elsewhere merged into the edits (the
+  // refused save's usual sequel): said together, until the next edit.
+  const note = error
+    ? { short: "Not saved", text: [`Not saved: ${error}`, merged].filter(Boolean).join(" "), color: "red" }
+    : merged && { short: "Merged", text: merged, color: "orange" };
   return (
     <Group gap="xs" wrap="nowrap">
       <ProblemsButton />
-      {error ? (
+      {note ? (
         <>
-          <Text size="sm" c="red" visibleFrom="sm" maw={260} truncate title={error}>
-            Not saved: {error}
-          </Text>
+          <Hint label={note.text} width={320}>
+            <Text size="sm" c={note.color} visibleFrom="sm" maw={260} truncate tabIndex={0}>
+              {note.text}
+            </Text>
+          </Hint>
           {/* On a phone, too little room for the reason: the word, the reason on a tap. */}
-          <Hint label={error} width={260}>
-            <Text size="sm" c="red" hiddenFrom="sm" tabIndex={0} aria-label={`Not saved: ${error}`}>
-              Not saved
+          <Hint label={note.text} width={260}>
+            <Text size="sm" c={note.color} hiddenFrom="sm" tabIndex={0} aria-label={note.text}>
+              {note.short}
             </Text>
           </Hint>
         </>
@@ -77,16 +84,19 @@ const Mark = () => (
   </ThemeIcon>
 );
 
-/** Beside a page in the sidebar: its problems' count, and System's update dot. */
-const NavMarks = ({ id, problems }: { id: string; problems: number }) => {
+/** System's update dot: worked out from the whole draft, so only where it shows. */
+const SystemUpdateDot = () => {
   const updates = useUpdates();
-  return (
-    <Group gap={6} wrap="nowrap">
-      {id === "system" && updates && <UpdateDot label={updates.text} />}
-      <ProblemCount count={problems} />
-    </Group>
-  );
+  return updates ? <UpdateDot label={updates.text} /> : null;
 };
+
+/** Beside a page in the sidebar: its problems' count, and System's update dot. */
+const NavMarks = ({ id, problems }: { id: string; problems: number }) => (
+  <Group gap={6} wrap="nowrap">
+    {id === "system" && <SystemUpdateDot />}
+    <ProblemCount count={problems} />
+  </Group>
+);
 
 const Shell = () => {
   const navigate = useNavigate();
@@ -332,6 +342,7 @@ export const App = () => {
   }
   if (intent.isPending) return <Loading />;
   if (intent.isError && intent.error instanceof NoSettingsError) return <FirstRun />;
+  if (intent.isError && intent.error instanceof UnreadableSettingsError) return <FirstRun unreadable={intent.error.message} />;
   if (intent.isError) {
     return (
       <Center h="100vh">

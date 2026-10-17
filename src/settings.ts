@@ -3,8 +3,10 @@
 // as a Result whose failure says what went wrong, so a page can say it and
 // the API answer with the right status. And the file as written, for what
 // works on any intent, valid or not (the editor, a diff, listing hardware).
+import { checkCompiles } from "./intent/compile";
 import { formatOf, migrateIntent } from "./intent/migrations";
-import { Intent, intentSchema, intentVersion } from "./intent/schema";
+import { Intent, intentSchema, intentShape, intentVersion } from "./intent/schema";
+import { issuesAt } from "./intent/issues";
 import { holdsSecretRefs, intentRefsRefused, loadConfig, LoadedConfig } from "./loadConfig";
 import { parseConfigJson } from "./parseJson";
 import { fileErrorCode, Platform } from "./platform";
@@ -45,17 +47,23 @@ export const loadSettings = async (intentPath: string, platform: Platform): Prom
 /**
  * An intent file as written: in the current format, with the schema's
  * defaults filled in when it is valid (so a diff never reports a default as
- * a change); why not, when it is missing, unreadable or not JSON.
+ * a change); why not, when it is missing, unreadable, not JSON, from a newer
+ * app, or holding `$secret` refs.
  */
 export const readIntentFile = (files: Pick<Platform, "readTextFile">, path: string): Result<unknown, Problem> => {
+  let parsed: unknown;
   try {
-    const intent = migrateIntent(parseConfigJson(files.readTextFile(path), path));
-    if (holdsSecretRefs(intent)) throw new Error(intentRefsRefused);
-    const parsed = intentSchema.safeParse(intent);
-    return ok(parsed.success ? parsed.data : intent);
+    parsed = parseConfigJson(files.readTextFile(path), path);
   } catch (thrown) {
     return err(readProblem(path, thrown));
   }
+  const intent = migrateIntent(parsed);
+  if (!intent.ok) return fail("conflict", `The saved settings are not valid: ${intent.error.message}`);
+  if (holdsSecretRefs(intent.value)) return fail("conflict", `The saved settings are not valid: ${intentRefsRefused}`);
+  // Defaults applied wherever the shape holds, so an editor never meets a
+  // missing default: only the checks across settings may still fail.
+  const shaped = intentShape.safeParse(intent.value);
+  return ok(shaped.success ? shaped.data : intent.value);
 };
 
 /** The intent file as written, if there is one that reads (see readIntentFile). */
@@ -64,21 +72,64 @@ export const intentFileOrNothing = (files: Pick<Platform, "readTextFile">, path:
   return read.ok ? read.value : undefined;
 };
 
-/** Where the file a write replaced is kept, beside it. */
-export const backupPath = (path: string) => `${path}.bak`;
+/**
+ * Settings as they may be saved: valid (else each issue at its path, as
+ * `details.issues`) and compiling (else the compiler's fault: never saved,
+ * so it shows here, not halfway through a run).
+ */
+export const checkedIntent = (input: unknown): Result<Intent, Problem> => {
+  const parsed = intentSchema.safeParse(input);
+  if (!parsed.success) return fail("invalid", "Some settings need fixing.", { details: { issues: issuesAt(parsed.error) } });
+  const compiled = checkCompiles(parsed.data);
+  return compiled.ok ? ok(parsed.data) : fail("internal", "The settings are valid but did not compile.", { details: compiled.error.details });
+};
+
+/** How many replaced files are kept beside the settings file. */
+export const keptBackups = 5;
+
+const splitPath = (path: string) => {
+  const slash = path.lastIndexOf("/");
+  const file = path.slice(slash + 1);
+  return { dir: slash < 0 ? "." : path.slice(0, slash) || "/", stem: file.replace(/\.json$/, "") };
+};
 
 /**
- * The intent file written, owner-only (it holds passwords). The file it
- * replaces is kept as `.bak` when `keepOld` says so: a restore or a reset
- * replaces everything, and a file in an older format is not written over
- * unseen (it was migrated in memory when read).
+ * Where a file replaced at `at` is kept: beside it, as
+ * `<name>.<compact ISO time>.bak` (a name every `*.bak` ignore rule covers),
+ * sorting oldest first.
+ */
+export const backupPath = (path: string, at: number) => {
+  const { dir, stem } = splitPath(path);
+  return `${dir}/${stem}.${new Date(at).toISOString().replace(/[-:]/g, "")}.bak`;
+};
+
+/** The replaced files kept for `path`, oldest first. */
+export const backupsOf = (files: Pick<Platform, "listDir">, path: string) => {
+  const { dir, stem } = splitPath(path);
+  const isKept = (name: string) => name.startsWith(stem) && /^\.\d{8}T\d{6}\.\d{3}Z\.bak$/.test(name.slice(stem.length));
+  return files
+    .listDir(dir)
+    .filter(isKept)
+    .sort()
+    .map((name) => `${dir}/${name}`);
+};
+
+export type IntentFiles = Pick<Platform, "readTextFile" | "writeFileAtomic" | "listDir" | "removeFile">;
+
+/**
+ * The intent file written, owner-only (it holds passwords), unless it
+ * already says exactly that. The file it replaces is kept (`backupPath`,
+ * owner-only, the newest `keptBackups`) when `keepOld` says so: a restore
+ * or a reset replaces everything, and a file in an older format is not
+ * written over unseen (it was migrated in memory when read).
  */
 export const writeIntentFile = (
-  files: Pick<Platform, "readTextFile" | "writeFileAtomic">,
+  files: IntentFiles,
   path: string,
   value: unknown,
-  { keepOld }: { keepOld: "always" | "older-format" }
-) => {
+  { keepOld, at }: { keepOld: "always" | "older-format"; at: number }
+): Result<void, Problem> => {
+  const text = JSON.stringify(value, null, 2) + "\n";
   const old = (() => {
     try {
       return files.readTextFile(path);
@@ -86,6 +137,7 @@ export const writeIntentFile = (
       return undefined;
     }
   })();
+  if (old === text) return ok(undefined);
   const olderFormat = () => {
     try {
       return (formatOf(parseConfigJson(old!, path)) ?? intentVersion) < intentVersion;
@@ -93,6 +145,16 @@ export const writeIntentFile = (
       return false;
     }
   };
-  if (old !== undefined && (keepOld === "always" || olderFormat())) files.writeFileAtomic(backupPath(path), old, 0o600);
-  files.writeFileAtomic(path, JSON.stringify(value, null, 2) + "\n", 0o600);
+  try {
+    if (old !== undefined && (keepOld === "always" || olderFormat())) {
+      files.writeFileAtomic(backupPath(path, at), old, 0o600);
+      backupsOf(files, path).slice(0, -keptBackups).forEach((kept) => files.removeFile(kept));
+    }
+    files.writeFileAtomic(path, text, 0o600);
+    return ok(undefined);
+  } catch (thrown) {
+    // The disk's (a plain Error, from either platform: full, read-only, gone) is said; a bug is thrown on.
+    if (thrown instanceof TypeError || thrown instanceof RangeError || thrown instanceof ReferenceError) throw thrown;
+    return fail("internal", `The settings could not be saved: ${messageOf(thrown)}`);
+  }
 };

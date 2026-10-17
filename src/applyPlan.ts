@@ -8,7 +8,7 @@
 import type { ChangeWhy } from "./applyChanges";
 import type { DeviceRead, FileChange, UciChange } from "./applyDiff";
 import { Disruption, disruptionRank, Effect, effectsOf, minutesOf, secondsOf, totalSeconds, worst } from "./applyImpact";
-import { byConfigOrder } from "./engine/uciOrder";
+import { byConfigOrder } from "./plan/uciOrder";
 import type { Change } from "./intent/diff";
 import { where } from "./intent/places";
 import type { DeviceFailure } from "./readEach";
@@ -276,9 +276,12 @@ export const buildApplyPlan = ({
     minutes: minutesOf(seconds),
     disruption,
     verdict: verdictOf({ items, devices: devices.map((d) => d.device), disruption, minutes: minutesOf(seconds), needs, unread }),
+    // Refused at the start of the run as it would be: a device not in the reviewed changes is never applied unreviewed.
     ...(tooBig.length
       ? { blocked: `${listed(tooBig)} ${tooBig.length === 1 ? "has" : "have"} too little flash for the packages this apply installs: it would be refused.` }
-      : {}),
+      : unread.length
+        ? { blocked: `${listed(unread.map((u) => u.device))} could not be read, so what applying changes there was not reviewed: it would be refused. Read again once ${unread.length === 1 ? "it answers" : "they answer"}.` }
+        : {}),
   };
   return {
     readAt,

@@ -49,7 +49,7 @@ test("each fix, device by device: active, not for this device and why, turned of
   t.deepEqual(stateOf(patchStatus(off, facts("25.12.5")), "ft-key-race")["home-ap-1"], ["off", "turned off"]);
   t.deepEqual(stateOf(patchStatus(intent(), {}), "ft-key-race")["home-ap-1"], ["unknown", "not read yet"]);
   const ft = views.find((v) => v.id === "ft-key-race")!;
-  t.like(ft, { title: "Fast roaming held off on WPA3 SSIDs on OpenWrt 25.12", required: false, kind: "fix", where: "where it has Wi-Fi, from OpenWrt 25.12.0" });
+  t.like(ft, { title: "Fast roaming held off with WPA3 on OpenWrt 25.12", required: false, kind: "fix", where: "where it has Wi-Fi, from OpenWrt 25.12.0" });
   t.true(ft.effects.length > 0 && ft.references.length > 0);
 });
 
@@ -87,7 +87,7 @@ test("the apply diff says which changes come from a fix, worked out from what th
     fixes,
   });
   const fastRoaming = diff.config.filter((c) => c.key.endsWith(".ieee80211r"));
-  t.true(fastRoaming.some((c) => c.after === "'0'" && c.fix === "Fast roaming held off on WPA3 SSIDs on OpenWrt 25.12"), "the held-off line says which fix");
+  t.true(fastRoaming.some((c) => c.after === "'0'" && c.fix === "Fast roaming held off with WPA3 on OpenWrt 25.12"), "the held-off line says which fix");
   t.true(diff.config.some((c) => c.key.endsWith(".bss_load_update_period") && c.fix === "Channel load not advertised on the NWA50AX Pro"));
   t.true(diff.files.some((f) => f.fix === "Energy Efficient Ethernet off on the NWA50AX Pro's port"));
   t.is(diff.packages.fixes?.["ethtool-full"], "Energy Efficient Ethernet off on the NWA50AX Pro's port");

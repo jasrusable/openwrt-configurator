@@ -65,3 +65,14 @@ export const newestCheckedSeries = "25.12";
 
 /** Whether a release is of a series newer than this app has been checked against. */
 export const uncheckedSeries = (version: string) => (compareReleases(seriesOf(version) ?? version, newestCheckedSeries) ?? 0) > 0;
+
+/** The release `ubus call system board` names, undefined when it names none. */
+export const boardRelease = ({ stdout, code }: { stdout: string; code: number | null }): string | undefined => {
+  if (code !== 0) return undefined;
+  try {
+    const version = (JSON.parse(stdout) as { release?: { version?: unknown } } | null)?.release?.version;
+    return typeof version === "string" ? version : undefined;
+  } catch {
+    return undefined;
+  }
+};

@@ -35,7 +35,11 @@ export const systemSchema = z
       .object({
         /** The private key on this computer; else the agent's. */
         key: z.string().optional(),
-        /** Also set as root's password on every device (system/compile.ts). */
+        /**
+         * Also set as root's password on every device (system/compile.ts).
+         * Required (system/checks.ts): left optional here so a file without
+         * one still reads, its issue shown at this field.
+         */
         password: z
           .string()
           .max(128, "at most 128 characters")
@@ -45,11 +49,10 @@ export const systemSchema = z
       .strict()
       .default({}),
     /**
-     * Who may log in as root at all: the compiler installs
-     * authorized_keys and can turn password login off (root's password,
-     * app_login.password, closes the web logins), so a device fresh
-     * from stock (which lets root in with any password) is closed by its
-     * first apply.
+     * Who may log in as root over SSH: the compiler installs
+     * authorized_keys and can turn password login off. Root's password
+     * (app_login.password, required) is what closes a device fresh from
+     * stock, which lets root in with any password, web logins included.
      */
     ssh: z
       .object({

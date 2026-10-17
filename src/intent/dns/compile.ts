@@ -45,9 +45,7 @@ export const fallbackOf = (upstream: Extract<Intent["dns"]["upstream"], { type: 
  * mask-h2.icloud.com (https://developer.apple.com/support/prepare-your-network-for-icloud-private-relay).
  * One dnsmasq answers every network, so they apply to all as soon as one keeps its devices.
  */
-export const dnsCanaries = ["use-application-dns.net", "mask.icloud.com", "mask-h2.icloud.com"];
-
-export const providerLabels: Record<DohProvider, string> = { cloudflare: "Cloudflare", google: "Google", quad9: "Quad9" };
+const dnsCanaries = ["use-application-dns.net", "mask.icloud.com", "mask-h2.icloud.com"];
 
 export const dns: Feature = (intent) => {
   const domain = intent.dns.domain;

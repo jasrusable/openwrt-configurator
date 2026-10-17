@@ -117,16 +117,51 @@ test("armed, then disarmed and done: the config stays, marked applied for an upg
   t.false(existsSync(`${d.root}${appliedMarker}`), "not applied until confirmed");
   t.true(existsSync(`${d.root}/etc/onc/rollback/t1/config/network`), "a boot-time copy on flash");
   t.true(lstatSync(`${d.root}/etc/rc.d/S11onc-rollback`).isSymbolicLink(), "its boot script enabled");
+  await d.steps("finalise", [{ kind: "commit", config: "network" }]);
   t.true((await d.run("disarm")).includes("ONC_DISARMED"));
   t.true((await d.run("disarm")).includes("ONC_DISARMED"), "a disarm repeated after one that went through");
   t.true((await d.run("done")).includes("ONC_DONE"));
   t.deepEqual(onc(d.tmp), []);
   t.false(existsSync(`${d.root}/etc/onc/rollback`), "a restart keeps the confirmed config");
   t.is(readFileSync(`${d.root}/etc/config/network`, "utf8"), "config interface 'wan'\n");
-  t.notRegex(d.log(), /reload_config|^reboot/m);
+  t.notRegex(d.log(), /uci revert|^reboot/m, "no restore");
   // An image's first-boot defaults leave this device's settings alone after an upgrade that keeps them.
   t.true(existsSync(`${d.root}${appliedMarker}`));
   t.is(readFileSync(`${d.root}${appliedKeepList}`, "utf8"), `${appliedMarker}\n`);
+});
+
+test("a device the run never committed on is disarmed unmarked: its settings are not this app's for that", async (t) => {
+  const d = device();
+  await armed(d, "--timeout", "30");
+  t.true((await d.run("disarm")).includes("ONC_DISARMED"));
+  t.true((await d.run("done")).includes("ONC_DONE"));
+  t.false(existsSync(`${d.root}${appliedMarker}`));
+});
+
+test("asleep: the seconds before it fires; a watchdog that died asleep leaves the change kept, and a disarm says so", async (t) => {
+  const d = device();
+  await armed(d, "--timeout", "30");
+  t.regex(await d.run("asleep"), /^ONC_ASLEEP (29|30)$/m);
+  await d.steps("finalise", [{ kind: "commit", config: "network" }]);
+  // Killed asleep (out of memory, say): nothing will restore the change.
+  process.kill(Number(readFileSync(join(d.runDir, "watchdog.pid"), "utf8")), "SIGKILL");
+  process.kill(Number(readFileSync(join(d.runDir, "sleep.pid"), "utf8")), "SIGKILL");
+  t.regex(await d.run("asleep"), /^ONC_KEPT$/m);
+  t.true((await d.run("disarm")).includes("ONC_DISARMED"), "not fired: nothing was restored");
+  t.is(readFileSync(`${d.root}/etc/config/network`, "utf8"), "config interface 'wan'\n");
+  t.true(existsSync(`${d.root}${appliedMarker}`));
+  t.false(existsSync(`${d.root}/etc/onc/rollback`), "a restart keeps it too");
+  await d.run("done");
+});
+
+test("rolled back now after its watchdog died asleep: a new one restores at once", async (t) => {
+  const d = device();
+  await armed(d, "--timeout", "30", "--mode", "reload", "--recover", "1");
+  process.kill(Number(readFileSync(join(d.runDir, "watchdog.pid"), "utf8")), "SIGKILL");
+  process.kill(Number(readFileSync(join(d.runDir, "sleep.pid"), "utf8")), "SIGKILL");
+  t.true((await d.run("rollback-now")).includes("ONC_WOKEN"));
+  await until(() => !existsSync(d.agent));
+  t.is(readFileSync(`${d.root}/etc/config/network`, "utf8"), "config interface 'lan'\n");
 });
 
 test("a wedged system log (logger never returns) cannot stall a rollback", async (t) => {
@@ -224,13 +259,18 @@ test("a failed arm, and a dropped one, leave nothing: no snapshot to restore at 
   t.notRegex(e.log(), /reload_config/);
 });
 
-test("a device restarted inside the window boots its old config back", async (t) => {
+test("a device restarted inside the window boots its old config, files and boot links back", async (t) => {
   const d = device();
-  await armed(d, "--timeout", "30");
+  await d.run("begin");
+  t.true((await d.arm(["delete /etc/new", "restore /etc/old"], "--timeout", "30")).stdout.includes("ONC_ARMED"));
+  change(d);
   // The restart: the boot script, as procd runs it early at boot.
   const boot = spawnSync("sh", ["-c", `. "${d.root}/etc/init.d/onc-rollback"; boot`], { env: { ...process.env, ONC_ROOT: d.root }, encoding: "utf8" });
   t.is(boot.status, 0);
   t.is(readFileSync(`${d.root}/etc/config/network`, "utf8"), "config interface 'lan'\n");
+  t.false(existsSync(`${d.root}/etc/new`), "a file the run made is gone");
+  t.is(readFileSync(`${d.root}/etc/old`, "utf8"), "before\n", "one it changed is as it was");
+  t.true(lstatSync(`${d.root}/etc/rc.d/S50svc`).isSymbolicLink(), "boot links as they were");
   t.false(existsSync(`${d.root}/etc/onc/rollback`));
   await d.run("drop");
 });
@@ -242,8 +282,12 @@ test("the commit's marker: there only once finalise has committed", async (t) =>
   const refused = await d.steps("finalise", [{ kind: "commit", config: "network" }], { fail: "uci commit" });
   t.notRegex(refused.stdout, /ONC_OK/);
   t.false((await d.run("commit-finished")).includes("ONC_COMMITTED"), "a commit that failed is no commit");
+  // Written after the reload, nothing said between: a verb ended by its last
+  // write (the link gone) has not reloaded, and must not pass for committed.
+  stub(d.bin, "reload_config", `[ -f "${d.runDir}/committed" ] && echo "reload_config after the marker" >> "${d.base}/log"; true`);
   await d.steps("finalise", [{ kind: "commit", config: "network" }]);
   t.true((await d.run("commit-finished")).includes("ONC_COMMITTED"));
+  t.notRegex(d.log(), /after the marker/);
 });
 
 test("every verb leaves the SSH session's cgroup for the agent's own, or the root one, so procd can always restart dropbear", async (t) => {
@@ -282,9 +326,16 @@ test("a snapshot that cannot be taken whole (a /tmp full of staged packages) fai
 
 test("a watchdog whose run was taken away while it slept restores nothing, reloads nothing, reboots nothing", async (t) => {
   const d = device();
-  await armed(d, "--timeout", "3", "--mode", "reload-then-reboot");
+  await armed(d, "--timeout", "1", "--mode", "reload-then-reboot");
+  const watchdog = Number(readFileSync(join(d.runDir, "watchdog.pid"), "utf8"));
   rmSync(d.runDir, { recursive: true, force: true });
-  await new Promise((r) => setTimeout(r, 4500));
+  await until(() => {
+    try {
+      return !process.kill(watchdog, 0);
+    } catch {
+      return true;
+    }
+  });
   t.notRegex(d.log(), /reload_config|^reboot|uci revert/m);
   t.is(readFileSync(`${d.root}/etc/config/network`, "utf8"), "config interface 'wan'\n", "the change stays");
 });

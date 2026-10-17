@@ -146,12 +146,12 @@ export const stateLayout = (intentPath: string) => {
     images: `${root}/images`,
     /** Devices asked to reboot, and when (src/status/actions.ts). */
     rebooting: `${root}/rebooting.json`,
-    /** The settings last applied, as written then (src/server/provisionJob.ts keeps it). */
+    /** The settings last applied, as written then (src/apply/job.ts keeps it). */
     lastApplied: `${root}/live.json`,
     /** What each device was left holding by the last apply, as hashes (src/applyChanges.ts). */
     applied: `${root}/applied`,
-    /** The lock a Status action takes, one action at a time. */
-    actionLock: (name: string) => `${root}/${name}.lock`,
+    /** The lock every Status action takes: one action at a time, of any kind. */
+    actionLock: `${root}/action.lock`,
   };
 };
 

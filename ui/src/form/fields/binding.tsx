@@ -8,7 +8,7 @@ import { SettingRow, useRowAria } from "../../kit/layout";
 import { availability, Availability, inUse } from "../../../../src/intent/choices";
 import { explainFor, fieldInfo } from "../../../../src/intent/fields";
 import { Intent } from "../../../../src/intent/schema";
-import { getIn, IntentField, useDerived, useDraft, useFieldError } from "../draft";
+import { getIn, IntentField, setAt, useDerived, useDraft, useFieldError } from "../draft";
 import { Override, overridesAt, overrideText } from "../../../../src/intent/patches/marks";
 import { useFacts, useFixSwitch } from "../../fixes";
 
@@ -253,13 +253,19 @@ export const useField = (name: IntentField, shown?: (value: unknown) => unknown[
   const whole = rules.unavailable;
   // A fix overriding it on every device it reaches: greyed out, its value kept for when the fix goes.
   const heldOff = useOverrides(name).find((o) => o.everywhere);
+  const swapped = (next: unknown) => rulesOf(draft.value, name).option(next).swap?.apply(draft.get());
   return {
     value,
     onChange: (next: unknown) => {
-      const swap = rulesOf(draft.value, name).option(next).swap;
-      if (swap) draft.replace(swap.apply(draft.get()));
+      const whole = swapped(next);
+      if (whole) draft.replace(whole);
       else draft.setPath(name, next);
     },
+    /**
+     * Set without counting as an edit: what appears (a group switched on, a
+     * blank row added) says what it is missing once edited, or on Save.
+     */
+    seed: (next: unknown) => draft.replace(swapped(next) ?? setAt(draft.get(), name, next)),
     error: useFieldError(name),
     /**
      * Why it cannot be changed now. A refused value already set stays

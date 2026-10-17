@@ -123,7 +123,16 @@ export const fakeDevice = ({
   freeKb = 100_000,
   extraConfig,
   newConfigs,
+  otherRunArmed,
+  firesBeforeAsleep = false,
+  runsAfter = false,
 }: {
+  /** Staging runs a changed file's run_after (root's password, say). */
+  runsAfter?: boolean;
+  /** Another run's watchdog still sleeps there: it fires in this many seconds, then waits 60 for access. */
+  otherRunArmed?: number;
+  /** The watchdog fires just before the run asks whether it still sleeps (the window ran out). */
+  firesBeforeAsleep?: boolean;
   /** Configs the run declares beside its system one (a typo's, say). */
   extraConfig?: Record<string, Record<string, { ".name": string }[]>>;
   /** Declared new on purpose (the low-level file's new_configs). */
@@ -258,7 +267,7 @@ export const fakeDevice = ({
     if (kind === "packages") afterPackages?.(committed);
     if (kind === "revert" || kind === "packages") staged = clone(committed);
     if (kind === "revert") device.changed = false;
-    return ok("ONC_OK\n");
+    return ok(kind === "configure" && runsAfter ? "ONC_STEP write /etc/onc/root-password\nONC_STEP run_after /etc/onc/root-password\nONC_OK\n" : "ONC_OK\n");
   };
 
   const agentVerb = (verb: string, command: string, stdin = ""): ExecResult => {
@@ -293,6 +302,13 @@ export const fakeDevice = ({
           return { stdout: "", stderr: "", code: null };
         }
         return ok("ONC_ARMED\n");
+      case "asleep":
+        if (firesBeforeAsleep && fireAt !== undefined) {
+          fireAt = clock!.now();
+          watchdogTick();
+        }
+        record("asleep");
+        return fireAt === undefined ? ok() : ok(`ONC_ASLEEP ${Math.floor((fireAt - clock!.now()) / 1000)}\n`);
       case "disarm":
         if (firesBeforeDisarm && fireAt !== undefined) {
           fireAt = clock!.now();
@@ -373,6 +389,8 @@ export const fakeDevice = ({
           })
         );
       if (command === "apk info") return ok("dnsmasq\n");
+      // Other runs' watchdogs still alive (apply/plan.ts).
+      if (command.startsWith("for f in /tmp/onc-run-")) return ok(otherRunArmed === undefined ? "" : `other1 ${otherRunArmed} 60\n`);
       // packageSpace: totals now, after removals, after additions; then df.
       if (command.startsWith("apk update")) {
         const now = 10;
@@ -410,11 +428,14 @@ export const fakeUpgradeDevice = ({
   comesBackOn,
   local = false,
   keepFails = false,
+  flashFails = false,
 }: {
   release: string;
   /** This app runs on it: its session is local. */
   local?: boolean;
   keepFails?: boolean;
+  /** The flash refused on the device (the settings could not be marked to keep). */
+  flashFails?: boolean;
   freeKb?: number;
   fetchFails?: boolean;
   checkFails?: boolean;
@@ -433,7 +454,7 @@ export const fakeUpgradeDevice = ({
         const now = state.release ?? comesBackOn;
         return now ? ok(JSON.stringify({ release: { version: now } })) : { stdout: "", stderr: "", code: null };
       }
-      if (/^cat > \/tmp\/onc-upgrade-[\w-]+\.sh$/.test(command)) {
+      if (/^umask 077 && cat > \/tmp\/onc-upgrade-[\w-]+\.sh && chmod 700 \/tmp\/onc-upgrade-[\w-]+\.sh$/.test(command)) {
         state.script = true;
         return ok("");
       }
@@ -453,6 +474,7 @@ export const fakeUpgradeDevice = ({
           return keepFails ? failed("could not keep a copy of this app's own package") : ok("ONC_KEPT");
         case "flash":
         case "flash-keys":
+          if (flashFails) return failed("could not mark the settings to keep");
           state.release = undefined;
           return ok("ONC_FLASHING");
         case "clean":

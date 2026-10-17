@@ -27,6 +27,7 @@ import { KeepEntry, PlanFile, Sections, Service } from "../../plan/types";
 import { when, When } from "../../plan/when";
 import { matchPattern, PatternValue, SettingPath, valueAt } from "../paths";
 import { Intent } from "../schema";
+import type { DeviceSchema } from "../../deviceSchema";
 
 type Role = Intent["hardware"][number]["role"];
 
@@ -131,28 +132,39 @@ export type Patch = {
   apply: (intent: Intent) => Effects;
 };
 
+/**
+ * A part of a target: a condition with its words. `role`: decided by the
+ * intent, so known before any facts; `release`: the one it names; `fixed`:
+ * a device past it runs a release with the fix.
+ */
+type TargetPart = { when: When; words: string; role?: boolean; release?: string; fixed?: boolean };
+
+/** The target's parts: the one source of the engine's condition, the listing's words and each device's state (status.ts). */
+export const targetParts = ({ models, targets, roles, releases, requires }: Target): TargetPart[] => [
+  ...(requires ? [{ when: requires.when, words: `where it ${requires.note}` }] : []),
+  ...(models ? [{ when: when.oneOf("device.model_id", models), words: `on ${models.join(" or ")}` }] : []),
+  ...(targets ? [{ when: when.oneOf("device.target", targets), words: `on ${targets.join(" or ")}` }] : []),
+  ...(roles ? [{ when: when.oneOf("device.tag.role", roles), words: `on ${roles.map((r) => `${r}s`).join(" and ")}`, role: true }] : []),
+  ...(releases?.from
+    ? [{ when: when.order("device.version", ">=", releases.from), words: `from OpenWrt ${releases.from}`, release: releases.from }]
+    : []),
+  ...(releases?.before
+    ? [{ when: when.order("device.version", "<", releases.before), words: `before OpenWrt ${releases.before}`, release: releases.before, fixed: true }]
+    : []),
+];
+
 /** The target as a condition: each part narrowing it, every device when it has none. */
-export const targetCondition = ({ models, targets, roles, releases, requires }: Target): When =>
-  when.all(
-    ...(requires ? [requires.when] : []),
-    ...(models ? [when.oneOf("device.model_id", models)] : []),
-    ...(targets ? [when.oneOf("device.target", targets)] : []),
-    ...(roles ? [when.oneOf("device.tag.role", roles)] : []),
-    ...(releases?.from ? [when.order("device.version", ">=", releases.from)] : []),
-    ...(releases?.before ? [when.order("device.version", "<", releases.before)] : [])
-  );
+export const targetCondition = (target: Target): When => when.all(...targetParts(target).map((part) => part.when));
 
 /** What the device facts (model, target, release) still decide, in words; roles are known from the intent. */
-export const describeTarget = ({ models, targets, releases, requires }: Target) =>
-  [
-    requires && `where it ${requires.note}`,
-    models && `on ${models.join(" or ")}`,
-    targets && `on ${targets.join(" or ")}`,
-    releases?.from && `from OpenWrt ${releases.from}`,
-    releases?.before && `before OpenWrt ${releases.before}`,
-  ]
-    .filter(Boolean)
+export const describeTarget = (target: Target) =>
+  targetParts(target)
+    .filter((part) => !part.role)
+    .map((part) => part.words)
     .join(", ");
+
+/** Each device's facts, as stored (deviceFacts.ts): only its schema is read. */
+export type Facts = Record<string, { schema: DeviceSchema } | undefined>;
 
 /** Whether the intent needs it: not turned off, and its settings in use. */
 export const needed = (intent: Intent) => (patch: Patch) =>

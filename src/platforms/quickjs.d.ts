@@ -48,7 +48,9 @@ interface QuickJsOs {
   kill(pid: number, signal: number): number;
   setTimeout(fn: () => void, ms: number): unknown;
   /** mtime in ms. */
-  stat(path: string): [{ mode: number; size: number; mtime: number } | null, number];
+  stat(path: string): [{ mode: number; uid: number; size: number; mtime: number } | null, number];
+  /** stat of a symlink itself, not what it names. */
+  lstat(path: string): [{ mode: number; uid: number } | null, number];
   mkdir(path: string, mode?: number): number;
   remove(path: string): number;
   rename(oldPath: string, newPath: string): number;

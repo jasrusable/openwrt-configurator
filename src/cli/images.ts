@@ -11,6 +11,7 @@ import { buildAll, imagePlans } from "../firmware/builds";
 import { readFacts } from "../deviceFacts";
 import { readReleases } from "../firmware/releases";
 import { targetOf } from "../firmware/target";
+import { appPublicKey } from "../loginAccess";
 import type { Intent } from "../intent/schema";
 import type { Plan } from "../plan/types";
 import type { Platform } from "../platform";
@@ -149,6 +150,7 @@ const intentImages = async ({
     facts: Object.fromEntries(Object.entries(facts).map(([name, f]) => [name, f?.schema])),
     versions,
     sha256: platform.sha256,
+    appKey: await appPublicKey(intent, platform),
   });
   unbuildable.forEach((u) => console.error(`${u.device}: ${u.why}`));
   if (dryRun) {

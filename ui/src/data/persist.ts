@@ -1,29 +1,31 @@
-// What was last read from the devices (facts, status, the apply plan), kept in
-// this browser so a reload shows it at once, with its age, while the pages
-// read it again. A per-viewer convenience: nothing here is the truth, every
-// page still refreshes as it opens. No secrets: the plan only ever says
-// "(hidden)" for them, and facts and status hold none. Dropped when a router
+// What was last read from the devices (facts, status), kept in this browser
+// so a reload shows it at once, with its age, while the pages read it again.
+// A per-viewer convenience: nothing here is the truth, every page still
+// refreshes as it opens. No secrets: facts and status hold none. Not the
+// apply plan: it holds config lines, and the sheet applies only a plan read
+// as it opens, so a kept one would only ever show. Dropped when a router
 // session ends (a 401), so a logged-out browser keeps nothing of the network;
 // kept per network (the settings' site id), so one served from the same
 // address before (a sample copy) never shows as yours.
 import { QueryClient } from "@tanstack/react-query";
+import { siteOfJson } from "../../../src/intent/site";
 
 /** The queries worth keeping: device reads, slow to make again. */
-const kept = ["devices", "network-status", "status-history", "apply-plan"];
+const kept = ["devices", "network-status", "status-history"];
 
 /**
  * The shape of what is kept: raised when a kept read's shape changes, so a
  * read kept by an older build is dropped rather than shown to code that
  * expects the new one.
  */
-export const format = 5;
+export const format = 6;
 
 /** Which network the reads are of: one origin can serve another intent (a sample copy, then your own), whose reads must never show. */
 let site: string | undefined;
 
 /** A short hash of the saved settings' identity: its site id, else its name. */
-export const siteOf = (intent: { system?: { site_id?: string; name?: string } } | undefined) => {
-  const id = intent?.system?.site_id ?? intent?.system?.name ?? "";
+export const siteOf = (intent: unknown) => {
+  const id = siteOfJson(intent) ?? "";
   return [...id].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0, 2166136261).toString(36);
 };
 
@@ -95,7 +97,7 @@ export const persistDeviceReads = (queryClient: QueryClient) => {
     if (event.type !== "updated" || event.action.type !== "success") return;
     const { data, dataUpdatedAt } = event.query.state;
     if (queryKey[0] === "intent") {
-      const now = siteOf(data as Parameters<typeof siteOf>[0]);
+      const now = siteOf(data);
       if (now === site) return;
       // Another network than what is shown: its reads go, this one's come back.
       if (site !== undefined) kept.forEach((key) => queryClient.removeQueries({ queryKey: [key] }));

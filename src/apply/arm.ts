@@ -103,13 +103,14 @@ export const armRollback = (run: DeviceRun, { timeoutSeconds }: { timeoutSeconds
     const unarmable = agent.unarmable(plan);
     if (unarmable) return err(failure(`Cannot arm a rollback on ${run.hostname}: ${unarmable}. Nothing was changed.`));
     console.log(describe(run.hostname, plan));
+    // The watchdog counts from the moment it starts sleeping, somewhere
+    // inside this call: every deadline is measured from before it, so this
+    // side never counts on time the device does not give (a slow answer).
+    const armedAt = run.now();
     const answer = await agent.call(run.ssh, agent.arm(run.runId, plan));
     if (!(answer.ok && answer.value.armed)) {
       const why = answer.ok ? answer.value.why : answer.error.message;
       return err(failure(`Failed to arm rollback on ${run.hostname}${why ? `: ${why}` : ""}.`));
     }
-    // The watchdog counts from the moment it starts sleeping, so every
-    // deadline is measured from here, not from when configuring ends.
-    const armedAt = run.now();
     return ok({ ...run, armedAt, deadline: armedAt + timeoutSeconds * 1000 });
   });

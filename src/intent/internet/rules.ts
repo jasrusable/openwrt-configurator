@@ -1,8 +1,13 @@
 // What the internet lines may be, given the rest: the first line carries
-// IPv6, a port carries one line, and the settings about several lines only
+// IPv6, a port carries one line per VLAN, and the settings about several lines only
 // mean something with several.
 import type { Choice } from "../feature";
-import { internetIpv6, multiWan, networkHasIpv6, primaryConnection, roomIn } from "../connections";
+import { internetIpv6, multiWan, networkHasIpv6, primaryConnection, roomIn, samePort } from "../connections";
+import type { Intent } from "../schema";
+
+/** An earlier line on `port` with line `c`'s VLAN. */
+const earlierOnPort = (intent: Intent, c: number, port: string | undefined) =>
+  intent.internet.lines.slice(0, c).find((o) => samePort(o, { port, vlan: intent.internet.lines[c]?.vlan }));
 
 export const internetRules: Choice[] = [
   {
@@ -33,23 +38,21 @@ export const internetRules: Choice[] = [
     refuses: false,
   },
   {
-    // A port carries one line: reported at the later of two (the UI greys
-    // a port any other line uses, with portTakenBy). Unset (the router's
-    // WAN port) is checked by the schema.
+    // A port carries one line per VLAN (one untagged): reported at the later
+    // of two (the UI greys a port another line uses, with portTakenBy).
     path: "internet.lines.*.port",
     unavailable: (intent, [c], port) => {
-      const other = intent.internet.lines.slice(0, Number(c)).find((o) => o.port === port);
-      return port !== undefined && other && `${other.name || "Another line"} uses it.`;
+      const other = port !== undefined && earlierOnPort(intent, Number(c), port);
+      return other && `${other.name || "Another line"} uses it${other.vlan ? ` with VLAN ${other.vlan}` : ""}.`;
     },
   },
   {
-    // Unset is the router's WAN port, which one line can have: the earliest
-    // that has it keeps it.
+    // Unset is the router's WAN port: the earliest line there keeps it.
     path: "internet.lines.*.port",
     values: [undefined],
     unavailable: (intent, [c]) => {
-      const other = intent.internet.lines.slice(0, Number(c)).find((o) => o.port === undefined);
-      return other && `${other.name || "Another line"} uses the WAN port.`;
+      const other = earlierOnPort(intent, Number(c), undefined);
+      return other && `${other.name || "Another line"} uses the WAN port${other.vlan ? ` with VLAN ${other.vlan}` : ""}.`;
     },
   },
   {

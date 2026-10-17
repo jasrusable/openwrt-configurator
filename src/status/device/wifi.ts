@@ -2,7 +2,7 @@
 // which access points hear each client (roaming).
 import type { Probe } from "../../deviceProbes";
 import { arr, num, obj, str } from "../values";
-import { json } from "./common";
+import { eachHostapd, json } from "./common";
 import type { WifiInterface } from "./types";
 
 /** The Wi-Fi probe's array: each hostapd interface's get_status and get_clients. */
@@ -39,21 +39,14 @@ export const parseWifi = (list: unknown): WifiInterface[] =>
       };
     });
 
-// One JSON array, built by the shell, so no output needs splitting: an
-// access point's hostapd interfaces with their status and clients; none on a
-// device without Wi-Fi. A call that fails, or says nothing, gives null: each
-// is captured first, so one failing partway cannot leave half its JSON.
+// An access point's hostapd interfaces with their status, clients and
+// iwinfo's view; a call that fails, or says nothing, gives null.
 export const wifi: Probe<unknown> = {
-  command: [
-    'call() { r=$(ubus call "$@" 2>/dev/null) && [ -n "$r" ] && printf \'%s\' "$r" || printf null; }',
-    "printf '['; sep=''",
-    "for o in $(ubus list 'hostapd.*' 2>/dev/null); do",
-    `  printf '%s{"object":"%s","status":' "$sep" "$o"; call "$o" get_status`,
-    `  printf ',"clients":'; call "$o" get_clients`,
-    `  printf ',"info":'; call iwinfo info "{\\"device\\":\\"\${o#hostapd.}\\"}"`,
-    "  printf '}'; sep=','",
-    "done; printf ']'",
-  ].join("\n"),
+  command: eachHostapd([
+    `printf '"object":"%s","status":' "$o"; call "$o" get_status`,
+    `printf ',"clients":'; call "$o" get_clients`,
+    `printf ',"info":'; call iwinfo info "{\\"device\\":\\"$d\\"}"`,
+  ]),
   parse: ({ stdout }) => json(stdout, "hostapd"),
 };
 

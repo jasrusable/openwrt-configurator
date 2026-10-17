@@ -10,8 +10,9 @@ import { join } from "path";
 import { appliedMarker } from "../../agent/paths";
 import { DeviceSchema } from "../../deviceSchema";
 import { buildAll, imagePlans } from "../../firmware/builds";
-import { firstBootOf, firstBootScript } from "../../firmware/firstBoot";
-import { profileFor } from "../../firmware/profiles";
+import { firstBootOf, firstBootScript, missingKey } from "../../firmware/firstBoot";
+import { profileFor, profilesUrl } from "../../firmware/profiles";
+import { getProfileTarget } from "../../buildImage";
 import { upgradePlan } from "../../firmware/upgradePlan";
 import { compileIntent } from "../../intent/compile";
 import { Intent } from "../../intent/schema";
@@ -60,11 +61,36 @@ test("a fresh router comes up on the main network with its pool; an access point
     t.regex(script, new RegExp(`\\[ -f ${appliedMarker} \\] && exit 0`), "an upgrade that kept the settings leaves them");
     t.notRegex(script, /home-router|home-ap/, "nothing per device");
   }
-  // No key: password login stays as OpenWrt has it, or nobody could log in.
-  t.notRegex(firstBootScript(firstBootOf(sampleIntent(), "router")), /PasswordAuth|authorized_keys/);
 });
 
-/** A root a first-boot script runs in: uci as a log of what it was asked. */
+test("no image without this app's own key authorized: a device fresh from one lets in only those keys", (t) => {
+  const intent = sampleIntent();
+  t.regex(missingKey(intent, key)!, /^Add an SSH key first \(System › General › Authorized keys\)/);
+  t.is(missingKey(network(), key), undefined);
+  t.is(missingKey(network(), `${key.split(" ").slice(0, 2).join(" ")} another-comment`), undefined, "the same key, whatever its comment");
+  // The app logs in with another key, or one it cannot read: it would be locked out of a device fresh from an image.
+  const other = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOtherOtherOtherOtherOtherOtherOtherOther1 app@router";
+  t.regex(missingKey(network(), other)!, /^Add this app's own key to the authorized keys/);
+  t.regex(missingKey(network(), undefined)!, /^Give this app an SSH key it can read \(System › Administration › SSH key\)/);
+  const { images, unbuildable } = imagePlans({ intent, plan: compileIntent(intent), facts, versions: { "home-router": "25.12.5" }, sha256, appKey: key });
+  t.deepEqual(images, []);
+  t.deepEqual(unbuildable, [{ device: "home-router", why: missingKey(intent, key)! }]);
+  t.deepEqual(
+    imagePlans({ intent: network(), plan: compileIntent(network()), facts, versions: { "home-router": "25.12.5" }, sha256, appKey: other }).unbuildable.map((u) => u.device),
+    ["home-router"]
+  );
+});
+
+test("a device the settings compile none of gets no image, rather than one without its role's packages", (t) => {
+  const intent = network();
+  const plan = compileIntent(intent);
+  const without = { ...plan, devices: plan.devices.filter((d) => d.hostname !== "home-ap-2") };
+  const { images, unbuildable } = imagePlans({ intent, plan: without, facts, versions: { "home-ap-1": "25.12.5", "home-ap-2": "25.12.5" }, sha256, appKey: key });
+  t.deepEqual(images.flatMap((i) => i.devices), ["home-ap-1"]);
+  t.deepEqual(unbuildable, [{ device: "home-ap-2", why: "The settings compile no such device: its packages are not known." }]);
+});
+
+/** A root a first-boot script runs in: uci as a log of what it was asked, passwd of what it read. */
 const runFirstBoot = (script: string, { applied = false } = {}) => {
   const root = tempDir("firstboot");
   const bin = join(root, "bin");
@@ -76,6 +102,7 @@ const runFirstBoot = (script: string, { applied = false } = {}) => {
     `#!/bin/sh\necho "$*" >> "${root}/uci.log"\ncase "$*" in "-q show network") echo "network.@device[0].name='br-lan'" ;; "-q get network.wan.device") echo wan ;; esac\n`,
     { mode: 0o755 }
   );
+  writeFileSync(join(bin, "passwd"), `#!/bin/sh\necho "$*" >> "${root}/passwd.log"\ncat >> "${root}/passwd.log"\n`, { mode: 0o755 });
   // Paths on the device, under this root.
   const rooted = script.replace(/\/etc\//g, `${root}/etc/`);
   const ran = spawnSync("sh", ["-c", rooted], { env: { PATH: `${bin}:/usr/bin:/bin` }, encoding: "utf8" });
@@ -86,7 +113,14 @@ const runFirstBoot = (script: string, { applied = false } = {}) => {
       return "";
     }
   })();
-  return { ran, log, root };
+  const passwd = (() => {
+    try {
+      return readFileSync(join(root, "passwd.log"), "utf8");
+    } catch {
+      return "";
+    }
+  })();
+  return { ran, log, root, passwd };
 };
 
 test("under plain sh: fresh, the access point's script bridges the WAN port and installs the keys; after a kept upgrade, it does nothing", (t) => {
@@ -97,9 +131,16 @@ test("under plain sh: fresh, the access point's script bridges the WAN port and 
   t.regex(fresh.log, /^-q set network\.@device\[0\]\.stp=1$/m);
   t.regex(fresh.log, /^commit$/m);
   t.is(readFileSync(join(fresh.root, "etc", "dropbear", "authorized_keys"), "utf8"), `${key}\n`);
+  // Root a password no one knows: with none, LuCI would let anyone in.
+  const [user, password, again] = fresh.passwd.split("\n");
+  t.is(user, "root");
+  t.regex(password, /^[A-Za-z0-9]{32}$/);
+  t.is(again, password);
+  t.not(runFirstBoot(script).passwd.split("\n")[1], password, "made on each device, never in the image");
   const kept = runFirstBoot(script, { applied: true });
   t.is(kept.ran.status, 0);
   t.is(kept.log, "");
+  t.is(kept.passwd, "", "an upgrade that kept the settings keeps root's password");
 });
 
 /** Every value the compiled plan or the intent holds as a secret. */
@@ -121,12 +162,16 @@ const secretsOf = (intent: Intent, plan: Plan) => {
 };
 
 test("no secret of any generated network reaches a first-boot script or a build request", (t) => {
-  const intents = generateIntents(Number(process.env.ONC_GEN_CASES ?? 40), 7);
+  // Each with a key, as every image needs one.
+  const intents = generateIntents(Number(process.env.ONC_GEN_CASES ?? 40), 7).map((intent) => ({
+    ...intent,
+    system: { ...intent.system, ssh: { ...intent.system.ssh, authorized_keys: [key] } },
+  }));
   const checked = intents.map((intent) => {
     const plan = compileIntent(intent);
     const versions = Object.fromEntries(intent.hardware.map((d) => [d.name, "25.12.5"]));
     const facts = Object.fromEntries(intent.hardware.map((d) => [d.name, d.role === "router" ? router : ap]));
-    const { images } = imagePlans({ intent, plan, facts, versions, sha256 });
+    const { images } = imagePlans({ intent, plan, facts, versions, sha256, appKey: key });
     const requests = images.map(({ version, target, board, packages, defaults }) => JSON.stringify({ version, target, board, packages, defaults }));
     const secrets = secretsOf(intent, plan);
     return { leaked: secrets.filter((s) => requests.some((r) => r.includes(s) || r.includes(JSON.stringify(s).slice(1, -1)))), secrets: secrets.length };
@@ -144,6 +189,7 @@ test("one image per board, role and release: identical access points share one b
     facts: { ...facts, "home-ap-3": undefined },
     versions: { "home-router": "25.12.5", "home-ap-1": "25.12.5", "home-ap-2": "25.12.5", "home-ap-3": "25.12.5" },
     sha256,
+    appKey: key,
   });
   t.deepEqual(
     images.map((i) => [i.board, i.role, i.devices]),
@@ -161,7 +207,7 @@ test("an upgrade moves the devices behind, access points first and the router la
   const intent = network();
   const plan = compileIntent(intent);
   const held = { ...intent, hardware: intent.hardware.map((d) => (d.name === "home-ap-2" ? { ...d, firmware: "hold" as const } : d)) };
-  const upgrade = upgradePlan({ intent: held, plan, facts, releases, sha256 });
+  const upgrade = upgradePlan({ intent: held, plan, facts, releases, sha256, appKey: key });
   t.deepEqual(
     upgrade.steps.map((s) => [s.device, s.from, s.to]),
     [
@@ -170,7 +216,7 @@ test("an upgrade moves the devices behind, access points first and the router la
     ]
   );
   t.deepEqual(upgrade.staying, [{ device: "home-ap-2", why: "Held." }]);
-  t.deepEqual(upgradePlan({ intent, plan, facts, releases, only: ["home-ap-2"], sha256 }).steps.map((s) => s.device), ["home-ap-2"]);
+  t.deepEqual(upgradePlan({ intent, plan, facts, releases, only: ["home-ap-2"], sha256, appKey: key }).steps.map((s) => s.device), ["home-ap-2"]);
 });
 
 test("a board's profile is the one that lists it, else the board's own name", (t) => {
@@ -178,6 +224,27 @@ test("a board's profile is the one that lists it, else the board's own name", (t
   t.is(profileFor(profiles, "linksys,e8450-ubi"), "linksys_e8450-ubi");
   t.is(profileFor(profiles, "x,y"), "x_y");
   t.is(profileFor(profiles, "nobody,here"), undefined);
+});
+
+test("a low-level config's board finds its profile as an intent's does: by the boards each profile lists", async (t) => {
+  const version = "24.10.97";
+  const asked: string[] = [];
+  const platform = {
+    sleep: async () => {},
+    http: {
+      ...nodePlatform.http,
+      request: async ({ url }: { url: string }) => {
+        asked.push(url);
+        const body = url.endsWith(".overview.json")
+          ? { profiles: [{ id: "linksys_e8450", target: "mediatek/mt7622" }, { id: "linksys_e8450-ubi", target: "mediatek/mt7622" }, { id: "other", target: "x86/64" }] }
+          : { profiles: { linksys_e8450: { supported_devices: ["linksys,e8450"] }, "linksys_e8450-ubi": { supported_devices: ["linksys,e8450-ubi"] } } };
+        return { status: 200, headers: {}, body: JSON.stringify(body) };
+      },
+    },
+  };
+  t.deepEqual(await getProfileTarget({ version, modelId: "linksys,e8450-ubi", platform }), { profile: "linksys_e8450-ubi", target: "mediatek/mt7622" });
+  t.true(asked.includes(profilesUrl(version, "mediatek/mt7622")), "the target's own list of boards decides");
+  await t.throwsAsync(getProfileTarget({ version, modelId: "nobody,here", platform }), { message: /No profile for nobody,here/ });
 });
 
 /** ASU, as a stand-in: profiles, a build queued then done, the image; a board it cannot build fails. */
@@ -214,7 +281,7 @@ const fakeAsu = () => {
 test("builds run once and are kept by what went into them; one that cannot be built is said, per build", async (t) => {
   const intentPath = join(tempDir("firmware-builds"), "intent.json");
   const intent = network();
-  const { images } = imagePlans({ intent, plan: compileIntent(intent), facts, versions: { "home-router": "25.12.5", "home-ap-1": "25.12.5" }, sha256 });
+  const { images } = imagePlans({ intent, plan: compileIntent(intent), facts, versions: { "home-router": "25.12.5", "home-ap-1": "25.12.5" }, sha256, appKey: key });
   const { platform, asked } = fakeAsu();
   const first = await buildAll({ intentPath, images, platform });
   t.true("built" in first[0]);
@@ -230,8 +297,8 @@ test("builds run once and are kept by what went into them; one that cannot be bu
 test("the device this app runs on is flashed last, its image with what the app runs with", (t) => {
   const intent = network();
   const plan = compileIntent(intent);
-  const upgrade = upgradePlan({ intent, plan, facts, releases, sha256, host: "home-ap-1" });
-  t.deepEqual(upgrade.steps.map((s) => s.device), ["home-ap-2", "home-router", "home-ap-1"]);
+  const upgrade = upgradePlan({ intent, plan, facts, releases, sha256, appKey: key, host: "home-ap-1" });
+  t.deepEqual(upgrade.steps.map((s) => [s.device, s.host]), [["home-ap-2", false], ["home-router", false], ["home-ap-1", true]]);
   const own = upgrade.images.find((i) => i.devices.includes("home-ap-1"))!;
   t.true(own.packages.includes("quickjs") && own.packages.includes("uhttpd"));
   t.deepEqual(own.devices, ["home-ap-1"], "its image is its own: the other access point's lacks the runtime");
@@ -242,13 +309,50 @@ test("a downgrade within a series keeps the settings; one to an older series kee
   const plan = compileIntent(intent);
   const pinned = (version: string): Intent => ({ ...intent, hardware: intent.hardware.map((d) => (d.name === "home-ap-1" ? { ...d, firmware: version } : d)) });
   const out = { at: 1, series: { "25.12": ["25.12.5", "25.12.3"], "26.1": ["26.1.0"] } };
-  const within = upgradePlan({ intent: pinned("25.12.3"), plan, facts: { ...facts, "home-ap-1": { ...ap, version: "25.12.5" } }, releases: out, only: ["home-ap-1"], sha256 });
+  const within = upgradePlan({ intent: pinned("25.12.3"), plan, facts: { ...facts, "home-ap-1": { ...ap, version: "25.12.5" } }, releases: out, only: ["home-ap-1"], sha256, appKey: key });
   t.like(within.steps[0], { device: "home-ap-1", from: "25.12.5", to: "25.12.3", keep: "settings" });
   t.deepEqual(within.downgrades.map((s) => s.device), ["home-ap-1"]);
-  const across = upgradePlan({ intent: pinned("25.12.5"), plan, facts: { ...facts, "home-ap-1": { ...ap, version: "26.1.0" } }, releases: out, only: ["home-ap-1"], sha256 });
+  const across = upgradePlan({ intent: pinned("25.12.5"), plan, facts: { ...facts, "home-ap-1": { ...ap, version: "26.1.0" } }, releases: out, only: ["home-ap-1"], sha256, appKey: key });
   t.like(across.steps[0], { from: "26.1.0", to: "25.12.5", keep: "keys" });
+  t.deepEqual(across.refused, []);
   // An upgrade is none of these.
-  const up = upgradePlan({ intent, plan, facts, releases: out, only: ["home-ap-1"], sha256 });
+  const up = upgradePlan({ intent, plan, facts, releases: out, only: ["home-ap-1"], sha256, appKey: key });
   t.like(up.steps[0], { keep: "settings" });
   t.deepEqual(up.downgrades, []);
+});
+
+test("back to an older series is refused where first-boot settings would strand something: this app's device, a mesh repeater, the access point this machine is on", (t) => {
+  const intent = network();
+  const plan = compileIntent(intent);
+  const out = { at: 1, series: { "25.12": ["25.12.5"], "26.1": ["26.1.0"] } };
+  const back = (changed: Intent, more: { host?: string; viaWifi?: string[] } = {}) =>
+    upgradePlan({
+      intent: { ...changed, hardware: changed.hardware.map((d) => (d.name === "home-ap-1" ? { ...d, firmware: "25.12.5" } : d)) },
+      plan,
+      facts: { ...facts, "home-ap-1": { ...ap, version: "26.1.0" } },
+      releases: out,
+      only: ["home-ap-1"],
+      sha256,
+      appKey: key,
+      ...more,
+    });
+  const host = back(intent, { host: "home-ap-1" });
+  t.like(host.steps[0], { keep: "keys", host: true });
+  t.regex(host.refused[0].why, /^This app runs on it: back to an older series it comes up on first-boot settings, keeping only its SSH keys/);
+  const mesh = back({ ...intent, hardware: intent.hardware.map((d) => (d.name === "home-ap-1" ? { ...d, uplink: "mesh" as const } : d)) });
+  t.regex(mesh.refused[0].why, /^It reaches the network over the mesh/);
+  const wifi = back(intent, { viaWifi: ["home-ap-1"] });
+  t.regex(wifi.refused[0].why, /^This machine reaches the network through its Wi-Fi/);
+  t.deepEqual(back(intent, { viaWifi: ["home-ap-2"] }).refused, [], "another access point's Wi-Fi is no matter");
+  // A cabled node mesh repeaters may reach the network through: with no mesh after, they are cut off.
+  const meshed = (intentIn: Intent, meshOn = true): Intent => ({
+    ...intentIn,
+    wifi: { ...intentIn.wifi, mesh: { ...intentIn.wifi.mesh, enabled: meshOn } },
+    hardware: intentIn.hardware.map((d) => (d.name === "home-ap-2" ? { ...d, uplink: "mesh" as const } : d)),
+  });
+  t.regex(back(meshed(intent)).refused[0]?.why ?? "", /^The mesh repeaters \(home-ap-2\) may reach the network through it/);
+  t.deepEqual(back(meshed(intent, false)).refused, [], "no mesh on: nothing reaches anything through it");
+
+  const within = upgradePlan({ intent, plan, facts, releases, only: ["home-ap-1"], sha256, appKey: key, host: "home-ap-1", viaWifi: ["home-ap-1"] });
+  t.deepEqual(within.refused, []);
 });

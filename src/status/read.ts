@@ -14,7 +14,7 @@ import { Platform } from "../platform";
 import { provisionableDevices, ProvisionableDevice } from "../apply/provisionConfig";
 import { readEach } from "../readEach";
 import { getOpenWrtState } from "../engine/getOpenWrtState";
-import { jobProgress, jobState, liveState } from "../server/provisionJob";
+import { jobProgress, jobState, liveState } from "../apply/job";
 import { meshWiredLink, readDeviceStatus } from "./device";
 import { NetworkStatus, networkStatus } from "./network";
 import { ActivityView, activityViewSchema, activityOf, attentionOf, clientsOf, devicesOf, internetCountersOf, internetOf, keepActivity, radiosOf } from "./views";
@@ -34,7 +34,9 @@ const appliesOf = async (intentPath: string, platform: Platform): Promise<Activi
         ? "Settings applied, with a problem after"
         : outcome === "rolled-back"
           ? "An apply was rolled back: every device kept its settings"
-          : "An apply stopped before changing anything";
+          : outcome === "partial"
+            ? "An apply finished on some devices only: apply again to finish"
+            : "An apply stopped before changing anything";
   return [{ at: run.startedAt, device: "This app", text, kind: run.state === "succeeded" ? "apply" : "problem" }];
 };
 

@@ -15,11 +15,12 @@ import { read, stateLayout, StoreKey, tryWrite } from "../store";
 import { loadSettings } from "../settings";
 import { provisionableDevices } from "../apply/provisionConfig";
 import { readEach } from "../readEach";
-import { jobState } from "../server/provisionJob";
+import { applyRunning } from "../apply/job";
 import { withLock } from "../lock";
 import { shellQuote } from "../shell";
 import { DeviceView, restartable } from "./views";
 import { arr, bandOf, channelOf, obj } from "./values";
+import { eachHostapd } from "./device/common";
 
 /**
  * One device, found and logged in to as anywhere else (src/locate.ts), within
@@ -33,7 +34,7 @@ export const onDevice = async <T>(
   timeoutMs: number,
   work: (session: Parameters<typeof runProbe>[0], state: () => ReturnType<typeof getOpenWrtState>) => Promise<Result<T, Problem>>
 ): Promise<Result<T, Problem>> => {
-  if ((await jobState({ intentPath, files: platform }).catch(() => undefined))?.state === "running") {
+  if (await applyRunning({ intentPath, files: platform }).catch(() => false)) {
     return fail("conflict", "An apply is running: try again when it has finished.");
   }
   const loaded = await loadSettings(intentPath, platform);
@@ -57,19 +58,19 @@ export const onDevice = async <T>(
 };
 
 /**
- * One at a time, per action, across processes (a CGI request is one): a second
- * click while one runs is told so. A lock left by a process that died is
- * taken over after a minute: every action ends sooner, inside uhttpd's 60 s
- * CGI limit (`actionBudgetMs`).
+ * One action at a time, of any kind, across processes (a CGI request is
+ * one): a click while one runs is told so, as two at once (a restart during
+ * a survey, two speed tests) would spoil or cut each other. A lock left by a
+ * process that died is taken over after a minute: every action ends sooner,
+ * inside uhttpd's 60 s CGI limit (`actionBudgetMs`).
  */
 export const oneAtATime = async <T>(
   platform: Platform,
   intentPath: string,
-  name: string,
   work: () => Promise<Result<T, Problem>>
 ): Promise<Result<T, Problem>> => {
-  const result = await withLock(platform, stateLayout(intentPath).actionLock(name), 1, work);
-  return result === "busy" ? fail("busy", "One is already running: wait for it to finish.") : result;
+  const result = await withLock(platform, stateLayout(intentPath).actionLock, 1, work);
+  return result === "busy" ? fail("busy", "Another action is running: wait for it to finish.") : result;
 };
 
 /** What an action may take in all: uhttpd ends a CGI request at 60 s. */
@@ -87,16 +88,18 @@ export const restartService = ({
   hostname: string;
   service: string;
 }) =>
-  onDevice(intentPath, platform, hostname, 20_000, async (session, state) => {
-    if (!(state().services ?? []).some((s) => s.name === service && restartable(s))) {
-      return fail("invalid", `${service} is not a service this page restarts on ${hostname}.`);
-    }
-    const restarted = await runProbe(session, {
-      command: `/etc/init.d/${shellQuote(service)} restart >/dev/null 2>&1; echo $?`,
-      parse: ({ stdout }) => stdout.trim() === "0",
-    } as Probe<boolean>);
-    return restarted ? ok({ ok: true as const }) : fail("failed", `${service} did not restart on ${hostname}.`);
-  });
+  oneAtATime(platform, intentPath, () =>
+    onDevice(intentPath, platform, hostname, 20_000, async (session, state) => {
+      if (!(state().services ?? []).some((s) => s.name === service && restartable(s))) {
+        return fail("invalid", `${service} is not a service this page restarts on ${hostname}.`);
+      }
+      const restarted = await runProbe(session, {
+        command: `/etc/init.d/${shellQuote(service)} restart >/dev/null 2>&1; echo $?`,
+        parse: ({ stdout }) => stdout.trim() === "0",
+      } as Probe<boolean>);
+      return restarted ? ok({ ok: true as const }) : fail("failed", `${service} did not restart on ${hostname}.`);
+    })
+  );
 
 /**
  * Started in the background, a moment after the answer: the command returns
@@ -154,7 +157,7 @@ export const rebootDevice = ({
   hostname: string;
   now?: () => number;
 }) =>
-  oneAtATime(platform, intentPath, "reboot", () =>
+  oneAtATime(platform, intentPath, () =>
     onDevice(intentPath, platform, hostname, 20_000, async (session) => {
       if (!(await runProbe(session, detached("reboot", "ONC_REBOOTING")))) return fail("failed", `${hostname} did not start rebooting.`);
       const at = now();
@@ -166,7 +169,7 @@ export const rebootDevice = ({
 
 /** Restart `hostname`'s Wi-Fi: its clients (and a mesh link through it) drop and reconnect within a minute. */
 export const restartWifi = ({ intentPath, platform, hostname }: { intentPath: string; platform: Platform; hostname: string }) =>
-  oneAtATime(platform, intentPath, "wifi-restart", () =>
+  oneAtATime(platform, intentPath, () =>
     onDevice(intentPath, platform, hostname, 20_000, async (session) => {
       const hasWifi = await runProbe(session, { command: "command -v wifi >/dev/null && echo ONC_WIFI", parse: ({ stdout }) => stdout.includes("ONC_WIFI") } as Probe<boolean>);
       if (!hasWifi) return fail("invalid", `${hostname} has no Wi-Fi.`);
@@ -192,7 +195,7 @@ export const parsePing = (stdout: string): PingResult | undefined => {
 /** Ping `target` from `hostname`: four pings, two seconds each at most. */
 export const pingFrom = ({ intentPath, platform, hostname, target }: { intentPath: string; platform: Platform; hostname: string; target: string }) =>
   pingTarget.test(target)
-    ? oneAtATime(platform, intentPath, "ping", () =>
+    ? oneAtATime(platform, intentPath, () =>
         onDevice(intentPath, platform, hostname, 20_000, async (session) => {
           const pinged = await runProbe(session, {
             command: `ping -c 4 -W 2 ${shellQuote(target)} 2>&1`,
@@ -203,32 +206,45 @@ export const pingFrom = ({ intentPath, platform, hostname, target }: { intentPat
       )
     : Promise.resolve(fail("invalid", "Give an address or a host name to ping."));
 
-/** How long the router takes to download this much, from Cloudflare's speed test. */
+/** At most this much is downloaded, from Cloudflare's speed test. */
 const speedBytes = 25_000_000;
 
-/** "<seconds> <bytes>" from the router: a download timed by its uptime clock (busybox has no time). */
+/** And for at most this long: a slow line is measured by what came in that time. */
+export const speedSeconds = 15;
+
+/**
+ * The download, timed by the uptime clock (busybox has no `time`): counted
+ * through a FIFO so nothing is kept in RAM, and the time taken when the
+ * counting ends (the download done, or killed at `speedSeconds`), so the
+ * second-long polling does not count. It ends on the device whatever
+ * happens to the session (dropbear does not end what a session leaves).
+ * Prints "<seconds> <bytes>".
+ */
+export const speedCommand = [
+  "d=$(mktemp -d); mkfifo $d/f; a=$(cut -d' ' -f1 /proc/uptime)",
+  "{ wc -c < $d/f > $d/n; cut -d' ' -f1 /proc/uptime > $d/b; } & w=$!",
+  `uclient-fetch -q -T 10 -O - 'https://speed.cloudflare.com/__down?bytes=${speedBytes}' > $d/f 2>/dev/null & p=$!`,
+  `i=0; while [ $i -lt ${speedSeconds} ] && kill -0 $p 2>/dev/null; do sleep 1; i=$((i+1)); done`,
+  "kill $p 2>/dev/null; wait $w",
+  'echo "$(awk -v a="$a" -v b="$(cat $d/b)" \'BEGIN { print b - a }\') $(cat $d/n)"',
+  "rm -rf $d",
+].join("\n");
+
+/** `speedCommand`'s "<seconds> <bytes>", as Mbit/s. */
 export const parseSpeed = (stdout: string) => {
   const [seconds, bytes] = stdout.trim().split(/\s+/).map(Number);
   return seconds > 0 && bytes > 0 ? Math.round(((bytes * 8) / seconds / 1e6) * 10) / 10 : undefined;
 };
 
-/** The router's download speed now, Mbit/s: test traffic only (25 MB), a few seconds, one at a time. */
+/** The router's download speed now, Mbit/s: test traffic only (25 MB at most, 15 s at most), one at a time. */
 export const speedTest = ({ intentPath, platform }: { intentPath: string; platform: Platform }) =>
-  oneAtATime(platform, intentPath, "speed-test", async () => {
+  oneAtATime(platform, intentPath, async () => {
     const loaded = await loadSettings(intentPath, platform);
     if (!loaded.ok) return loaded;
     const router = provisionableDevices(loaded.value.plan).ready.find((d) => d.tags?.role === "router");
     if (!router) return fail("conflict", "There is no router in Hardware.");
     return onDevice(intentPath, platform, router.hostname, 45_000, async (session) => {
-      const mbps = await runProbe(session, {
-        command: [
-          "a=$(cut -d' ' -f1 /proc/uptime)",
-          `n=$(uclient-fetch -q -T 30 -O - 'https://speed.cloudflare.com/__down?bytes=${speedBytes}' 2>/dev/null | wc -c)`,
-          "b=$(cut -d' ' -f1 /proc/uptime)",
-          'echo "$(awk -v a="$a" -v b="$b" \'BEGIN { print b - a }\') $n"',
-        ].join("; "),
-        parse: ({ stdout }) => parseSpeed(stdout),
-      } as Probe<number | undefined>);
+      const mbps = await runProbe(session, { command: speedCommand, parse: ({ stdout }) => parseSpeed(stdout) } as Probe<number | undefined>);
       return mbps ? ok({ downMbps: mbps }) : fail("failed", "The speed test did not finish.");
     });
   });
@@ -258,13 +274,13 @@ const bandOfScan = (n: Record<string, unknown>, channel: number) => {
 type Heard = Survey["neighbours"][number] & { bssid?: string };
 export type SurveyRead = { accessPoint: string; own: string[]; channels: Survey["channels"]; heard: Heard[] };
 
-/** The survey probe's array: each radio's ifname, its own BSSID, iwinfo scan and survey. */
 /** Far past any uptime, in ms: a counter this large wrapped (mt7915/mt7981 underflow them after days: mt76#1135). */
 const wrapped = 1e15;
 
 /** Whether a channel's survey counters can be right: busy no more than the time measured, neither wrapped. */
 const plausible = (active: number, busy: number) => busy <= active && active < wrapped && busy < wrapped;
 
+/** The survey probe's array (`surveyCommand`): each radio's ifname, its own BSSID, iwinfo scan and survey. */
 export const parseSurvey = (accessPoint: string, value: unknown): SurveyRead => {
   const radios = arr(value).map(obj);
   const seen = new Map<number, Survey["channels"][number]>();
@@ -324,23 +340,17 @@ export const neighboursOf = (surveys: SurveyRead[], ssids: string[], complete: b
   }));
 };
 
-  // Each call captured first, so one failing partway cannot leave half its JSON.
-  export const surveyCommand = [
-    'call() { r=$(ubus call "$@" 2>/dev/null) && [ -n "$r" ] && printf \'%s\' "$r" || printf null; }',
-    "printf '['; sep=''",
-    "for o in $(ubus list 'hostapd.*' 2>/dev/null); do d=${o#hostapd.}",
-    `  printf '%s{"ifname":"%s","bssid":"%s","scan":' "$sep" "$d" "$(cat /sys/class/net/$d/address 2>/dev/null)"; call iwinfo scan "{\\"device\\":\\"$d\\"}"`,
-    `  printf ',"survey":'; call iwinfo survey "{\\"device\\":\\"$d\\"}"`,
-    "  printf '}'; sep=','",
-    "done; printf ']'",
-  ].join("\n");
+export const surveyCommand = eachHostapd([
+  `printf '"ifname":"%s","bssid":"%s","scan":' "$d" "$(cat /sys/class/net/$d/address 2>/dev/null)"; call iwinfo scan "{\\"device\\":\\"$d\\"}"`,
+  `printf ',"survey":'; call iwinfo survey "{\\"device\\":\\"$d\\"}"`,
+]);
 
 /**
  * Each access point's survey: on request only, one access point at a time, as
  * a scan briefly takes its radios off their channel and its clients may notice.
  */
 export const wifiSurvey = ({ intentPath, platform }: { intentPath: string; platform: Platform }) =>
-  oneAtATime(platform, intentPath, "survey", async () => {
+  oneAtATime(platform, intentPath, async () => {
     const loaded = await loadSettings(intentPath, platform);
     if (!loaded.ok) return loaded;
     const { plan, intent } = loaded.value;

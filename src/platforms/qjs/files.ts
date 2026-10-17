@@ -1,6 +1,7 @@
 import * as std from "std";
 import { ExecResult, FileErrorCode } from "../../platform";
-import { spawn, spawnSync, which } from "./process";
+import { dirname } from "../../posixPath";
+import { ownUid, spawn, spawnSync, which } from "./process";
 import { fileExists, os } from "./runtime";
 
 /** errno numbers (the same on Linux and macOS) by the names the platforms share (src/platform.ts). */
@@ -46,13 +47,25 @@ export const writeFileAtomic = (path: string, data: string, mode: number) => {
   // anything is written to it: the data (a Wi-Fi password) is never in a
   // file others can read, even for a moment.
   const temporary = `${path}.onc-tmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  // Written through the descriptor O_EXCL made, never the name opened again.
   const fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode);
   if (fd < 0) throw new Error(`${path}: could not write it`);
-  os.close(fd);
+  const file = std.fdopen(fd, "w");
+  if (!file) {
+    os.close(fd);
+    os.remove(temporary);
+    throw new Error(`${path}: could not write it`);
+  }
   try {
-    writeTextFile(temporary, data);
-    // Exactly the mode asked for, whatever the umask took off. QuickJS's os has no chmod.
-    os.exec(["chmod", mode.toString(8), temporary], { block: true });
+    try {
+      file.puts(data);
+    } finally {
+      // A full disk shows here, as the buffer is written out.
+      if (file.close() !== 0) throw new Error(`${path}: could not write it`);
+    }
+    // Exactly the mode asked for, where the umask took some off: a whole
+    // process here, as QuickJS's os has no chmod.
+    if (fileMode(temporary) !== mode) os.exec(["chmod", mode.toString(8), temporary], { block: true });
     if (os.rename(temporary, path) !== 0) throw new Error(`${path}: could not replace it`);
   } catch (e) {
     os.remove(temporary);
@@ -91,6 +104,16 @@ export const makeDir = (path: string) => {
   if (result === 0) return true;
   if (result === -17) return false;
   throw fileError(path, -result);
+};
+
+export const privateDir = (path: string) => {
+  mkdirp(dirname(path));
+  const made = os.mkdir(path, 0o700);
+  if (made < 0 && made !== -17) throw fileError(path, -made);
+  const [stat] = os.lstat(path);
+  if (!stat || (stat.mode & os.S_IFMT) !== os.S_IFDIR || stat.uid !== ownUid() || (stat.mode & 0o777) !== 0o700) {
+    throw new Error(`${path} is not this program's own (a directory of its user's, mode 700, not a link): refused`);
+  }
 };
 
 export const removeDir = (path: string) => {

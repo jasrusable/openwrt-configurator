@@ -13,10 +13,15 @@ export const SwitchField = ({
   /** Greyed out and shown off, its value kept for when it applies again. */
   disabled?: boolean;
 }) => {
-  const field = useField(row.name, (value) => [!value]);
-  // Off when ignored; otherwise its value, and whether flipping it is allowed.
-  const off = disabled || field.ignored;
-  const reason = field.unavailable ?? (off ? undefined : field.option(!field.value).unavailable);
+  const field = useField(row.name, (value) => [value, !value]);
+  // On, where a rule makes on unavailable without refusing it: ignored for
+  // now (steering off ignores "prefer 5 GHz"), so shown off and greyed like
+  // a whole setting ignored, its value kept.
+  const current = field.option(field.value);
+  const ruledOut = current.unavailable;
+  const ignoredOn = !!field.value && !!ruledOut && current.refuses === false;
+  const off = disabled || field.ignored || ignoredOn;
+  const reason = field.unavailable ?? (ignoredOn ? ruledOut : off ? undefined : field.option(!field.value).unavailable);
   return (
     <Row row={row} error={field.error} unavailable={reason}>
       <Switch
@@ -167,7 +172,7 @@ export const OptionalField = ({
           checked={on}
           disabled={!!field.unavailable}
           onChange={(e) =>
-            field.onChange(e.currentTarget.checked ? (last.current ?? initial) : undefined)
+            e.currentTarget.checked ? field.seed(last.current ?? initial) : field.onChange(undefined)
           }
           size="md"
         />

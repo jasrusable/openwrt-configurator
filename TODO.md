@@ -116,6 +116,7 @@ over `src/server/`, and the React UI in `ui/`.
       of that cgroup. The rig's snapshot job shows it.
 - [ ] Router-hosted first run: today `/etc/onc/intent.json` must be copied there; a first-run page that starts one from the router itself (its facts, its current network) would make the package usable on its own. Also HTTPS: the session cookie travels in clear over plain HTTP, as LuCI's does.
 
+
 - [ ] **Off is always explicit, tested.** For every service a feature installs on a role, compiling with that feature off must give an explicit off state (a disabled section, `ignore 1`, or the service declared `enabled: false` so it is stopped and disabled at boot), never just "no config". Missing config counts as off only when the package is not installed on that role (dnsmasq and odhcpd on access points). A test walks every feature's services × roles over the generator's intents and fails on a service that is installed, unused and not declared off; each package's "no section" behaviour stays checked against its init script on the image (miniupnpd starts without one, https-dns-proxy rewrites dnsmasq).
 
 - [ ] **DHCP identity with `sendclientid`.** Devices identify by MAC today (no `dhcp_default_duid`, see src/intent/networks/compile.ts). Once every device runs a release with `sendclientid` (commit eae2afc352, after 25.12.5), consider a stable DUID derived from the site seed and the device's name (survives a WAN port or hardware change) with `sendclientid` set per line so DHCPv4 sends no RFC 4361 client-id. Changing it renumbers each device once: plan it, and never on an access point mid-apply.
@@ -135,6 +136,22 @@ over `src/server/`, and the React UI in `ui/`.
 
 - One root password is sent to every device: prefer keys only, the password only with password login on and no key.
 
+## From the full review (2026-10-17)
+
+- **Root's password on flash.** `/etc/onc/root-password` (0600) stays after `passwd` read it: deleting it would rewrite it, and run `passwd`, on every apply. Needs an engine kind of file that is stamped by a hash, not kept.
+- **Logging in after a password change was undone.** Root's password is not rewound by a rollback (it is said so per device), but an Undo or a reverted draft then logs in with the old one. A fallback to the previous live password would close it.
+- **Offline reinstall of removed packages** stages the feed's current version, not the one installed (`apk fetch`), and not its dependencies: fetch `name=version` once checked on a device with apk v3.
+- **Two adopts under one name** (two tabs, before a save) overwrite each other's facts and pin; only the draft's check stops it. Refusing a name with facts would break replacing a removed device, whose facts are kept on purpose.
+- **Two first-boot scripts:** low-level `build-images` (`getBuildPlan.getUciDefaultsScript`) and intents (`firmware/firstBoot.ts`). Profiles are found one way now (`findProfile`); merging the scripts changes low-level images.
+- **Shaping two lines on one port:** an untagged and a tagged line on one DSA port both shape the bare port (`sqm`, `portOf` without the VLAN): two cake queues on one device. Refuse, or shape per VLAN.
+- **Item pages by position:** `/firewall/rules/3` names a place, so a merge that inserts items can leave an open item page on another item.
+- **New-item pages off the field kit:** the VPN provider, remote-access client and site pages are built by hand (their own flows: a pasted file, a key shown once, an invitation), their errors in an alert rather than on the field.
+- **Equivalence corpus:** about a fifth of the seeded device × board outputs are errors, compared only as errors; generate intents that compile on more boards.
+- **mwan3 recording:** `scripts/mwan3-test.sh` records `logread` without `-t`; record with it and drop `withEpochs` (`src/tests/helpers/logread.ts`).
+- **Status on an invalid intent:** the Status pages go dark while the saved file fails a check, and this round added checks (root password, `dns.domain`, VLANs) an older file may fail. Status could compile the last valid settings instead.
+- **A renamed item moves to the end** of its list after `merge3`, with no conflict reported: only its order changes.
+- **A greyed value's reason** can be the ignoring rule's when another rule refuses it: say the refusing rule's first.
+
 ## Roadmap (2026-10-13)
 
 - **App updates in status.** The Apply sheet now names an app update, a fix or a change on the device per line (`src/applyChanges.ts`, a stamp of hashes beside the intent, `<intent>.state/applied/`). Still to do: Overview says "not applied" when the current app would write something other than what the stamp holds, without opening Apply (a compile against stored facts, no device read).
@@ -147,13 +164,14 @@ over `src/server/`, and the React UI in `ui/`.
     - `sysupgrade` keeping settings, then the first-boot script standing aside (`/etc/onc/applied`);
     - a downgrade to an older series with `sysupgrade -f` and the on-device `/etc/dropbear` tarball, coming up on the first-boot defaults under the same host key;
     - a factory reset coming up on those defaults;
-    - the router flashing itself and finishing at the collector's next start.
+    - the router flashing itself and finishing at the collector's next start (its wait for netifd's `pending` to clear, its reinstall retried by uci-defaults);
+    - the settings-kept flash writing the applied marker, and `clean` stopping a download left running.
     
     Checked so far on 25.12.5 in Docker: the device script's `room`, `fetch` (TLS from openwrt.org), sha256 check, `clean`, `keep-self` and its offline reinstall, `tar` of `/etc/dropbear`, and that `sysupgrade` takes `-f <tar.gz>`. Docker cannot run `sysupgrade` itself.
   - **The upgrade rig.** QEMU is on this Mac (Homebrew; `qemu-system-aarch64 -accel hvf` with OpenWrt's armsr/armv8 generic EFI image and `share/qemu/edk2-aarch64-code.fd`). The blocker is networking: user-mode (slirp) networking puts the VM behind NAT at 10.0.2.15, reachable only through a forwarded port, and the app assumes SSH on 22 (no port in a device's address). Either an SSH port per device (`hardware.*`/facts), vmnet (needs root on macOS), or a Linux CI runner with a tap bridge. The VM reaches ASU through the NAT, so fetching its image works. armsr's first boot has LAN static on eth0: give it two NICs.
   - **Upgrades done outside the app** (LuCI's Attended Sysupgrade, `owut`) on the router running it lose the app: the package could ship its own `/lib/upgrade/keep.d` list and `/etc/onc/`, though the package itself is still not reinstalled. A router-hosted app should say so in System › Firmware.
-  - **After a stopped upgrade,** the devices already upgraded keep their settings but have not been applied to: the Firmware tab could offer Apply right there.
+  - **Mesh depth in the flash order.** Mesh repeaters go first but in Hardware order, not deepest first (`meshOrder.ts`, as an apply orders them); one at a time with each back before the next, it matters only for which is stranded when one fails.
   - **Status during an upgrade:** Overview and the Apply sheet show the run as an apply; its firmware steps are shown only in the Firmware tab.
-- **Status pages, simpler.** Rework the Status pages to be more intuitive and useful at a glance: fewer, clearer numbers, what changed and what needs doing first.
+- **Status redesign.** Planned in `docs/status-redesign.md` (decided 2026-10-15): a verdict first, a page for each client and device, status first with settings as its own mode, events made from reads, a client registry, history kept on flash. Six phases, data first.
 - **More features.** Captive portal (guest network), ad blocking, scheduled firewall rules (block at times), people and device groups (James's iPhone and iPad off at 7 pm), more VPN options (servers, types), and a little more for OpenWrt power users.
 - **Simple by default, advanced on demand.** Keep the intent and UI simple, with advanced panels that expand: every advanced setting has a sane default that is shown (and marked recommended) even when collapsed, so simple users never need them and power users can see and change what the defaults are, in the same UI.

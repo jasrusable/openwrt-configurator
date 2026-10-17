@@ -1,15 +1,18 @@
 // Logging in to the app where it runs on a router (src/server/auth.ts): POST
 // /api/login {password} gives a session (a cookie) for the router's root
-// password, POST /api/logout ends it. Wrong passwords are counted per client.
-import { shellQuote } from "../../shell";
+// password, POST /api/logout ends it. Wrong passwords are counted per client,
+// and only per client: a ceiling for everyone together is one any client with
+// a few addresses could fill, locking the owner out. This only slows a
+// browser; it is not the router's limit, as rpcd's session login is reachable
+// through LuCI's /ubus without it.
 import { HttpResponse, Platform } from "../../platform";
 import { Auth, LoginResult, sessionSetCookie } from "../auth";
 import { json, refuse, Route, withBody } from "../router";
 import { stateLayout } from "../../store";
 
-const withCookie = (response: HttpResponse, sid: string | undefined): HttpResponse => ({
+const withCookie = (response: HttpResponse, sid: string | undefined, secure: boolean): HttpResponse => ({
   ...response,
-  headers: { ...response.headers, "set-cookie": sessionSetCookie(sid) },
+  headers: { ...response.headers, "set-cookie": sessionSetCookie(sid, secure) },
 });
 
 /**
@@ -34,8 +37,6 @@ export const clientOf = (remote: string) => {
 
 /** Wrong passwords allowed within the window, from one client, before its logins pause. */
 const loginAttempts = 5;
-/** From everyone together: a client with many addresses (IPv6 has endless) is held by this. */
-const loginAttemptsAll = 30;
 const loginWindowMs = 60_000;
 
 export const sessionRoutes = ({
@@ -46,7 +47,7 @@ export const sessionRoutes = ({
   now = Date.now,
 }: {
   auth: Auth;
-  platform: Pick<Platform, "sleep" | "writeTextFile" | "removeFile" | "run">;
+  platform: Pick<Platform, "sleep" | "privateDir" | "writeTextFile" | "listDir" | "removeFile">;
   intentPath: string;
   /** Where attempts are counted: RAM on a router (/tmp), as each one is a file written. */
   attemptsDir?: string;
@@ -56,7 +57,7 @@ export const sessionRoutes = ({
     path: "/api/logout",
     POST: async (request) => {
       await auth.logout(request);
-      return withCookie(json(200, { ok: true }), undefined);
+      return withCookie(json(200, { ok: true }), undefined, !!request.secure);
     },
   },
   {
@@ -76,41 +77,25 @@ export const sessionRoutes = ({
       // The directory must be this program's alone (in /tmp, anyone may make
       // it first): another owner could plant attempts, locking the owner out,
       // or remove them, beating the count.
-      const q = shellQuote;
-      const listed = await platform
-        .run([
-          "sh",
-          "-c",
-          [
-            `umask 077; mkdir -p ${q(dir)}`,
-            `set -- $(ls -ld ${q(dir)}); case "$1" in drwx------*) ;; *) exit 9 ;; esac; [ -O ${q(dir)} ] || exit 9`,
-            `: > ${q(`${dir}/${mine}`)}`,
-            `ls ${q(dir)}`,
-          ].join("\n"),
-        ])
-        .catch(() => ({ code: 1, stdout: "" }));
-      if (listed.code !== 0) return refuse("internal", `Logins are off: ${dir} is not this app's own (owned by it, mode 700).`);
-      const recent = listed.stdout
-        .split("\n")
-        .map((name) => name.trim())
+      try {
+        platform.privateDir(dir);
+        platform.writeTextFile(`${dir}/${mine}`, "");
+      } catch {
+        return refuse("internal", `Logins are off: ${dir} is not this app's own (owned by it, mode 700).`);
+      }
+      const recent = platform
+        .listDir(dir)
         .filter((name) => {
           const at = Number(name.split("-")[0]);
-          if (!name || !Number.isFinite(at)) return false;
+          if (!Number.isFinite(at)) return false;
           if (now() - at >= loginWindowMs) {
             platform.removeFile(`${dir}/${name}`);
             return false;
           }
           return true;
         });
-      const fromClient = recent.filter((name) => name.split("-")[1] === client);
-      // The ceiling counts only passwords actually checked (a refused attempt
-      // is marked "-r"): else one client hammering past its own limit would
-      // fill it, and lock the owner out from everywhere.
-      const checked = recent.filter((name) => !name.endsWith("-r"));
-      if (fromClient.length > loginAttempts || checked.length > loginAttemptsAll) {
-        // Kept, for its own client's pause (only itself: counted per client), but marked refused.
-        platform.writeTextFile(`${dir}/${mine}-r`, "");
-        platform.removeFile(`${dir}/${mine}`);
+      if (recent.filter((name) => name.split("-")[1] === client).length > loginAttempts) {
+        // Kept: it counts toward its own client's pause.
         return refuse("rate-limited", "Too many wrong passwords: wait a minute and try again.");
       }
       const result: LoginResult = typeof password === "string" && password ? await auth.login(password) : { refused: "wrong" };
@@ -124,7 +109,7 @@ export const sessionRoutes = ({
           : refuse("unauthorized", "That is not the router's password.");
       }
       platform.removeFile(`${dir}/${mine}`);
-      return withCookie(json(200, { ok: true }), result.sid);
+      return withCookie(json(200, { ok: true }), result.sid, !!request.secure);
     }),
   },
 ];

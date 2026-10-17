@@ -12,7 +12,8 @@ export const useInspect = () => useMutation({ mutationFn: inspectDevice });
 export const useAdopt = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ address, name }: { address: string; name: string }) => adoptDevice(address, name),
+    mutationFn: ({ address, name, fingerprint }: { address: string; name: string; fingerprint: string }) =>
+      adoptDevice(address, name, fingerprint),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["devices"] }),
   });
 };
@@ -24,7 +25,8 @@ export const useInspectReset = () =>
 export const useReadopt = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ address, name }: { address: string; name: string }) => readoptDevice(address, name),
+    mutationFn: ({ address, name, fingerprint }: { address: string; name: string; fingerprint: string }) =>
+      readoptDevice(address, name, fingerprint),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["devices"] }),
   });
 };

@@ -5,7 +5,12 @@ import { DeviceStatus, parseHeardBy, parseTraffic } from "../../status/device";
 import { activityOf, attentionOf, clientsOf, devicesOf, internetCountersOf, keepActivity, restartable } from "../../status/views";
 import { printPlan } from "../../lowLevel/print";
 import { compileIntent } from "../../intent/compile";
-import { neighboursOf, parseSpeed, parseSurvey } from "../../status/actions";
+import { neighboursOf, oneAtATime, parseSpeed, parseSurvey } from "../../status/actions";
+import { join } from "path";
+import { nodePlatform } from "../../platforms/node";
+import { ok, Result } from "../../result";
+import type { Problem } from "../../problem";
+import { tempDir } from "../helpers/tempDir";
 
 const sample = () =>
   sampleIntent();
@@ -139,6 +144,16 @@ test("activity: log lines in words, newest first; the rest left out", (t) => {
     ["Port eth1 disconnected", "down"],
     [`${intent.networks[0].name} came up`, "up"],
   ]);
+});
+
+test("actions: one at a time of any kind: another kind while one runs is told so", async (t) => {
+  const intentPath = join(tempDir("actions"), "intent.json");
+  let release = () => {};
+  const first = oneAtATime(nodePlatform, intentPath, () => new Promise<Result<string, Problem>>((r) => (release = () => r(ok("survey")))));
+  t.like(await oneAtATime(nodePlatform, intentPath, async () => ok("restart")), { ok: false, error: { kind: "busy" } });
+  release();
+  t.like(await first, { ok: true, value: "survey" });
+  t.like(await oneAtATime(nodePlatform, intentPath, async () => ok("restart")), { ok: true, value: "restart" });
 });
 
 test("speed: bits over the router's uptime clock", (t) => {

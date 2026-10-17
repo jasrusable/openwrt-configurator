@@ -135,8 +135,12 @@ test("a device read in time is not marked failed when its time limit passes afte
   writeFacts(nodePlatform, path, { hostname: "home-router", readAt: 1, schema });
   const { platform } = network({ "10.0.0.1": { board: board(schema.name), macs: ["aa:bb:cc:00:00:09"], key: "ROUTER-KEY" } });
   const now = factsMaxAgeMs + 5000;
-  await refreshStale({ intentPath: path, platform: { ...platform, sleep: () => new Promise<void>((r) => setTimeout(r, 30)) }, now: () => now });
-  await new Promise((r) => setTimeout(r, 80));
+  // The time limit passes only when the test says so: after the read.
+  const limits: (() => void)[] = [];
+  await refreshStale({ intentPath: path, platform: { ...platform, sleep: () => new Promise<void>((r) => limits.push(r)) }, now: () => now });
+  t.true(limits.length > 0);
+  limits.forEach((pass) => pass());
+  await new Promise((r) => setImmediate(r));
   t.is(readFailures(nodePlatform, path, ["home-router"])["home-router"], undefined);
   t.is(readFacts(nodePlatform, path, ["home-router"])["home-router"]?.readAt, now);
 });

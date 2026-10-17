@@ -2,14 +2,12 @@
 // whether the settings need it at all; each device's facts (model, target,
 // release, radios) decide the rest. Pure, so System › Patches (with the draft),
 // the API and Status say the same.
-import type { DeviceSchema } from "../../deviceSchema";
 import { deviceLookup } from "../../plan/device";
-import { evaluateChecked, when } from "../../plan/when";
-import { compareReleases } from "../../release";
+import { evaluateChecked, Lookup } from "../../plan/when";
 import { compileFeatures } from "../compile";
 import type { Intent } from "../schema";
 import { patches } from "./index";
-import { amendedSettings, describeTarget, effectsOf, Patch } from "./patch";
+import { amendedSettings, describeTarget, effectsOf, Facts, Patch, targetParts } from "./patch";
 
 /**
  * What a fix does on a device: active; turned off by you; not needed by
@@ -30,26 +28,27 @@ export type FixView = Pick<Patch, "id" | "title" | "why" | "kind" | "note" | "re
   devices: DeviceFix[];
 };
 
-/** Each device's facts, as stored (deviceFacts.ts): only its schema is read. */
-export type Facts = Record<string, { schema: DeviceSchema } | undefined>;
-
+/**
+ * A fix on one device, by the first part of its target (targetParts, the
+ * engine's own condition) the device misses: its role from the intent, the
+ * rest from its facts.
+ */
 const onDevice = (patch: Patch, intent: Intent, device: Intent["hardware"][number], facts: Facts): Omit<DeviceFix, "device"> => {
   if ((intent.system.patches?.off ?? []).includes(patch.id)) return { state: "off", why: "turned off" };
   if (patch.applies && !patch.applies(intent)) return { state: "unused", why: "not needed by your settings" };
-  const { models, targets, roles, releases, requires } = patch.target;
-  if (roles && !roles.includes(device.role)) return { state: "elsewhere", why: `only on ${roles.map((r) => `${r}s`).join(" and ")}` };
+  const parts = targetParts(patch.target);
+  const role = parts.find((part) => part.role);
+  const byRole: Lookup = (name) => ({ value: name === "device.tag.role" ? device.role : undefined });
+  if (role && !evaluateChecked(role.when, byRole)) return { state: "elsewhere", why: `only ${role.words}` };
   const schema = facts[device.name]?.schema;
   if (!schema) return { state: "unknown", why: "not read yet" };
   const lookup = deviceLookup({ hostname: device.name, tags: { role: device.role } }, schema);
-  const holds = (condition: Parameters<typeof evaluateChecked>[0]) => evaluateChecked(condition, lookup);
-  if (models && !holds(when.oneOf("device.model_id", models))) return { state: "elsewhere", why: `only on ${models.join(" or ")}` };
-  if (targets && !holds(when.oneOf("device.target", targets))) return { state: "elsewhere", why: `only on ${targets.join(" or ")}` };
-  if (requires && !holds(requires.when)) return { state: "elsewhere", why: `only where it ${requires.note}` };
-  if (releases?.from && (compareReleases(schema.version, releases.from) ?? 0) < 0)
-    return { state: "elsewhere", why: `from OpenWrt ${releases.from}; it runs ${schema.version}` };
-  if (releases?.before && (compareReleases(schema.version, releases.before) ?? -1) >= 0)
-    return { state: "fixed", why: `fixed in OpenWrt ${releases.before}; it runs ${schema.version}` };
-  return { state: "active" };
+  const missed = parts.find((part) => !evaluateChecked(part.when, lookup));
+  if (!missed) return { state: "active" };
+  const runs = missed.release ? `; it runs ${schema.version}` : "";
+  return missed.fixed
+    ? { state: "fixed", why: `fixed in OpenWrt ${missed.release}${runs}` }
+    : { state: "elsewhere", why: `only ${missed.words}${runs}` };
 };
 
 /**

@@ -5,9 +5,13 @@
 // has none), and an octet over 255 makes fw4 skip the rule (verified on
 // 25.12.5).
 
+/** One decimal octet, without leading zeros: musl's inet_pton (OpenWrt's) refuses 010. */
+const octet = "(0|[1-9]\\d{0,2})";
+const ipv4Pattern = new RegExp(`^${octet}\\.${octet}\\.${octet}\\.${octet}$`);
+
 /** An IPv4 address as a number, or undefined if it is not one. */
 export const parseIpv4 = (address: string) => {
-  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(address);
+  const match = ipv4Pattern.exec(address);
   const octets = match?.slice(1).map(Number);
   return octets && octets.every((o) => o <= 255)
     ? octets.reduce((n, o) => n * 256 + o, 0)
@@ -36,7 +40,7 @@ export const isAddressOrRange = (value: string) => {
   if (rest.length) return false;
   const bits = parseIpv4(address) !== undefined ? 32 : isIpv6Address(address) ? 128 : undefined;
   if (bits === undefined) return false;
-  return length === undefined || (/^\d{1,3}$/.test(length) && Number(length) <= bits);
+  return length === undefined || (/^(0|[1-9]\d{0,2})$/.test(length) && Number(length) <= bits);
 };
 
 /** A port: 1 to 65535. */
@@ -59,10 +63,26 @@ export const parseCidr = (cidr: string) => {
   const [address, length] = cidr.split("/");
   const start = parseIpv4(address ?? "");
   const bits = Number(length);
-  if (start === undefined || !Number.isInteger(bits) || bits < 8 || bits > 32) return undefined;
+  if (start === undefined || !/^[1-9]\d?$/.test(length ?? "") || bits < 8 || bits > 32) return undefined;
   const size = 2 ** (32 - bits);
   return start % size === 0 ? { start, size } : undefined;
 };
+
+/** The range an address with its prefix length is in: 10.64.0.2/24 → 10.64.0.0/24. */
+export const rangeOf = (addressWithPrefix: string) => {
+  const [address, length] = addressWithPrefix.split("/");
+  const at = parseIpv4(address ?? "");
+  const size = 2 ** (32 - Number(length ?? 32));
+  if (at === undefined || !Number.isInteger(size)) return undefined;
+  const start = at - (at % size);
+  return `${[24, 16, 8, 0].map((shift) => Math.floor(start / 2 ** shift) % 256).join(".")}/${length ?? 32}`;
+};
+
+/** The first three parts of a network's /24: "10.0.99" for 10.0.99.0/24. */
+export const prefixOf = (subnet: string) => subnet.split(".").slice(0, 3).join(".");
+
+/** A host's address in a network's /24 by its number: the router's is 1. */
+export const hostIn = (subnet: string, host: number) => `${prefixOf(subnet)}.${host}`;
 
 /** Whether two IPv4 ranges share any address. */
 export const overlaps = (a: string, b: string) => {

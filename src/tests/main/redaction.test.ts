@@ -9,7 +9,8 @@ import { availability } from "../../intent/choices";
 import { printPlan } from "../../lowLevel/print";
 import { compileIntent } from "../../intent/compile";
 import { intentSchema } from "../../intent/schema";
-import { redactSecretFields } from "../../secrets";
+import { findPlaintextSecrets, redactSecretFields } from "../../secrets";
+import { getUciCommands } from "../../engine/getUciCommands";
 import { redactor } from "../../secretOptions";
 
 const root = join(__dirname, "../../..");
@@ -58,4 +59,17 @@ test("the dry run of an intent hides every secret, though none came from the key
   for (const secret of secretsOf(intent)) t.false(script.includes(secret), `${secret.slice(0, 4)}… printed`);
   t.regex(script, /<redacted>/);
   t.true(getDeviceScript({ state }).join("\n").includes("root-pass-SECRET"), "and they are there unredacted");
+});
+
+test("a secret is one by its option whatever its type: a numeric password is hidden, a flag or number elsewhere is not", (t) => {
+  const commands = getUciCommands({
+    openWrtConfig: { network: { interface: [{ ".name": "wan", password: 12345678, metric: 10, auto: true }] } },
+    redact: redactor((value) => (value === "1" || value === "10" ? "<by value>" : value)),
+  }).join("\n");
+  t.false(commands.includes("12345678"));
+  t.true(commands.includes("uci set network.wan.password='<redacted>'"));
+  t.true(commands.includes("uci set network.wan.metric='10'"), "only an original string is matched by value");
+  t.true(commands.includes("uci set network.wan.auto='1'"));
+  t.deepEqual(redactSecretFields({ password: 12345678, metric: 10 }), { password: "<redacted>", metric: 10 });
+  t.deepEqual(findPlaintextSecrets({ wan: { password: 12345678 } }), ["wan.password"]);
 });

@@ -4,7 +4,7 @@ import { deviceToJson, fileToJson, serviceToJson } from "./names";
 import { isPlaceholder, keepText, Options, Placeholder, Plan, Scalar, Section, Value } from "../plan/types";
 import { writePlaceholder, writeText } from "./placeholders";
 import { printWhen, When } from "../plan/when";
-import { orderConfigs, orderOptions, orderTypes } from "../engine/uciOrder";
+import { orderConfigs, orderOptions, orderTypes } from "../plan/uciOrder";
 
 /** A value as written at `config.type.option`: placeholders and plain texts each as they read back. */
 const printValue = (at: string, value: Value): unknown => {
@@ -15,8 +15,6 @@ const printValue = (at: string, value: Value): unknown => {
 
 const printOptions = (config: string, type: string, options: Options) =>
   Object.fromEntries(Object.entries(orderOptions(config, type, options)).map(([key, value]) => [key, printValue(`${config}.${type}.${key}`, value)]));
-
-/** A keep as the low-level JSON writes it. */
 
 const condition = (when: When | undefined) => (when ? { ".if": printWhen(when) } : {});
 

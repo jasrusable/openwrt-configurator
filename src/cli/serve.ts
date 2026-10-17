@@ -13,9 +13,15 @@ import { cgiRequest, cgiResponse } from "../server/cgi";
 import { routerNames } from "../server/hosts";
 import { runCollector } from "../status/collector";
 import { CliContext } from "./context";
+import { messageOf } from "../result";
 
-/** On a router: what the collector reads, in RAM (never flash: it is rewritten every few seconds). */
+/**
+ * On a router, in RAM (never flash: rewritten every few seconds): what the
+ * collector reads, and the login attempts counted. In /tmp, where any process
+ * may take a name first, so each is used only as this app's own (privateDir).
+ */
 const routerStatusDir = "/tmp/onc-collector";
+const routerLoginAttemptsDir = "/tmp/onc-login-attempts";
 
 const uiOptions = (uiDir: string): OptionSpec[] => [
   {
@@ -73,6 +79,7 @@ export const collectCommand = ({ platform }: CliContext): CommandSpec => ({
     // The first start after the router flashed itself: finished as that run would have (src/firmware/self.ts).
     const finished = await finishSelfUpgrade({ intentPath, platform }).catch(() => undefined);
     if (finished) console.error(finished.message);
+    platform.privateDir(options.dir);
     await runCollector({ intentPath, platform, dir: options.dir, everyHour: () => readReleases({ intentPath, platform }) });
   },
 });
@@ -86,13 +93,24 @@ export const cgiCommand = ({ platform, uiDir }: CliContext): CommandSpec => ({
   action: async ([intentPath], options) => {
     const names = routerNames(intentFileOrNothing(platform, intentPath));
     const request = cgiRequest(platform.env, names, platform.readStdin);
+    const refusal = ({ refused, error }: { refused: number; error: string }) => ({
+      status: refused,
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ error }),
+    });
+    const statusDirRefused = (() => {
+      try {
+        platform.privateDir(routerStatusDir);
+        return undefined;
+      } catch (thrown) {
+        return { refused: 500, error: messageOf(thrown) };
+      }
+    })();
     const response =
       "refused" in request
-        ? {
-            status: request.refused,
-            headers: { "content-type": "application/json; charset=utf-8" },
-            body: JSON.stringify({ error: request.error }),
-          }
+        ? refusal(request)
+        : statusDirRefused
+        ? refusal(statusDirRefused)
         : await uiHandler({
             intentPath,
             uiRoot: options.uiDir,
@@ -100,7 +118,7 @@ export const cgiCommand = ({ platform, uiDir }: CliContext): CommandSpec => ({
             // On a router, reachable from the network: log in with its root password.
             auth: rpcdAuth(platform),
             // Counted in RAM, not flash: every attempt is a file.
-            loginAttemptsDir: "/tmp/onc-login-attempts",
+            loginAttemptsDir: routerLoginAttemptsDir,
             // What the collector service (`collect`) keeps, in RAM.
             statusDir: routerStatusDir,
           })(request);
