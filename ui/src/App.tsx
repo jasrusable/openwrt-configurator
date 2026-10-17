@@ -28,6 +28,8 @@ import { UpdateDot } from "./kit/UpdateDot";
 import { AppIcon, StatusDot } from "./kit/layout";
 import { settingsPages, statusPages } from "./pages";
 import { ApplyModal } from "./provision/ApplyModal";
+import { Finder } from "./Finder";
+import { useLanding } from "./form/landing";
 import { ProvisionButton } from "./provision/ProvisionButton";
 
 /**
@@ -146,6 +148,7 @@ const Shell = () => {
   const [navOpen, nav] = useDisclosure(false);
   const site: string = useDraftValue("system.name") || "Network";
   const dirty = useDraftChanged();
+  useLanding();
   useEffect(() => {
     document.title = site;
   }, [site]);
@@ -174,6 +177,7 @@ const Shell = () => {
             </Text>
           </Group>
           <Group gap="xs" wrap="nowrap">
+            <Finder />
             <SaveBar />
             {/* While there are edits, Save leads; Apply waits for them. */}
             <ProvisionButton quiet={dirty} />

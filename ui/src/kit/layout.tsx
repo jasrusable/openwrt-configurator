@@ -167,6 +167,7 @@ export const SettingRow = ({
   openwrt,
   explain,
   marks,
+  setting,
   children,
 }: {
   label: ReactNode;
@@ -178,12 +179,14 @@ export const SettingRow = ({
   explain?: string;
   /** Beside the label: what overrides it now (a fix's chip, src/intent/patches/marks.ts). */
   marks?: ReactNode;
+  /** The setting it edits (a dotted path): where a link to it lands (form/landing.ts). */
+  setting?: string;
   children?: ReactNode;
 }) => {
   const id = useId();
   const ids = { label: `${id}-label`, description: `${id}-description` };
   return (
-    <Group justify="space-between" gap="md" px="md" py={10} mih={52} className="onc-row">
+    <Group justify="space-between" gap="md" px="md" py={10} mih={52} className="onc-row" data-setting={setting}>
       <Box style={{ flex: 1, minWidth: 0 }}>
         <Group gap={4} wrap="nowrap">
           {/* A div: a label may be an icon and a name, which a paragraph cannot hold. */}

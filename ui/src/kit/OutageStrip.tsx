@@ -60,7 +60,7 @@ export const OutageStrip = ({ points, range, now = Date.now(), label }: { points
               h={22}
               style={{
                 flex: 1,
-                minWidth: 3,
+                minWidth: 1,
                 borderRadius: 3,
                 background: cell.read ? `var(--mantine-color-${toneColor[cellTone(cell.share)]}-6)` : "var(--onc-separator)",
                 opacity: cell.read ? 0.9 : 1,
@@ -69,7 +69,7 @@ export const OutageStrip = ({ points, range, now = Date.now(), label }: { points
           </Hint>
         ))}
       </Group>
-      <Text size="sm" fw={600} style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+      <Text size="sm" fw={600} style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", flexShrink: 0 }}>
         {share === undefined ? "—" : `${share === 1 ? "100" : (Math.floor(share * 10000) / 100).toFixed(2)}% up`}
       </Text>
     </Group>

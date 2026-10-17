@@ -4,11 +4,11 @@
 // run on 25.12.5 over dbclient: a detached one answers at once and runs after
 // the session closes; a reboot answers, then goes down.
 import test from "ava";
-import { writeFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { nodePlatform } from "../../platforms/node";
 import { uiHandler } from "../../server/app";
-import { parsePing, pingTarget, stillRebooting, withRebooting } from "../../status/actions";
+import { parsePing, parseTraceroute, pingTarget, stillRebooting, withRebooting } from "../../status/actions";
 import { sampleIntentText } from "../helpers/fixtures";
 import { tempDir } from "../helpers/tempDir";
 
@@ -19,6 +19,16 @@ test("a ping's summary: sent, answered and the average; none when ping could not
   );
   t.deepEqual(parsePing("4 packets transmitted, 0 packets received, 100% packet loss\n"), { sent: 4, received: 0 });
   t.is(parsePing("ping: bad address 'no.such.host'\n"), undefined);
+});
+
+// Recorded from busybox 1.37.0 in the 25.12.5 rootfs, the addresses replaced with documentation ones.
+test("a traceroute's hops: who answered and in what time, a lost probe counted", (t) => {
+  const hops = parseTraceroute(readFileSync(join(__dirname, "../helpers/status/traceroute.txt"), "utf8"));
+  t.is(hops.length, 7);
+  t.deepEqual(hops[0], { hop: 1, address: "192.0.2.1", ms: [0.005, 0.003], lost: 0 });
+  t.deepEqual(hops[2], { hop: 3, address: "100.64.0.1", ms: [5.474], lost: 1 });
+  t.deepEqual(hops[6], { hop: 7, ms: [], lost: 2 });
+  t.deepEqual(parseTraceroute("traceroute: bad address 'nosuch.invalid'\n"), []);
 });
 
 test("a ping's target is an address or a name, never an option or shell text", (t) => {
@@ -48,5 +58,6 @@ test("the action routes refuse what they cannot act on before reaching any devic
   t.is((await post("/api/device/reboot", {})).status, 400);
   t.is((await post("/api/device/wifi-restart", { device: "" })).status, 400);
   t.is((await post("/api/device/ping", { device: "home-router", target: "-f" })).status, 400);
+  t.is((await post("/api/device/traceroute", { device: "home-router", target: "$(reboot)" })).status, 400);
   t.is((await post("/api/device/reboot", { device: "no-such-device" })).status, 404);
 });

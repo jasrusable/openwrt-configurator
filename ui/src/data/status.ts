@@ -8,7 +8,7 @@ import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/re
 import type { NetworkEvent } from "../../../src/status/events";
 import type { Tone } from "../../../src/status/health";
 import type { NetworkStatus } from "../../../src/status/network";
-import { loadClient, loadEvents, loadNetworkStatus, loadSpeedTests, pingFrom, rebootDevice, restartService, restartWifi, runSpeedTest, runWifiSurvey } from "./api";
+import { loadClient, loadEvents, loadNetworkStatus, loadSpeedTests, pingFrom, tracerouteFrom, rebootDevice, restartService, restartWifi, runSpeedTest, runWifiSurvey } from "./api";
 
 export const statusKey = ["network-status"] as const;
 
@@ -71,6 +71,7 @@ export const useReboot = () => {
 export const useRestartWifi = () => useMutation({ mutationFn: restartWifi });
 
 export const usePing = () => useMutation({ mutationFn: ({ device, target }: { device: string; target: string }) => pingFrom(device, target) });
+export const useTraceroute = () => useMutation({ mutationFn: ({ device, target }: { device: string; target: string }) => tracerouteFrom(device, target) });
 
 /** Each access point's survey: on request, as a scan can briefly disturb its clients. */
 export const useWifiSurvey = () => useMutation({ mutationFn: runWifiSurvey });

@@ -34,6 +34,8 @@ export type PlanItem = {
   devices: string[];
   effect: { disruption: Disruption; notices: string[] };
   lines: DeviceLines[];
+  /** A change on a device: the settings its lines come from (dotted paths), so their rows can say so. */
+  settings?: string[];
 };
 
 /**
@@ -220,9 +222,13 @@ export const buildApplyPlan = ({
   const caused = edits.map((change) => edited.filter((u) => u.change && fromEdit(u.change, change.path)));
   const rest = edited.filter((u) => !caused.some((c) => c.includes(u)));
   const byDevice = (source: PlanSource, title: (device: string) => string, units: Unit[]) =>
-    groupBy(units, (u) => u.device).map(([device, onDevice]) =>
-      item({ id: `${source}:${device}`, source, title: title(device), why: sourceWords[source as Exclude<PlanSource, "edit">] }, onDevice)
-    );
+    groupBy(units, (u) => u.device).map(([device, onDevice]) => {
+      const settings = [...new Set(onDevice.flatMap((u) => u.change?.setting ?? u.change?.item ?? []))];
+      return {
+        ...item({ id: `${source}:${device}`, source, title: title(device), why: sourceWords[source as Exclude<PlanSource, "edit">] }, onDevice),
+        ...(settings.length ? { settings } : {}),
+      };
+    });
 
   const items = [
     ...(of("first").length ? [item({ id: "first", source: "first", title: "Every setting", why: sourceWords.first }, of("first"))] : []),

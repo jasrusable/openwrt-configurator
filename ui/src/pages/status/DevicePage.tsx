@@ -19,7 +19,7 @@ import { eventTone, useNetworkStatus, useRestartService } from "../../data/statu
 import { duration } from "../../facts";
 import { useDraftValue } from "../../form/draft";
 import { PortFace } from "../../kit/charts";
-import { dbm, Facts, Panel, percent, StatusPage, ToneDot, ToneValue, Verdict } from "../../kit/status";
+import { dbm, EditLink, Facts, Panel, percent, StatusPage, ToneDot, ToneValue, Verdict } from "../../kit/status";
 import { TimeChart } from "../../kit/TimeChart";
 import { DeviceActions } from "./DeviceActions";
 import { AttentionRows, clientName, deviceState, RangeSwitch, eventsAbout, eventTime, kindIcon, liveLine, modeWords, ThingIcon, uplinkWords } from "./shared";
@@ -203,7 +203,7 @@ export const DevicePage = ({ name }: { name: string }) => {
         </>
       )}
       {radios.length > 0 && (
-        <Panel title="Radios" padded={false}>
+        <Panel title="Radios" padded={false} actions={<EditLink setting={`hardware.${index}.radios`} label="Channels ›" />}>
           <Table.ScrollContainer minWidth={560} type="native">
             <Table verticalSpacing={8} horizontalSpacing="md" withRowBorders={false}>
               <Table.Thead>
@@ -249,7 +249,7 @@ export const DevicePage = ({ name }: { name: string }) => {
         </Panel>
       )}
       {mesh && (mesh.links.length > 0 || intent.hardware[index].uplink === "mesh") && (
-        <Panel title="Mesh links" padded={false}>
+        <Panel title="Mesh links" padded={false} actions={<EditLink setting="wifi.mesh" />}>
           {mesh.links.length ? (
             mesh.links.map((l) => <MeshLink key={l.to} from={name} to={l.to} throughput={l.throughput} />)
           ) : (
@@ -287,7 +287,10 @@ export const DevicePage = ({ name }: { name: string }) => {
           {live.networks.map((n) => (
             <Group key={n.id} justify="space-between" px="md" py={8} wrap="nowrap" className="onc-list-row" style={{ cursor: "default" }}>
               <Stack gap={0}>
-                <Text size="sm">{n.name || n.id}</Text>
+                <Group gap={8} wrap="nowrap">
+                  <Text size="sm">{n.name || n.id}</Text>
+                  <EditLink setting={`networks.${intent.networks.findIndex((x) => x.id === n.id)}`} />
+                </Group>
                 <Text size="xs" c="dimmed">
                   {intent.networks.find((x) => x.id === n.id)?.subnet}
                 </Text>
@@ -300,7 +303,7 @@ export const DevicePage = ({ name }: { name: string }) => {
         </Panel>
       )}
       {role === "router" && live?.vpn && (live.vpn.clients.length || live.vpn.sites.length || live.vpn.tunnels.length) ? (
-        <Panel title="VPN" padded={false}>
+        <Panel title="VPN" padded={false} actions={<EditLink setting="vpn" />}>
           {[...live.vpn.clients.map((c) => ({ ...c, kind: "Remote client" })), ...live.vpn.sites.map((s) => ({ ...s, kind: "Linked site" }))].map(({ name: peer, since, kind }) => {
             const p = peerState(since);
             return (
@@ -340,7 +343,7 @@ export const DevicePage = ({ name }: { name: string }) => {
           <Facts
             cols={{ base: 2 }}
             items={[
-              ["OpenWrt", device?.version],
+              ["OpenWrt", device?.version, `hardware.${index}.firmware`],
               ["Model", device?.model],
               ["Update", update ? <Anchor key="u" href={releaseNotesUrl(update)} target="_blank" rel="noreferrer" size="sm">{update} is out</Anchor> : "Up to date"],
               ["Up for", device?.uptime ? duration(device.uptime) : undefined],
@@ -369,7 +372,7 @@ export const DevicePage = ({ name }: { name: string }) => {
         {events.length ? (
           events.slice(0, 30).map((e, i) => (
             <Group key={`${e.at}-${i}`} gap="sm" px="md" py={8} wrap="nowrap" className="onc-list-row" style={{ cursor: "default" }}>
-              <Text size="xs" c="dimmed" w={70} style={{ flexShrink: 0 }}>
+              <Text size="xs" c="dimmed" w={84} style={{ flexShrink: 0, whiteSpace: "nowrap" }}>
                 {eventTime(e.at)}
               </Text>
               <ToneDot tone={eventTone(e)} />
@@ -387,7 +390,7 @@ export const DevicePage = ({ name }: { name: string }) => {
           <Stack gap={0} p="md" style={{ maxHeight: 320, overflow: "auto" }}>
             {[...device.log].reverse().map((l, i) => (
               <Group key={i} gap="sm" wrap="nowrap" align="baseline">
-                <Text size="xs" c="dimmed" w={70} style={{ flexShrink: 0 }}>
+                <Text size="xs" c="dimmed" w={84} style={{ flexShrink: 0, whiteSpace: "nowrap" }}>
                   {eventTime(l.at)}
                 </Text>
                 <Stack gap={0} style={{ minWidth: 0 }}>

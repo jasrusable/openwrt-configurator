@@ -9,9 +9,10 @@ import type { Releases } from "../../../src/firmware/target";
 import type { SelfUpgradeResult } from "../../../src/firmware/self";
 import type { NetworkStatus } from "../../../src/status/network";
 import type { History, Range } from "../../../src/status/history";
-import type { SpeedTest, Survey } from "../../../src/status/actions";
+import type { SpeedTest, Survey, TraceHop } from "../../../src/status/actions";
 import type { NetworkEvent } from "../../../src/status/events";
 import type { KnownClient } from "../../../src/status/registry";
+import type { ClientMove } from "../../../src/status/moves";
 import type { Intent } from "../../../src/intent/schema";
 import type { ProvisionStatus } from "../../../src/server/provisionJob";
 
@@ -256,6 +257,10 @@ export const restartWifi = (device: string) =>
 export const pingFrom = (device: string, target: string) =>
   postJson<{ sent: number; received: number; averageMs?: number }>("api/device/ping", { device, target }, "The ping did not run.");
 
+/** The route from a device to an address: each hop, who answered and in what time. */
+export const tracerouteFrom = (device: string, target: string) =>
+  postJson<{ hops: TraceHop[] }>("api/device/traceroute", { device, target }, "The traceroute did not run.");
+
 /** The router's speed now, down and up, and how its round trip grows under load: about half a minute. */
 export const runSpeedTest = () => postJson<SpeedTest>("api/internet/speed", {}, "The speed test did not finish.");
 
@@ -267,7 +272,7 @@ export const loadEvents = (since = 0) => getJson<NetworkEvent[]>(`api/events/${s
 
 /** One client as remembered, and its own series for the last day. */
 export const loadClient = (mac: string) =>
-  getJson<{ known?: KnownClient; history: History }>(`api/clients/${encodeURIComponent(mac)}`, "Could not read this device.");
+  getJson<{ known?: KnownClient; history: History; moves: ClientMove[] }>(`api/clients/${encodeURIComponent(mac)}`, "Could not read this device.");
 
 /** OpenWrt's latest stable release. */
 /** OpenWrt's releases, as last read (asked again when a day old), and why a fresh ask failed. */

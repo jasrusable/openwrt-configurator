@@ -6,9 +6,9 @@
 // (GET /api/history, or /api/history/<since ms>; /api/history/month for 30
 // days at 15 minutes): whole, or what is new. Every event kept
 // (GET /api/events[/<since ms>]: the snapshot carries only the latest), and
-// one client as remembered, with its own series (GET /api/clients/<mac>).
+// one client as remembered, with its own series and where it went (GET /api/clients/<mac>).
 import { rebootsAsked, withRebooting } from "../../status/actions";
-import { currentStatus, markWanted, readClientHistory, readEvents, readHistory, readRegistry } from "../../status/collector";
+import { currentStatus, markWanted, readClientHistory, readEvents, readHistory, readMoves, readRegistry } from "../../status/collector";
 import { map } from "../../result";
 import { historyOfClient, historySince, Range, ranges } from "../../status/history";
 import { ApiContext, json, refuse, respond, Route } from "../router";
@@ -52,7 +52,8 @@ export const statusRoutes = ({ intentPath, platform, statusDir, now }: ApiContex
       const mac = decodeURIComponent(path.split("/")[3] ?? "").toLowerCase();
       if (!/^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/.test(mac)) return refuse("not-found", "Not a MAC address.");
       const known = readRegistry(platform, statusDir)?.clients[mac];
-      return json(200, { ...(known ? { known } : {}), history: historyOfClient(readClientHistory(platform, statusDir), mac) });
+      const moves = readMoves(platform, statusDir)?.byClient[mac] ?? [];
+      return json(200, { ...(known ? { known } : {}), history: historyOfClient(readClientHistory(platform, statusDir), mac), moves });
     },
   },
 ];

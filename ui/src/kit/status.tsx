@@ -3,8 +3,10 @@
 // chart or a table. Colour means state only (src/status/health.ts: good,
 // fair, poor, off), always beside words; what kind of thing something is
 // goes in an icon or a word.
-import { Box, Group, SimpleGrid, Stack, Text, Title } from "@mantine/core";
-import { ReactNode } from "react";
+import { Anchor, Box, Group, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { MouseEvent, ReactNode } from "react";
+import { Link } from "react-router";
+import { settingUrl } from "../settingPages";
 import type { Tone } from "../../../src/status/health";
 import { Hint } from "./Hint";
 import { Crumb, StatusDot } from "./layout";
@@ -157,14 +159,30 @@ export const Panel = ({
   </Stack>
 );
 
-/** Facts as label above value, in a grid: what a thing is, at a glance. */
-export const Facts = ({ items, cols = { base: 2, sm: 3 } }: { items: [ReactNode, ReactNode][]; cols?: Record<string, number> }) => (
+/**
+ * Edit › beside a live value a setting controls: opens settings at that
+ * setting's row (settingUrl, form/landing.ts). Nothing when no page edits it.
+ */
+export const EditLink = ({ setting, label = "Edit ›" }: { setting: string; label?: string }) => {
+  const url = settingUrl(setting);
+  return url ? (
+    <Anchor component={Link} to={url} size="xs" className="onc-edit" onClick={(e: MouseEvent) => e.stopPropagation()}>
+      {label}
+    </Anchor>
+  ) : null;
+};
+
+/** Facts as label above value, in a grid: what a thing is, at a glance; one a setting controls has its Edit › (the third part: its path). */
+export const Facts = ({ items, cols = { base: 2, sm: 3 } }: { items: [ReactNode, ReactNode, string?][]; cols?: Record<string, number> }) => (
   <SimpleGrid cols={cols} spacing="md" verticalSpacing="sm">
-    {items.map(([label, value], i) => (
+    {items.map(([label, value, setting], i) => (
       <Stack key={i} gap={2} style={{ minWidth: 0 }}>
-        <Text size="xs" c="dimmed">
-          {label}
-        </Text>
+        <Group gap={6} wrap="nowrap">
+          <Text size="xs" c="dimmed">
+            {label}
+          </Text>
+          {setting && <EditLink setting={setting} />}
+        </Group>
         <Text component="div" size="sm" style={{ overflowWrap: "anywhere" }}>
           {value ?? "—"}
         </Text>

@@ -11,6 +11,7 @@ import { Intent } from "../../../../src/intent/schema";
 import { getIn, IntentField, useDerived, useDraft, useFieldError } from "../draft";
 import { Override, overridesAt, overrideText } from "../../../../src/intent/patches/marks";
 import { useFacts, useFixSwitch } from "../../fixes";
+import { AppliedMarks } from "./applied";
 
 /** Control widths: fixed in a wide row, shrinking to fit a narrow one. */
 export const control = {
@@ -101,11 +102,19 @@ export const FieldRow = ({
   return (
     <SettingRow
       {...props}
+      setting={name}
       label={props.label ?? labelOf(name)}
       description={props.description ?? info?.description}
       openwrt={props.openwrt ?? info?.openwrt}
       explain={explain}
-      marks={overrides.length ? overrides.map((o) => <OverrideChip key={o.patch.id} override={o} />) : undefined}
+      marks={
+        <>
+          {overrides.map((o) => (
+            <OverrideChip key={o.patch.id} override={o} />
+          ))}
+          <AppliedMarks name={name} />
+        </>
+      }
     >
       <Because reason={unavailable}>
         <Named>{children}</Named>

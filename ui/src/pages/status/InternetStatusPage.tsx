@@ -18,7 +18,7 @@ import { duration } from "../../facts";
 import { useDraftValue } from "../../form/draft";
 import { bitsWords } from "../../kit/format";
 import { OutageStrip } from "../../kit/OutageStrip";
-import { Facts, mbit, ms, Panel, StatusPage, ToneValue, Verdict } from "../../kit/status";
+import { EditLink, Facts, mbit, ms, Panel, StatusPage, ToneValue, Verdict } from "../../kit/status";
 import { TimeChart } from "../../kit/TimeChart";
 import { AttentionRows, eventsAbout, lately, lineState, liveLine, RangeSwitch } from "./shared";
 
@@ -203,16 +203,19 @@ export const InternetStatusPage = () => {
       </Stack>
       <Panel title={several ? "Lines" : "Line"} padded={false}>
         <div className="onc-rows">
-        {intent.internet.lines.map((line) => {
+        {intent.internet.lines.map((line, li) => {
           const c = live?.connections.find((x) => x.id === line.id);
           const state = lineState(c, several);
           const nat = natOf(c?.ipv4[0]);
           return (
             <Stack key={line.id} gap="sm" p="md">
               <Group justify="space-between" wrap="nowrap">
-                <Text fw={600} size="sm">
-                  {line.name || line.id}
-                </Text>
+                <Group gap={8} wrap="nowrap">
+                  <Text fw={600} size="sm">
+                    {line.name || line.id}
+                  </Text>
+                  <EditLink setting={`internet.lines.${li}`} />
+                </Group>
                 <ToneValue tone={state.tone}>
                   {state.word ?? "—"}
                   {state.since !== undefined ? ` · ${duration(state.since)}` : ""}
@@ -224,10 +227,10 @@ export const InternetStatusPage = () => {
                   ["Address", c?.ipv4[0] ? <span key="a">{c.ipv4[0].split("/")[0]}{nat ? <Text span size="xs" c="dimmed"> · {nat}</Text> : null}</span> : undefined],
                   ["IPv6 prefix", c?.prefixes?.[0]],
                   ["Gateway", c?.gateway],
-                  ["Connects by", c?.proto?.toUpperCase()],
+                  ["Connects by", c?.proto?.toUpperCase(), `internet.lines.${li}.type`],
                   ["Provider's DNS", c?.dns?.join(", ")],
-                  ["Port", c?.device],
-                  ["Shaped to", line.shaping ? `${line.shaping.down_mbps} / ${line.shaping.up_mbps} Mbit/s` : "Not shaped"],
+                  ["Port", c?.device, `internet.lines.${li}.port`],
+                  ["Shaped to", line.shaping ? `${line.shaping.down_mbps} / ${line.shaping.up_mbps} Mbit/s` : "Not shaped", `internet.lines.${li}.shaping`],
                 ]}
               />
             </Stack>
@@ -309,8 +312,8 @@ export const InternetStatusPage = () => {
               ) : undefined,
             ],
             ["Jitter", check?.jitterMs !== undefined ? <ToneValue key="j" tone={toneOf.jitter(check.jitterMs)}>{ms(check.jitterMs)}</ToneValue> : undefined],
-            ["Name lookups (the router's DNS)", check ? <ToneValue key="d" tone={check.dnsOk ? "good" : "poor"}>{check.dnsOk ? "Answering" : "Not answering"}</ToneValue> : undefined],
-            ...doh.map(([label, state]): [string, React.ReactNode] => [label, <ToneValue key={label} tone={state.tone}>{state.text}</ToneValue>]),
+            ["Name lookups (the router's DNS)", check ? <ToneValue key="d" tone={check.dnsOk ? "good" : "poor"}>{check.dnsOk ? "Answering" : "Not answering"}</ToneValue> : undefined, "dns.upstream"],
+            ...doh.map(([label, state]): [string, React.ReactNode, string] => [label, <ToneValue key={label} tone={state.tone}>{state.text}</ToneValue>, "dns.upstream"]),
             [
               "Smart queueing",
               check?.queues.length ? (

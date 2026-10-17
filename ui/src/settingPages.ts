@@ -33,13 +33,13 @@ export const settingPages: { path: string; page: string; url?: string; item?: (i
   { path: "hardware", page: "hardware", item: (i) => `/settings/hardware/${i}` },
 ];
 
-/** The page, and the URL, where the setting at `path` is edited. */
 /** Whether `path` is the setting at `pattern` or within it; a `*` in the pattern stands for any one part. */
 const within = (path: string, pattern: string) => {
   const [parts, wanted] = [path.split("."), pattern.split(".")];
   return parts.length >= wanted.length && wanted.every((part, i) => part === "*" || part === parts[i]);
 };
 
+/** The page, and the URL, where the setting at `path` is edited. */
 export const whereIs = (path: string) => {
   const home = settingPages.find((s) => within(path, s.path));
   if (!home) return undefined;
@@ -49,4 +49,14 @@ export const whereIs = (path: string) => {
     // A fixed address (a tab), else a list item by its index, else the page.
     url: home.url ?? (home.item && index ? home.item(index) : `/settings/${home.page}`),
   };
+};
+
+/**
+ * A link to the setting at `path`, opening its page at its row (`?at=`: the
+ * page scrolls to it and marks it, form/landing.ts): Edit › on a status
+ * page, a ⌘K result.
+ */
+export const settingUrl = (path: string) => {
+  const home = whereIs(path);
+  return home && `${home.url}?at=${encodeURIComponent(path)}`;
 };

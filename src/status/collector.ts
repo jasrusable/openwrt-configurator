@@ -2,7 +2,7 @@
 // (read.ts), keeps the result as a snapshot every page answers from at once,
 // adds its numbers to the graphs' history (history.ts), tells what changed
 // since the last read as events (events.ts), and remembers every client
-// seen (registry.ts). Fast while someone has the app open (each status
+// seen (registry.ts) and where each went (moves.ts). Fast while someone has the app open (each status
 // request leaves a mark), slow otherwise, so the graphs have no gaps; never
 // while an apply runs. On a Mac it runs inside `onc ui`, writing beside the
 // intent; on a router it is its own service (`onc collect`), writing to RAM,
@@ -33,6 +33,7 @@ import {
 import { NetworkStatus } from "./network";
 import { readNetworkStatus, readStatusSettings } from "./read";
 import { Registry, registrySchema, updateRegistry, withRegistry } from "./registry";
+import { Moves, movesSchema, updateMoves } from "./moves";
 
 export type Snapshot = { at: number; status: NetworkStatus };
 
@@ -63,6 +64,7 @@ const clientHistoryKey = (dir: string): StoreKey<History> => ({
 });
 export const eventsKey = (dir: string): StoreKey<NetworkEvent[]> => ({ path: `${dir}/events.json`, schema: z.array(eventSchema), format: 1 });
 export const registryKey = (dir: string): StoreKey<Registry> => ({ path: `${dir}/clients.json`, schema: registrySchema, format: 1 });
+export const movesKey = (dir: string): StoreKey<Moves> => ({ path: `${dir}/client-moves.json`, schema: movesSchema, format: 1 });
 
 /** What a router copies to flash: everything that is history, never the snapshot (read again in seconds). */
 const persisted = (dir: string): StoreKey<unknown>[] => [
@@ -71,6 +73,7 @@ const persisted = (dir: string): StoreKey<unknown>[] => [
   clientHistoryKey(dir),
   eventsKey(dir),
   registryKey(dir),
+  movesKey(dir),
 ];
 
 /** How many events the snapshot carries: the latest; the rest are asked for (GET /api/events). */
@@ -103,6 +106,8 @@ export const readClientHistory = (files: Pick<Platform, "readTextFile">, dir: st
 export const readEvents = (files: Pick<Platform, "readTextFile">, dir: string): NetworkEvent[] => read(files, eventsKey(dir)) ?? [];
 
 export const readRegistry = (files: Pick<Platform, "readTextFile">, dir: string): Registry | undefined => read(files, registryKey(dir));
+
+export const readMoves = (files: Pick<Platform, "readTextFile">, dir: string): Moves | undefined => read(files, movesKey(dir));
 
 const readHistories = (files: Pick<Platform, "readTextFile">, dir: string): Histories => ({
   day: readHistory(files, dir, "day"),
@@ -181,6 +186,7 @@ export type State = {
   radioCounts?: RadioCounts;
   observed?: Observed;
   registry?: Registry;
+  moves?: Moves;
   events?: NetworkEvent[];
   /** The last apply told as an event, by when it started. */
   applyTold?: number;
@@ -238,6 +244,7 @@ export const digest = ({
   const status: NetworkStatus = { ...read, radios: air.radios, throughput, readAt: at };
   const reserved = reservedIn(status);
   const { registry, fresh } = updateRegistry({ registry: state.registry, clients: status.clientList ?? [], at, keep: reserved });
+  const moves = updateMoves({ moves: state.moves, clients: status.clientList ?? [], at, remembered: (mac) => !!registry.clients[mac] });
   const observed = observe(status, at, state.observed);
   const fresher = [...eventsBetween(state.observed, observed), ...fresh.map((c) => newClientEvent(c, networkName)), ...(applied ? [applied] : [])];
   const before = state.events ?? [];
@@ -255,6 +262,7 @@ export const digest = ({
       radioCounts: air.counts,
       observed,
       registry,
+      moves,
       events,
       applyTold: applied?.at ?? state.applyTold,
     },
@@ -292,6 +300,7 @@ export const collectOnce = async ({
     write(platform, historyKey(dir, "month"), next.histories.month);
     write(platform, clientHistoryKey(dir), next.clientHistory ?? {});
     if (next.registry) write(platform, registryKey(dir), next.registry);
+    if (next.moves) write(platform, movesKey(dir), next.moves);
   }
   return ok({ ...next, savedBucket: bucket });
 };
@@ -342,12 +351,14 @@ export const runCollector = async ({
     platform.onStop(() => copyKept(platform, dir, keeping));
   }
   const registry = readRegistry(platform, dir);
+  const moves = readMoves(platform, dir);
   let state: State = {
     histories: readHistories(platform, dir),
     counts: {},
     clientHistory: readClientHistory(platform, dir),
     events: readEvents(platform, dir),
     ...(registry ? { registry } : {}),
+    ...(moves ? { moves } : {}),
   };
   let lastRead = -Infinity;
   let lastHourly = -Infinity;

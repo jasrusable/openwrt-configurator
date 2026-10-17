@@ -7,8 +7,9 @@
 //
 //   npx ts-node --transpile-only scripts/status-preview.ts [--port 8090]
 //
-// Nothing here reaches a device: the networks are in TEST-NET ranges
-// (192.0.2.0/24, 198.51.100.0/24), so the router's address answers nothing,
+// Nothing here reaches a device: the networks are in private ranges no
+// network here uses (172.31.250.0/24, 172.31.251.0/24; the sample's own
+// 10.0.0.x is a real network's), so the router's address answers nothing,
 // and the access points have no facts to be found by. Build the UI first
 // (npm run ui:build).
 import { chmodSync, mkdtempSync, writeFileSync } from "fs";
@@ -17,7 +18,9 @@ import { join } from "path";
 import { nodePlatform } from "../src/platforms/node";
 import { uiHandler } from "../src/server/app";
 import { stateLayout, write } from "../src/store";
-import { digest, eventsKey, registryKey, State } from "../src/status/collector";
+import { digest, eventsKey, movesKey, registryKey, State } from "../src/status/collector";
+import { jobPaths } from "../src/server/provisionJob";
+import type { ApplyPlan } from "../src/applyPlan";
 import type { NetworkEvent } from "../src/status/events";
 import { History, radioKey, ranges } from "../src/status/history";
 import type { NetworkStatus } from "../src/status/network";
@@ -39,18 +42,19 @@ const between = (a: number, b: number) => a + random() * (b - a);
 
 const dir = mkdtempSync(join(tmpdir(), "onc-preview-"));
 const intentPath = join(dir, "intent.json");
-const sample = JSON.parse(readFileSync(join(__dirname, "../sampleConfigs/intent.json"), "utf8"));
+// Every address the sample gives (reservations, rules, forwards) moved into the preview's range.
+const sample = JSON.parse(readFileSync(join(__dirname, "../sampleConfigs/intent.json"), "utf8").replace(/\b10\.0\.0\./g, "172.31.250."));
 const intent = {
   ...sample,
   system: { ...sample.system, name: "Hillside" },
-  networks: sample.networks.map((n: { id: string }) => ({ ...n, subnet: n.id === "lan" ? "192.0.2.0/24" : "198.51.100.0/24" })),
+  networks: sample.networks.map((n: { id: string }) => ({ ...n, subnet: n.id === "lan" ? "172.31.250.0/24" : "172.31.251.0/24" })),
   internet: { ...sample.internet, lines: [...sample.internet.lines, { id: "wanb", name: "LTE", type: "dhcp", port: "lan4", failover: { metered: true } }] },
   hardware: [
     { name: "router", role: "router" },
     { name: "office", role: "access-point" },
     { name: "loft", role: "access-point", uplink: "mesh" },
   ],
-  wifi: { ...sample.wifi, mesh: { ...(sample.wifi?.mesh ?? {}), enabled: true } },
+  wifi: { ...sample.wifi, mesh: { ...(sample.wifi?.mesh ?? {}), enabled: true, key: "preview-only-mesh-key" } },
 };
 writeFileSync(intentPath, JSON.stringify(intent, null, 2));
 chmodSync(intentPath, 0o600);
@@ -88,7 +92,7 @@ const clients = (t: number): ClientView[] =>
       name,
       ...(kind ? { kind } : {}),
       ...(model ? { model } : {}),
-      ipv4: guest ? `198.51.100.${20 + i}` : `192.0.2.${20 + i}`,
+      ipv4: guest ? `172.31.251.${20 + i}` : `172.31.250.${20 + i}`,
       ipv6: guest ? [] : [`2001:db8:12:0:${(i + 1).toString(16)}::1`],
       network: guest ? "guest" : "lan",
       connection: wired
@@ -316,5 +320,49 @@ write(nodePlatform, { path: stateLayout(intentPath).speedTests, schema: z.custom
   { at: now - 2 * day, downMbps: 884.1, upMbps: 104.9, idleMs: 10.2, downLoadedMs: 44.1, upLoadedMs: 23.0 },
 ]);
 
+// The first phone's day: joined, roamed, changed band, asleep and back.
+write(nodePlatform, movesKey(statusDir), {
+  places: {},
+  byClient: {
+    [macOf(0)]: [
+      { at: now - 40 * minute, kind: "roamed", text: "Roamed from office to loft · 5 GHz", accessPoint: "loft" },
+      { at: now - 3 * hour, kind: "band", text: "Moved to 5 GHz on office", accessPoint: "office" },
+      { at: now - 3 * hour - 4 * minute, kind: "joined", text: "Joined on office · 2.4 GHz", accessPoint: "office" },
+      { at: now - 9 * hour, kind: "left", text: "Left loft", accessPoint: "loft" },
+      { at: now - 14 * hour, kind: "roamed", text: "Roamed from loft to office · 5 GHz", accessPoint: "office" },
+    ],
+  },
+});
+// Applied once, before the first Wi-Fi's client isolation was turned on: one saved change not applied.
+writeFileSync(
+  jobPaths(intentPath).live,
+  JSON.stringify({ ...intent, wifi: { ...intent.wifi, networks: intent.wifi.networks.map((w: { isolate_clients?: boolean }, i: number) => (i === 0 ? { ...w, isolate_clients: !w.isolate_clients } : w)) } })
+);
+// The change plan as if the devices were read: office's fast roaming changed by hand.
+const plan: ApplyPlan = {
+  readAt: now,
+  items: [
+    {
+      id: "drift:office",
+      source: "drift",
+      title: "Changed on office",
+      devices: ["office"],
+      effect: { disruption: "none", notices: [] },
+      lines: [{ device: "office", groups: [{ title: "wireless", lines: [{ sign: "~", text: "wireless.home_5g.ieee80211r: 1 → 0" }] }] }],
+      settings: ["wifi.networks.0.roaming.fast"],
+    },
+  ],
+  devices: [],
+  unread: [],
+  summary: { devices: 1, seconds: 5, minutes: 1, disruption: "none", verdict: "One change on office" },
+  needs: [],
+  verify: {},
+};
+
 console.log(`Preview of ${intentPath} at http://127.0.0.1:${port}/ (Ctrl-C to stop)`);
-void nodePlatform.serve(uiHandler({ intentPath, uiRoot: join(__dirname, "../dist/ui"), platform: nodePlatform, statusDir, now: () => now + 5_000 }), { host: "127.0.0.1", port });
+const handler = uiHandler({ intentPath, uiRoot: join(__dirname, "../dist/ui"), platform: nodePlatform, statusDir, now: () => now + 5_000 });
+void nodePlatform.serve(
+  async (request) =>
+    request.path === "/api/apply/plan" ? { status: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(plan) } : handler(request),
+  { host: "127.0.0.1", port }
+);

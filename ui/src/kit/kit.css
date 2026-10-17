@@ -88,6 +88,15 @@ body {
   flex-wrap: nowrap;
 }
 
+/* The row a link landed on (form/landing.ts): marked for a moment, then fading. */
+.onc-row {
+  transition: background-color 0.6s ease-out;
+}
+.onc-row.onc-landed {
+  background-color: var(--mantine-color-blue-light);
+  transition: none;
+}
+
 /* A device row in the apply sheet: the whole row opens its uci lines. */
 button.onc-device-row:hover {
   background: var(--onc-hover);
@@ -209,4 +218,24 @@ button.onc-device-row:focus-visible {
 /* The sidebar's two lists: status, and settings as its own mode. */
 .onc-nav-mode {
   color: var(--onc-label-2);
+}
+
+/* A ⌘K result (Finder.tsx): the selected one filled, as a menu's. */
+.onc-finder-row {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 6px;
+}
+.onc-finder-row[data-selected] {
+  background: var(--onc-hover);
+}
+
+/* Edit › beside a live value: quiet until pointed at. */
+.onc-edit {
+  color: var(--onc-label-2);
+  white-space: nowrap;
+}
+.onc-edit:hover {
+  color: var(--mantine-color-anchor);
 }

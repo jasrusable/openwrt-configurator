@@ -15,7 +15,7 @@ import type { RadioView } from "../../../../src/status/views";
 import { useAllSeries, useRangeSwitch } from "../../data/history";
 import { useNetworkStatus, useWifiSurvey } from "../../data/status";
 import { useDraftValue } from "../../form/draft";
-import { dbm, Panel, seriesColor, StatusPage, ToneValue, Verdict } from "../../kit/status";
+import { dbm, EditLink, Panel, seriesColor, StatusPage, ToneValue, Verdict } from "../../kit/status";
 import { SignalBars } from "../../kit/charts";
 import { TimeChart } from "../../kit/TimeChart";
 import { AttentionRows, clientName, kindIcon, liveLine, modeWords, RangeSwitch, ThingIcon } from "./shared";
@@ -236,7 +236,7 @@ export const WifiStatusPage = () => {
         </Verdict>
         {attention.length > 0 && <AttentionRows items={attention} />}
       </Stack>
-      <Panel title="Radios" padded={false}>
+      <Panel title="Radios" padded={false} actions={<EditLink setting="wifi.radios" label="Width and power ›" />}>
         {radios.length === 0 ? (
           <Text size="sm" c="dimmed" p="md">
             {live ? "No access point is broadcasting." : "Reading the access points…"}
@@ -327,16 +327,19 @@ export const WifiStatusPage = () => {
         </SimpleGrid>
       )}
       <Panel title="Networks on the air" padded={false}>
-        {intent.wifi.networks.map((w) => {
+        {intent.wifi.networks.map((w, wi) => {
           const now = live?.ssids.find((s) => s.ssid === w.ssid);
           const on = now && now.accessPoints.length > 0;
           const network = intent.networks.find((n) => n.id === w.network)?.name;
           return (
             <Group key={w.ssid} justify="space-between" px="md" py={10} wrap="nowrap" className="onc-list-row" style={{ cursor: "default" }}>
               <Stack gap={0} style={{ minWidth: 0 }}>
-                <Text size="sm" fw={500}>
-                  {w.ssid || "Unnamed"}
-                </Text>
+                <Group gap={8} wrap="nowrap">
+                  <Text size="sm" fw={500}>
+                    {w.ssid || "Unnamed"}
+                  </Text>
+                  <EditLink setting={`wifi.networks.${wi}`} />
+                </Group>
                 <Text size="xs" c="dimmed" truncate>
                   {[network, now ? (on ? `on ${now.accessPoints.join(", ")}` : "not on the air") : undefined].filter(Boolean).join(" · ")}
                 </Text>

@@ -1,6 +1,6 @@
 // What a Status page can do when asked (and only then): restart a service the
 // settings need running on a device (the fix for, say, odhcpd gone silent),
-// reboot a device, restart its Wi-Fi, ping from it, test the internet line's
+// reboot a device, restart its Wi-Fi, ping or trace the route from it, test the internet line's
 // download speed from the router, survey the air around the access points.
 // Nothing here changes a setting.
 import { z } from "zod";
@@ -203,6 +203,37 @@ export const pingFrom = ({ intentPath, platform, hostname, target }: { intentPat
         })
       )
     : Promise.resolve(fail("invalid", "Give an address or a host name to ping."));
+
+/** One hop: who answered (none: every probe went unanswered) and each answer's time. */
+export type TraceHop = { hop: number; address?: string; ms: number[]; lost: number };
+
+/** busybox traceroute's hops: " 3  100.64.0.1  5.474 ms  *", " 7  *  *". */
+export const parseTraceroute = (stdout: string): TraceHop[] =>
+  stdout.split("\n").flatMap((line) => {
+    const hop = /^\s*(\d+)\s+(.*)$/.exec(line);
+    if (!hop) return [];
+    const rest = hop[2];
+    const address = /(?:^|\s)([0-9a-fA-F.:]*[0-9a-fA-F][0-9a-fA-F.:]*)\s+[\d.]+ ms/.exec(rest)?.[1];
+    return [{ hop: Number(hop[1]), ...(address ? { address } : {}), ms: [...rest.matchAll(/([\d.]+) ms/g)].map((m) => Number(m[1])), lost: (rest.match(/\*/g) ?? []).length }];
+  });
+
+/**
+ * The route from `hostname` to `target`: two UDP probes a hop (busybox has no
+ * ICMP mode), a second each, 16 hops at most, so 32 s at worst, within the
+ * CGI's 60.
+ */
+export const tracerouteFrom = ({ intentPath, platform, hostname, target }: { intentPath: string; platform: Platform; hostname: string; target: string }) =>
+  pingTarget.test(target)
+    ? oneAtATime(platform, intentPath, "traceroute", () =>
+        onDevice(intentPath, platform, hostname, 45_000, async (session) => {
+          const traced = await runProbe(session, {
+            command: `traceroute -n -q 2 -w 1 -m 16 ${shellQuote(target)} 2>&1`,
+            parse: ({ stdout }) => ({ hops: parseTraceroute(stdout), said: stdout.trim().split("\n").pop() ?? "" }),
+          } as Probe<{ hops: TraceHop[]; said: string }>);
+          return traced.hops.length ? ok({ hops: traced.hops }) : fail("failed", traced.said.replace(/^traceroute: /, "") || `No answer from traceroute on ${hostname}.`);
+        })
+      )
+    : Promise.resolve(fail("invalid", "Give an address or a host name to trace."));
 
 /**
  * Each direction is timed over this many seconds, whatever the line's

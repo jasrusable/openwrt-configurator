@@ -1,11 +1,12 @@
 // One client: how it is served and why (its verdict names the cause and
 // what would help), what it is and where, its signal, link and traffic over
-// the last day, which access points hear it, and what happened to it. Its
+// the last day (each roam marked), which access points hear it, and what
+// happened to it: joins, leaves and roams (src/status/moves.ts) among its events. Its
 // one action gives it a fixed address (a draft edit, saved as any other).
 import { Anchor, Button, Group, SimpleGrid, Stack, Text } from "@mantine/core";
 import { useNavigate } from "react-router";
 import type { Intent } from "../../../../src/intent/schema";
-import { clientHealth, thresholds } from "../../../../src/status/health";
+import { clientHealth, thresholds, type Tone } from "../../../../src/status/health";
 import { clientRange } from "../../../../src/status/history";
 import type { ClientView } from "../../../../src/status/views";
 import { eventTone, useClientDetail, useNetworkStatus } from "../../data/status";
@@ -50,7 +51,13 @@ export const ClientPage = ({ mac }: { mac: string }) => {
   const crumbs = [{ label: "Clients", onClick: () => navigate("/clients") }, { label: name }];
   const health = client ? clientHealth(client, live?.radios ?? []) : undefined;
   const wifi = client?.connection.kind === "wifi" ? client.connection : undefined;
-  const events = eventsAbout(live?.events, `client:${mac}`);
+  // Its own moves and the network's events about it, newest first.
+  const happened = [
+    ...eventsAbout(live?.events, `client:${mac}`).map((e) => ({ at: e.at, text: e.text, tone: eventTone(e) })),
+    // A move is neither good nor bad: grey, as an event that only informs.
+    ...(detail?.moves ?? []).map((m) => ({ at: m.at, text: m.text, tone: "off" as Tone })),
+  ].sort((a, b) => b.at - a.at);
+  const roams = (detail?.moves ?? []).filter((m) => m.kind === "roamed" || m.kind === "band").map((m) => ({ at: m.at, text: m.text, tone: "off" as Tone }));
   const history = detail?.history ?? {};
   if (live && !client && !known) {
     return (
@@ -71,7 +78,15 @@ export const ClientPage = ({ mac }: { mac: string }) => {
             .filter(Boolean)
             .join(" · ")
         : "Connected by cable";
-  const networkName = intent.networks.find((n) => n.id === (client?.network ?? known?.network))?.name;
+  const networkIndex = intent.networks.findIndex((n) => n.id === (client?.network ?? known?.network));
+  const networkName = intent.networks[networkIndex]?.name;
+  // Its fixed address in the settings, if it has one: the setting its name and address come from.
+  const reservation = intent.networks
+    .flatMap((n, i) => (n.dhcp?.reservations ?? []).map((r, j) => ({ r, path: `networks.${i}.dhcp.reservations.${j}` })))
+    .find(({ r }) => r.mac.toLowerCase() === mac);
+  const ssidIndex = wifi ? intent.wifi.networks.findIndex((w) => w.ssid === wifi.ssid) : -1;
+  const apIndex = wifi ? intent.hardware.findIndex((d) => d.name === wifi.accessPoint) : -1;
+  const bandKey = wifi?.band?.startsWith("2") ? "2g" : wifi?.band?.startsWith("5") ? "5g" : wifi?.band?.startsWith("6") ? "6g" : undefined;
   return (
     <StatusPage title={crumbs} live={liveLine(status)}>
       <Verdict
@@ -92,13 +107,13 @@ export const ClientPage = ({ mac }: { mac: string }) => {
           <Facts
             cols={{ base: 2 }}
             items={[
-              ["Name", name],
+              ["Name", name, reservation && `${reservation.path}.name`],
               ["Model", client?.model ?? known?.model],
               ["MAC", <span key="mac">{mac}{client?.private ? " · private" : ""}</span>],
               ["IPv4", client?.ipv4 ?? known?.ipv4],
               ["IPv6", client?.ipv6.length ? <Stack key="v6" gap={0}>{client.ipv6.map((a) => <span key={a}>{a}</span>)}</Stack> : undefined],
-              ["Network", networkName],
-              ["Fixed address", client?.reserved ? "Yes" : "No"],
+              ["Network", networkName, networkIndex >= 0 ? `networks.${networkIndex}` : undefined],
+              ["Fixed address", client?.reserved ? "Yes" : "No", reservation?.path],
               ["First seen", client?.firstSeen ? ago(client.firstSeen) : known ? ago(known.firstSeen) : undefined],
             ]}
           />
@@ -119,8 +134,8 @@ export const ClientPage = ({ mac }: { mac: string }) => {
                     {wifi.accessPoint}
                   </Anchor>,
                 ],
-                ["Network name", wifi.ssid],
-                ["Band and channel", [wifi.band, wifi.channel !== undefined ? `channel ${wifi.channel}` : undefined].filter(Boolean).join(", ") || undefined],
+                ["Network name", wifi.ssid, ssidIndex >= 0 ? `wifi.networks.${ssidIndex}` : undefined],
+                ["Band and channel", [wifi.band, wifi.channel !== undefined ? `channel ${wifi.channel}` : undefined].filter(Boolean).join(", ") || undefined, apIndex >= 0 && bandKey && bandKey !== "6g" ? `hardware.${apIndex}.radios.${bandKey}.channel` : undefined],
                 ["Signal", <ToneValue key="s" tone={toneOf.signal(wifi.signal)}>{dbm(wifi.signal)}</ToneValue>],
                 ["Link, to it", wifi.txRate !== undefined ? mbit(wifi.txRate) : undefined],
                 ["Link, from it", wifi.rxRate !== undefined ? mbit(wifi.rxRate) : undefined],
@@ -159,6 +174,7 @@ export const ClientPage = ({ mac }: { mac: string }) => {
             { from: -90, to: thresholds.signal.fair, tone: "poor" },
             { from: thresholds.signal.fair, to: thresholds.signal.good, tone: "fair" },
           ]}
+          events={roams}
           height={120}
         />
       </Panel>
@@ -197,13 +213,13 @@ export const ClientPage = ({ mac }: { mac: string }) => {
         </Panel>
       )}
       <Panel title="What happened" padded={false}>
-        {events.length ? (
-          events.slice(0, 20).map((e, i) => (
+        {happened.length ? (
+          happened.slice(0, 30).map((e, i) => (
             <Group key={`${e.at}-${i}`} gap="sm" px="md" py={8} wrap="nowrap" className="onc-list-row" style={{ cursor: "default" }}>
-              <Text size="xs" c="dimmed" w={70} style={{ flexShrink: 0 }}>
+              <Text size="xs" c="dimmed" w={84} style={{ flexShrink: 0, whiteSpace: "nowrap" }}>
                 {eventTime(e.at)}
               </Text>
-              <ToneDot tone={eventTone(e)} />
+              <ToneDot tone={e.tone} />
               <Text size="sm">{e.text}</Text>
             </Group>
           ))

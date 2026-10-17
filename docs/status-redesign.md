@@ -383,12 +383,29 @@ Changed from the plan while building, for reasons found then:
 - More than four series on one chart would break the colour rule: each
   radio's air is a small chart of its own.
 
+Built after (2026-10-17, second pass):
+
+- ⌘K (`ui/src/Finder.tsx`, `findable.ts`): every setting by label,
+  description or OpenWrt name, once per item it is for, only where its part
+  is set, never a value; pages, devices, clients. A setting opens its page at
+  its row: `?at=<path>` (`settingUrl`), found by `data-setting` on
+  `SettingRow`, scrolled to, marked and focused (`form/landing.ts`), else
+  the nearest setting holding it.
+- Edit › (`kit/status` `EditLink`, a `Facts` item's third part) on the
+  client, device, Internet and Wi-Fi pages, where a value comes from one
+  setting; tables get one in the panel's header.
+- Settings rows marked (`form/fields/applied.tsx`): "Not applied" (saved,
+  against `live.json`, after a first apply) and "Changed on <device>" (the
+  cached change plan's drift lines, whose settings `PlanItem.settings` now
+  carries; a row never starts a device read).
+- Traceroute (busybox, UDP: `-n -q 2 -w 1 -m 16`, 32 s at worst), from a
+  device's actions.
+- A client's joins, leaves, roams and band moves (`src/status/moves.ts`):
+  per client, the latest 30 for 7 days, `client-moves.json`, on its page and
+  as marks on its signal chart; gone only after two missed reads.
+
 Not built yet (TODO.md):
 
-- ⌘K across settings, and Edit › beside each live value (each page has its
-  settings button; a client's page gives a fixed address).
-- Settings marking what differs on the devices.
-- Traceroute as a device action; a client's roams and joins on its page.
 - Measuring the history's size and a read's time under QuickJS on a router
   with 128 MB.
 

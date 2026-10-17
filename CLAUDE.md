@@ -67,7 +67,7 @@ npm run package          # pkg -> ./artifacts (needs npm run build first)
 npm run ui -- <intent>   # build the web UI and serve it on http://127.0.0.1:8080
 npm run dev -- <intent>  # the same, with hot reload: UI rebuilds and reloads, backend restarts
 npx ts-node --transpile-only scripts/status-preview.ts [--port 8090]
-                         # the Status pages over a made-up day, offline (TEST-NET addresses,
+                         # the Status pages over a made-up day, offline (unused 172.31.250.x addresses,
                          # a frozen clock): for looking at them; build the UI first
 
 # Against real devices — only on explicit request:
@@ -337,7 +337,12 @@ Wi-Fi, Activity. Every reading is coloured by `src/status/health.ts`'s
 tones (good, fair, poor, off; colour means state only, the series colours
 are indigo and cyan); collections are `kit/StatusTable`, charts
 `kit/TimeChart` (the whole range across, gaps where nothing was read, events
-marked), uptime `kit/OutageStrip`.
+marked), uptime `kit/OutageStrip`. Status links into settings land on the
+setting's row (`settingUrl`'s `?at=`, `ui/src/form/landing.ts`): Edit ›
+beside a live value (`EditLink`) and ⌘K (`ui/src/Finder.tsx`). A setting's
+row says "Not applied" or "Changed on <device>" (`form/fields/applied.tsx`).
+A client's joins and roams are its own (`src/status/moves.ts`), never
+network events.
 
 ### Platforms — `src/platform.ts`, `src/platforms/`
 

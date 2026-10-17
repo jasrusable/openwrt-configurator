@@ -6,7 +6,7 @@ import { join } from "path";
 import { nodePlatform } from "../../platforms/node";
 import { jobPaths, jobRecordKey } from "../../server/provisionJob";
 import { write } from "../../store";
-import { copyKept, digest, eventsKey, markWanted, readEvents, readHistory, registryKey, runCollector, snapshotFreshMs, State } from "../../status/collector";
+import { copyKept, digest, eventsKey, markWanted, movesKey, readEvents, readHistory, registryKey, runCollector, snapshotFreshMs, State } from "../../status/collector";
 import type { NetworkStatus } from "../../status/network";
 import { uiHandler } from "../../server/app";
 import { tempDir } from "../helpers/tempDir";
@@ -201,16 +201,18 @@ test("what is worth keeping is copied from RAM to flash, and back at the next st
   t.deepEqual(readEvents(nodePlatform, rebooted), []);
 });
 
-test("events are answered whole or from a time on; one client as remembered, with its own series", async (t) => {
+test("events are answered whole or from a time on; one client as remembered, with its own series and moves", async (t) => {
   const dir = tempDir("collector");
   const e = (at: number) => ({ at, kind: "line" as const, severity: "info" as const, subject: "line:wan", text: `at ${at}` });
   write(nodePlatform, eventsKey(dir), [e(3000), e(2000), e(1000)]);
   write(nodePlatform, registryKey(dir), { since: 0, clients: { [phone.mac]: { mac: phone.mac, firstSeen: 5, lastSeen: 9, name: "Phone" } } });
+  const roam = { at: 7, kind: "roamed" as const, text: "Roamed from loft to lounge", accessPoint: "lounge" };
+  write(nodePlatform, movesKey(dir), { places: {}, byClient: { [phone.mac]: [roam] } });
   writeFileSync(join(dir, "client-history.json"), JSON.stringify({ format: 1, value: { [`signal:${phone.mac}`]: [[0, -60, 1]], "signal:other": [[0, -80, 1]] } }));
   const handle = api(dir);
   t.is(JSON.parse((await handle(get("/api/events"))).body).length, 3);
   t.deepEqual(JSON.parse((await handle(get("/api/events/1500"))).body).map((x: { at: number }) => x.at), [3000, 2000]);
   const one = JSON.parse((await handle(get(`/api/clients/${encodeURIComponent(phone.mac.toUpperCase())}`))).body);
-  t.deepEqual(one, { known: { mac: phone.mac, firstSeen: 5, lastSeen: 9, name: "Phone" }, history: { signal: [[0, -60, 1]] } });
+  t.deepEqual(one, { known: { mac: phone.mac, firstSeen: 5, lastSeen: 9, name: "Phone" }, history: { signal: [[0, -60, 1]] }, moves: [roam] });
   t.is((await handle(get("/api/clients/../../etc"))).status, 404);
 });

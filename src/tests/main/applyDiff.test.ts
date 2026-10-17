@@ -329,7 +329,11 @@ test("the plan: items by source, the most noticed first, with what to acknowledg
   };
   const drift = (n: DeviceNow): DeviceNow => ({
     ...n,
-    config: { ...n.config, system: n.config.system.map((s) => ({ ...s, options: { ...s.options, zonename: "Somewhere" } })) },
+    config: {
+      ...n.config,
+      system: n.config.system.map((s) => ({ ...s, options: { ...s.options, zonename: "Somewhere" } })),
+      wireless: n.config.wireless.map((s) => (s.type === "wifi-iface" ? { ...s, options: { ...s.options, isolate: "1" } } : s)),
+    },
   });
   const ap = readOf({ edit, drift, space: { needKb: 2048, freeKb: 1024 } });
   const plan = buildApplyPlan({
@@ -345,6 +349,9 @@ test("the plan: items by source, the most noticed first, with what to acknowledg
   t.deepEqual(first.lines[0].groups.map((g) => g.title), ["wireless", "renamed"]);
   const drifted = plan.items.find((i) => i.source === "drift")!;
   t.is(drifted.title, "Changed on home-ap-1");
+  // The settings (or items) the changed lines come from, so their rows in settings can say so.
+  // (The time zone's line has no setting recorded: a row only says what it knows.)
+  t.deepEqual(drifted.settings, ["wifi.networks.0.isolate_clients"]);
   t.deepEqual(plan.needs.map((n) => n.kind), ["disruption", "drift", "flash"]);
   const [dropping] = plan.needs;
   t.true(dropping.kind === "disruption" && dropping.effects.every((e) => /reconnect/.test(e)), "only what drops devices needs a tick");

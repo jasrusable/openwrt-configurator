@@ -157,8 +157,7 @@ over `src/server/`, and the React UI in `ui/`.
 - **Status redesign, what is left** (`docs/status-redesign.md`, built 2026-10-17):
   - Check on a real access point: rpcd's `iwinfo assoclist` rates and generation, and `iwinfo survey`'s counters giving busy % over two reads (mt76 wraps them: the difference should hold).
   - Measure history, client history and the registry on a 128 MB router under QuickJS: file sizes, a cold read.
-  - ⌘K across settings; Edit › beside each live value; settings marking what differs on the devices.
-  - Traceroute as a device action; a client's roams and joins on its page (events per client).
+  - "Changed on <device>" marks only settings whose UCI lines record their setting (`origin.settings`); some (the time zone's `zonename`) have none yet, so a change there shows only in the Apply sheet.
   - System › Firmware crashes on an intent with no `system.ssh` in the draft (`authorized_keys` of undefined): the draft holds the file as written, without defaults (seen in the status preview).
 - **More features.** Captive portal (guest network), ad blocking, scheduled firewall rules (block at times), people and device groups (James's iPhone and iPad off at 7 pm), more VPN options (servers, types), and a little more for OpenWrt power users.
 - **Simple by default, advanced on demand.** Keep the intent and UI simple, with advanced panels that expand: every advanced setting has a sane default that is shown (and marked recommended) even when collapsed, so simple users never need them and power users can see and change what the defaults are, in the same UI.

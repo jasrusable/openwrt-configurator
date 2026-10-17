@@ -1,11 +1,11 @@
 // What a Status page can ask for (and only then, src/status/actions.ts):
 // restart a service the settings declare on a device, reboot one, restart
-// its Wi-Fi, ping from it, test the internet
+// its Wi-Fi, ping or trace the route from it, test the internet
 // line's speed, survey the air around the access points, and a mesh link's
 // speed (src/meshSpeed.ts).
 import { measureLink } from "../../meshSpeed";
 import { fail } from "../../problem";
-import { pingFrom, rebootDevice, restartService, restartWifi, speedTest, speedTests, wifiSurvey } from "../../status/actions";
+import { pingFrom, rebootDevice, tracerouteFrom, restartService, restartWifi, speedTest, speedTests, wifiSurvey } from "../../status/actions";
 import { ApiContext, field, json, respond, Route, withBody } from "../router";
 
 export const actionRoutes = ({ intentPath, platform, now }: ApiContext): Route[] => [
@@ -36,6 +36,13 @@ export const actionRoutes = ({ intentPath, platform, now }: ApiContext): Route[]
     POST: withBody(async (input) => {
       const [device, target] = [field(input, "device"), field(input, "target")];
       return respond(device ? await pingFrom({ intentPath, platform, hostname: device, target }) : fail("invalid", "Give a device."));
+    }),
+  },
+  {
+    path: "/api/device/traceroute",
+    POST: withBody(async (input) => {
+      const [device, target] = [field(input, "device"), field(input, "target")];
+      return respond(device ? await tracerouteFrom({ intentPath, platform, hostname: device, target }) : fail("invalid", "Give a device."));
     }),
   },
   {
