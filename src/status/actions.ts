@@ -267,7 +267,7 @@ export type SpeedTest = z.infer<typeof speedTestSchema>;
 /**
  * Bufferbloat's grade: how much the round trip grows while the line is
  * full, by the worse of download and upload. A and B are good, C fair, D
- * and F poor (docs/status-redesign.md).
+ * and F poor (docs/design/status-redesign.md).
  */
 export const bloatGrade = (test: Pick<SpeedTest, "idleMs" | "downLoadedMs" | "upLoadedMs">) => {
   if (test.idleMs === undefined) return undefined;

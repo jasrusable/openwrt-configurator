@@ -151,11 +151,11 @@ const useHaveBand = (label: string) => {
   const intent: Intent = useDraftValue();
   const facts = useDevices().data?.facts;
   const read = intent.hardware
-    .filter((d) => d.role === "access-point")
+    .filter((d) => d.role === "access-point" || d.wifi !== false)
     .flatMap((d) => (facts?.[d.name] ? [{ name: d.name, bands: bandsOf(facts[d.name]!.schema) }] : []));
   if (read.length === 0) return undefined;
   const have = read.filter((d) => d.bands.includes(label)).map((d) => d.name);
-  return have.length ? `On ${have.join(", ")}.` : "None of your access points has it.";
+  return have.length ? `On ${have.join(", ")}.` : "None of your devices has it.";
 };
 
 const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {

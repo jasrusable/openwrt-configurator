@@ -10,6 +10,7 @@ import { networkHasIpv6 } from "../intent/connections";
 import { isPrivateRange } from "../intent/addresses";
 import { type Intent } from "../intent/schema";
 import { bands } from "../intent/radios";
+import { routerBroadcasts } from "../intent/fragment";
 import type { DeviceStatus, InternetCheck, PortLink } from "./device";
 import { lineWorks, memoryUsed, networkOfAddress, type NetworkStatus, Reachability, readDevices, readOf, reached, routerOf, weakMeshLinkMbps, whyUnread } from "./network";
 import { bandOf } from "./values";
@@ -415,10 +416,11 @@ export const attentionOf = ({
       out.push({ id: `memory:${d.name}`, severity: "warning", title: `${d.name} is nearly out of memory`, detail: "Under 10% free." });
     }
     // An SSID of yours that this access point does not broadcast: only where
-    // it has a radio in one of the SSID's bands (when its radios are known).
-    if (d.role === "access-point") {
+    // it has a radio in one of the SSID's bands (when its radios are known);
+    // on the router, only when they are known and it broadcasts.
+    const radios = facts[d.name]?.schema.radios;
+    if (d.role === "access-point" || (routerBroadcasts(intent) && !!radios?.length)) {
       const here = new Set(status.wifi.map((w) => w.ssid));
-      const radios = facts[d.name]?.schema.radios;
       const canCarry = (w: Intent["wifi"]["networks"][number]) =>
         !radios || (w.bands ?? bands.filter((b) => intent.wifi.radios[b].enabled)).some((b) => radios.some((r) => r.band === b));
       for (const w of intent.wifi.networks.filter((w) => w.enabled !== false && !here.has(w.ssid) && canCarry(w))) {
@@ -426,7 +428,7 @@ export const attentionOf = ({
           id: `ssid:${d.name}:${w.ssid}`,
           severity: "warning",
           title: `“${w.ssid}” is not on the air at ${d.name}`,
-          detail: "Your settings have it there, but the access point is not broadcasting it.",
+          detail: `Your settings have it there, but ${d.role === "router" ? "the router" : "the access point"} is not broadcasting it.`,
           link: "?apply",
         });
       }

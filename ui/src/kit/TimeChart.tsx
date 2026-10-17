@@ -4,7 +4,7 @@
 // poor, faintly behind; what happened, marked where it happened (an outage,
 // an apply, a restart); and a crosshair that reads every series at once,
 // with the keyboard too. 2px lines, a 10% wash under them, text in text
-// colours (docs/status-redesign.md; the dataviz rules).
+// colours (docs/design/status-redesign.md; the dataviz rules).
 import { Box, Group, Stack, Text } from "@mantine/core";
 import { useElementSize } from "@mantine/hooks";
 import { KeyboardEvent, PointerEvent, useId, useState } from "react";

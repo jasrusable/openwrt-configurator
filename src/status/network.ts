@@ -6,6 +6,7 @@
 import { meshMtu } from "../intent/mesh";
 import { failoverOrder, ipv6Interface } from "../intent/connections";
 import { networkHolding } from "../intent/addresses";
+import { routerBroadcasts } from "../intent/fragment";
 import type { Intent } from "../intent/schema";
 import type { DeviceFailure } from "../readEach";
 import type { Result } from "../result";
@@ -172,7 +173,8 @@ export const networkStatus = (
   // Clients only: our own devices (the access points) hold leases too.
   const ours = new Set(Object.values(macs).flatMap((m) => m ?? []));
   const leases = (routerUp?.leases ?? []).filter((l) => !ours.has(l.mac));
-  const accessPoints = intent.hardware.filter((d) => d.role === "access-point");
+  // On the air: the access points, and the router unless its Wi-Fi is off.
+  const accessPoints = intent.hardware.filter((d) => d.role === "access-point" || routerBroadcasts(intent));
   const radios = accessPoints.flatMap((ap) => {
     return (statusOf(ap.name)?.wifi ?? []).map((w) => ({ ap: ap.name, ...w }));
   });

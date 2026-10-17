@@ -1,6 +1,6 @@
 // How good a reading is, in four words every Status page uses alike: good,
 // fair, poor, or off (unknown, not read). The thresholds are written once,
-// here, and the pages colour a value by them (docs/status-redesign.md's
+// here, and the pages colour a value by them (docs/design/status-redesign.md's
 // table). A client's health names its cause, never an opaque score. Pure.
 import type { ClientView, RadioView } from "./views";
 

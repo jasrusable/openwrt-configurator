@@ -82,6 +82,13 @@ export const hardwareRules: Choice[] = [
     refuses: false,
   },
   {
+    path: "hardware.*.wifi",
+    unavailable: (intent, [i]) =>
+      intent.hardware[Number(i)]?.role === "access-point" && "An access point always broadcasts your Wi-Fi.",
+    // Ignored on an access point, and kept for when it becomes the router.
+    refuses: false,
+  },
+  {
     path: "hardware.*.uplink",
     values: ["mesh"],
     unavailable: (intent, [i]) =>

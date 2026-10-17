@@ -3,7 +3,7 @@
 // intent: the router is the network's first address, every other device is
 // found by name on the local domain (the router's DHCP and DNS put it there).
 import { section } from "../../plan/types";
-import { Feature, onAccessPoints, routerAddress } from "../fragment";
+import { Feature, onAccessPoints, onRadioDevices, routerAddress } from "../fragment";
 
 export const devices: Feature = (intent) => ({
   devices: intent.hardware.map((device) => ({
@@ -35,6 +35,6 @@ export const roles: Feature = () => ({
   ],
   config: {
     // Shipped by the full wpad; no RADIUS server is wanted.
-    radius: { radius: [section({ when: onAccessPoints }, { disabled: true })] },
+    radius: { radius: [section({ when: onRadioDevices }, { disabled: true })] },
   },
 });

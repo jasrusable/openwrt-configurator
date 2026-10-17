@@ -1,6 +1,6 @@
 // Wi-Fi › Radios › <band> › Airtime: each radio's queue limits, which
 // OpenWrt has no setting for, written by a hook as each radio comes up.
-import { Feature, onAccessPoints } from "../fragment";
+import { Feature, onRadioDevices } from "../fragment";
 import { bands } from "../radios";
 import { aqlLimits } from "./constants";
 
@@ -15,7 +15,7 @@ export const airtime: Feature = (intent) => {
   return {
     files: [
       {
-        when: onAccessPoints,
+        when: onRadioDevices,
         path: "/etc/hotplug.d/net/20-aql",
         mode: "0755",
         // Each phy's bands are in board.json, put there by OpenWrt's own

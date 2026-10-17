@@ -233,6 +233,7 @@ export const AddHardwarePage = () => {
                 name: choice.name,
                 role: "access-point",
                 uplink: "cable",
+                wifi: true,
                 ...(choice.location ? { location: choice.location } : {}),
               },
             ],

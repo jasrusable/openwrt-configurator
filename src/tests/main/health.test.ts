@@ -1,5 +1,5 @@
 // The four words every Status page colours by, and a client's health with
-// its cause: the thresholds of docs/status-redesign.md, held.
+// its cause: the thresholds of docs/design/status-redesign.md, held.
 import test from "ava";
 import { cellTone, clientHealth, needsLook, tone, uptimeOf, worst } from "../../status/health";
 import type { ClientView } from "../../status/views";

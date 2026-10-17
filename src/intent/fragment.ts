@@ -12,6 +12,14 @@ export type Feature = (intent: Intent) => Fragment;
 export const everyDevice = when.always;
 export const onRouter = when.role("router");
 export const onAccessPoints = when.role("access-point");
+/** A router with a radio. */
+export const onRouterRadios = when.all(onRouter, when.any(when.radio("2g"), when.radio("5g"), when.radio("6g")));
+/** Where Wi-Fi's packages and radios go: access points, and a router with a radio. */
+export const onRadioDevices = when.any(onAccessPoints, onRouterRadios);
+/** Whether the router broadcasts the SSIDs (where it has radios): unless its Wi-Fi is off. */
+export const routerBroadcasts = (intent: Pick<Intent, "hardware">) => intent.hardware.find((d) => d.role === "router")?.wifi !== false;
+/** Where the SSIDs go out: every access point, and the router unless its Wi-Fi is off. */
+export const onBroadcasting = (intent: Pick<Intent, "hardware">) => (routerBroadcasts(intent) ? onRadioDevices : onAccessPoints);
 export const onDevice = when.device;
 /** A swconfig switch (VLANs tagged in the switch), or DSA (a bridge that filters VLANs). */
 export const onSwConfig = when.swConfig(true);

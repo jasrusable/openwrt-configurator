@@ -705,6 +705,32 @@ test("zones and forwardings are named for what they are, so another network neve
   t.deepEqual([...names(reordered)].sort(), [...before].sort());
 });
 
+test("a router with radios broadcasts as an access point does; its Wi-Fi off writes them off", (t) => {
+  const stateOf = (change: (i: any) => void = () => {}) => {
+    const intent = sample();
+    change(intent);
+    const plan = planFor(intent);
+    const deviceSchema = deviceSchemaSchema.parse(
+      JSON.parse(readFileSync(join(root, "deviceSchemas", "tplink,archer-c50-v4.json"), "utf8"))
+    );
+    return getOpenWrtState({ plan, deviceConfig: plan.devices.find((d) => d.hostname === "home-router")!, deviceSchema });
+  };
+  const ssids = (state: ReturnType<typeof stateOf>) => (state.config.wireless?.["wifi-iface"] ?? []).map((s: any) => s.ssid);
+  const usteer = (state: ReturnType<typeof stateOf>) => state.services.find((s) => s.name === "usteer");
+
+  const on = stateOf();
+  t.deepEqual([...new Set(ssids(on))].sort(), ["Home", "Home Guests"]);
+  t.true(on.config.wireless["wifi-device"].every((r: any) => !r.disabled));
+  t.true(on.packages.add.includes("wpad-mbedtls"));
+  t.true(on.services.some((s) => s.name === "wpad" && s.running));
+
+  const off = stateOf((i) => (i.hardware.find((d: any) => d.role === "router").wifi = false));
+  t.deepEqual(ssids(off), []);
+  t.true(off.config.wireless["wifi-device"].every((r: any) => r.disabled === true), "its radios written off");
+  t.true(off.packages.add.includes("wpad-mbedtls"), "packages follow the hardware, not the setting");
+  t.like(usteer(off), { enabled: false });
+});
+
 test("services: each role's kept enabled and started; those that must run are checked", (t) => {
   const services = (hostname: string, model: string, change: (i: any) => void = () => {}) => {
     const intent = sample();

@@ -364,7 +364,7 @@ test("a setting's control is greyed out only where the override holds on every d
   const [one] = overridesAt(intent, facts("25.12.5"), steering);
   t.like(one, { reached: ["home-ap-1"], overridden: ["home-ap-1"], everywhere: true }, "the only access point: greyed out");
   // A second access point past the fix (26.0): editable, the chip names the one held.
-  const two = { ...intent, hardware: [...intent.hardware, { name: "home-ap-2", role: "access-point" as const, uplink: "cable" as const }] };
+  const two = { ...intent, hardware: [...intent.hardware, { name: "home-ap-2", role: "access-point" as const, uplink: "cable" as const, wifi: true }] };
   const [partial] = overridesAt(two, facts("25.12.5", "26.0"), steering);
   t.like(partial, { reached: ["home-ap-1", "home-ap-2"], overridden: ["home-ap-1"], everywhere: false });
   const [unread] = overridesAt(intent, {}, steering);

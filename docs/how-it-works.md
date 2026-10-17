@@ -15,14 +15,14 @@ It holds no device facts. Model, release, ports, the switch, radios and their ba
 
 Settings are checked against each other as you edit (one main network, unique VLANs and ranges, Wi-Fi on a network that exists, channels legal in your country per wireless-regdb, a root password set), and a choice another setting rules out is greyed with the reason. A file that fails a check is not saved.
 
-Each feature (system, hardware, internet, networks, Wi-Fi, mesh, firewall, VPN, DNS) compiles its part. Which packages a device gets is fixed by its role, never by a setting: turning something off writes its config disabled and stops the service, so turning it on again needs no install.
+Each feature (system, hardware, internet, networks, Wi-Fi, mesh, firewall, VPN, DNS) compiles its part. Which packages a device gets is fixed by its role and hardware (Wi-Fi's go to access points and to a router with radios), never by a setting: turning something off writes its config disabled and stops the service, so turning it on again needs no install.
 
 ## Fitting to the hardware
 
 The compiled plan uses placeholders where hardware differs: the WAN port, every free port, the CPU port, the bridge's ports, every radio, the radios of a band, the best `htmode` a radio supports up to a width. Per device they are fitted to the facts:
 
 - **DSA or swconfig.** A DSA board gets `bridge-vlan` sections; a swconfig board gets `switch_vlan` on its own switch (named as the board names it), with the CPU port tagged. The swconfig layout is checked against OpenWrt's own `config_generate` for the same boards (`swconfigLayout.test.ts`).
-- **Radios.** Declared Wi-Fi maps to a band's radios in order. On a tri-band board, a band's pinned channel and the single-interface mesh go to the radio whose channels hold them.
+- **Radios.** Every access point broadcasts your SSIDs, and so does the router wherever it has radios, unless its Broadcast Wi-Fi is off (its radios are then written off). Declared Wi-Fi maps to a band's radios in order. On a tri-band board, a band's pinned channel and the single-interface mesh go to the radio whose channels hold them.
 - **Refused before anything changes:** a role a device cannot carry (a router with no WAN port), more radios than it has, packages that would not fit its flash.
 
 `openwrt-configurator compile <intent>` prints the low-level config the intent compiles to, offline ([the low-level config](low-level-config.md)).

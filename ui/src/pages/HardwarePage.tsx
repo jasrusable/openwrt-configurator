@@ -5,6 +5,7 @@ import { FixStateBadge, useFixes } from "../fixes";
 import {
   SegmentedField,
   SelectField,
+  SwitchField,
   TextField,
   Value,
   When,
@@ -294,7 +295,7 @@ const hardware = defineList({
           <Value
             name={`hardware.${i}`}
             format={(device) =>
-              device?.role === "access-point"
+              device && broadcasts(device)
                 ? `${channel(device.radios?.["2g"]?.channel)} · ${channel(
                     device.radios?.["5g"]?.channel,
                   )}`
@@ -321,9 +322,20 @@ const hardware = defineList({
         />
       </Section>
       <UplinkSection index={i} />
-      <When name={`hardware.${i}.role`} is="access-point">
+      <When name={`hardware.${i}.role`} is="router">
+        <Section title="Wi-Fi">
+          <SwitchField name={`hardware.${i}.wifi`} />
+        </Section>
+      </When>
+      <When
+        name={`hardware.${i}`}
+        test={(d) => {
+          const device = d as Intent["hardware"][number] | undefined;
+          return !!device && broadcasts(device);
+        }}
+      >
         <Section
-          title="Wi-Fi"
+          title="Channels"
           description="Pin one only to avoid a crowded channel."
         >
           <SelectField
@@ -346,5 +358,8 @@ const hardware = defineList({
     </>
   ),
 });
+
+/** Whether a device carries your Wi-Fi: an access point always, the router unless turned off. */
+const broadcasts = (device: Intent["hardware"][number]) => device.role === "access-point" || device.wifi !== false;
 
 export const HardwarePage = () => <ListPage list={hardware} />;

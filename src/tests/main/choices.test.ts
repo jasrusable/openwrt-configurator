@@ -30,7 +30,7 @@ test("every rule is about a setting that exists", (t) => {
 
 test("no dead ends: whatever the rules leave available can be chosen without breaking anything", (t) => {
   const base = sample();
-  base.hardware.push({ name: "home-ap-2", role: "access-point", uplink: "cable" });
+  base.hardware.push({ name: "home-ap-2", role: "access-point", uplink: "cable", wifi: true });
   t.deepEqual(issues(base), []);
   // Every place each rule's path matches, and every value it is about.
   const places = choices.flatMap((choice) =>

@@ -21,7 +21,7 @@ Other boards should work if OpenWrt supports them; tell us how it goes.
 
 ### Does the router broadcast Wi-Fi?
 
-Not yet: Wi-Fi is broadcast by access points only, so an all-in-one router's radios are left unconfigured. If your router is also your only access point, this app does not fit your network yet.
+Yes, wherever it has radios: every SSID goes out from the router as from an access point, with fast roaming between them. A single all-in-one router is a complete network on its own. To leave Wi-Fi to the access points, turn off Broadcast Wi-Fi on the router (Settings › Hardware); its radios are then written off. The wireless mesh is between access points only: the router joins it by cable.
 
 ### Can I still change things by hand, or in LuCI?
 
@@ -39,7 +39,6 @@ Every apply regenerates the whole config from your settings, fixes for OpenWrt b
 
 ### What isn't supported yet?
 
-- Wi-Fi on the router (access points only).
 - Choosing networks per port: every LAN port carries every network (the main one untagged, the others tagged).
 - Client isolation across access points (an isolated SSID is isolated on each access point, not between them).
 - Importing an existing configuration; a guided first-run wizard.

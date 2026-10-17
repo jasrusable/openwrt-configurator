@@ -24,6 +24,12 @@ export const deviceSchema = z
     location: z.string().max(64).optional(),
     /** How an access point reaches the network: a cable, or the mesh. */
     uplink: z.enum(["cable", "mesh"]).default("cable"),
+    /**
+     * The router's Wi-Fi: on (the default) it broadcasts the SSIDs as an
+     * access point does, where it has radios; off, its radios are off. Access
+     * points always broadcast.
+     */
+    wifi: z.boolean().default(true),
     /** Its own radios: a channel pinned per band; "auto" (the default) lets it choose. */
     radios: z
       .object({ "2g": pinnedChannel("2g"), "5g": pinnedChannel("5g") })

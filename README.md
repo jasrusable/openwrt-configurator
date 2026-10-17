@@ -5,7 +5,7 @@
 One file holds your whole home network: the internet lines, networks and VLANs, Wi-Fi, mesh, firewall, VPN and DNS, written as decisions rather than UCI. A web UI edits it, a compiler turns it into each router's and access point's configuration, and the app applies it to all of them over SSH, showing exactly what will change first.
 
 > [!NOTE]
-> **Early days: looking for testers and feedback.** It is tested end to end against OpenWrt in Docker and against captured board data, but has barely met real hardware yet. If you try it, please [open an issue](https://github.com/jasrusable/openwrt-configurator/issues) with what worked and what didn't. Requires **OpenWrt 25.12 or later**, and is built for **a router plus separate access points**: the router itself does not broadcast Wi-Fi (yet).
+> **Early days: looking for testers and feedback.** It is tested end to end against OpenWrt in Docker and against captured board data, but has barely met real hardware yet. If you try it, please [open an issue](https://github.com/jasrusable/openwrt-configurator/issues) with what worked and what didn't. Requires **OpenWrt 25.12 or later**. Works with a single router on its own, or a router plus any number of access points.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-dark.png">
@@ -75,7 +75,7 @@ OpenWrt can do almost anything, but you have to say how: which port is `lan3` on
 |---|---|
 | **Internet** | DHCP, static, PPPoE; several lines with failover (mwan3), IPv6 |
 | **Networks** | VLANs, guest isolation, DHCP reservations, per-network DNS |
-| **Wi-Fi** | SSIDs on every access point, WPA2/WPA3, several passwords per SSID, fast roaming and band steering, wired and wireless mesh |
+| **Wi-Fi** | SSIDs on the router and every access point, WPA2/WPA3, several passwords per SSID, fast roaming and band steering, wired and wireless mesh |
 | **Firewall** | Port forwards, rules between networks, UPnP |
 | **VPN** | WireGuard remote access and site-to-site; a network routed through a VPN provider (WireGuard or OpenVPN) |
 | **DNS** | DNS over HTTPS with a fallback, keeping devices on the router's DNS, a local domain |
@@ -112,7 +112,7 @@ The UI is then at `http://<router>/cgi-bin/onc/`, behind your root password. Or 
 ## Status and support
 
 - **OpenWrt 25.12 or later** only. The app drives `apk`, and older releases are refused before anything changes.
-- **A router plus access points.** Wi-Fi is configured on access points only; an all-in-one router's radios are left off. Every LAN port carries every network (no per-port networks yet).
+- **One router, alone or with access points.** The router broadcasts your Wi-Fi too wherever it has radios (Settings › Hardware turns that off). The wireless mesh is between access points; the router joins it by cable. Every LAN port carries every network (no per-port networks yet).
 - **Tested** end to end against OpenWrt in Docker (`scripts/rig-test.sh`, every SSH client path, 25.12.0 to SNAPSHOT) and against captured board data: a NanoPi R6S, Zyxel NWA50AX Pro, an Archer C50 (swconfig, checked against OpenWrt's own `config_generate`) and Wi-Fi 7 multi-radio boards. Not yet on much real hardware: hardware reports are the most useful thing you can send.
 - **Experimental:** mesh, VPN and dynamic DNS are marked so in the UI; firmware upgrades and swconfig switches have not yet run end to end on real devices.
 - **The settings format may still change** before the first stable release.

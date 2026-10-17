@@ -126,7 +126,8 @@ Secrets are hidden in everything printed unless `--show-secrets`
     depends on which device is plugged in.
   - No escape hatch: the features plus their defaults must make a complete
     working device, because the wipe removes everything not declared.
-  - Packages are fixed per role, never chosen by a setting; "off" is config
+  - Packages are fixed per role (Wi-Fi's: access points, and a router with a
+    radio, `onRadioDevices`), never chosen by a setting; "off" is config
     written disabled, checked against the package's init defaults, and an
     unused service is declared off (`serviceWhen`).
   - Sections built from lists are named for what they are, never their place
@@ -363,7 +364,7 @@ told apart, the edit's whole list is kept and the page says so.
 ### Status pages and settings mode — `ui/src/pages/status/`
 
 The app opens on status; settings are their own mode (`/settings/*`, its
-own sidebar), so live and draft never share a page (docs/status-redesign.md).
+own sidebar), so live and draft never share a page (docs/design/status-redesign.md).
 Status: Overview (verdict, attention, a card each, the map, recent events),
 Clients and `/clients/<mac>`, Devices and `/devices/<name>`, Internet,
 Wi-Fi, Activity. Every reading is coloured by `src/status/health.ts`'s

@@ -52,7 +52,7 @@ Node 24 (`.node-version`).
 
 ## Planned
 
-A Linux server install (a Raspberry Pi, a NAS, a VM) with a Docker image and a systemd unit, login, and one-click app updates is planned: see [the release plan](release-plan.md).
+A Linux server install (a Raspberry Pi, a NAS, a VM) with a Docker image and a systemd unit, login, and one-click app updates is planned: see [the release plan](design/release-plan.md).
 
 ## Logging in to devices
 

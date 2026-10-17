@@ -1,8 +1,19 @@
-// Wi-Fi, from the access points: each SSID on its bands, with fast roaming
-// between access points, and each band's radios set as Wi-Fi › Radios says.
+// Wi-Fi, from the access points and the router (unless its Wi-Fi is off):
+// each SSID on its bands, with fast roaming between them, and each band's
+// radios set as Wi-Fi › Radios says.
 // Radios are matched to bands on the device, so a band an access point lacks
 // (6 GHz on most) is skipped there; the intent only pins channels per device.
-import { Feature, mainNetwork, onAccessPoints, onDevice, serviceWhen } from "../fragment";
+import {
+  Feature,
+  mainNetwork,
+  onBroadcasting,
+  onDevice,
+  onRadioDevices,
+  onRouter,
+  onRouterRadios,
+  routerBroadcasts,
+  serviceWhen,
+} from "../fragment";
 import { Options, Origin, placeholder, section, SectionMeta, Value } from "../../plan/types";
 import { uniqueNames } from "../names";
 import { broadcastBands, radios, radioWidth } from "../radios";
@@ -101,23 +112,29 @@ const steeringOrigin = (roaming: Intent["wifi"]["roaming"]) =>
 
 export const wifi: Feature = (intent) => {
   const posixTimezone = timezones[intent.system.timezone];
+  const broadcasting = onBroadcasting(intent);
   const ap = (meta: SectionMeta, options: Record<string, Value | undefined>) =>
-    section({ ...meta, when: onAccessPoints }, options);
+    section({ ...meta, when: broadcasting }, options);
+  // The router's Wi-Fi off: its radios written off, not left unconfigured.
+  const routerOff: { when: typeof onRouter; options: Options }[] = routerBroadcasts(intent)
+    ? []
+    : [{ when: onRouter, options: { disabled: true } }];
   const ssidNames = uniqueNames("wifi", intent.wifi.networks, (ssid) => ssid.ssid);
   const meshBand = intent.wifi.mesh.enabled ? intent.wifi.mesh.band : undefined;
 
   return {
     packages: [
       {
-        when: onAccessPoints,
+        when: onRadioDevices,
         // The full wpad, for 802.11r and WPA3; usteer steers clients between APs.
         add: ["wpad-mbedtls", "usteer", "luci-app-usteer"],
         remove: ["wpad-basic-mbedtls"],
       },
     ],
     services: [
-      { when: onAccessPoints, name: "wpad", running: true },
-      serviceWhen(onAccessPoints, "usteer", steeredSsids(intent).length > 0),
+      { when: onRadioDevices, name: "wpad", running: true },
+      serviceWhen(broadcasting, "usteer", steeredSsids(intent).length > 0),
+      ...(routerBroadcasts(intent) ? [] : [serviceWhen(onRouterRadios, "usteer", false)]),
     ],
     config: {
       wireless: {
@@ -130,8 +147,8 @@ export const wifi: Feature = (intent) => {
             const channel = meshBand === band ? undefined : pins[band]?.channel;
             return channel !== undefined ? [{ when: onDevice(device.name), options: { channel } as Options }] : [];
           });
-          return ap(
-            { name, overrides: pinned, origin: radioOrigin(band) },
+          return section(
+            { name, when: onRadioDevices, overrides: [...routerOff, ...pinned], origin: radioOrigin(band) },
             {
               band,
               ...(settings.enabled ? {} : { disabled: true }),

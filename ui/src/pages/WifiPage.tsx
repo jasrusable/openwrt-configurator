@@ -41,7 +41,7 @@ const wifiNetworks = defineList({
   name: "wifi.networks",
   title: "SSIDs",
   description:
-    "Broadcast by every access point.",
+    "Broadcast by every access point, and by the router unless its Wi-Fi is off.",
   addLabel: "Add network",
   // Joins the main network unless told otherwise.
   newItem: (_, intent) => ({
