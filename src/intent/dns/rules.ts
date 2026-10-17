@@ -1,6 +1,7 @@
 // What the DNS settings may be, given the rest.
 import type { Choice } from "../feature";
 import { where } from "../places";
+import { dohProviders } from "./schema";
 
 export const dnsRules: Choice[] = [
   {
@@ -20,6 +21,21 @@ export const dnsRules: Choice[] = [
     unavailable: (intent, _at, value) =>
       intent.dns.upstream.type === "encrypted" && intent.dns.upstream.provider === value
         ? "It is already the provider."
+        : undefined,
+  },
+  {
+    // The provider its own fallback: the fallback goes back to automatic (another provider).
+    path: "dns.upstream.provider",
+    values: dohProviders,
+    swap: (intent, _at, value) =>
+      intent.dns.upstream.type === "encrypted" && intent.dns.upstream.fallback === value
+        ? {
+            note: "Its fallback goes back to automatic.",
+            apply: (next) =>
+              next.dns.upstream.type === "encrypted"
+                ? { ...next, dns: { ...next.dns, upstream: { ...next.dns.upstream, provider: value, fallback: undefined } } }
+                : next,
+          }
         : undefined,
   },
   {

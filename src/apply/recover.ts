@@ -4,32 +4,19 @@
 import * as agent from "../agent";
 import { reachableSession, reconnectUntil } from "./reconnect";
 import { Session } from "../platform";
-import { Problem } from "../problem";
-import { ok, Result } from "../result";
 import { DeviceRun, step } from "./run";
 
-/**
- * Stand the watchdog down: the device is reachable and its config stays.
- * "fired" when it came too late (the watchdog had started restoring the old
- * config, or finished); a failure when the session could not ask.
- */
-export const disarmDevice = async (
-  run: DeviceRun,
-  session: Session,
-  { untouched = false } = {}
-): Promise<Result<"disarmed" | "fired", Problem>> => {
-  const answer = await agent.call(session, agent.disarm(run.runId));
-  if (!answer.ok) return answer;
+/** Says what a disarm found, in the log and as the device's step. */
+const reportDisarm = (run: DeviceRun, result: "disarmed" | "fired", { untouched = false } = {}) => {
   if (untouched) {
     step(run, "reverted");
-  } else if (answer.value === "fired") {
+  } else if (result === "fired") {
     console.error(`${run.hostname} rolled itself back before it could be confirmed.`);
     step(run, "rolling-back");
   } else {
     console.log(`Confirmed ${run.hostname}.`);
     step(run, "confirmed");
   }
-  return ok(answer.value);
 };
 
 /**
@@ -121,19 +108,32 @@ export const finishRun = async (run: DeviceRun, session: Session) => {
 export type Disarmed = { result: "disarmed" | "fired"; session: Session } | { result: "unreached"; session: undefined };
 
 /**
- * Disarm over the given session, else over a new one: confirming (or
+ * A verb over the given session, else over a new one: confirming (or
  * changing) other devices can cut that session, and an answer lost with it
- * is asked again. "unreached": neither got in, so its watchdog fires at its
- * deadline.
+ * is asked again. The answer and the session it came over; undefined when
+ * neither got in.
  */
-export const disarmLive = async (run: DeviceRun, session: Session, options: { untouched?: boolean } = {}): Promise<Disarmed> => {
-  const first = await disarmDevice(run, session, options);
-  if (first.ok) return { result: first.value, session };
+export const callLive = async <T>(run: DeviceRun, session: Session, verb: agent.Verb<T>): Promise<{ answer: T; session: Session } | undefined> => {
+  const first = await agent.call(session, verb);
+  if (first.ok) return { answer: first.value, session };
   session.dispose();
   const fresh = await reconnect(run, 15).catch(() => undefined);
-  if (!fresh) return { result: "unreached", session: undefined };
-  const again = await disarmDevice(run, fresh, options);
-  if (again.ok) return { result: again.value, session: fresh };
+  if (!fresh) return undefined;
+  const again = await agent.call(fresh, verb);
+  if (again.ok) return { answer: again.value, session: fresh };
   fresh.dispose();
-  return { result: "unreached", session: undefined };
+  return undefined;
+};
+
+/**
+ * Stand the watchdog down: the device is reachable and its config stays.
+ * "fired" when it came too late (the watchdog had started restoring the old
+ * config, or finished); "unreached" when no session got in, so its watchdog
+ * fires at its deadline.
+ */
+export const disarmLive = async (run: DeviceRun, session: Session, options: { untouched?: boolean } = {}): Promise<Disarmed> => {
+  const got = await callLive(run, session, agent.disarm(run.runId));
+  if (!got) return { result: "unreached", session: undefined };
+  reportDisarm(run, got.answer, options);
+  return { result: got.answer, session: got.session };
 };

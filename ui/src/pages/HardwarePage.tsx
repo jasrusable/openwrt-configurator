@@ -111,7 +111,6 @@ const ModelCell = ({ index }: { index: number }) => {
   );
 };
 
-/** What the device is, read from it: nothing here is set by you. */
 /**
  * Patches that change a setting on this device: on, turned off, or not
  * known until its facts are read. Ones that only adjust the device are
@@ -171,6 +170,7 @@ const DeviceFacts = ({ index }: { index: number }) => {
   );
 };
 
+/** What the device is, read from it: nothing here is set by you. */
 const DeviceRead = ({ index }: { index: number }) => {
   const { known, unreached, reading } = useFactsOf(index);
   // Read from the device by itself; said in words, never a button.

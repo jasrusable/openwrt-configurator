@@ -8,21 +8,22 @@
 // sees them, not this one.
 import type { Probe } from "../../deviceProbes";
 import { arr, obj, str } from "../values";
-import { json, keptInRam } from "./common";
+import { json, keptInRam, ubusCall } from "./common";
 import type { MdnsDevice } from "./types";
 
 export const mdns: Probe<{ browse: unknown; hosts: unknown }> = {
   command: [
-    `ubus call umdns browse '{"array":true}' 2>/dev/null || echo '{}'`,
-    "echo __ONC_HOSTS__",
-    `ubus call umdns hosts '{"array":true}' 2>/dev/null || echo '{}'`,
+    ubusCall,
+    `printf '{"browse":'; call umdns browse '{"array":true}'`,
+    `printf ',"hosts":'; call umdns hosts '{"array":true}'`,
+    "printf '}'",
     keptInRam,
     't=$(cut -d. -f1 /proc/uptime); a=$(cat $s/mdns.at 2>/dev/null)',
     '{ [ -n "$a" ] && [ $((t - a)) -lt 60 ]; } || { ubus call umdns update >/dev/null 2>&1; echo $t > $s/mdns.at; }',
   ].join("\n"),
   parse: ({ stdout }) => {
-    const [browse = "", hosts = ""] = stdout.split("__ONC_HOSTS__");
-    return { browse: json(browse, "umdns browse"), hosts: json(hosts, "umdns hosts") };
+    const both = obj(json(stdout, "umdns"));
+    return { browse: both.browse, hosts: both.hosts };
   },
 };
 

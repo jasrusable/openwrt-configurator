@@ -14,6 +14,9 @@ import { rescueAfterMinutes } from "../../intent/mesh";
 import { ulaPrefix } from "../../intent/site";
 import { migrateIntent } from "../../intent/migrations";
 import { Intent, intentSchema } from "../../intent/schema";
+import { resetIntent } from "../../intent/starter";
+import { generateIntents } from "../helpers/intentGenerator";
+import { newPrivateKey, publicKeyOf } from "../../wireguard";
 import { printPlan } from "../../lowLevel/print";
 
 const root = join(__dirname, "../../..");
@@ -503,7 +506,8 @@ test("patches apply only where they say: by model, by role", (t) => {
       JSON.parse(readFileSync(join(root, "deviceSchemas", `${model}.json`), "utf8"))
     );
     const deviceConfig = plan.devices.find((d) => d.hostname === hostname)!;
-    return (getOpenWrtState({ plan, deviceConfig, deviceSchema }).files ?? []).map((f: any) => f.path);
+    // The patches' files: root's password is every device's.
+    return (getOpenWrtState({ plan, deviceConfig, deviceSchema }).files ?? []).map((f: any) => f.path).filter((p: string) => p !== "/etc/onc/root-password");
   };
   t.deepEqual(files("home-router", "friendlyarm,nanopi-r6s").filter((p: string) => !p.includes("avahi")), [
     "/usr/libexec/platform/packet-steering.sh",
@@ -677,8 +681,10 @@ test("rules across settings are checked, at the field they concern", (t) => {
 });
 
 test("a file newer than the tool is refused", (t) => {
-  t.throws(() => migrateIntent({ ...sample(), schema: 99 }), { message: /newer/ });
-  t.is(intentSchema.parse(migrateIntent(sample())).schema, 1);
+  const newer = migrateIntent({ ...sample(), schema: 99 });
+  t.true(!newer.ok && /newer/.test(newer.error.message));
+  const current = migrateIntent(sample());
+  t.is(current.ok && intentSchema.parse(current.value).schema, 1);
 });
 
 test("the ULA prefix is stable and well-formed", (t) => {
@@ -1090,8 +1096,32 @@ test("an internet line on a swconfig router: a switch VLAN of its own, out of th
   delete intent.internet.lines[0].port;
   intent.internet.lines[0].vlan = 7;
   t.deepEqual(vlans(intent), { switch: ["1: 6t 1 2 3 4", "20: 6t 1t 2t 3t 4t", "7: 6t 0t"], wan: "eth0.7" });
+  // A network's VLAN: refused by the settings on every device, not only here (the engine's own check is the last word).
   intent.internet.lines[0].vlan = 20;
-  t.throws(() => vlans(intent), { message: /VLAN 20 is both a network's and the line's/ });
+  t.throws(() => vlans(intent), { message: /Guests's VLAN: give the line or the network another/ });
+});
+
+test("internet lines: one per port and VLAN, a VLAN on one port only, none a network's or the mesh's over cables", (t) => {
+  const issues = (change: (i: Intent) => void) => {
+    const intent = sample();
+    change(intent);
+    const r = intentSchema.safeParse(intent);
+    return r.success ? [] : r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
+  };
+  const second = (line: object) => (i: Intent) => {
+    i.internet.lines.push({ ...i.internet.lines[0], id: "wanb", name: "Second", ...line } as Intent["internet"]["lines"][number]);
+  };
+  t.deepEqual(issues(second({ vlan: 7 })), [], "the WAN port again, tagged beside the untagged line");
+  t.deepEqual(issues(second({})), ["internet.lines.1.port: Fibre uses the WAN port."]);
+  t.deepEqual(issues((i) => (second({ vlan: 7 })(i), (i.internet.lines[0].vlan = 7))), ["internet.lines.1.port: Fibre uses the WAN port with VLAN 7."]);
+  t.deepEqual(issues((i) => (second({ vlan: 7, port: "eth2" })(i), (i.internet.lines[0].vlan = 7))), ["internet.lines.1.vlan: Fibre uses it on another port"]);
+  t.deepEqual(
+    issues((i) => {
+      i.wifi.mesh = { ...i.wifi.mesh, enabled: true, over_cable: true, key: "k".repeat(32) };
+      i.internet.lines[0].vlan = 4000;
+    }).filter((m) => m.startsWith("internet")),
+    ["internet.lines.0.vlan: VLAN 4000 carries the mesh over cables"]
+  );
 });
 
 test("the main connection's IPv6 moves with the role: promoting a backup or removing the main keeps it", (t) => {
@@ -1391,4 +1421,72 @@ test("over cables on a swconfig access point: batman on the CPU's VLAN device, t
     (ap.network.device ?? []).filter((d: any) => Number(d.mtu) === 1532).map((d: any) => d.name),
     ["mesh0"]
   );
+});
+
+test("settings refused across features: root's password, names, ports and ranges that clash", (t) => {
+  const issues = (change: (i: any) => void) => {
+    const intent = sampleIntentJson();
+    change(intent);
+    const r = intentSchema.safeParse(intent);
+    return r.success ? [] : r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
+  };
+  t.deepEqual(issues(() => {}), []);
+  // A stock device lets anyone in with any password until root has one.
+  t.deepEqual(issues((i) => delete i.system.app_login.password), [
+    "system.app_login.password: required: without one, a device lets anyone log in to it with any password",
+  ]);
+  t.deepEqual(issues((i) => (i.networks[1].subnet = "10.0.0.0/24")), ["networks.1.subnet: already used by another network"]);
+  t.deepEqual(issues((i) => (i.dns = { ...i.dns, hosts: [{ name: "home-ap-1", address: "10.0.0.9" }] })), ["dns.hosts.0.name: already a device's name"]);
+  t.true(issues((i) => (i.dns = { ...i.dns, domain: "com" })).some((m) => m.startsWith("dns.domain: the internet's")));
+  t.true(issues((i) => (i.dns = { ...i.dns, domain: "ch" })).some((m) => m.startsWith("dns.domain: the internet's")));
+  t.deepEqual(issues((i) => (i.dns = { ...i.dns, domain: "home.arpa" })), []);
+  // ISO 3166's user-assigned codes are never a country's TLD.
+  t.deepEqual(issues((i) => (i.dns = { ...i.dns, domain: "zz" })), []);
+  // Only Cloudflare's script reads the zone.
+  const ddns = (provider: string) => (i: any) => (i.internet.dynamic_dns = { provider, hostname: "home.example.com", token: "t", zone: "other.org" });
+  t.deepEqual(issues(ddns("duckdns")), []);
+  t.deepEqual(issues(ddns("cloudflare")), ["internet.dynamic_dns.zone: the name must be in the zone"]);
+  // The router's WireGuard port: a UDP forward's DNAT would take it.
+  const remote = (i: any) => (i.vpn = { ...i.vpn, remote_access: { enabled: true, private_key: newPrivateKey(), port: 51820 } });
+  const forward = (protocol: string) => (i: any) => {
+    remote(i);
+    i.firewall = { ...i.firewall, port_forwards: [{ name: "Game", protocol, port: "51000-52000", to: { address: "10.0.0.20" } }] };
+  };
+  t.deepEqual(issues(forward("udp")), ["firewall.port_forwards.0.port: Remote access listens on UDP 51820"]);
+  t.deepEqual(issues(forward("tcp")), []);
+  // A provider's tunnel address in one of our ranges.
+  const provider = (address: string) => (i: any) =>
+    (i.vpn = {
+      ...i.vpn,
+      providers: [{ id: "tun1", name: "P", type: "wireguard", private_key: newPrivateKey(), address, peer: { public_key: publicKeyOf(newPrivateKey()), endpoint: "203.0.113.5:51820" } }],
+    });
+  t.deepEqual(issues(provider("10.0.20.7/32")), ["vpn.providers.0.address: 10.0.20.7/32 overlaps this site's 10.0.20.0/24"]);
+  t.deepEqual(issues(provider("10.64.0.2/32")), []);
+});
+
+test("back to defaults: what a reset keeps still validates, for any settings (the mesh on 6 GHz included)", (t) => {
+  const sixGhzMesh = intentSchema.parse(sample());
+  sixGhzMesh.wifi.radios["6g"].enabled = true;
+  sixGhzMesh.wifi.mesh = { ...sixGhzMesh.wifi.mesh, enabled: true, band: "6g", channel: 37, key: "k".repeat(32) };
+  const all = [intentSchema.parse(sixGhzMesh), ...generateIntents(Number(process.env.ONC_GEN_CASES ?? 60), 3)];
+  all.forEach((intent, n) => {
+    const reset = intentSchema.safeParse(resetIntent(intent));
+    t.true(reset.success, `case ${n}: ${reset.error?.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+  });
+});
+
+test("choosing the encrypted DNS provider its fallback was: the fallback goes back to automatic", (t) => {
+  const intent = intentSchema.parse(sample());
+  intent.dns.upstream = { type: "encrypted", provider: "cloudflare", fallback: "quad9" };
+  const swap = availability(intent, "dns.upstream.provider").option("quad9").swap!;
+  t.deepEqual(swap.apply(intent).dns.upstream, { type: "encrypted", provider: "quad9", fallback: undefined });
+  t.is(availability(intent, "dns.upstream.provider").option("google").swap, undefined);
+});
+
+test("a value's availability says whether the schema refuses it, or keeps it ignored", (t) => {
+  const intent = intentSchema.parse(sample());
+  // Refused: a channel the country forbids.
+  t.like(availability({ ...intent, system: { ...intent.system, country: "US" } }, "hardware.0.radios.2g.channel").option(13), { refuses: true });
+  // Ignored: metered with one line only matters with several.
+  t.like(availability(intent, "internet.lines.0.failover.metered").option(true), { refuses: undefined });
 });

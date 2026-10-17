@@ -104,8 +104,8 @@ dist
 .tern-port
 
 *.config.json
-# The settings file a restore, a reset or a save over an older format replaced (passwords and all).
-*.json.bak
+# The settings files a restore, a reset or a save over an older format replaced (passwords and all).
+*.bak
 
 artifacts
 

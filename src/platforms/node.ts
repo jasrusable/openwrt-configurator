@@ -6,6 +6,7 @@ import {
   closeSync,
   existsSync,
   createReadStream,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -29,7 +30,7 @@ import {
   parseKnownHosts,
 } from "../knownHosts";
 import { dirname } from "../posixPath";
-import { commandTimeoutMs, ExecResult, loopbackHosts, NetworkError, Platform, Session, SshTarget } from "../platform";
+import { commandTimeoutMs, ExecResult, httpTimeoutMs, loopbackHosts, NetworkError, Platform, Session, SshTarget } from "../platform";
 
 const transientCodes = new Set([
   "ECONNRESET",
@@ -41,12 +42,13 @@ const transientCodes = new Set([
 ]);
 
 // fetch rejects with a bare "fetch failed" TypeError; the useful code is on
-// its cause.
+// its cause. Past its time limit, a TimeoutError: worth another try too.
 const networkError = (e: unknown, url: string): NetworkError => {
   const code = (e as { cause?: { code?: string } })?.cause?.code;
+  const timedOut = (e as Error)?.name === "TimeoutError";
   return Object.assign(
-    new Error(`${url}: ${code ?? (e as Error)?.message ?? e}`),
-    { transient: code !== undefined && transientCodes.has(code) }
+    new Error(`${url}: ${code ?? (timedOut ? "timed out" : undefined) ?? (e as Error)?.message ?? e}`),
+    { transient: timedOut || (code !== undefined && transientCodes.has(code)) }
   );
 };
 
@@ -92,7 +94,8 @@ const hostKeyOptions = (target: SshTarget, onChanged: () => void) => {
   }
   const file = target.knownHostsFile;
   const host = target.host;
-  if (!file || !host) return {};
+  // Never any key accepted: always a file, or a key, to check it against.
+  if (!file || !host) throw new Error(`SSH to ${host} refused: no known_hosts file and no host key to check it against.`);
   const entries = existsSync(file)
     ? parseKnownHosts(readFileSync(file, "utf-8"))
     : [];
@@ -208,6 +211,18 @@ export const nodePlatform: Platform = {
       throw fileError(path, e);
     }
   },
+  privateDir: (path) => {
+    try {
+      mkdirSync(dirname(path), { recursive: true });
+      mkdirSync(path, { mode: 0o700 });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw fileError(path, e);
+    }
+    const stat = lstatSync(path);
+    if (!stat.isDirectory() || stat.uid !== process.geteuid?.() || (stat.mode & 0o777) !== 0o700) {
+      throw new Error(`${path} is not this program's own (a directory of its user's, mode 700, not a link): refused`);
+    }
+  },
   removeDir: (path) => rmSync(path, { recursive: true, force: true }),
   modifiedAt: (path) => {
     try {
@@ -237,10 +252,10 @@ export const nodePlatform: Platform = {
 
   http: {
     request: async ({ method, url, json }) => {
-      let response: Response;
       try {
-        response = await fetch(url, {
+        const response = await fetch(url, {
           method,
+          signal: AbortSignal.timeout(httpTimeoutMs),
           ...(json === undefined
             ? {}
             : {
@@ -248,26 +263,41 @@ export const nodePlatform: Platform = {
                 body: JSON.stringify(json),
               }),
         });
+        // The body inside the limit too: it is read under the same signal.
+        return { status: response.status, headers: headersOf(response), body: await response.text() };
       } catch (e) {
         throw networkError(e, url);
       }
-      return {
-        status: response.status,
-        headers: headersOf(response),
-        body: await response.text(),
-      };
     },
     download: async (url, path) => {
+      // Ended once nothing arrives for the limit, not by a total: an image
+      // takes minutes on a slow line.
+      const controller = new AbortController();
+      let timer: NodeJS.Timeout | undefined;
+      const alive = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => controller.abort(new DOMException("stalled", "TimeoutError")), httpTimeoutMs);
+      };
       let response: Response;
+      const chunks: Uint8Array[] = [];
       try {
-        response = await fetch(url);
+        alive();
+        response = await fetch(url, { signal: controller.signal });
+        if (response.ok && response.body) {
+          for await (const chunk of response.body) {
+            alive();
+            chunks.push(chunk);
+          }
+        }
       } catch (e) {
         throw networkError(e, url);
+      } finally {
+        clearTimeout(timer);
       }
       if (!response.ok) {
         throw new Error(`${url}: HTTP ${response.status}`);
       }
-      const body = Buffer.from(await response.arrayBuffer());
+      const body = Buffer.concat(chunks);
       writeFileSync(path, body);
       const declared = response.headers.get("content-length");
       return {
@@ -279,15 +309,37 @@ export const nodePlatform: Platform = {
 
   run: (argv, options) =>
     new Promise((resolve, reject) => {
+      const limit = options?.timeoutMs;
+      // With a limit, a session of its own (detached: setsid), so that it
+      // has no terminal to prompt on and its whole group can be killed.
       const child = spawn(argv[0], argv.slice(1), {
         stdio: ["pipe", "pipe", "pipe"],
+        detached: limit !== undefined,
       });
       let stdout = "";
       let stderr = "";
+      let timedOut = false;
+      const timer =
+        limit === undefined
+          ? undefined
+          : setTimeout(() => {
+              timedOut = true;
+              try {
+                process.kill(-child.pid!, "SIGKILL");
+              } catch {
+                child.kill("SIGKILL");
+              }
+            }, limit);
       child.stdout.setEncoding("utf8").on("data", (d) => (stdout += d));
       child.stderr.setEncoding("utf8").on("data", (d) => (stderr += d));
-      child.on("error", reject);
-      child.on("close", (code) => resolve({ stdout, stderr, code }));
+      child.on("error", (e) => {
+        clearTimeout(timer);
+        reject(e);
+      });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        resolve(timedOut ? { stdout, stderr, code: null, timedOut } : { stdout, stderr, code });
+      });
       // A program that exits without reading its input (`ip route`, say)
       // closes the pipe first, and the write then fails with EPIPE. That is
       // not an error worth crashing over: the exit status says what happened.

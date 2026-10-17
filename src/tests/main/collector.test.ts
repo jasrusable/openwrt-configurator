@@ -4,9 +4,22 @@
 import test from "ava";
 import { join } from "path";
 import { nodePlatform } from "../../platforms/node";
-import { jobPaths, jobRecordKey } from "../../server/provisionJob";
+import { jobPaths, jobRecordKey } from "../../apply/job";
 import { write } from "../../store";
-import { copyKept, digest, eventsKey, markWanted, movesKey, readEvents, readHistory, registryKey, runCollector, snapshotFreshMs, State } from "../../status/collector";
+import {
+  copyKept,
+  currentStatus,
+  digest,
+  eventsKey,
+  markWanted,
+  movesKey,
+  readEvents,
+  readHistory,
+  registryKey,
+  runCollector,
+  snapshotFreshMs,
+  State,
+} from "../../status/collector";
 import type { NetworkStatus } from "../../status/network";
 import { uiHandler } from "../../server/app";
 import { tempDir } from "../helpers/tempDir";
@@ -73,7 +86,7 @@ test.serial("the collector reads fast only while someone looks, and says a lasti
 test("while an apply runs, status is what was read before, marked so, and no device is read", async (t) => {
   const dir = tempDir("collector");
   const intentPath = join(dir, "missing.json");
-  // A job starting: its lock taken, its record written, no pid yet (src/server/provisionJob.ts).
+  // A job starting: its lock taken, its record written, no pid yet (src/apply/job.ts).
   mkdirSync(jobPaths(intentPath).lock, { recursive: true });
   write(nodePlatform, jobRecordKey(jobPaths(intentPath).dir), { runId: "r", startedAt: Date.now() });
   const handle = api(dir);
@@ -215,4 +228,35 @@ test("events are answered whole or from a time on; one client as remembered, wit
   const one = JSON.parse((await handle(get(`/api/clients/${encodeURIComponent(phone.mac.toUpperCase())}`))).body);
   t.deepEqual(one, { known: { mac: phone.mac, firstSeen: 5, lastSeen: 9, name: "Phone" }, history: { signal: [[0, -60, 1]] }, moves: [roam] });
   t.is((await handle(get("/api/clients/../../etc"))).status, 404);
+});
+
+test("the hourly work runs beside the reads: one that never answers holds none of them up", async (t) => {
+  const dir = tempDir("collector");
+  let clock = 0;
+  let calls = 0;
+  let asks = 0;
+  // The loop's ticks pass; the hourly work's own time limit never does here.
+  const platform = { ...nodePlatform, sleep: (ms: number) => (ms > 60_000 ? new Promise<void>(() => {}) : ((clock += ms), Promise.resolve())) };
+  await runCollector({
+    intentPath: join(dir, "missing.json"),
+    platform,
+    dir,
+    now: () => clock,
+    stop: () => clock >= 180_000,
+    collect: async ({ state }) => (calls++, ok(state)),
+    everyHour: () => (asks++, new Promise(() => {})),
+  });
+  t.is(calls, 3, "read each minute all the same");
+  t.is(asks, 1);
+});
+
+test("requests with no collector share one read of the devices, not one each", async (t) => {
+  const dir = tempDir("collector");
+  const intentPath = join(dir, "missing.json");
+  let reads = 0;
+  // Each read starts by looking for the settings file: counted there.
+  const platform = { ...nodePlatform, fileMode: (path: string) => (path === intentPath && reads++, nodePlatform.fileMode(path)) };
+  const answers = await Promise.all([1, 2, 3].map(() => currentStatus({ intentPath, platform, dir })));
+  t.is(reads, 1);
+  t.deepEqual(new Set(answers.map((a) => (a.ok ? "read" : a.error.message))).size, 1, "each told the one read's answer");
 });

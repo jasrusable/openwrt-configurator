@@ -5,6 +5,7 @@
 import { fromBase64, publicKeyOf, toBase64 } from "../../wireguard";
 import { formatWgConf, WgConf } from "../../wireguardConf";
 import { fromUtf8, toUtf8 } from "../../utf8";
+import { hostIn } from "../addresses";
 import { siteSeed, ulaPrefix } from "../site";
 import { remoteAccessZone, sitesZone } from "../access";
 import type { Intent } from "../schema";
@@ -18,11 +19,8 @@ export const vpnZones = (intent: Pick<Intent, "vpn">) => [
   ...(intent.vpn.sites.peers.length ? [sitesZone] : []),
 ];
 
-/** The first three parts of a /24: "10.0.99" for 10.0.99.0/24. */
-const prefixOf = (subnet: string) => subnet.split(".").slice(0, 3).join(".");
-
 /** The router's address among the clients: .1. */
-export const vpnRouterAddress = (intent: Pick<Intent, "vpn">) => `${prefixOf(intent.vpn.remote_access.subnet)}.1`;
+const vpnRouterAddress = (intent: Pick<Intent, "vpn">) => hostIn(intent.vpn.remote_access.subnet, 1);
 
 /**
  * Its IPv6, from the networks' ULA prefix: the /64 numbered ffff. A network's
@@ -37,7 +35,7 @@ export const vpnRouterAddresses = (intent: Pick<Intent, "vpn" | "system">) => [
 
 /** A client's addresses: IPv4 by its host number, IPv6 in the VPN's /64. */
 export const clientAddresses = (intent: Pick<Intent, "vpn" | "system">, client: Pick<VpnClient, "host">) => [
-  `${prefixOf(intent.vpn.remote_access.subnet)}.${client.host}`,
+  hostIn(intent.vpn.remote_access.subnet, client.host),
   `${vpnUla(intent)}${client.host.toString(16)}`,
 ];
 
@@ -57,7 +55,13 @@ export const withPort = (host: string, port: number) => (host.includes(":") ? `[
 const vpnReachesSites = (intent: Pick<Intent, "vpn">) =>
   intent.vpn.remote_access.enabled && intent.vpn.sites.peers.length > 0 && intent.vpn.remote_access.access.networks.includes("sites");
 
-/** What a client sends through the tunnel: everything, or only home's ranges (and the linked sites', when it may reach them). */
+/**
+ * What a client sends through the tunnel: everything, or only home's ranges
+ * (and the linked sites', when it may reach them). Everything is ::/0 too,
+ * though the tunnel's IPv6 is only the site's ULA: else the client's own IPv6
+ * would carry its traffic outside the tunnel. With only a ULA source, a
+ * client prefers IPv4 for internet names (RFC 6724), which the tunnel carries.
+ */
 const clientRoutes = (intent: Pick<Intent, "vpn" | "networks" | "system">, client: Pick<VpnClient, "route">) =>
   client.route === "all"
     ? ["0.0.0.0/0", "::/0"]

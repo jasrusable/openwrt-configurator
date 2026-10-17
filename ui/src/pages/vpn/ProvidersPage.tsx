@@ -1,7 +1,7 @@
 // VPN › Providers: tunnels a network's internet can go out through (its
 // Internet line), from the provider's own file: WireGuard's .conf, read into
 // fields, or OpenVPN's .ovpn, kept as given.
-import { Alert, Button, SegmentedControl, Text, Textarea, TextInput } from "@mantine/core";
+import { Alert, Button, PasswordInput, SegmentedControl, Text, Textarea, TextInput } from "@mantine/core";
 import { IconShieldLock } from "@tabler/icons-react";
 import { useState } from "react";
 import { useNavigate } from "react-router";
@@ -113,8 +113,7 @@ const NewProviderPage = () => {
               <TextInput value={login.username} onChange={(e) => setLogin({ ...login, username: e.currentTarget.value })} w={260} />
             </SettingRow>
             <SettingRow label="Password">
-              <TextInput
-                type="password"
+              <PasswordInput
                 value={login.password}
                 onChange={(e) => setLogin({ ...login, password: e.currentTarget.value })}
                 w={260}

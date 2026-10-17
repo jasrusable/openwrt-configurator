@@ -55,7 +55,7 @@ export const measureLink = ({
   from: string;
   to: string;
 }): Promise<Result<{ mbps: number }, Problem>> =>
-  oneAtATime(platform, intentPath, "mesh-speed", async () => {
+  oneAtATime(platform, intentPath, async () => {
     const mac = await onDevice(intentPath, platform, to, 15_000, async (session) => {
       const found = await runProbe(session, meshAddress);
       return found ? ok(found) : fail("conflict", `${to} is not in the mesh.`);

@@ -1,5 +1,6 @@
 // Rules and port forwards across settings: ends that exist, one IP version
-// per rule, and a forward to a device that can answer, on a port taken once.
+// per rule, and a forward to a device that can answer, on a port taken once
+// (the router's own WireGuard ones included).
 import { anywhere, internet, router } from "../access";
 import { isIpv6, networkHolding, parseIpv4 } from "../addresses";
 import type { FeatureModule } from "../feature";
@@ -31,6 +32,11 @@ export const firewallChecks: FeatureModule["check"] = (intent, issue) => {
       issue(at("to_addresses"), "IPv4 and IPv6 addresses cannot share a rule");
     }
   });
+  const { remote_access: remote, sites } = intent.vpn;
+  const wireguardPorts = [
+    ...(remote.enabled ? [{ name: "Remote access", port: remote.port }] : []),
+    ...(sites.peers.length ? [{ name: "Linked sites", port: sites.port }] : []),
+  ];
   port_forwards.forEach((forward, i) => {
     const toAddress = ["firewall", "port_forwards", i, "to", "address"];
     const target = networkHolding(intent.networks, forward.to.address);
@@ -65,5 +71,8 @@ export const firewallChecks: FeatureModule["check"] = (intent, issue) => {
     if (clash) {
       issue(["firewall", "port_forwards", i, "port"], "already forwarded");
     }
+    // The router's own WireGuard ports: a forward's DNAT would take their packets first.
+    const listener = forward.protocol !== "tcp" && wireguardPorts.find(({ port }) => overlap(String(port), forward.port));
+    if (listener) issue(["firewall", "port_forwards", i, "port"], `${listener.name} listens on UDP ${listener.port}`);
   });
 };

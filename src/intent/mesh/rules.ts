@@ -6,7 +6,7 @@ import { where } from "../places";
 import { bandLabels, illegalChannelReason, meshBands, meshChannels, strandedReason } from "../radios";
 
 /** A mesh key: 32 random letters and digits, from the platform's strong random source. */
-export const newMeshKey = () => {
+const newMeshKey = () => {
   const alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const bytes = new Uint8Array(32);
   globalThis.crypto.getRandomValues(bytes);

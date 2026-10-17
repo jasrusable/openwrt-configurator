@@ -3,7 +3,7 @@
 // concrete (or says which placeholder cannot stand where it is).
 import { OpenWrtSection, UciScalar } from "./openWrtState";
 import { isPlaceholder, Placeholder, Scalar, Value } from "../plan/types";
-import { orderOptions } from "./uciOrder";
+import { orderOptions } from "../plan/uciOrder";
 
 /** The lowest number from `from` up that `taken` does not hold. */
 export const firstFree = (taken: number[], from: number): number => (taken.includes(from) ? firstFree(taken, from + 1) : from);

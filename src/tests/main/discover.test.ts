@@ -1,10 +1,10 @@
 import test from "ava";
 import { sampleIntent, sampleIntentText } from "../helpers/fixtures";
 import { tempDir } from "../helpers/tempDir";
-import { readFileSync, writeFileSync } from "fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { DeviceFacts, readFacts, writeFacts } from "../../deviceFacts";
-import { discoverCandidates, inspect, inspectReset, readopt, suggestName, suggestRole } from "../../discover";
+import { adopt, discoverCandidates, inspect, inspectAt, inspectReset, readopt, suggestName, suggestRole } from "../../discover";
 import { Intent } from "../../intent/schema";
 import { Platform, Session, SshTarget } from "../../platform";
 import { nodePlatform } from "../../platforms/node";
@@ -88,7 +88,8 @@ const stock = (accepts: { key: boolean }) => {
     connect: async (target) => {
       targets.push(target);
       if (target.privateKeyPath && !accepts.key) throw new Error("Permission denied (publickey)");
-      writeFileSync(knownHosts, `${target.host} ssh-ed25519 ${stockKey}\n`);
+      // As a client trusting on first use: the key recorded where it was told to.
+      appendFileSync(target.knownHostsFile ?? knownHosts, `${target.host} ssh-ed25519 ${stockKey}\n`);
       return session;
     },
   };
@@ -127,35 +128,80 @@ test("a device that takes this app's key is not open", async (t) => {
   t.like(read, { ok: true, value: { openLogin: false } });
 });
 
-test("a device that was reset is read again with its address's old key forgotten, and taken back only if it is the same box", async (t) => {
-  const { platform: stockPlatform } = stock({ key: false });
-  const knownHosts = stockPlatform.env("ONC_KNOWN_HOSTS")!;
-  // Its old key on record, and another host's, which stays.
-  writeFileSync(knownHosts, `10.0.0.143 ssh-ed25519 AAAAoldkey\n10.0.0.1 ssh-ed25519 AAAArouter\n`);
-  // What the file held as each connection was made: the old key refuses it.
-  let atConnect = "";
-  const platform: Platform = {
-    ...stockPlatform,
-    connect: async (target) => {
-      atConnect = readFileSync(knownHosts, "utf8");
-      if (atConnect.includes("10.0.0.143 ssh-ed25519 AAAAoldkey")) throw new Error("host key changed");
-      return stockPlatform.connect(target);
-    },
-  };
+/** A network with a reset device at 10.0.0.143: its old key on record there, and the router's, which stays. */
+const resetNetwork = () => {
+  const { platform } = stock({ key: false });
+  const knownHosts = platform.env("ONC_KNOWN_HOSTS")!;
+  const before = "10.0.0.143 ssh-ed25519 AAAAoldkey\n10.0.0.1 ssh-ed25519 AAAArouter\n";
+  writeFileSync(knownHosts, before);
   const intentPath = join(tempDir("reset"), "intent.json");
   writeFileSync(intentPath, sampleIntentText(), { mode: 0o600 });
-  const facts = (macs: string[]) =>
-    writeFacts(platform, intentPath, { hostname: "home-ap-1", readAt: 1, schema: { name: "zyxel,nwa50ax-pro", version: "25.12.5" }, address: "10.0.0.143", macs, hostKey: { type: "ssh-ed25519", key: "AAAAoldkey" } });
+  writeFacts(platform, intentPath, {
+    hostname: "home-ap-1",
+    readAt: 1,
+    schema: { name: "zyxel,nwa50ax-pro", version: "25.12.5" },
+    address: "10.0.0.143",
+    macs: ["aa:00:00:00:00:43"],
+    hostKey: { type: "ssh-ed25519", key: "AAAAoldkey" },
+  });
+  return { platform, knownHosts, before, intentPath };
+};
 
+test("reading a reset device trusts nothing: cancelling leaves the old pin as it was", async (t) => {
+  const { platform, knownHosts, before, intentPath } = resetNetwork();
   t.is((await inspectReset({ intentPath, platform, address: "10.0.0.143", name: "nobody" })).ok, false);
   const read = await inspectReset({ intentPath, platform, address: "10.0.0.143", name: "home-ap-1" });
   t.true(read.ok);
-  t.is(atConnect, "10.0.0.1 ssh-ed25519 AAAArouter\n", "only that address's key is forgotten");
+  t.truthy(read.ok && read.value.fingerprint, "its new key's fingerprint, to compare");
+  t.is(readFileSync(knownHosts, "utf8"), before, "the address still held to its old key");
+  t.is(readFacts(platform, intentPath, ["home-ap-1"])["home-ap-1"]?.hostKey?.key, "AAAAoldkey");
+  t.false(existsSync(`${intentPath}.state/inspected/10.0.0.143.known_hosts`), "the key it showed, recorded aside, is gone");
+});
 
-  facts(["aa:00:00:00:00:99"]);
-  const another = await readopt({ intentPath, platform, address: "10.0.0.143", name: "home-ap-1" });
-  t.regex(!another.ok ? another.error.message : "", /This is not home-ap-1/);
-  facts(["aa:00:00:00:00:43"]);
-  t.true((await readopt({ intentPath, platform, address: "10.0.0.143", name: "home-ap-1", now: () => 9 })).ok);
+test("taking a reset device back pins exactly the key it showed, and only when that fingerprint is confirmed", async (t) => {
+  const { platform, knownHosts, before, intentPath } = resetNetwork();
+  const read = await inspectReset({ intentPath, platform, address: "10.0.0.143", name: "home-ap-1" });
+  const fingerprint = read.ok ? read.value.fingerprint! : "";
+  const refused = await readopt({ intentPath, platform, address: "10.0.0.143", name: "home-ap-1", fingerprint: "SHA256:another" });
+  t.regex(!refused.ok ? refused.error.message : "", /not the key it showed/);
+  t.is(readFileSync(knownHosts, "utf8"), before, "a different key at confirm time: nothing pinned");
+  t.true((await readopt({ intentPath, platform, address: "10.0.0.143", name: "home-ap-1", fingerprint, now: () => 9 })).ok);
+  t.is(readFileSync(knownHosts, "utf8"), `10.0.0.1 ssh-ed25519 AAAArouter\n10.0.0.143 ssh-ed25519 ${stockKey}\n`);
   t.is(readFacts(platform, intentPath, ["home-ap-1"])["home-ap-1"]?.hostKey?.key, stockKey, "its new key pinned, under its own name");
+});
+
+test("taking a reset device back: only one in Hardware, and its old key at its old address goes", async (t) => {
+  const { platform, knownHosts, intentPath } = resetNetwork();
+  // It came back at another address (an access point asks DHCP for one).
+  writeFileSync(knownHosts, "10.0.0.120 ssh-ed25519 AAAAoldkey\n10.0.0.1 ssh-ed25519 AAAArouter\n");
+  writeFacts(platform, intentPath, {
+    hostname: "home-ap-1",
+    readAt: 1,
+    schema: { name: "zyxel,nwa50ax-pro", version: "25.12.5" },
+    address: "10.0.0.120",
+    macs: ["aa:00:00:00:00:43"],
+    hostKey: { type: "ssh-ed25519", key: "AAAAoldkey" },
+  });
+  writeFacts(platform, intentPath, { hostname: "gone-ap", readAt: 1, schema: { name: "x", version: "25.12.5" }, macs: ["aa:00:00:00:00:43"] });
+  const read = await inspectReset({ intentPath, platform, address: "10.0.0.143", name: "home-ap-1" });
+  const fingerprint = read.ok ? read.value.fingerprint! : "";
+  const notThere = await readopt({ intentPath, platform, address: "10.0.0.143", name: "gone-ap", fingerprint });
+  t.regex(!notThere.ok ? notThere.error.message : "", /^gone-ap is not in Hardware/, "facts alone are not enough");
+  t.true((await readopt({ intentPath, platform, address: "10.0.0.143", name: "home-ap-1", fingerprint, now: () => 9 })).ok);
+  t.is(readFileSync(knownHosts, "utf8"), `10.0.0.1 ssh-ed25519 AAAArouter\n10.0.0.143 ssh-ed25519 ${stockKey}\n`, "nothing held at 10.0.0.120 for whatever answers there next");
+});
+
+test("Hardware › Add trusts nothing when it reads a device: the key is pinned when it is added, with its fingerprint confirmed", async (t) => {
+  const { platform, knownHosts, intentPath } = resetNetwork();
+  writeFileSync(knownHosts, "");
+  const read = await inspectAt({ intentPath, platform, address: "10.0.0.150" });
+  t.true(read.ok);
+  t.is(readFileSync(knownHosts, "utf8"), "", "nothing trusted by reading it");
+  const fingerprint = read.ok ? read.value.fingerprint! : "";
+  t.false((await adopt({ intentPath, platform, address: "10.0.0.150", name: "ap-9", fingerprint: "SHA256:another" })).ok);
+  t.is(readFileSync(knownHosts, "utf8"), "");
+  // Another box than home-ap-1 (its MAC): the stand-in answers with home-ap-1's, so give it its own facts first.
+  writeFacts(platform, intentPath, { hostname: "home-ap-1", readAt: 1, schema: { name: "x", version: "25.12.5" }, macs: ["aa:00:00:00:00:01"] });
+  t.true((await adopt({ intentPath, platform, address: "10.0.0.150", name: "ap-9", fingerprint })).ok);
+  t.is(readFileSync(knownHosts, "utf8"), `10.0.0.150 ssh-ed25519 ${stockKey}\n`);
 });

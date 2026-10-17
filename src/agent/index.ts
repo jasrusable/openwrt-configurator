@@ -10,6 +10,7 @@ import { shellQuote } from "../shell";
 import { agentPath } from "./paths";
 import { AgentRecord, encodeRecords } from "./records";
 import { agentScript } from "./script";
+import { writeScriptCommand } from "./prelude";
 
 /** How the device recovers if a provision is never confirmed. */
 export type RollbackMode = "reload" | "reboot" | "reload-then-reboot";
@@ -28,14 +29,18 @@ const hooksTimeoutMs = 5 * 60_000;
 const verb = (runId: string, name: string, args: string[] = []) =>
   [`sh ${agentPath(runId)} ${name}`, ...args.map(shellQuote)].join(" ");
 
-const says = (word: string) => ({ stdout }: { stdout: string }) => stdout.includes(word);
+/** A marker, as its own line: never a substring of other output (a path, a package's words). */
+export const saysLine = (stdout: string, word: string) => stdout.split("\n").some((line) => line.trim() === word);
+
+/** The answer is `word`, on a line of its own. */
+export const says = (word: string) => ({ stdout }: { stdout: string }) => saysLine(stdout, word);
 
 /**
  * Write the agent and start a fresh run directory, in one round trip: the
  * script travels on stdin (a long exec request is refused by dropbear).
  */
 export const install = (runId: string): Verb<boolean> => ({
-  command: `umask 077 && cat > ${agentPath(runId)} && chmod 700 ${agentPath(runId)} && ${verb(runId, "begin")}`,
+  command: `${writeScriptCommand(agentPath(runId))} && ${verb(runId, "begin")}`,
   stdin: agentScript,
   parse: says("ONC_BEGUN"),
 });
@@ -45,12 +50,15 @@ export const install = (runId: string): Verb<boolean> => ({
  * agent's words: a path, a package, a config, never a value) and what the
  * device said of it.
  */
-export type Steps = { done: true } | { done: false; step: string; stderr: string };
+export type Steps = ({ done: true } | { done: false; step: string; stderr: string }) & {
+  /** Every step it started, in order. */
+  started: string[];
+};
 
 const stepsOf = ({ stdout, stderr, code }: ExecResult): Steps => {
-  if (code === 0 && /^ONC_OK$/m.test(stdout)) return { done: true };
-  const started = [...stdout.matchAll(/^ONC_STEP (.*)$/gm)];
-  return { done: false, step: started.length ? started[started.length - 1][1] : "its first step", stderr: stderr.trim() };
+  const started = [...stdout.matchAll(/^ONC_STEP (.*)$/gm)].map((match) => match[1]);
+  if (code === 0 && saysLine(stdout, "ONC_OK")) return { done: true, started };
+  return { done: false, step: started.length ? started[started.length - 1] : "its first step", stderr: stderr.trim(), started };
 };
 
 const steps = (runId: string, name: string, records: AgentRecord[], timeoutMs?: number): Verb<Steps> => ({
@@ -72,8 +80,8 @@ export const stage = (runId: string, records: AgentRecord[]) => steps(runId, "st
 /** Commit each changed config, mark the commit done, reload. Its link may drop. */
 export const finalise = (runId: string, records: AgentRecord[]) => steps(runId, "finalise", records);
 
-/** Enable and start, or stop and disable, each declared service. */
-export const services = (runId: string, records: AgentRecord[]) => steps(runId, "services", records);
+/** Enable and start, or stop and disable, each declared service; within `timeoutMs` (what is left of the window). */
+export const services = (runId: string, records: AgentRecord[], timeoutMs?: number) => steps(runId, "services", records, timeoutMs);
 
 /** The run_after_reload hooks, once the config is live. */
 export const hooks = (runId: string, records: AgentRecord[]) => steps(runId, "hooks", records, hooksTimeoutMs);
@@ -81,7 +89,7 @@ export const hooks = (runId: string, records: AgentRecord[]) => steps(runId, "ho
 /** Fetch packages a run removes, so a rollback can reinstall them with the network down. How many were kept. */
 export const stagePackages = (runId: string, packages: string[]): Verb<number> => ({
   command: verb(runId, "stage-packages", packages),
-  parse: ({ stdout }) => Number(/ONC_STAGED\s+(\d+)/.exec(stdout)?.[1] ?? 0),
+  parse: ({ stdout }) => Number(/^ONC_STAGED (\d+)$/m.exec(stdout)?.[1] ?? 0),
   timeoutMs: packagesTimeoutMs,
 });
 
@@ -127,7 +135,7 @@ export const arm = (runId: string, plan: ArmPlan): Verb<{ armed: boolean; why: s
     ...(plan.reloadWireless ? ["--wireless"] : []),
   ]),
   stdin: armLines(plan),
-  parse: ({ stdout, stderr }) => ({ armed: stdout.includes("ONC_ARMED"), why: stderr.trim() }),
+  parse: ({ stdout, stderr }) => ({ armed: saysLine(stdout, "ONC_ARMED"), why: stderr.trim() }),
 });
 
 /** Whether the commit finished: a dropped link looks the same before, during and after it. */
@@ -136,10 +144,23 @@ export const commitFinished = (runId: string): Verb<boolean> => ({
   parse: says("ONC_COMMITTED"),
 });
 
+/**
+ * Before any device is disarmed: still asleep, with the seconds before it
+ * fires; "kept" when its watchdog died before restoring (nothing undoes the
+ * change now); "fired" otherwise (restoring, restored, gone).
+ */
+export const asleep = (runId: string): Verb<{ asleep: true; seconds: number } | { asleep: false; kept: boolean }> => ({
+  command: verb(runId, "asleep"),
+  parse: ({ stdout }) => {
+    const seconds = /^ONC_ASLEEP (-?\d+)$/m.exec(stdout)?.[1];
+    return seconds !== undefined ? { asleep: true, seconds: Number(seconds) } : { asleep: false, kept: saysLine(stdout, "ONC_KEPT") };
+  },
+});
+
 /** Stand the watchdog down, or learn it fired (restoring, or done). */
 export const disarm = (runId: string): Verb<"disarmed" | "fired"> => ({
   command: verb(runId, "disarm"),
-  parse: ({ stdout }) => (stdout.includes("ONC_DISARMED") ? "disarmed" : "fired"),
+  parse: ({ stdout }) => (saysLine(stdout, "ONC_DISARMED") ? "disarmed" : "fired"),
 });
 
 /** The run is over on the device: what it leaves (the disarm's marker, its directory, the agent), removed. */

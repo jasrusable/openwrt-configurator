@@ -4,6 +4,7 @@ import { fakeDevice, virtualClock } from "../helpers/fakeDevice";
 import { ApplyEvent, parseEvents, progressOf } from "../../applyEvents";
 import { RunResult } from "../../apply/outcome";
 import { provisioningOrder, provisionNetwork } from "../../apply/provisionNetwork";
+import { scrubbed } from "../../apply/run";
 import { readDeviceNow, stateHash } from "../../deviceState";
 import { nodePlatform } from "../../platforms/node";
 
@@ -46,7 +47,7 @@ test.serial("one device: armed before configuring, disarmed only after confirmin
   await applies(t, run([device]));
   t.deepEqual(
     device.events.filter((e) => e !== "revert"),
-    ["prepare", "arm", "packages", "configure", "commit", "settle", "disarm"]
+    ["prepare", "arm", "packages", "configure", "commit", "settle", "asleep", "disarm"]
   );
   t.true(device.changed);
   // Wiped, then exactly the declared config: the stale interface and the
@@ -326,7 +327,7 @@ test.serial("a dropped session at disarm time is reconnected, not a failed run",
 test.serial("a device found to have fired at disarm is told it recovered once restored, so it does not reboot", async (t) => {
   const device = fakeDevice({ hostname: "ap", firesBeforeDisarm: true });
   const error = await failure(t, run([device]));
-  t.regex(error!.message, /rolled itself back before it could be confirmed/);
+  t.regex(error!.message, /rolled itself back before it could be disarmed/);
   t.true(device.events.indexOf("recovered") > device.events.indexOf("watchdog-fired"));
   t.false(device.changed);
 });
@@ -466,4 +467,92 @@ test.serial("a device changed since its plan was reviewed stops the run before a
       confirmTimeoutSeconds: 60,
     })
   ));
+});
+
+test.serial("every watchdog is checked still asleep before any is disarmed: one that fired takes the whole run back, none disarmed", async (t) => {
+  const [a, b] = [fakeDevice({ hostname: "a" }), fakeDevice({ hostname: "b", firesBeforeAsleep: true })];
+  const error = await failure(t, run([a, b]));
+  t.is(error?.end, "rolled-back");
+  t.regex(error!.message, /b rolled itself back[\s\S]*No device keeps a change/);
+  t.false(a.events.includes("disarm") || b.events.includes("disarm"));
+  t.false(a.changed || b.changed);
+});
+
+test.serial("every watchdog still has time to spare once all are asked: one asked early and slowed past its margin by the rest takes the run back", async (t) => {
+  const clock = virtualClock();
+  const a = fakeDevice({ hostname: "a" });
+  // b arms 30 s after a (its deadline later), and asking it takes 80 s: a, fine when asked, is then 10 s from firing.
+  const b = fakeDevice({ hostname: "b", onEvent: (e) => (e === "arm" || e === "asleep") && void clock.sleep(e === "arm" ? 30_000 : 80_000) });
+  const error = await failure(t, quietly(() => provisionNetwork({ devices: [a, b].map((d) => d.options(clock)), confirm: true, confirmTimeoutSeconds: 60 })));
+  t.is(error?.end, "rolled-back");
+  t.regex(error!.message, /Too little of the rollback window was left to disarm every device \(a: 10 s\)/);
+  t.false(a.events.includes("disarm") || b.events.includes("disarm"));
+  t.false(a.changed || b.changed);
+});
+
+test.serial("one lost as the devices are disarmed: the rest are disarmed too, and the run says which kept the change", async (t) => {
+  const [a, b, c] = [fakeDevice({ hostname: "a" }), fakeDevice({ hostname: "b", firesBeforeDisarm: true }), fakeDevice({ hostname: "c" })];
+  const error = await failure(t, run([a, b, c]));
+  t.is(error?.end, "partial");
+  t.deepEqual(error?.kept, ["a", "c"]);
+  t.regex(error!.message, /keeping the change: a, c/);
+  t.true(a.changed && c.changed);
+  t.false(b.changed);
+});
+
+test.serial("a device another run's watchdog still guards is refused at plan, before anything is armed", async (t) => {
+  const [a, b] = [fakeDevice({ hostname: "a" }), fakeDevice({ hostname: "b", otherRunArmed: 50 })];
+  const error = await failure(t, run([a, b]));
+  t.is(error?.end, "failed");
+  t.regex(error!.message, /b still has an earlier apply's rollback armed[\s\S]*about 3 min/);
+  t.deepEqual([...a.events, ...b.events], []);
+});
+
+test.serial("with a reviewed plan, a device not in it is refused as stale", async (t) => {
+  const clock = virtualClock();
+  const device = fakeDevice({ hostname: "ap" });
+  const error = await failure(t, quietly(() =>
+    provisionNetwork({ devices: [{ ...device.options(clock), verify: { sha256: nodePlatform.sha256 } }], confirm: true, confirmTimeoutSeconds: 60 })
+  ));
+  t.is(error?.end, "plan-stale");
+  t.regex(error!.message, /ap was not in the reviewed changes/);
+});
+
+test.serial("a rolled-back run says root's password stays as it set it, when a run_after set it", async (t) => {
+  const [a, b] = [fakeDevice({ hostname: "a", runsAfter: true }), fakeDevice({ hostname: "b", failOn: "configure" })];
+  const error = await failure(t, run([a, b]));
+  t.is(error?.end, "rolled-back");
+  t.regex(error!.message, /root's password is one: as this run set it on a\)/);
+  const clean = await failure(t, run([fakeDevice({ hostname: "c" }), fakeDevice({ hostname: "d", failOn: "configure" })]));
+  t.regex(clean!.message, /No device keeps a change from this run:/);
+});
+
+test.serial("--no-confirm stopped after committing some devices: partial, each one committed kept", async (t) => {
+  const clock = virtualClock();
+  const [a, b] = [fakeDevice({ hostname: "a" }), fakeDevice({ hostname: "b", failOn: "configure" })];
+  const unconfirmed = (devices: ReturnType<typeof fakeDevice>[]) =>
+    quietly(() => provisionNetwork({ devices: devices.map((d) => d.options(clock)), confirm: false, confirmTimeoutSeconds: 60 }));
+  const partly = await failure(t, unconfirmed([a, b]));
+  t.is(partly?.end, "partial");
+  t.deepEqual(partly?.kept, ["a"]);
+  const first = await failure(t, unconfirmed([fakeDevice({ hostname: "c", failOn: "configure" })]));
+  t.is(first?.end, "failed", "nothing committed");
+  const cutOff = fakeDevice({ hostname: "e", lockedOutAfterCommit: true });
+  const last = await failure(t, unconfirmed([cutOff]));
+  t.is(last?.end, "applied-with-problems", "committed everywhere, not reached after");
+  const failedCommit = await failure(t, unconfirmed([fakeDevice({ hostname: "f", failOn: "commit" })]));
+  t.is(failedCommit?.end, "partial", "a failed commit is never applied: maybe in part, never made live");
+  t.deepEqual(failedCommit?.kept, ["f"]);
+});
+
+test("what a device says reaches the log with the run's secrets hidden: secret options, owner-only files' lines", (t) => {
+  const state = {
+    ...fakeDevice({ hostname: "ap" }).options(virtualClock()).state,
+    config: { wireless: { "wifi-iface": [{ ".name": "home", ssid: "Home", key: "hunter22" }] } },
+    files: [{ path: "/etc/onc/root-password", mode: "0600", content: "s3cret!\ns3cret!\n" }, { path: "/etc/motd", content: "Home\n" }],
+  };
+  t.is(
+    scrubbed({ state }, "passwd: s3cret! is too weak; psk hunter22 for Home"),
+    "passwd: <redacted> is too weak; psk <redacted> for Home"
+  );
 });

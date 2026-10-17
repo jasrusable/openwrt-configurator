@@ -146,7 +146,12 @@ export const readingsOf = (status: NetworkStatus, throughput: { down?: number; u
 /** The device a series belongs to, if it is one device's ("load:ap", "busy:ap:5 GHz"). */
 const deviceOfKey = (key: string) => /^(?:load|memory|temperature|clients|busy):([^:]+)/.exec(key)?.[1];
 
-/** One read's numbers added to a range; a device no longer in the settings keeps no history. */
+/**
+ * One read's numbers added to a range, every series pruned to what the range
+ * keeps (not only those read now: one no longer read, a line or a device gone
+ * quiet, kept its days-old points); a device no longer in the settings keeps
+ * no history.
+ */
 export const withReadings = (
   history: History,
   at: number,
@@ -155,13 +160,21 @@ export const withReadings = (
   range: RangeRule = ranges.day
 ): History => {
   const kept = Object.fromEntries(
-    Object.entries(history).filter(([key]) => {
+    Object.entries(history).flatMap(([key, points]) => {
       const device = deviceOfKey(key);
-      return device === undefined || devices.includes(device);
+      if (device !== undefined && !devices.includes(device)) return [];
+      const recent = points.filter(([t]) => t > at - range.keepMs);
+      return recent.length ? [[key, recent] as const] : [];
     })
   );
   return Object.entries(readings).reduce((h, [key, value]) => withSample(h, key, at, value, range), kept);
 };
+
+/** Means to four significant digits, as stored and served: the graphs draw no finer. */
+export const rounded = (history: History): History =>
+  Object.fromEntries(
+    Object.entries(history).map(([key, points]) => [key, points.map(([t, mean, n]): Point => [t, Number(mean.toPrecision(4)), n])])
+  );
 
 /** One read's numbers added to every range. */
 export const withReadingsEverywhere = (histories: Histories, at: number, readings: Record<string, number>, devices: string[]): Histories => ({

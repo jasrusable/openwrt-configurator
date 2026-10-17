@@ -1,4 +1,5 @@
 import test from "ava";
+import { sessionSetCookie } from "../../server/auth";
 import { cgiRequest, cgiResponse } from "../../server/cgi";
 
 const names = ["gateway", "gateway.lan", "openwrt.lan"];
@@ -25,10 +26,22 @@ test("under uhttpd, a rebound name is refused, and the saved file's version come
   t.is((put as { headers: Record<string, string> }).headers["x-onc-version"], version);
   const odd = request({ REQUEST_METHOD: "PUT", HTTP_HOST: "gateway", QUERY_STRING: "version=../x" });
   t.false("x-onc-version" in (odd as { headers: Record<string, string> }).headers);
+  // None saved (a first restore) is a version too, checked as one: never dropped, which would check nothing.
+  const none = request({ REQUEST_METHOD: "POST", HTTP_HOST: "gateway", QUERY_STRING: "version=" });
+  t.is((none as { headers: Record<string, string> }).headers["x-onc-version"], "");
+  const unnamed = request({ REQUEST_METHOD: "POST", HTTP_HOST: "gateway" });
+  t.false("x-onc-version" in (unnamed as { headers: Record<string, string> }).headers);
   t.deepEqual(request({ HTTP_HOST: "gateway", CONTENT_LENGTH: String(3 * 1024 * 1024) }), { refused: 413, error: "Too large." });
 });
 
 test("a CGI answer's status carries its reason: uhttpd ignores a bare code and sends 200", (t) => {
   t.regex(cgiResponse({ status: 401, headers: {}, body: "" }), /^Status: 401 Unauthorized\r\n/);
   t.regex(cgiResponse({ status: 418, headers: {}, body: "" }), /^Status: 418 \S/);
+});
+
+test("under uhttpd with TLS, the request says so: its session cookie is Secure", (t) => {
+  t.like(request({ HTTP_HOST: "gateway", HTTPS: "on" }), { secure: true });
+  t.false("secure" in request({ HTTP_HOST: "gateway" }));
+  t.regex(sessionSetCookie("0".repeat(32), true), /; Secure/);
+  t.notRegex(sessionSetCookie("0".repeat(32)), /Secure/);
 });

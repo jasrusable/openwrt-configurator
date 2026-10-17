@@ -261,6 +261,17 @@ test("a patch marks exactly the settings it overrides, by item: derived from ori
   t.notRegex(explainFor("wifi.networks.1.roaming.fast".split("."), intent) ?? "", /Held off/);
 });
 
+test("ft-key-race: by the section's encryption, so a WPA2 SSID's 6 GHz section (SAE) is held off and its other bands are not", (t) => {
+  const intent = sample();
+  intent.wifi.radios["6g"].enabled = true;
+  intent.wifi.networks = intent.wifi.networks.map((ssid, i) => ({ ...ssid, roaming: { ...ssid.roaming, fast: i === 0 }, security: "wpa2" as const }));
+  const own = compileIntent(intent).config.wireless["wifi-iface"].filter((s) => s.origin?.item === "wifi.networks.0");
+  const heldOff = (s: (typeof own)[number]) => (s.overrides ?? []).some((o) => o.options.ieee80211r === false);
+  t.deepEqual(own.map((s) => [s.options.encryption, heldOff(s)]), [["psk2+ccmp", false], ["sae", true]]);
+  intent.wifi.radios["6g"].enabled = false;
+  t.false(patchMarks(intent).some((m) => m.patch.id === "ft-key-race"), "WPA2 without 6 GHz: not needed");
+});
+
 test("a patch turned off emits nothing and marks nothing; one that is required cannot be", (t) => {
   const intent = roaming();
   intent.system.patches = { off: ["ft-key-race"] };

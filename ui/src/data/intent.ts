@@ -1,6 +1,6 @@
 // Server state for the intent file, through React Query.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { loadIntent, NoSettingsError, SaveError, saveIntent } from "./api";
+import { loadIntent, NoSettingsError, SaveError, saveIntent, UnreadableSettingsError } from "./api";
 import { prefetchApplyPlan } from "./devices";
 import { provisionKey } from "./provision";
 
@@ -10,8 +10,9 @@ export const useIntent = () =>
   useQuery({
     queryKey: intentKey,
     queryFn: loadIntent,
-    // None saved yet is an answer (the first run), not a failure to try again.
-    retry: (failures, error) => !(error instanceof NoSettingsError) && failures < 1,
+    // None saved yet, or a file that does not read, is an answer (the first
+    // run, the recovery screen), not a failure to try again.
+    retry: (failures, error) => !(error instanceof NoSettingsError || error instanceof UnreadableSettingsError) && failures < 1,
   });
 
 export const useSaveIntent = ({ prefetchPlan = true }: { prefetchPlan?: boolean } = {}) => {

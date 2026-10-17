@@ -11,7 +11,7 @@ import { isPrivateRange } from "../intent/addresses";
 import { type Intent } from "../intent/schema";
 import { bands } from "../intent/radios";
 import type { DeviceStatus, InternetCheck, PortLink } from "./device";
-import { networkOfAddress, type NetworkStatus, Reachability, readDevices, readOf, reached, routerOf, weakMeshLinkMbps, whyUnread } from "./network";
+import { lineWorks, memoryUsed, networkOfAddress, type NetworkStatus, Reachability, readDevices, readOf, reached, routerOf, weakMeshLinkMbps, whyUnread } from "./network";
 import { bandOf } from "./values";
 import { droppableFixes } from "../intent/patches/status";
 
@@ -244,7 +244,7 @@ export const devicesOf = (
         ? {
             uptime: status.uptime,
             load: status.load[0],
-            memoryUsed: status.memory.total ? 1 - status.memory.available / status.memory.total : 0,
+            memoryUsed: memoryUsed(status),
             ...(status.storage ? { storage: status.storage } : {}),
             ...(status.temperature !== undefined ? { temperature: status.temperature } : {}),
             ...(status.cores ? { cores: status.cores } : {}),
@@ -434,10 +434,7 @@ export const attentionOf = ({
   }
   if (router) {
     const connections = intent.internet.lines;
-    const up = connections.filter((c) => {
-      const line = router.lines.find((l) => l.id === c.id);
-      return line ? line.state === "online" || line.state === "disconnecting" : !!router.interfaces.find((i) => i.id === c.id)?.up;
-    });
+    const up = connections.filter((c) => lineWorks(router, c.id));
     if (up.length === 0) {
       out.push({ id: "internet:down", severity: "problem", title: "No internet", detail: "No internet connection is working.", link: "/internet" });
     } else {

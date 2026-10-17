@@ -19,7 +19,7 @@ import { nodePlatform } from "../src/platforms/node";
 import { uiHandler } from "../src/server/app";
 import { stateLayout, write } from "../src/store";
 import { digest, eventsKey, movesKey, registryKey, State } from "../src/status/collector";
-import { jobPaths } from "../src/server/provisionJob";
+import { jobPaths } from "../src/apply/job";
 import type { ApplyPlan } from "../src/applyPlan";
 import type { NetworkEvent } from "../src/status/events";
 import { History, radioKey, ranges } from "../src/status/history";

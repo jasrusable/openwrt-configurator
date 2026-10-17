@@ -125,7 +125,8 @@ export const internetSchema = z
         zone: z.string().regex(/^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/, "like example.com").optional(),
       })
       .strict()
-      .refine((d) => !d.zone || d.hostname === d.zone || d.hostname.endsWith(`.${d.zone}`), {
+      // Only Cloudflare's script reads the zone: another provider's is ignored.
+      .refine((d) => !d.zone || d.provider !== "cloudflare" || d.hostname === d.zone || d.hostname.endsWith(`.${d.zone}`), {
         message: "the name must be in the zone",
         path: ["zone"],
       })

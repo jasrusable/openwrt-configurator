@@ -10,6 +10,7 @@ import {
   removeFile,
   listDir,
   makeDir,
+  privateDir,
   removeDir,
   modifiedAt,
   sha256,
@@ -43,6 +44,7 @@ export const qjsPlatform: Platform = {
   removeFile,
   listDir,
   makeDir,
+  privateDir,
   removeDir,
   modifiedAt,
   readFileHead,
@@ -54,8 +56,9 @@ export const qjsPlatform: Platform = {
   run: async (argv, options) => {
     const { timedOut, ...result } = await spawn(argv, {
       stdin: options?.stdin,
+      ...(options?.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs, group: true }),
     });
-    return result;
+    return timedOut ? { ...result, code: null, timedOut } : result;
   },
   runInteractive: async (argv) =>
     os.exec(resolveArgv(argv), { block: true, usePath: false }),

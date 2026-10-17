@@ -36,7 +36,7 @@ export const systemFields: FieldInfo[] = [
     secret: true,
     openwrt: "root password",
     explain:
-      "Root's password on every device: each apply sets it, so the web logins (LuCI, and this app on a router) need it. A device fresh from OpenWrt has none, and then any password logs in. The app also logs in with it over SSH when there is no key. A rollback leaves it set.",
+      "Root's password on every device, required: each apply sets it, so the web logins (LuCI, and this app on a router) and SSH need it. A device fresh from OpenWrt has none, and then any password logs in, from every network that reaches it. The app also logs in with it over SSH when there is no key. A rollback leaves it set.",
   },
   { path: "system.firmware", label: "Firmware" },
   {
@@ -53,7 +53,7 @@ export const systemFields: FieldInfo[] = [
     description: "Public keys that may log in to the devices as root.",
     openwrt: "/etc/dropbear/authorized_keys",
     explain:
-      "Installed on every device by each apply, replacing what was there. Empty leaves each device's own file alone. This app's key belongs here, so it can still log in once password login is off.",
+      "Installed on every device by each apply, replacing what was there. Empty removes the list this app installed; a file put there by hand stays. This app's key belongs here, so it can still log in once password login is off.",
   },
   {
     path: "system.ssh.password_login",
@@ -61,6 +61,6 @@ export const systemFields: FieldInfo[] = [
     description: "Off: only the authorized keys can log in. Recommended.",
     openwrt: "dropbear PasswordAuth, RootPasswordAuth",
     explain:
-      `Off, only the authorized keys can log in over SSH. The web logins are closed by root's password (${where("system", "Administration", "Password")}), which each apply sets when there is one.`,
+      `Off, only the authorized keys can log in over SSH. The web logins are closed by root's password (${where("system", "Administration", "Password")}), which each apply sets.`,
   },
 ];

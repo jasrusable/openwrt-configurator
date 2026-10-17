@@ -78,6 +78,9 @@ export const strandedReason = (intent: Intent, wifi: WifiSettings) => {
   return stranded && `“${stranded.ssid || "Unnamed"}” would be broadcast nowhere: give it another band first (${where("ssids")}).`;
 };
 
+/** The countries wireless-regdb limits: elsewhere no channel is known to be refused. */
+export const regulatedCountries = Object.keys(regdb);
+
 /** A channel's centre frequency (MHz), as OpenWrt's wifi-detect counts them. */
 const centreOf = (band: Band, channel: number) =>
   band === "2g" ? (channel === 14 ? 2484 : 2407 + 5 * channel) : band === "5g" ? 5000 + 5 * channel : 5950 + 5 * channel;
@@ -88,7 +91,7 @@ const centreOf = (band: Band, channel: number) =>
  * table, so a channel outside it leaves the radio down. A country the table
  * lacks: no limit known.
  */
-export const channelLegal = (country: string, band: Band, channel: number) => {
+const channelLegal = (country: string, band: Band, channel: number) => {
   const ranges = regdb[country];
   if (!ranges) return true;
   const centre = centreOf(band, channel);

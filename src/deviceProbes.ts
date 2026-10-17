@@ -326,7 +326,9 @@ export const notRunning = (names: string[]): Probe<{ name: string; missing: bool
     ? [
         `for s in ${names.map(shellQuote).join(" ")}; do`,
         '  [ -x "/etc/init.d/$s" ] || { echo "$s -"; continue; }',
-        `  printf '%s %s\\n' "$s" "$(ubus call service list '{"name":"'"$s"'"}' 2>/dev/null | jsonfilter -e '@.*.instances.*.running' 2>/dev/null | grep -c true)"`,
+        // A failed ubus (wedged ubusd) says nothing, rather than "not running".
+        `  out=$(ubus call service list '{"name":"'"$s"'"}' 2>/dev/null) || { echo "$s ?"; continue; }`,
+        `  printf '%s %s\\n' "$s" "$(echo "$out" | jsonfilter -e '@.*.instances.*.running' 2>/dev/null | grep -c true)"`,
         "done",
       ].join("\n")
     : "true",

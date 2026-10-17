@@ -5,9 +5,13 @@ import { DeviceStatus, parseHeardBy, parseTraffic } from "../../status/device";
 import { attentionOf, clientsOf, devicesOf, internetCountersOf, logWords, restartable } from "../../status/views";
 import { printPlan } from "../../lowLevel/print";
 import { compileIntent } from "../../intent/compile";
-import { bloatGrade, neighboursOf, parseSpeed, parseSpeedTest, parseSurvey } from "../../status/actions";
+import { bloatGrade, neighboursOf, oneAtATime, parseSpeed, parseSpeedTest, parseSurvey } from "../../status/actions";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { nodePlatform } from "../../platforms/node";
+import { ok, Result } from "../../result";
+import type { Problem } from "../../problem";
+import { tempDir } from "../helpers/tempDir";
 
 const sample = () =>
   sampleIntent();
@@ -146,6 +150,16 @@ test("a device's log in words: links, interfaces, mwan3 and this app's marks; th
   const [router] = devicesOf(intent, reads(device("home-router", { log })), {});
   t.deepEqual(router.log?.[0], { at: 1000, text: "netifd: Interface 'lan' is now up", said: `${intent.networks[0].name} came up`, tone: "up" });
   t.deepEqual(router.log?.[3], { at: 4000, text: "dnsmasq[1]: read /etc/hosts" }, "as logged, nothing said of it");
+});
+
+test("actions: one at a time of any kind: another kind while one runs is told so", async (t) => {
+  const intentPath = join(tempDir("actions"), "intent.json");
+  let release = () => {};
+  const first = oneAtATime(nodePlatform, intentPath, () => new Promise<Result<string, Problem>>((r) => (release = () => r(ok("survey")))));
+  t.like(await oneAtATime(nodePlatform, intentPath, async () => ok("restart")), { ok: false, error: { kind: "busy" } });
+  release();
+  t.like(await first, { ok: true, value: "survey" });
+  t.like(await oneAtATime(nodePlatform, intentPath, async () => ok("restart")), { ok: true, value: "restart" });
 });
 
 test("speed: bits over the router's uptime clock", (t) => {

@@ -4,12 +4,15 @@
 // last answer kept offline), and the settings' own checks.
 import test from "ava";
 import { join } from "path";
-import { firmwareRows, newerSeries, Releases, targetOf, updatesAvailable } from "../../firmware/target";
+import { firmwareRows, isFirmwareChoice, newerSeries, Releases, targetOf, updatesAvailable } from "../../firmware/target";
+import { jobPaths } from "../../apply/job";
+import { diffIntent } from "../../intent/diff";
+import { uiHandler } from "../../server/app";
 import { asuOverviewUrl, parseOverview, readReleases } from "../../firmware/releases";
-import { upgradeFirst } from "../../firmware/run";
+import { planAfterUpgrade, stationsOf, upgradeFirst } from "../../firmware/run";
 import { writeFacts } from "../../deviceFacts";
 import { writeFileSync } from "fs";
-import { intentSchema } from "../../intent/schema";
+import { Intent, intentSchema } from "../../intent/schema";
 import { nodePlatform } from "../../platforms/node";
 import { runCollector } from "../../status/collector";
 import { ok } from "../../result";
@@ -24,11 +27,21 @@ import { tempDir } from "../helpers/tempDir";
 const overview = JSON.stringify(readRepoJson("src", "tests", "helpers", "firmware", "asu-overview.json"));
 const releases: Releases = { at: 1, series: { "25.12": ["25.12.5", "25.12.4", "25.12.3"], "26.1": ["26.1.0"] } };
 
+/** An authorized key, this app's own: no image is built without it. */
+const key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq7cL9mXJ8uH2n0u5bq1nE2b6p0Gx3m5qS1qR8u0Vtq you@mac";
+const appKeyPath = join(tempDir("app-key"), "id_ed25519");
+writeFileSync(`${appKeyPath}.pub`, `${key}\n`);
+
 const withFirmware = (release?: string, devices: Record<string, string> = {}) => {
   const intent = sampleIntent();
   return {
     ...intent,
-    system: { ...intent.system, ...(release ? { firmware: { release } } : {}) },
+    system: {
+      ...intent.system,
+      app_login: { key: appKeyPath },
+      ssh: { authorized_keys: [key], password_login: false },
+      ...(release ? { firmware: { release } } : {}),
+    },
     hardware: intent.hardware.map((d) => (devices[d.name] ? { ...d, firmware: devices[d.name] as "hold" } : d)),
   };
 };
@@ -44,9 +57,9 @@ test("ASU's overview reads as the supported series' stable releases, newest firs
 
 test("a series follows its newest release and never the next series; one release stays put", (t) => {
   const [router, ap] = sampleIntent().hardware.map((d) => d.name);
-  t.deepEqual(targetOf(withFirmware(), router, releases), { kind: "release", version: "25.12.5", pinned: false });
+  t.deepEqual(targetOf(withFirmware(), router, releases), { kind: "release", version: "25.12.5", pinned: false, follows: "25.12" });
   t.deepEqual(targetOf(withFirmware("25.12.4"), router, releases), { kind: "release", version: "25.12.4", pinned: false });
-  t.deepEqual(targetOf(withFirmware("26.1"), router, releases), { kind: "release", version: "26.1.0", pinned: false });
+  t.deepEqual(targetOf(withFirmware("26.1"), router, releases), { kind: "release", version: "26.1.0", pinned: false, follows: "26.1" });
   // Not read yet: said, not guessed.
   t.deepEqual(targetOf(withFirmware(), router), { kind: "unknown", series: "25.12" });
   t.deepEqual(newerSeries(withFirmware(), releases), ["26.1"]);
@@ -66,6 +79,10 @@ test("each device stands against what it runs: an update, current, held, unread,
   t.deepEqual(rows(withFirmware("25.12.4"), { [router]: "25.12.5" }), ["downgrade", "not-read"]);
   t.deepEqual(rows(withFirmware(undefined, { [router]: "hold" }), { [router]: "25.12.0" }), ["held", "not-read"]);
   t.deepEqual(rows(withFirmware(undefined, { [ap]: "hold" }), {}), ["not-read", "held"]);
+  // Ahead of the newest read of what it follows (releases read before, or moved by hand): current, never moved back.
+  t.deepEqual(rows(withFirmware(), { [router]: "25.12.6" }), ["current", "not-read"]);
+  t.deepEqual(rows(withFirmware("stable"), { [router]: "26.1.1" }), ["current", "not-read"]);
+  t.deepEqual(rows(withFirmware(undefined, { [router]: "25.12.4" }), { [router]: "25.12.6" }), ["downgrade", "not-read"], "a pin is a release named for it");
   const rowsOf = (facts: Record<string, string>, intent = withFirmware()) =>
     firmwareRows({ intent, facts: Object.fromEntries(Object.entries(facts).map(([n, version]) => [n, { version }])), releases });
   // Every dot says this: the newest release some device can move up to, which devices, in words.
@@ -167,8 +184,8 @@ test("the collector asks once an hour beside its reads", async (t) => {
 test("Latest OpenWrt follows the newest stable release of any series; a series its own; one release stays; candidates never count", (t) => {
   const [router] = sampleIntent().hardware.map((d) => d.name);
   const out: Releases = { at: 1, series: { "25.12": ["25.12.5", "25.12.4"], "26.1": ["26.1.0"] } };
-  t.deepEqual(targetOf(withFirmware("stable"), router, out), { kind: "release", version: "26.1.0", pinned: false });
-  t.deepEqual(targetOf(withFirmware("25.12"), router, out), { kind: "release", version: "25.12.5", pinned: false });
+  t.deepEqual(targetOf(withFirmware("stable"), router, out), { kind: "release", version: "26.1.0", pinned: false, follows: "stable" });
+  t.deepEqual(targetOf(withFirmware("25.12"), router, out), { kind: "release", version: "25.12.5", pinned: false, follows: "25.12" });
   t.deepEqual(targetOf(withFirmware("25.12.4"), router, out), { kind: "release", version: "25.12.4", pinned: false });
   t.deepEqual(newerSeries(withFirmware("stable"), out), [], "Latest OpenWrt already follows a new series");
   // A series out only as release candidates is no release yet: Latest OpenWrt stays where it is.
@@ -176,7 +193,7 @@ test("Latest OpenWrt follows the newest stable release of any series; a series i
   candidates.branches["26.1"] = { name: "26.1", enabled: true, snapshot: false, versions: ["26.1.0-rc2", "26.1.0-rc1", "26.1-SNAPSHOT"] };
   const read = parseOverview(JSON.stringify(candidates), 1)!;
   t.false("26.1" in read.series);
-  t.deepEqual(targetOf(withFirmware("stable"), router, read), { kind: "release", version: "25.12.5", pinned: false });
+  t.deepEqual(targetOf(withFirmware("stable"), router, read), { kind: "release", version: "25.12.5", pinned: false, follows: "stable" });
   t.deepEqual(targetOf(withFirmware("stable"), router), { kind: "unknown", series: "stable" });
   t.true(intentSchema.safeParse({ ...sampleIntentJson(), system: { ...sampleIntentJson().system, firmware: { release: "stable" } } }).success);
 });
@@ -187,9 +204,9 @@ test("a series newer than this app has been checked against is said, and must be
   const intent = withFirmware("stable");
   const out: Releases = { at: 1, series: { "25.12": ["25.12.5"], "26.1": ["26.1.0"] } };
   const facts = Object.fromEntries(intent.hardware.map((d) => [d.name, { ...capturedBoards()[0].schema, version: "25.12.5", target: "rockchip/armv8" }]));
-  const plan = upgradePlan({ intent, plan: compileIntent(intent), facts, releases: out, sha256: nodePlatform.sha256 });
+  const plan = upgradePlan({ intent, plan: compileIntent(intent), facts, releases: out, sha256: nodePlatform.sha256, appKey: key });
   t.deepEqual(plan.newSeries, ["26.1"]);
-  t.deepEqual(upgradePlan({ intent: withFirmware("25.12"), plan: compileIntent(intent), facts, releases: out, sha256: nodePlatform.sha256 }).newSeries, []);
+  t.deepEqual(upgradePlan({ intent: withFirmware("25.12"), plan: compileIntent(intent), facts, releases: out, sha256: nodePlatform.sha256, appKey: key }).newSeries, []);
 });
 
 test("an upgrade into a new series is refused before anything is built or flashed, unless acknowledged", async (t) => {
@@ -220,10 +237,10 @@ test("an upgrade into a new series is refused before anything is built or flashe
   const refused = await run(false);
   t.regex(!refused.ok ? refused.error.message : "", /^Nothing was flashed: OpenWrt 26\.1 is a new series, not yet checked by this app/);
   t.deepEqual(asked, [asuOverviewUrl], "only the releases were asked: nothing was built");
-  // Acknowledged: past the guard, on to the builds (which this stand-in cannot make).
+  // Acknowledged: past the guard, on to reading the devices (which do not answer here): nothing built.
   const accepted = await run(true);
-  t.regex(!accepted.ok ? accepted.error.message : "", /^Nothing was flashed: images could not be built\. .*OpenWrt 26\.1\.0's rockchip\/armv8 profiles could not be read\./);
-  t.true(asked.some((url) => url.endsWith("/profiles.json")));
+  t.regex(!accepted.ok ? accepted.error.message : "", /^Nothing was flashed: .*could not be reached/);
+  t.false(asked.some((url) => url.endsWith("/profiles.json")));
 });
 
 test("a downgrade is refused before anything is built or flashed, unless acknowledged", async (t) => {
@@ -249,5 +266,130 @@ test("a downgrade is refused before anything is built or flashed, unless acknowl
   const refused = await run(false);
   t.regex(!refused.ok ? refused.error.message : "", /^Nothing was flashed: home-router would go back from 25\.12\.5 to 25\.12\.3\. Acknowledge the downgrade/);
   const accepted = await run(true);
-  t.regex(!accepted.ok ? accepted.error.message : "", /could not be built/, "past the guard, on to the builds");
+  t.regex(!accepted.ok ? accepted.error.message : "", /could not be reached/, "past the guard, on to reading the devices");
+});
+
+test("no upgrade without this app's key authorized: refused before any device is touched or image built, with where to add it", async (t) => {
+  const intentPath = join(tempDir("no-key"), "intent.json");
+  const keyless = { ...withFirmware(), system: { ...withFirmware().system, ssh: { authorized_keys: [], password_login: true } } };
+  const unreadable = { ...withFirmware(), system: { ...withFirmware().system, app_login: { password: "test-only" } } };
+  const asked: string[] = [];
+  const platform = {
+    ...nodePlatform,
+    connect: async () => {
+      throw new Error("not to be touched");
+    },
+    http: {
+      ...nodePlatform.http,
+      request: async ({ url }: { url: string }) => (
+        asked.push(url), { status: 200, headers: {}, body: JSON.stringify({ branches: { "25.12": { versions: ["25.12.5", "25.12.3"] } } }) }
+      ),
+    },
+  };
+  const said = async (intent: Intent) => {
+    writeFileSync(intentPath, JSON.stringify(intent), { mode: 0o600 });
+    for (const d of intent.hardware) {
+      writeFacts(nodePlatform, intentPath, { hostname: d.name, readAt: Date.now(), schema: { ...capturedBoards()[0].schema, version: "25.12.3", target: "rockchip/armv8" } });
+    }
+    const refused = await upgradeFirst({ intentPath, intent, plan: compileIntent(intent), runId: "r", platform, report: () => {}, log: () => {} });
+    return !refused.ok ? refused.error.message : "";
+  };
+  t.regex(await said(keyless), /^Nothing was flashed\. home-router, home-ap-1: Add an SSH key first \(System › General › Authorized keys\)/);
+  // It logs in with a password: a device fresh from an image would not let it in.
+  t.regex(await said(unreadable), /^Nothing was flashed\. home-router, home-ap-1: Give this app an SSH key it can read/);
+  t.deepEqual(asked, [asuOverviewUrl], "only the releases asked: nothing built");
+});
+
+test("after an upgrade the saved settings go to every device; stopped partway, to those it upgraded, and with none, nowhere", (t) => {
+  const plan = compileIntent(withFirmware());
+  const names = (p?: { devices: { hostname: string }[] }) => p?.devices.map((d) => d.hostname);
+  t.deepEqual(names(planAfterUpgrade(plan, { upgraded: [] })), ["home-router", "home-ap-1"]);
+  const stopped = { kind: "failed" as const, message: "home-router: it did not answer" };
+  t.deepEqual(names(planAfterUpgrade(plan, { upgraded: ["home-ap-1"], stopped })), ["home-ap-1"]);
+  t.is(planAfterUpgrade(plan, { upgraded: [], stopped }), undefined);
+});
+
+test("an upgrade from the UI sends nothing unreviewed, and is acknowledged for exactly what it moves", async (t) => {
+  const intentPath = join(tempDir("upgrade-api"), "intent.json");
+  const [router] = sampleIntent().hardware.map((d) => d.name);
+  const pinned = withFirmware(undefined, { [router]: "25.12.3" });
+  const saved = { ...pinned, system: { ...pinned.system, app_login: { ...pinned.system.app_login, password: "test-only-pass" } } };
+  writeFileSync(intentPath, JSON.stringify(saved), { mode: 0o600 });
+  for (const d of saved.hardware) {
+    writeFacts(nodePlatform, intentPath, { hostname: d.name, readAt: Date.now(), schema: { ...capturedBoards()[0].schema, version: "25.12.5", target: "rockchip/armv8" } });
+  }
+  const started: string[][] = [];
+  const platform = {
+    ...nodePlatform,
+    selfCommand: () => ["onc"],
+    spawnDetached: (argv: string[]) => (started.push(argv), 4242),
+    // No run stays alive: each next request may start one.
+    commandLineOf: async () => undefined,
+    http: {
+      ...nodePlatform.http,
+      request: async () => ({ status: 200, headers: {}, body: JSON.stringify({ branches: { "25.12": { versions: ["25.12.5", "25.12.3"] } } }) }),
+    },
+  };
+  const handle = uiHandler({ intentPath, uiRoot: tempDir("upgrade-api-ui"), platform, now: Date.now });
+  const upgrade = async (acknowledged: object) => {
+    const answer = await handle({ method: "POST", path: "/api/firmware/upgrade", body: JSON.stringify({ devices: [router], acknowledged }), headers: { "x-onc": "1" } });
+    return { status: answer.status, error: answer.status === 202 ? "" : String(JSON.parse(answer.body).error) };
+  };
+  const downgrade = { downgrades: { [router]: "25.12.3" }, newSeries: [] };
+  t.regex((await upgrade(downgrade)).error, /^Nothing has been applied from here yet/);
+  t.regex((await upgrade({ ...downgrade, downgrades: { [router]: "25.12.4" }, unapplied: true })).error, /has changed since it was acknowledged/, "a tick for another release");
+  t.is((await upgrade({ ...downgrade, unapplied: true })).status, 202);
+  t.true(started[0].join(" ").includes(`--upgrade ${router} --accept-downgrade`));
+  // Applied once: what is live differs from what is saved by more than the firmware choices.
+  const live = jobPaths(intentPath).live;
+  writeFileSync(live, JSON.stringify({ ...saved, system: { ...saved.system, name: "Before" } }), { mode: 0o600 });
+  t.regex((await upgrade(downgrade)).error, /^Saved changes are not applied yet \(.*\): apply them first/);
+  // By the firmware choices alone: they reach no device, so nothing goes out unreviewed.
+  writeFileSync(live, JSON.stringify({ ...saved, hardware: saved.hardware.map(({ firmware, ...d }) => d) }), { mode: 0o600 });
+  t.is((await upgrade(downgrade)).status, 202);
+  t.is(started.length, 2);
+});
+
+test("only the firmware choices are firmware choices, as the saved changes name them", (t) => {
+  const [router] = sampleIntent().hardware.map((d) => d.name);
+  const before = withFirmware();
+  const paths = diffIntent(before, withFirmware("26.1", { [router]: "25.12.3" })).map((c) => c.path);
+  t.true(paths.length >= 2 && paths.every(isFirmwareChoice), paths.join(", "));
+  t.false(diffIntent(before, { ...before, system: { ...before.system, name: "Other" } }).map((c) => c.path).some(isFirmwareChoice));
+  t.false(isFirmwareChoice("hardware.0"), "a device added is no firmware choice");
+});
+
+test("OpenWrt's releases are needed only for a device that follows a series: one named a release upgrades without them", async (t) => {
+  const run = async (release: string) => {
+    const intentPath = join(tempDir("offline"), "intent.json");
+    const intent = withFirmware(release);
+    writeFileSync(intentPath, JSON.stringify(intent), { mode: 0o600 });
+    for (const d of intent.hardware) {
+      writeFacts(nodePlatform, intentPath, { hostname: d.name, readAt: Date.now(), schema: { ...capturedBoards()[0].schema, version: "25.12.3", target: "rockchip/armv8" } });
+    }
+    const platform = {
+      ...nodePlatform,
+      connect: async () => {
+        throw new Error("no route");
+      },
+      http: {
+        ...nodePlatform.http,
+        request: async () => {
+          throw new Error("offline");
+        },
+      },
+    };
+    const result = await upgradeFirst({ intentPath, intent, plan: compileIntent(intent), runId: "r", platform, report: () => {}, log: () => {} });
+    return !result.ok ? result.error.message : "";
+  };
+  t.regex(await run("25.12"), /offline.*: which release .* should move to is not known/);
+  t.regex(await run("25.12.5"), /could not be reached/, "past the releases, on to reading the devices");
+});
+
+test("a device whose Wi-Fi clients could not be read is not reached, never one with none: it could strand this machine", async (t) => {
+  const answering = (answer: object) => ({ execCommand: async () => ({ stdout: "", stderr: "", code: 0, ...answer }) }) as never;
+  t.deepEqual(await stationsOf(answering({ stdout: "AA:BB:CC:DD:EE:01  -40 dBm / -95 dBm (SNR 55)  0 ms ago\n" })), ["aa:bb:cc:dd:ee:01"]);
+  t.deepEqual(await stationsOf(answering({})), [], "no Wi-Fi: none");
+  await t.throwsAsync(stationsOf(answering({ code: null, timedOut: true })), { message: /could not be read/ });
+  await t.throwsAsync(stationsOf(answering({ code: null })), { message: /could not be read/ });
 });

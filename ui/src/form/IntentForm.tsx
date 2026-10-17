@@ -5,15 +5,16 @@ import { Intent } from "../../../src/intent/schema";
 import { SaveError } from "../data/api";
 import { useSaveIntent } from "../data/intent";
 import { whereIs } from "../settingPages";
-import { Draft, DraftProvider, useDraft, useDraftChanged, useDraftValue, useIssues } from "./draft";
+import { describePath } from "../../../src/intent/diff";
+import { Draft, DraftProvider, MergeNote, useDraft, useDraftChanged, useDraftNotes, useIssues } from "./draft";
 import { keepEdits, keptEdits } from "./stash";
 
 /** The draft of `intent`, for every page below. */
 export const IntentForm = ({ intent, children }: { intent: Intent; children: ReactNode }) => {
   // Made once: a save (draft.savedAs) or a file changed elsewhere (rebase)
   // moves it on, so nothing on the page starts again, a VPN client's key
-  // shown once included. Edits a reload or a login ending left are put back
-  // over the file as it is now (stash.ts).
+  // shown once included. Edits a reload left are put back over the file as
+  // it is now (stash.ts); a login ending forgets them.
   const [draft] = useState(() => {
     const kept = keptEdits(intent);
     const made = new Draft(kept?.base ?? intent, kept?.value);
@@ -45,21 +46,31 @@ const LeaveGuard = () => {
   return null;
 };
 
+/** A merge in words: that it happened, and where an edit was kept over the other change. */
+export const mergeWords = ({ conflicts }: MergeNote, intent: Intent) =>
+  [
+    "A change saved elsewhere was merged into your edits.",
+    conflicts.length
+      ? `Where both changed it, yours was kept: ${conflicts.map((path) => describePath(path ? path.split(".") : [], intent).join(" › ") || "everything").join("; ")}.`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
 /** Save and revert, for the toolbar and for Save and Apply. */
 export const useSaveActions = ({ prefetchPlan = true }: { prefetchPlan?: boolean } = {}) => {
   const draft = useDraft();
   const save = useSaveIntent({ prefetchPlan });
   const dirty = useDraftChanged();
   const issues = useIssues();
-  const value = useDraftValue();
+  const { saveError, merged } = useDraftNotes();
 
-  // Shown beside the buttons, not as a toast, until the draft changes; a
-  // save that works says nothing (Save greys out).
-  const [failed, setFailed] = useState<{ message: string; value: Intent }>();
+  // Shown beside the buttons, not as a toast, until the next edit (a merge
+  // after a refused save makes a new draft, not an edit); a save that works
+  // says nothing (Save greys out).
   // True when the draft is saved, or there was nothing to save. False when
   // problems stopped it or the save failed: the caller must not apply.
   const submit = async (): Promise<boolean> => {
-    setFailed(undefined);
     if (!draft.changed()) return true;
     // Problems hidden until now (a group just switched on) show, and stop it.
     if (draft.issues().length) {
@@ -78,18 +89,16 @@ export const useSaveActions = ({ prefetchPlan = true }: { prefetchPlan?: boolean
       const placed = all.filter((issue) => whereIs(issue.path));
       const unplaced = all.filter((issue) => !whereIs(issue.path));
       if (e instanceof SaveError) draft.setServerIssues(placed);
-      setFailed({ message: [(e as Error).message, ...unplaced.map((issue) => issue.message)].join(" "), value: sent });
+      draft.failed([(e as Error).message, ...unplaced.map((issue) => issue.message)].join(" "));
       return false;
     }
   };
 
   return {
     save: submit,
-    revert: () => {
-      setFailed(undefined);
-      draft.reset();
-    },
-    error: failed?.value === value ? failed.message : undefined,
+    revert: () => draft.reset(),
+    error: saveError,
+    merged: merged && mergeWords(merged, draft.value),
     dirty,
     // Only problems on screen grey Save out: with hidden ones, Save shows them.
     valid: issues.length === 0,

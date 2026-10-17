@@ -8,14 +8,13 @@
 // The intent is never changed by a patch: the user's value stays as stored,
 // and applies again as soon as the patch does not (switched off, its device
 // past the release that fixed it, or the patch gone).
-import type { DeviceSchema } from "../../deviceSchema";
 import { appliesTo, deviceLookup } from "../../plan/device";
 import type { When } from "../../plan/when";
 import { compileFeatures } from "../compile";
 import { matchPattern } from "../paths";
 import type { Intent } from "../schema";
 import { patches } from "./index";
-import { amendedSettings, describeTarget, Patch, targetCondition } from "./patch";
+import { amendedSettings, describeTarget, Facts, Patch, targetCondition } from "./patch";
 
 export type PatchMark = {
   /** The setting it overrides, as a path ("wifi.networks.2.roaming.fast"). */
@@ -52,9 +51,6 @@ export const markText = ({ patch }: PatchMark) => {
   const reference = patch.references[0]?.url;
   return `${patch.note ?? patch.title}${where ? ` (${where})` : ""}${reference ? `: ${reference}` : ""}.`;
 };
-
-/** Each device's facts, as stored: only its schema is read. */
-export type Facts = Record<string, { schema: DeviceSchema } | undefined>;
 
 export type Override = {
   patch: Patch;

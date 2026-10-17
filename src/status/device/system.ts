@@ -5,13 +5,20 @@ import { arr, num, obj, str } from "../values";
 import { json, raw } from "./common";
 import type { InterfaceStatus, PortLink } from "./types";
 
-/** `ubus call system info`: uptime, load (×65536 there), memory. */
+/**
+ * `ubus call system info`: uptime, load (×65536 there), memory. The one
+ * answer a read needs: without an uptime, ubus did not answer (wedged, it
+ * prints nothing), and the device is not read rather than taken for one
+ * just booted.
+ */
 export const parseSystemInfo = (info: unknown) => {
   const o = obj(info);
+  const uptime = num(o.uptime);
+  if (uptime === undefined) throw new Error("its system did not answer (ubus)");
   const load = arr(o.load).map((l) => (num(l) ?? 0) / 65536);
   const memory = obj(o.memory);
   return {
-    uptime: num(o.uptime) ?? 0,
+    uptime,
     load: [load[0] ?? 0, load[1] ?? 0, load[2] ?? 0] as [number, number, number],
     memory: {
       total: num(memory.total) ?? 0,

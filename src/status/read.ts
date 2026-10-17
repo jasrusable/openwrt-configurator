@@ -12,7 +12,7 @@ import { Platform } from "../platform";
 import { provisionableDevices, ProvisionableDevice } from "../apply/provisionConfig";
 import { readEach } from "../readEach";
 import { getOpenWrtState } from "../engine/getOpenWrtState";
-import { liveState } from "../server/provisionJob";
+import { liveState } from "../apply/job";
 import { dohPorts, fallbackOf } from "../intent/dns";
 import { meshWiredLink, readDeviceStatus } from "./device";
 import { NetworkStatus, networkStatus } from "./network";

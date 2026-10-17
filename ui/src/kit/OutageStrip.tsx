@@ -47,7 +47,8 @@ export const OutageStrip = ({ points, range, now = Date.now(), label }: { points
       : new Date(t).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
   return (
     <Group gap="md" wrap="nowrap" align="center">
-      <Group gap={2} wrap="nowrap" style={{ flex: 1, minWidth: 0 }} role="img" aria-label={`${label}: ${share === undefined ? "nothing read" : `${(share * 100).toFixed(2)}% up`}`}>
+      {/* A grid: each cell's Hint wraps it in a span, which is what a row would size. */}
+      <Box style={{ flex: 1, minWidth: 0, display: "grid", gridTemplateColumns: `repeat(${cells.length}, minmax(0, 1fr))`, gap: 2 }} role="img" aria-label={`${label}: ${share === undefined ? "nothing read" : `${(share * 100).toFixed(2)}% up`}`}>
         {cells.map((cell) => (
           <Hint
             key={cell.start}
@@ -60,7 +61,7 @@ export const OutageStrip = ({ points, range, now = Date.now(), label }: { points
               h={22}
               style={{
                 flex: 1,
-                minWidth: 1,
+                minWidth: 0,
                 borderRadius: 3,
                 background: cell.read ? `var(--mantine-color-${toneColor[cellTone(cell.share)]}-6)` : "var(--onc-separator)",
                 opacity: cell.read ? 0.9 : 1,
@@ -68,7 +69,7 @@ export const OutageStrip = ({ points, range, now = Date.now(), label }: { points
             />
           </Hint>
         ))}
-      </Group>
+      </Box>
       <Text size="sm" fw={600} style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", flexShrink: 0 }}>
         {share === undefined ? "—" : `${share === 1 ? "100" : (Math.floor(share * 10000) / 100).toFixed(2)}% up`}
       </Text>

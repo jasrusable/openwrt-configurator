@@ -23,6 +23,9 @@ const queryParam = (query: string | undefined, name: string) =>
     .map((pair) => pair.split("="))
     .find(([key]) => key === name)?.[1];
 
+/** As the API gives a version (src/server/api/intent.ts versionOf): a sha256, or "" with no file saved. */
+const versionPattern = /^(?:[0-9a-f]{64})?$/;
+
 /** The request, or why it is refused before anything reads it. */
 export const cgiRequest = (
   env: Env,
@@ -41,10 +44,13 @@ export const cgiRequest = (
     path: env("PATH_INFO") || "/",
     body: length > 0 ? readBody() : "",
     ...(remote ? { remoteAddress: remote } : {}),
+    // uhttpd says so for a TLS client.
+    ...(env("HTTPS") === "on" ? { secure: true } : {}),
     headers: {
       "x-onc": sameOrigin(env) ? "1" : "",
       cookie: env("HTTP_COOKIE") ?? "",
-      ...(version && /^[0-9a-f]{64}$/.test(version) ? { "x-onc-version": version } : {}),
+      // A saved file's version, or "" for none saved (a first restore): either is checked.
+      ...(version !== undefined && versionPattern.test(version) ? { "x-onc-version": version } : {}),
     },
   };
 };

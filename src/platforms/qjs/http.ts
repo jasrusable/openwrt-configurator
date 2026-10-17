@@ -1,10 +1,17 @@
-import { NetworkError, Platform } from "../../platform";
+import { httpTimeoutMs, NetworkError, Platform } from "../../platform";
 import { fileExists, fileSize, readTextFile, removeFile } from "./files";
 import { spawn, tmpPath, which } from "./process";
 
 // curl exit codes for failures worth retrying: DNS, connect, timeout, TLS
 // handshake, empty reply, send/receive errors.
 const transientCurlCodes = new Set([5, 6, 7, 28, 35, 52, 55, 56]);
+
+const seconds = String(Math.round(httpTimeoutMs / 1000));
+/** A request ends by the limit; a download (an image, minutes on a slow line) only once it stalls that long. */
+const limits = {
+  request: ["--connect-timeout", "15", "--max-time", seconds],
+  download: ["--connect-timeout", "15", "--speed-limit", "1", "--speed-time", seconds],
+};
 
 const curl = async (args: string[], url: string, stdin?: string) => {
   if (!which("curl")) {
@@ -74,6 +81,7 @@ export const http: Platform["http"] = {
       // one: a build request carries the UCI-defaults script, secrets and all.
       const result = await curl(
         [
+          ...limits.request,
           "-X",
           method,
           "-D",
@@ -103,7 +111,7 @@ export const http: Platform["http"] = {
     const headersPath = tmpPath("headers");
     try {
       // -f: a non-2xx status fails rather than saving an error page.
-      await curl(["-f", "-L", "-D", headersPath, "-o", path], url);
+      await curl([...limits.download, "-f", "-L", "-D", headersPath, "-o", path], url);
       const declared = parseHeaders(readTextFile(headersPath))[
         "content-length"
       ];

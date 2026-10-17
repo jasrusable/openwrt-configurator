@@ -19,6 +19,7 @@ import { where } from "./intent/places";
 import { isIpAddress } from "./intent/addresses";
 import { fingerprintOf } from "./sshFingerprint";
 import { formatKnownHost, parseKnownHosts } from "./knownHosts";
+import { dirname } from "./posixPath";
 import { knownKey, Located, locateEach, macsProbe, Neighbour } from "./locate";
 import { PlanDevice } from "./plan/types";
 import { Platform } from "./platform";
@@ -28,7 +29,7 @@ import { map, messageOf, ok, Result } from "./result";
 import { loadSettings } from "./settings";
 import { shellQuote } from "./shell";
 import { Lease } from "./status/device";
-import { fileName, read, stateLayout, StoreFiles, StoreKey, tryWrite } from "./store";
+import { fileName, read, stateLayout, StoreKey, tryWrite } from "./store";
 
 export type Candidate = {
   address: string;
@@ -189,10 +190,17 @@ export const inspect = async ({
   address,
   intent,
   platform,
+  knownHostsFile,
 }: {
   address: string;
   intent: Intent;
   platform: Platform;
+  /**
+   * Where this read records the key the device shows: a throwaway file, never
+   * the one every connection checks, so nothing is trusted until the key's
+   * fingerprint is confirmed (adopt, readopt). Unset, the shared one (tests).
+   */
+  knownHostsFile?: string;
 }): Promise<Result<Inspected, Problem>> => {
   const tries: NonNullable<PlanDevice["login"]>[] = [
     ...(intent.system.app_login.key ? [{ username: "root", privateKeyPath: intent.system.app_login.key }] : []),
@@ -201,7 +209,8 @@ export const inspect = async ({
   const failures: string[] = [];
   for (const [i, login] of tries.entries()) {
     const at: PlanDevice = { hostname: address, ipaddr: address, tags: {}, login };
-    const options = sshConnectOptions({ deviceConfig: at, platform });
+    const shared = sshConnectOptions({ deviceConfig: at, platform });
+    const options = knownHostsFile ? { ...shared, knownHostsFile } : shared;
     try {
       const session = await platform.connect({ ...options, readyTimeout: 5000 });
       try {
@@ -253,7 +262,13 @@ export const inspectAt = async ({
   if (!isIpAddress(address)) return fail("invalid", "Give its IP address, like 10.0.0.143: a name can be claimed by any device on the network.");
   const intent = await savedIntent(intentPath, platform);
   if (!intent.ok) return intent;
-  const inspected = await inspect({ address, intent: intent.value, platform });
+  // The key it shows is recorded aside, with the read: trusted only once its fingerprint is confirmed.
+  const aside = `${stateLayout(intentPath).inspected}/${fileName(address)}.known_hosts`;
+  platform.mkdirp(stateLayout(intentPath).inspected, 0o700);
+  platform.removeFile(aside);
+  const inspected = await inspect({ address, intent: intent.value, platform, knownHostsFile: aside }).finally(() =>
+    platform.removeFile(aside)
+  );
   if (!inspected.ok) return inspected;
   const kept = tryWrite(platform, inspectedKey(intentPath, address), inspected.value);
   return kept.ok ? inspected : fail("internal", `${address} was read, but what it said could not be kept: ${kept.error.message}`);
@@ -273,12 +288,15 @@ export const adopt = async ({
   platform,
   address,
   name,
+  fingerprint,
   now = Date.now,
 }: {
   intentPath: string;
   platform: Platform;
   address: string;
   name: string;
+  /** The fingerprint the user was shown and confirms: the key pinned is the one it names, or none. */
+  fingerprint: string;
   now?: () => number;
 }): Promise<Result<{ ok: true }, Problem>> => {
   if (!isIpAddress(address)) return fail("invalid", "Give its IP address, like 10.0.0.143.");
@@ -286,8 +304,9 @@ export const adopt = async ({
   const intent = await savedIntent(intentPath, platform);
   if (!intent.ok) return intent;
   if (intent.value.hardware.some((d) => d.name === name)) return fail("conflict", `${name} is already in Hardware.`);
-  const inspected = read(platform, inspectedKey(intentPath, address));
-  if (!inspected) return fail("conflict", "Read the device first.");
+  const checked = confirmed(read(platform, inspectedKey(intentPath, address)), fingerprint);
+  if (!checked.ok) return checked;
+  const inspected = checked.value;
   const known = readFacts(platform, intentPath, intent.value.hardware.map((d) => d.name));
   const same = Object.values(known).find(
     (f) =>
@@ -303,24 +322,48 @@ export const adopt = async ({
   return ok({ ok: true as const });
 };
 
-/** An inspected device's facts, kept under `name`. */
-const keepAdopted = (files: StoreFiles, intentPath: string, name: string, inspected: Inspected, now: number) => {
+/**
+ * The read kept for `address`, if the fingerprint the user confirms is its
+ * key's: the key pinned is the one they compared, never one read since.
+ */
+const confirmed = (inspected: Inspected | undefined, fingerprint: string): Result<Inspected & { hostKey: { type: string; key: string } }, Problem> => {
+  if (!inspected) return fail("conflict", "Read the device first.");
+  if (!inspected.hostKey || !inspected.fingerprint) return fail("conflict", "Its key was not recorded: read it again.");
+  if (inspected.fingerprint !== fingerprint) return fail("conflict", "That is not the key it showed when read: read it again and compare.");
+  return ok({ ...inspected, hostKey: inspected.hostKey });
+};
+
+/** An inspected device, its key confirmed: its facts kept under `name`, and its key the one its address is held to. */
+const keepAdopted = (
+  platform: Platform,
+  intentPath: string,
+  name: string,
+  inspected: Inspected & { hostKey: { type: string; key: string } },
+  now: number,
+  /** Where it was found before: the old key pinned there goes too. */
+  previous?: string
+) => {
+  pinHostKey(platform, inspected.address, inspected.hostKey, previous);
   const located: Omit<Located, "session"> = {
     hostname: name,
     address: inspected.address,
     schema: inspected.schema,
     macs: inspected.macs,
-    ...(inspected.hostKey ? { hostKey: inspected.hostKey } : {}),
+    hostKey: inspected.hostKey,
   };
-  writeFacts(files, intentPath, { ...located, readAt: now });
+  writeFacts(platform, intentPath, { ...located, readAt: now });
 };
 
 /** The known_hosts file every SSH client here checks host keys against. */
 const knownHostsFileOf = (platform: Platform) =>
   sshConnectOptions({ deviceConfig: { hostname: "x", tags: {} }, platform }).knownHostsFile!;
 
-/** The keys on record for `address` gone, so the next connection there trusts what it shows (as a first use does). */
-const forgetHostKey = (platform: Platform, address: string) => {
+/**
+ * `address` held to `key` alone, in one write: whatever was on record for it
+ * replaced, and for `previous` (the device's old address) dropped, so its old
+ * key is not held there for whatever answers at it next.
+ */
+const pinHostKey = (platform: Platform, address: string, key: { type: string; key: string }, previous?: string) => {
   const file = knownHostsFileOf(platform);
   const text = (() => {
     try {
@@ -329,15 +372,18 @@ const forgetHostKey = (platform: Platform, address: string) => {
       return "";
     }
   })();
-  const kept = parseKnownHosts(text).filter((entry) => entry.host !== address && entry.host !== `[${address}]:22`);
-  platform.writeFileAtomic(file, kept.map(formatKnownHost).join(""), 0o600);
+  const replaced = [address, ...(previous ? [previous] : [])].flatMap((a) => [a, `[${a}]:22`]);
+  const others = parseKnownHosts(text).filter((entry) => !replaced.includes(entry.host));
+  platform.mkdirp(dirname(file));
+  platform.writeFileAtomic(file, [...others, { host: address, ...key }].map(formatKnownHost).join(""), 0o600);
 };
 
 /**
  * A device in Hardware that was reset or flashed clean: it made a new host
  * key, so it is refused where it was known. Read again at `address`, the key
- * on record for that address forgotten first, to show the new one's
- * fingerprint before it is trusted (`readopt`).
+ * it shows recorded aside (inspectAt), the one on record left as it is, to
+ * show the new one's fingerprint: trusted only when that is confirmed
+ * (`readopt`). Cancelling leaves the old pin.
  */
 export const inspectReset = async ({
   intentPath,
@@ -354,37 +400,43 @@ export const inspectReset = async ({
   const intent = await savedIntent(intentPath, platform);
   if (!intent.ok) return intent;
   if (!intent.value.hardware.some((d) => d.name === name)) return fail("not-found", `${name} is not in Hardware.`);
-  forgetHostKey(platform, address);
   return inspectAt({ intentPath, platform, address });
 };
 
 /**
- * Take a reset device back under its own name, its settings kept: only the
- * same box (one of its MACs the one on record), never another device, which
- * is added through Hardware's Add.
+ * Take a reset device back under its own name, its settings kept, once its
+ * new key's fingerprint is confirmed: that is the check (a device reports its
+ * own MACs; they only say which device in Hardware it means to be).
  */
 export const readopt = async ({
   intentPath,
   platform,
   address,
   name,
+  fingerprint,
   now = Date.now,
 }: {
   intentPath: string;
   platform: Platform;
   address: string;
   name: string;
+  /** The fingerprint the user was shown and confirms. */
+  fingerprint: string;
   now?: () => number;
 }): Promise<Result<{ ok: true }, Problem>> => {
-  const inspected = read(platform, inspectedKey(intentPath, address));
-  if (!inspected) return fail("conflict", "Read the device first.");
+  const intent = await savedIntent(intentPath, platform);
+  if (!intent.ok) return intent;
+  if (!intent.value.hardware.some((d) => d.name === name)) return fail("not-found", `${name} is not in Hardware.`);
+  const checked = confirmed(read(platform, inspectedKey(intentPath, address)), fingerprint);
+  if (!checked.ok) return checked;
+  const inspected = checked.value;
   const known = readFacts(platform, intentPath, [name])[name];
   if (!known) return fail("not-found", `${name} has no facts on record: add it through ${where("hardware", "Add")}.`);
   if (!(known.macs ?? []).some((mac) => inspected.macs.includes(mac))) {
     return fail("conflict", `This is not ${name}: none of its MACs is the one on record. Another device is added through ${where("hardware", "Add")}.`);
   }
   try {
-    keepAdopted(platform, intentPath, name, inspected, now());
+    keepAdopted(platform, intentPath, name, inspected, now(), known.address !== inspected.address ? known.address : undefined);
   } catch (thrown) {
     return fail("internal", `${name} could not be kept: ${messageOf(thrown)}`);
   }

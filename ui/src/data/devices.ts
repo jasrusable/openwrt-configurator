@@ -37,12 +37,19 @@ export const useFreshDevices = () => {
   return { ...devices, reading: refresh.isFetching };
 };
 
+/** How long a plan read stands for the devices as they are: the sheet reads again after. */
+export const planFreshMs = 30_000;
+
 /**
  * Read the change plan now, in the background: as the app opens and after
- * each save, so the Apply sheet has it before it is opened. Never throws.
+ * each save, so the Apply sheet has it before it is opened. A read already
+ * on its way is of the file before the save: it is dropped, not shared.
+ * Never throws.
  */
-export const prefetchApplyPlan = (queryClient: QueryClient) =>
-  queryClient.prefetchQuery({ queryKey: planKey, queryFn: loadApplyPlan, staleTime: 0 });
+export const prefetchApplyPlan = async (queryClient: QueryClient) => {
+  await queryClient.cancelQueries({ queryKey: planKey });
+  return queryClient.prefetchQuery({ queryKey: planKey, queryFn: loadApplyPlan, staleTime: 0 });
+};
 
 /**
  * The change plan (src/applyPlan.ts), read from the devices afresh as the
@@ -52,4 +59,4 @@ export const prefetchApplyPlan = (queryClient: QueryClient) =>
  */
 export const useApplyPlan = (enabled = true) =>
   // Fresh for half a minute: opening Apply just after a save (which read it) reads it once.
-  useQuery({ queryKey: planKey, queryFn: loadApplyPlan, enabled, refetchOnWindowFocus: false, staleTime: 30_000 });
+  useQuery({ queryKey: planKey, queryFn: loadApplyPlan, enabled, refetchOnWindowFocus: false, staleTime: planFreshMs });

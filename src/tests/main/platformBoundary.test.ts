@@ -29,14 +29,20 @@ const isNodeOnly = (specifier: string) =>
   builtinModules.includes(specifier.split("/")[0]) ||
   nodeOnlyPackages.includes(specifier);
 
+/** Every module a source names: `from`, a bare `import`, `require(…)` and `import(…)`, in either quote. */
+const specifiers = (text: string) =>
+  [...text.matchAll(/(?:\bfrom|\bimport|\brequire\s*\(|\bimport\s*\()\s*(["'])([^"'\n]+)\1/g)].map((m) => m[2]);
+
+test("the module names found are every way a source can name one", (t) => {
+  t.deepEqual(
+    specifiers(`import a from "fs";\nimport b from 'child_process';\nimport "os";\nconst c = require('net');\nconst d = await import("node:dns");\nexport { e } from './local';`),
+    ["fs", "child_process", "os", "net", "node:dns", "./local"]
+  );
+});
+
 test("src/ outside platforms/ imports no Node-only modules", (t) => {
   const offenders = sourceFiles(srcDir).flatMap((path) =>
-    [
-      ...readFileSync(path, "utf-8").matchAll(
-        /from\s+"([^"]+)"|require\("([^"]+)"\)/g
-      ),
-    ]
-      .map((m) => m[1] ?? m[2])
+    specifiers(readFileSync(path, "utf-8"))
       .filter(isNodeOnly)
       .map((specifier) => `${path.slice(srcDir.length + 1)}: ${specifier}`)
   );

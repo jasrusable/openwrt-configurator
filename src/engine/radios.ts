@@ -9,13 +9,17 @@ import { isPlaceholder, Scalar, Value } from "../plan/types";
 import { ResolvedSection } from "./resolvePlan";
 import { sanitizeName, unresolvable, writeSection } from "./values";
 
-// A channel of each band (6 GHz: its first preferred-scan channel; 60 GHz: 802.11ad's 2).
+// A channel of each band (6 GHz: its first preferred-scan channel; 60 GHz:
+// 802.11ad's 2), or a radio's first where its own list lacks it (tri-band's
+// upper 5 GHz radio has no 36).
 const defaultChannels = {
   "2g": 11,
   "5g": 36,
   "6g": 37,
   "60g": 2,
 };
+const defaultChannel = ({ band, channels }: NonNullable<DeviceSchema["radios"]>[number]) =>
+  !channels?.length || channels.includes(defaultChannels[band]) ? defaultChannels[band] : channels[0];
 
 /** The wireless config for a device's radios, or none where it has none. */
 export const fitRadios = ({
@@ -29,14 +33,31 @@ export const fitRadios = ({
 }): Record<string, OpenWrtSection[]> | undefined => {
   const written = writeSection(hostname);
   const stuck = unresolvable(hostname);
-  // Each radio with its band's declared wifi-device: the first of a band by
-  // that section's name, another (tri-band: two in 5 GHz) by the name and
-  // its place, or uci would merge the two.
+  // Each radio with a declared wifi-device of its band, in order: the band's
+  // first radio the first declared, its second the second (a section named
+  // twice is one), the rest the last, so one declared stands for them all
+  // (tri-band: two in 5 GHz). Named for the section, the first of a name by
+  // it alone, another by it and its place, or uci would merge the two.
   const declaredRadios = wireless?.["wifi-device"] || [];
-  const radios = (deviceSchema.radios || []).reduce<
+  const declaredOf = (band: string) =>
+    declaredRadios
+      .filter((d) => d.options.band === band)
+      .filter((d, i, all) => all.findIndex((o) => o === d || (d.name !== undefined && o.name === d.name)) === i);
+  const physical = deviceSchema.radios || [];
+  [...new Set(physical.map((r) => r.band))].forEach((band) => {
+    const declared = declaredOf(band);
+    const has = physical.filter((r) => r.band === band).length;
+    if (declared.length > has) {
+      throw new Error(
+        `${hostname}: ${declared.length} radios are declared for ${band} (${declared.map((d) => d.name ?? "unnamed").join(", ")}), but it has ${has}.`
+      );
+    }
+  });
+  const radios = physical.reduce<
     { radio: NonNullable<DeviceSchema["radios"]>[number]; declared?: ResolvedSection; name: string; first: boolean }[]
   >((acc, radio, index) => {
-    const declared = declaredRadios.find((d) => d.options.band === radio.band);
+    const ofBand = declaredOf(radio.band);
+    const declared = ofBand[Math.min(acc.filter((r) => r.radio.band === radio.band).length, ofBand.length - 1)];
     const wanted = sanitizeName(declared?.name || `wifidevice${index}`);
     const first = !acc.some((r) => r.name === wanted);
     return [...acc, { radio, declared, name: first ? wanted : sanitizeName(`${wanted}${index}`), first }];
@@ -116,7 +137,7 @@ export const fitRadios = ({
       ...declared?.options,
       // A pinned channel (or the mesh's) is the band's primary radio's:
       // another there (tri-band's other 5 GHz) may not have it.
-      channel: isPrimary(r) ? (declared?.options.channel as Scalar | undefined) || defaultChannels[radio.band] : "auto",
+      channel: isPrimary(r) ? (declared?.options.channel as Scalar | undefined) || defaultChannel(radio) : "auto",
       type: radio.type,
       band: radio.band,
       ...(radio.path ? { path: radio.path } : radio.phy !== undefined ? { phy: radio.phy } : {}),

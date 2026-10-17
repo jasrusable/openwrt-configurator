@@ -1,13 +1,24 @@
-// The internet lines' rules across settings: a line's id once, and a
-// static line's address, gateway and DNS making sense together.
+// The internet lines' rules across settings: a line's id once, its VLAN no
+// network's or other port's, and a static line's address, gateway and DNS
+// making sense together.
 import { parseCidr, parseIpv4 } from "../addresses";
 import type { FeatureModule } from "../feature";
 import { where } from "../places";
 
 export const internetChecks: FeatureModule["check"] = (intent, issue) =>
   intent.internet.lines.forEach((line, c) => {
-    if (intent.internet.lines.slice(0, c).some((other) => other.id === line.id)) {
+    const earlier = intent.internet.lines.slice(0, c);
+    if (earlier.some((other) => other.id === line.id)) {
       issue(["internet", "lines", c, "id"], "already used by another line");
+    }
+    // On a swconfig switch a VLAN is one for the whole switch: a network's,
+    // or another port's line's, would join them (engine/ports.ts). Refused
+    // on every device, so the settings' validity never depends on which.
+    if (line.vlan !== undefined) {
+      const network = intent.networks.find((n) => n.vlan === line.vlan);
+      const other = earlier.find((o) => o.vlan === line.vlan && o.port !== line.port);
+      if (network) issue(["internet", "lines", c, "vlan"], `${network.name}'s VLAN: give the line or the network another`);
+      else if (other) issue(["internet", "lines", c, "vlan"], `${other.name || "Another line"} uses it on another port`);
     }
     if (line.type !== "static") return;
     const connection = line.static;

@@ -40,7 +40,7 @@ export const UndoSection = ({ info }: { info: ProvisionInfo }) => {
             label="Also make them my saved settings"
             description="Otherwise your saved settings stay as they are, and show as changes to apply."
           >
-            <Switch checked={restore} onChange={(e) => setRestore(e.currentTarget.checked)} />
+            <Switch aria-label="Also make them my saved settings" checked={restore} onChange={(e) => setRestore(e.currentTarget.checked)} />
           </SettingRow>
           {undo.error && (
             <Alert color="red" title="Could not undo" m="sm">

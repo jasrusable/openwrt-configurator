@@ -10,6 +10,7 @@ import { Feature, onAccessPoints, onDevice, onDsa, onRouter, onSwConfig } from "
 import { placeholder, section } from "../../plan/types";
 import { when } from "../../plan/when";
 import { meshWiredVlan, radios, radioWidth } from "../radios";
+import { sshLogin } from "../system";
 import type { Intent } from "../schema";
 import { meshHopPenalty, meshId, meshInterface, meshMtu, meshRouting, meshRssiThreshold, rescueAddress, rescueAfterMinutes, rescueSsid } from "./constants";
 import { agentGlob, watchdogPidGlob } from "../../agent/paths";
@@ -238,12 +239,7 @@ start_service() {
             // rules as the main instance (system/compile.ts).
             dropbear: {
               dropbear: repeaters.map((d) =>
-                section({ name: "rescue", when: onDevice(d.name) }, {
-                PasswordAuth: intent.system.ssh.password_login ? "on" : "off",
-                RootPasswordAuth: intent.system.ssh.password_login ? "on" : "off",
-                Port: 22,
-                Interface: "rescue",
-                })
+                section({ name: "rescue", when: onDevice(d.name) }, { ...sshLogin(intent), Interface: "rescue" })
               ),
             },
           },

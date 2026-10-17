@@ -286,7 +286,6 @@ export const verifyConfigs = ({
   });
 };
 
-/** `configs_to_not_reset` entries naming a config the device does not have. */
 /**
  * Keep entries naming a config the device lacks: likely a typo. One starting
  * with "?" (`?ubihealthd.*`) is kept only if present, and never reported:

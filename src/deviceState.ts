@@ -45,6 +45,8 @@ export type DeviceNow = {
   managed: string[];
   /** sha256 of each file asked about that exists; "?" where it could not be hashed. */
   hashes: Record<string, string>;
+  /** Of those, the ones only their owner may read: a secret's (root's password), whose hash never leaves this side. */
+  secret?: string[];
 };
 
 /** sha256 of each of `paths` that is a file: `<hash>  <path>`, or `? <path>` without sha256sum. */
@@ -61,25 +63,37 @@ export const fileHashes = (paths: string[]): Probe<Record<string, string>> => ({
     ),
 });
 
+/** Of `paths`, the files no one but their owner may read (`-rw-------`, as secretOptions.ts judges a file). */
+export const ownerOnlyFiles = (paths: string[]): Probe<string[]> => ({
+  command: paths.length
+    ? `for p in ${paths.map(shellQuote).join(" ")}; do [ -f "$p" ] || continue; case "$(ls -ld "$p")" in ????------*) printf '%s\\n' "$p" ;; esac; done`
+    : "true",
+  parse: ({ stdout }) => stdout.split("\n").filter((line) => line.startsWith("/")),
+});
+
 /** Read what a device holds, hashing the managed files and `paths` (the files an apply would write). Two round trips. */
 export const readDeviceNow = async (session: Session, paths: string[]): Promise<DeviceNow> => {
   const first = await runProbes(session, { config: uciConfigs, installed: installedPackages, managed: managedFiles(managedFilesManifest) });
-  const { hashes } = await runProbes(session, { hashes: fileHashes([...new Set([...paths, ...first.managed])]) });
-  return { config: first.config.configs, installed: first.installed, managed: first.managed, hashes };
+  const asked = [...new Set([...paths, ...first.managed])];
+  const { hashes, secret } = await runProbes(session, { hashes: fileHashes(asked), secret: ownerOnlyFiles(asked) });
+  return { config: first.config.configs, installed: first.installed, managed: first.managed, hashes, secret };
 };
 
 /**
  * What a device holds, as one hash: its config lines, its packages, its
  * managed files. Only files it manages count (the files an apply would write
  * depend on the settings, which may be saved between review and run), and
- * a secret's value is left out: the hash goes to the page, and one over
- * otherwise known lines would let a weak Wi-Fi key be guessed.
+ * a secret's value is left out, an owner-only file's content too (only that
+ * it is there counts): the hash goes to the page, and one over otherwise
+ * known lines would let a weak Wi-Fi key, or root's password, be guessed.
  */
 export const stateHash = (now: DeviceNow, sha256: (text: string) => string) =>
   sha256(
     JSON.stringify({
       config: [...uciLines(now.config)].sort(([a], [b]) => a.localeCompare(b)).map(([key, line]) => [key, line.secret ? "" : line.value]),
       installed: [...now.installed].sort(),
-      files: now.managed.map((path) => [path, now.hashes[path] ?? ""]).sort(([a], [b]) => a.localeCompare(b)),
+      files: now.managed
+        .map((path) => [path, now.secret?.includes(path) && path in now.hashes ? "present" : now.hashes[path] ?? ""])
+        .sort(([a], [b]) => a.localeCompare(b)),
     })
   );

@@ -16,3 +16,12 @@ test("every hover help is the kit's Hint, never Mantine's Tooltip or HoverCard",
     .filter((path) => /import \{[^}]*\b(Tooltip|HoverCard)\b[^}]*\} from "@mantine\/core"/.test(readFileSync(path, "utf8")));
   t.deepEqual(offenders.map((p) => p.slice(uiSrc.length + 1)), []);
 });
+
+test("a list edited in place writes each row through its controls' own settings, never the row whole", (t) => {
+  // A row written whole (useDraftList's update) marks only the list edited,
+  // and a list's edit shows none of its rows' problems (form/draft.tsx).
+  const offenders = files(join(uiSrc, "pages"))
+    .filter((path) => /useDraftList\(/.test(readFileSync(path, "utf8")))
+    .filter((path) => /\.update\(/.test(readFileSync(path, "utf8")));
+  t.deepEqual(offenders.map((p) => p.slice(uiSrc.length + 1)), []);
+});

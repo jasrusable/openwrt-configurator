@@ -6,7 +6,7 @@
 // they would be sent.
 import { AgentRecord, encodeRecords } from "./agent/records";
 import { Redact } from "./secretOptions";
-import { getUciCommands } from "./engine/getUciCommands";
+import { UciOperation, uciLine, uciOperations } from "./engine/getUciCommands";
 import { changedConfigs, declaredConfigs, uciFileText, UciConfigs, wipeOperations } from "./engine/uci";
 import { OpenWrtState } from "./engine/openWrtState";
 
@@ -56,15 +56,6 @@ export const prepareRecords = ({
   ...packagesToAdd({ state, installedPackages }).map((name): AgentRecord => ({ kind: "add", name })),
 ];
 
-const unquote = (quoted: string) => quoted.slice(1, -1).replace(/'\\''/g, "'");
-
-/** An operation whose value spans lines (getUciCommands quotes every value), as its own record. */
-const spanning = (operation: string): AgentRecord => {
-  const match = /^(set|add_list) ([^=\s]+)=('[\s\S]*')$/.exec(operation);
-  if (!match) throw new Error(`A uci operation spanning lines that is not a set: ${operation.split("\n")[0]}`);
-  return { kind: match[1] as "set" | "add_list", key: match[2], value: unquote(match[3]) };
-};
-
 /**
  * uci operations as stage takes them: each run of one-line operations one
  * `uci batch` (one uci process: ~0.1 ms an operation, not ~1.5), and one whose
@@ -72,12 +63,15 @@ const spanning = (operation: string): AgentRecord => {
  * it), in place: lists are ordered, and hoisting the rest ahead of it would
  * move a list's items.
  */
-const uciRecords = (operations: string[]): AgentRecord[] =>
+const uciRecords = (operations: (string | UciOperation)[]): AgentRecord[] =>
   operations.reduce<AgentRecord[]>((records, operation) => {
-    if (operation.includes("\n")) return [...records, spanning(operation)];
+    if (typeof operation !== "string" && operation.op !== "section" && operation.value.includes("\n")) {
+      return [...records, { kind: operation.op, key: operation.key, value: operation.value }];
+    }
+    const line = typeof operation === "string" ? operation : uciLine(operation);
     const last = records[records.length - 1];
-    if (last?.kind !== "batch") return [...records, { kind: "batch", operations: [operation] }];
-    last.operations.push(operation);
+    if (last?.kind !== "batch") return [...records, { kind: "batch", operations: [line] }];
+    last.operations.push(line);
     return records;
   }, []);
 
@@ -106,7 +100,7 @@ export const stageRecords = ({
   const stale = (managedFiles || []).filter((path) => !files.some((file) => file.path === path));
   const operations = [
     ...wipeOperations(current, state.keep),
-    ...getUciCommands({ openWrtConfig: state.config, redact }).map((command) => command.replace(/^uci /, "")),
+    ...uciOperations({ openWrtConfig: state.config, redact }),
   ];
   const manifest: AgentRecord[] =
     files.length > 0 || stale.length > 0
@@ -165,27 +159,25 @@ export const finaliseRecords = ({
   ...refreshedProtocols(state).map((name): AgentRecord => ({ kind: "protocol", name })),
 ];
 
-/**
- * Services' records: every declared service enabled and started, or (its
- * feature unused) stopped and disabled. Run over the first reconnect after
- * the commit, before the confirming one: a stopped firewall's new rules take
- * effect only as it starts, so a lockout there must still roll back.
- */
 /** The config a service reads, where it is not its own name. */
 const serviceConfigs: Record<string, string> = { dnsmasq: "dhcp", odhcpd: "dhcp", sysntpd: "system", log: "system" };
 export const configOfService = (name: string) => serviceConfigs[name] ?? name;
 
-/**
- * Each declared service enabled and started, or stopped and disabled; and
- * restarted after the reload when this run changed its config and procd
- * holds no reload trigger of its for that config (`triggers`, per running
- * service: which configs its triggers watch). One procd does not know is
- * started afresh anyway, on the new config.
- */
 /** Whether a package matches one of a service's `restartOnPackages`: by name, or by a prefix ending in `*`. */
 const matchesPackage = (patterns: string[]) => (name: string) =>
   patterns.some((p) => (p.endsWith("*") ? name.startsWith(p.slice(0, -1)) : name === p));
 
+/**
+ * Services' records: every declared service enabled and started, or (its
+ * feature unused) stopped and disabled; and restarted after the reload when
+ * this run changed its config and procd holds no reload trigger of its for
+ * that config (`triggers`, per running service: which configs its triggers
+ * watch), or a package it names was swapped. One procd does not know is
+ * started afresh anyway, on the new config. Run over the first reconnect
+ * after the commit, before the confirming one: a stopped firewall's new
+ * rules take effect only as it starts, so a lockout there must still roll
+ * back.
+ */
 export const servicesRecords = (
   state: OpenWrtState,
   triggers: Record<string, string[]> = {},

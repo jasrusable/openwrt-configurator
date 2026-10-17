@@ -1,9 +1,10 @@
 // Adding hardware, guided (src/discover.ts): what is on the network and not
 // in Hardware (GET /api/discover), a read of the device picked (POST
-// /api/discover/inspect {address}), and taking it on under a name (POST
-// /api/discover/adopt {address, name}); a device in Hardware that was reset,
-// read again with its old key forgotten and taken back under its own name
-// (inspect-reset, readopt {address, name}).
+// /api/discover/inspect {address}: its key recorded aside, trusted by
+// nothing), and taking it on under a name once its key's fingerprint is
+// confirmed (POST /api/discover/adopt {address, name, fingerprint}); a device
+// in Hardware that was reset, read the same way and taken back under its own
+// name (inspect-reset, readopt {address, name, fingerprint}).
 import { adopt, discover, inspectAt, inspectReset, readopt } from "../../discover";
 import { map } from "../../result";
 import { ApiContext, field, respond, Route, withBody } from "../router";
@@ -27,13 +28,17 @@ export const discoverRoutes = ({ intentPath, platform, now }: ApiContext): Route
   {
     path: "/api/discover/readopt",
     POST: withBody(async (input) =>
-      respond(await readopt({ intentPath, platform, address: field(input, "address"), name: field(input, "name"), now }))
+      respond(
+        await readopt({ intentPath, platform, address: field(input, "address"), name: field(input, "name"), fingerprint: field(input, "fingerprint"), now })
+      )
     ),
   },
   {
     path: "/api/discover/adopt",
     POST: withBody(async (input) =>
-      respond(await adopt({ intentPath, platform, address: field(input, "address"), name: field(input, "name"), now }))
+      respond(
+        await adopt({ intentPath, platform, address: field(input, "address"), name: field(input, "name"), fingerprint: field(input, "fingerprint"), now })
+      )
     ),
   },
 ];

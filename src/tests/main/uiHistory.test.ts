@@ -16,6 +16,7 @@ import {
   ranges,
   rate,
   readingsOf,
+  rounded,
   throughputOf,
   withClientReadings,
   withReadings,
@@ -60,6 +61,15 @@ test("reads in one minute are one point, their mean; a day is kept", (t) => {
 test("a device gone from the settings keeps no history", (t) => {
   const h = withReadings({ "load:old": [[0, 1, 1]], down: [[0, 1, 1]] }, bucketMs, { "load:ap": 0.5 }, ["ap"]);
   t.deepEqual(Object.keys(h).sort(), ["down", "load:ap"]);
+});
+
+test("a series no longer read is pruned with the rest: a day on, its points are gone, not drawn as current", (t) => {
+  const h = withReadings({ latency: [[0, 9, 1]], clients: [[0, 4, 1], [3 * bucketMs, 5, 1]], down: [[0, 1, 1]] }, keepMs + bucketMs, { down: 2 }, []);
+  t.deepEqual(h, { clients: [[3 * bucketMs, 5, 1]], down: [[keepMs + bucketMs, 2, 1]] });
+});
+
+test("stored means are rounded to four significant digits", (t) => {
+  t.deepEqual(rounded({ down: [[0, 123456789.123, 3]], load: [[0, 0.123456, 2]] }), { down: [[0, 123500000, 3]], load: [[0, 0.1235, 2]] });
 });
 
 test("what is new replaces the minutes it repeats", (t) => {

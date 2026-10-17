@@ -5,6 +5,7 @@
 // listed as unexpected, never hidden. Pure: tested against recorded output.
 import { meshMtu } from "../intent/mesh";
 import { failoverOrder, ipv6Interface } from "../intent/connections";
+import { networkHolding } from "../intent/addresses";
 import type { Intent } from "../intent/schema";
 import type { DeviceFailure } from "../readEach";
 import type { Result } from "../result";
@@ -113,9 +114,20 @@ export const readOf = (devices: Reachability[], name: string | undefined) =>
 export const routerOf = (intent: Intent, devices: Reachability[]) =>
   readOf(devices, intent.hardware.find((d) => d.role === "router")?.name);
 
-/** The network an IPv4 address is in: each hands out its /24 ("10.0.20." for 10.0.20.0/24). */
-export const networkOfAddress = (intent: Intent, address: string) =>
-  intent.networks.find((n) => address.startsWith(n.subnet.split(".").slice(0, 3).join(".") + "."));
+/** The network an IPv4 address is in. */
+export const networkOfAddress = (intent: Intent, address: string) => networkHolding(intent.networks, address);
+
+/**
+ * Whether the router's line `id` works: when mwan3 says so (still, while it
+ * is only failing); with one connection and no mwan3, when its interface is up.
+ */
+export const lineWorks = (router: DeviceStatus, id: string) => {
+  const line = router.lines.find((l) => l.id === id);
+  return line ? line.state === "online" || line.state === "disconnecting" : !!router.interfaces.find((i) => i.id === id)?.up;
+};
+
+/** The share of a device's memory in use. */
+export const memoryUsed = ({ memory }: Pick<DeviceStatus, "memory">) => (memory.total ? 1 - memory.available / memory.total : 0);
 
 export const networkStatus = (
   intent: Intent,
@@ -127,14 +139,8 @@ export const networkStatus = (
   const routerUp = reached(routerOf(intent, devices));
   const iface = (id: string) => routerUp?.interfaces.find((i) => i.id === id);
   const lineOf = (id: string) => routerUp?.lines.find((l) => l.id === id);
-  // A line works when mwan3 says so (still, while it is only failing); with
-  // one connection and no mwan3, when its interface is up.
-  const works = (c: Intent["internet"]["lines"][number]) => {
-    const line = lineOf(c.id);
-    return line ? line.state === "online" || line.state === "disconnecting" : !!iface(c.id)?.up;
-  };
   const all = intent.internet.lines;
-  const working = all.filter(works);
+  const working = routerUp ? all.filter((c) => lineWorks(routerUp, c.id)) : [];
   // Which carry traffic now: the first working one in failover; sharing,
   // every working one, a metered line only when nothing else works.
   const carrying =
@@ -250,13 +256,7 @@ export const networkStatus = (
         role: d.role,
         ...(status
           ? {
-              health: {
-                uptime: status.uptime,
-                load: status.load[0],
-                memoryUsed: status.memory.total
-                  ? 1 - status.memory.available / status.memory.total
-                  : 0,
-              },
+              health: { uptime: status.uptime, load: status.load[0], memoryUsed: memoryUsed(status) },
             }
           : { error: whyUnread(read) ?? "not read" }),
       };

@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { messageOf } from "./result";
+import { attempt, messageOf } from "./result";
+import { findProfile } from "./firmware/profiles";
 import { dirname } from "./posixPath";
 import { HttpResponse, Platform } from "./platform";
 
@@ -105,8 +106,16 @@ const overviewSchema = z.object({
   ),
 });
 
-let overviewCache: Record<string, Record<string, string>> = {};
+let overviewCache: Record<string, { id: string; target: string }[]> = {};
 
+/**
+ * A board's target and image profile at a release, for a config that names
+ * only its model (an intent's facts give the target: firmware/builds.ts).
+ * The release's overview narrows the targets to those with a profile named
+ * like the board (linksys,e8450: linksys_e8450, linksys_e8450-ubi); the
+ * profile is then the one whose supported boards name it, as for an intent
+ * (firmware/profiles.ts findProfile).
+ */
 export const getProfileTarget = async ({
   version,
   modelId,
@@ -123,20 +132,15 @@ export const getProfileTarget = async ({
       platform,
       accept: [200],
     });
-    const parsed = overviewSchema.parse(response.data);
-    overviewCache[version] = parsed.profiles.reduce<Record<string, string>>(
-      (acc, p) => ({ ...acc, [p.id]: p.target }),
-      {}
-    );
+    overviewCache[version] = overviewSchema.parse(response.data).profiles;
   }
-  const profileId = modelId.replace(",", "_");
-  const target = overviewCache[version][profileId];
-  if (!target) {
-    throw new Error(
-      `No profile "${profileId}" found in OpenWrt ${version} releases. Check the model_id and version.`
-    );
+  const named = modelId.replace(",", "_");
+  const targets = [...new Set(overviewCache[version].filter((p) => p.id === named || p.id.startsWith(`${named}-`)).map((p) => p.target))];
+  for (const target of targets) {
+    const found = await attempt(() => findProfile({ version, target, board: modelId, platform }), messageOf);
+    if (found.ok) return { profile: found.value, target };
   }
-  return { profile: profileId, target };
+  throw new Error(`No profile for ${modelId} found in OpenWrt ${version} releases. Check the model_id and version.`);
 };
 
 const buildImageSchema = z.object({

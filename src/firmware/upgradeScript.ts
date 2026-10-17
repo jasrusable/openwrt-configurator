@@ -9,17 +9,27 @@
 //   fetch < url sum   download the image into RAM; its sha256 checked here
 //   check             sysupgrade -T: an image for this board
 //   keep-self < dir   the device this app runs on: keep the app through the upgrade
-//                     (its package's file, a one-shot reinstall at first boot, and
-//                     <dir>, its settings and state, in sysupgrade's keep list)
-//   flash             sysupgrade, keeping the settings, a moment after answering
+//                     (its package's file, a one-shot reinstall at first boot, its
+//                     feed and key, and <dir>, its settings and state, in
+//                     sysupgrade's keep list)
+//   flash             sysupgrade, keeping the settings, a moment after answering;
+//                     the applied marker set first, so the image's first-boot
+//                     defaults leave those settings alone (a device applied before
+//                     the marker existed, or without a confirm, has none)
 //   flash-keys        sysupgrade keeping only /etc/dropbear (host keys, authorized
 //                     keys), from a tarball made here that never leaves the device:
 //                     back to an older series, which must not be handed newer config
-//   clean             the image and this script gone
+//   clean             the image, a download still running, what keep-self left, and
+//                     this script gone
 //
 // Each says ONC_<WORD> on stdout when it went through; a failure says why on
-// stderr and exits 1. Paths grow from ONC_ROOT and ONC_TMP, so the whole
+// stderr and exits 1. It starts as the apply's agent does (src/agent/prelude.ts):
+// out of the SSH session's cgroup (sysupgrade, started late and detached, must
+// not stay in dropbear's), and a download kept off the session's streams. Paths grow from ONC_ROOT and ONC_TMP, so the whole
 // script is tested under plain sh in a temp dir (upgrade.test.ts).
+
+import { appliedKeepList, appliedMarker } from "../agent/paths";
+import { prelude } from "../agent/prelude";
 
 export const upgradeName = "onc-upgrade-";
 
@@ -29,6 +39,8 @@ export const upgradePath = (runId: string) => `/tmp/${upgradeName}${runId}.sh`;
 /** This app's own package, and where the router it runs on keeps a copy of it through an upgrade. */
 export const selfPackage = "openwrt-configurator";
 export const selfPackageDir = "/etc/onc/pkg";
+/** The key its feed is signed with (README), kept with the feed's own list so it updates after. */
+export const selfFeedKey = "/etc/apk/keys/openwrt-configurator.pem";
 /** Its one-shot reinstall at the first boot after the upgrade. */
 export const selfReinstall = "/etc/uci-defaults/90-onc-reinstall";
 /** What sysupgrade keeps for it. */
@@ -47,8 +59,12 @@ SCRIPT="$0"
 RUN="\${SCRIPT##*/${upgradeName}}"; RUN="\${RUN%.sh}"
 IMAGE="$TMP/onc-firmware-$RUN.bin"
 KEYS="$TMP/onc-keys-$RUN.tgz"
+# A detached command's output (a download), and its pid while it runs.
+OUT="$TMP/onc-fetch-$RUN"
+FETCHING="$OUT.pid"
+${prelude}
 
-fail() { rm -f "$IMAGE" "$KEYS"; echo "onc-upgrade: $*" >&2; exit 1; }
+fail() { rm -f "$IMAGE" "$KEYS" "$FETCHING"; echo "onc-upgrade: $*" >&2; exit 1; }
 
 # Free RAM, KiB: the less of /tmp's free space and the memory available
 # (tmpfs takes its pages from memory, so its free space can be more than there is).
@@ -67,10 +83,12 @@ room() {
 	echo ONC_ROOM
 }
 
+# Detached, its pid kept while it runs: a call that timed out leaves it
+# running (dropbear signals nothing), and clean stops it.
 fetch() {
 	read -r url; read -r sum
 	rm -f "$IMAGE"
-	uclient-fetch -q -T 60 -O "$IMAGE" "$url" < /dev/null >&2 || fail "could not download the image"
+	detached uclient-fetch -q -T 60 -O "$IMAGE" "$url" || fail "could not download the image"
 	got=$(sha256sum "$IMAGE" | cut -d ' ' -f 1)
 	[ "$got" = "$sum" ] || fail "the image's sha256 is $got, not $sum"
 	echo ONC_FETCHED
@@ -84,24 +102,34 @@ check() {
 
 # An upgrade keeps /etc/config and what keep.d lists, never packages installed
 # since the image: so this app keeps its own package's file and installs it
-# again, offline, at the first boot after (quickjs, its runtime, is in the image).
+# again, offline, at the first boot after (quickjs, its runtime, is in the
+# image). A reinstall that fails is said in the log and left to run again at
+# the next boot. Of the feeds, only the list naming this app's is kept: the
+# release's own (distfeeds.list) names its release, and the new one's must stand.
 keep_self() {
 	read -r dir
 	pkg="$ROOT${selfPackageDir}"
 	mkdir -p "$pkg" "$ROOT/lib/upgrade/keep.d" "$ROOT/etc/uci-defaults"
 	rm -f "$pkg"/*.apk
 	# The index first: a router after a reboot has none cached.
-	{ apk update && apk fetch -o "$pkg" "\${ONC_SELF_PACKAGE:-${selfPackage}}"; } < /dev/null >&2 ||
+	{ detached apk update && detached apk fetch -o "$pkg" "\${ONC_SELF_PACKAGE:-${selfPackage}}"; } ||
 		fail "could not keep a copy of this app's own package"
 	ls "$pkg"/*.apk > /dev/null 2>&1 || fail "could not keep a copy of this app's own package"
 	cat > "$ROOT${selfReinstall}" <<-'EOF'
 	#!/bin/sh
 	# openwrt-configurator: back after an upgrade of the router it runs on, reinstalled from the copy kept
 	# (checked against its feed's signed index when it was fetched, as the agent's staged packages are).
-	apk add --allow-untrusted --repositories-file /dev/null ${selfPackageDir}/*.apk
-	exit 0
+	# Failing, it stays, and runs again at the next boot.
+	apk add --allow-untrusted --repositories-file /dev/null ${selfPackageDir}/*.apk && exit 0
+	logger -t openwrt-configurator "could not reinstall itself from ${selfPackageDir} after the upgrade: tried again at the next boot"
+	exit 1
 	EOF
-	printf '%s\n' "$dir/" "${selfPackageDir}/" "${selfReinstall}" /etc/apk/keys/ /etc/apk/repositories.d/ > "$ROOT${selfKeepList}"
+	feeds=$(grep -l -s '${selfPackage}' "$ROOT"/etc/apk/repositories.d/*.list | grep -v '/distfeeds\.list$')
+	key=""; [ -f "$ROOT${selfFeedKey}" ] && key="${selfFeedKey}"
+	{
+		printf '%s\n' "$dir/" "${selfPackageDir}/" "${selfReinstall}" $key
+		for f in $feeds; do echo "\${f#"$ROOT"}"; done
+	} > "$ROOT${selfKeepList}"
 	echo ONC_KEPT
 }
 
@@ -109,6 +137,8 @@ keep_self() {
 # dropbear; it keeps the settings (no -n), and reboots into the new release.
 flash() {
 	[ -f "$IMAGE" ] || fail "no image to flash"
+	mkdir -p "$ROOT/etc/onc" "$ROOT/lib/upgrade/keep.d" && touch "$ROOT${appliedMarker}" &&
+		echo "${appliedMarker}" > "$ROOT${appliedKeepList}" || fail "could not mark the settings to keep"
 	setsid sh -c "sleep 1; exec sysupgrade '$IMAGE'" < /dev/null > /dev/null 2>&1 &
 	echo ONC_FLASHING
 }
@@ -123,7 +153,13 @@ flash_keys() {
 	echo ONC_FLASHING
 }
 
-clean() { rm -f "$IMAGE" "$KEYS" "$SCRIPT"; echo ONC_CLEAN; }
+clean() {
+	[ -f "$FETCHING" ] && kill "$(cat "$FETCHING")" 2> /dev/null
+	rm -f "$IMAGE" "$KEYS" "$FETCHING" "$OUT" "$ROOT${selfReinstall}" "$ROOT${selfKeepList}" "$SCRIPT"
+	echo ONC_CLEAN
+}
+
+leave_session_cgroup
 
 case "$1" in
 	room) room "$2" ;;

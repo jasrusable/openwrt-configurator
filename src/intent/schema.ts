@@ -20,7 +20,8 @@ import { wifiSchema } from "./wifi/schema";
 
 export const intentVersion = 1;
 
-export const intentSchema = z
+/** The intent's shape and defaults, before the checks across settings. */
+export const intentShape = z
   .object({
     /** This file's format version; older files are migrated (migrations.ts). */
     schema: z.literal(intentVersion),
@@ -34,15 +35,16 @@ export const intentSchema = z
     dns: dnsSchema,
     hardware: hardwareSchema,
   })
-  .strict()
-  .superRefine((intent, ctx) => {
-    // Rules across settings, each feature's own, at the field they concern,
-    // so the UI shows them there; then what one setting may be given the
-    // rest (the rules the UI greys out by). The server applies the same
-    // ones: nothing invalid is saved.
-    const issue: AddIssue = (path, message) => ctx.addIssue({ code: z.ZodIssueCode.custom, path, message });
-    featureModules.forEach((feature) => feature.check?.(intent, issue));
-    choiceIssues(intent).forEach(({ path, message }) => issue(path, message));
-  });
+  .strict();
+
+export const intentSchema = intentShape.superRefine((intent, ctx) => {
+  // Rules across settings, each feature's own, at the field they concern,
+  // so the UI shows them there; then what one setting may be given the
+  // rest (the rules the UI greys out by). The server applies the same
+  // ones: nothing invalid is saved.
+  const issue: AddIssue = (path, message) => ctx.addIssue({ code: z.ZodIssueCode.custom, path, message });
+  featureModules.forEach((feature) => feature.check?.(intent, issue));
+  choiceIssues(intent).forEach(({ path, message }) => issue(path, message));
+});
 
 export type Intent = z.infer<typeof intentSchema>;

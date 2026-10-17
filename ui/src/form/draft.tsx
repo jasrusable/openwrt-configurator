@@ -1,8 +1,9 @@
 // The draft: the whole intent being edited, as one immutable value. Fields
 // read it by path and write it with set(path, value); everything else is
 // derived from it, never kept in step by hand: its problems (the intent
-// schema, the same the server checks with, run over the whole draft) and
-// whether it differs from the saved file.
+// schema, the same the server checks with, run over the whole draft),
+// whether it differs from the saved file, and what the page must say about
+// the last save or merge until the next edit.
 import {
   createContext,
   ReactNode,
@@ -13,6 +14,7 @@ import { merge3 } from "../../../src/intent/merge";
 import { canonical } from "../../../src/json";
 import type { PathsOf, ValueAt } from "../../../src/intent/paths";
 import { Intent, intentSchema } from "../../../src/intent/schema";
+import { Issue, issuesAt } from "../../../src/intent/issues";
 
 export type IntentField = PathsOf<Intent>;
 
@@ -29,7 +31,12 @@ export type ItemOf<N extends ListPath> = NonNullable<ValueAt<Intent, N>> extends
   ? U
   : never;
 
-export type Issue = { path: string; message: string };
+
+/**
+ * A change saved elsewhere merged into the edits (Draft.rebase): where both
+ * changed one setting, the edit was kept over it (`conflicts`, by path).
+ */
+export type MergeNote = { conflicts: string[] };
 
 const isIndex = (part: string) => /^\d+$/.test(part);
 
@@ -69,9 +76,7 @@ export const issuesOf = (intent: Intent): Issue[] => {
   let issues = checked.get(intent);
   if (!issues) {
     const result = intentSchema.safeParse(intent);
-    issues = result.success
-      ? []
-      : result.error.issues.map((i) => ({ path: i.path.join("."), message: i.message }));
+    issues = result.success ? [] : issuesAt(result.error);
     checked.set(intent, issues);
   }
   return issues;
@@ -93,6 +98,13 @@ const keyOf = (issue: Issue) => `${issue.path}\u0000${issue.message}`;
 const shownBy = (touched: string) => (issue: Issue) =>
   belongsTo(issue, touched) || touched.startsWith(`${issue.path}.`);
 
+/** Each value's canonical JSON, made once: the saved file's is asked on every edit. */
+const canonicals = new WeakMap<object, string>();
+const canonicalOf = (value: Intent) => {
+  if (!canonicals.has(value)) canonicals.set(value, canonical(value));
+  return canonicals.get(value)!;
+};
+
 /** Remembers its last answer while `deps` are the same objects, as a subscription needs. */
 const memo = <T,>(compute: (...deps: unknown[]) => T) => {
   let last: { deps: unknown[]; value: T } | undefined;
@@ -108,6 +120,10 @@ export class Draft {
   private touched: ReadonlySet<string> = new Set();
   /** What the server said was wrong with the last save, until the next edit. */
   private serverIssues: Issue[] = [];
+  /** Why the last save failed, in words, until the next edit or save. */
+  saveError?: string;
+  /** The last merge of a change saved elsewhere, until the next edit or save. */
+  merged?: MergeNote;
 
   constructor(
     public saved: Intent,
@@ -136,7 +152,14 @@ export class Draft {
     this.value = value;
     this.touched = new Set();
     this.revealAll = false;
+    this.edited();
+  }
+
+  /** An edit, a save or a revert: what was said about the last save or merge is done with. */
+  private edited() {
     this.serverIssues = [];
+    this.saveError = undefined;
+    this.merged = undefined;
     this.emit();
   }
 
@@ -153,15 +176,13 @@ export class Draft {
   setPath = (path: string, next: unknown) => {
     this.value = setAt(this.value, path, next);
     if (!this.touched.has(path)) this.touched = new Set([...this.touched, path]);
-    this.serverIssues = [];
-    this.emit();
+    this.edited();
   };
 
   /** Replace the whole draft, e.g. with an edit that spans settings. */
   replace = (next: Intent) => {
     this.value = next;
-    this.serverIssues = [];
-    this.emit();
+    this.edited();
   };
 
   /** Back to the saved file; or a newly saved one becomes the saved file. */
@@ -174,18 +195,26 @@ export class Draft {
   savedAs = (sent: Intent, stored: Intent) => {
     if (this.value === sent) return this.settle(stored, stored);
     this.saved = stored;
-    this.serverIssues = [];
+    this.edited();
+  };
+
+  /** The last save failed: said until the next edit, a merge's note with it. */
+  failed = (message: string) => {
+    this.saveError = message;
     this.emit();
   };
 
   /**
    * The saved file changed elsewhere (another tab, the CLI, a login read it
    * again): the edits made over the old file are replayed onto the new one,
-   * so saving keeps the other change too (`merge3`).
+   * so saving keeps the other change too (`merge3`). With edits to merge
+   * into, the page says so until the next edit, and where an edit won.
    */
   rebase = (saved: Intent, base: Intent = this.saved) => {
     if (saved === this.saved && base === this.saved) return;
-    this.value = merge3(base, this.value, saved);
+    const { value, conflicts } = merge3(base, this.value, saved);
+    if (this.differs(this.value, base) && this.differs(saved, base)) this.merged = { conflicts };
+    this.value = value;
     this.saved = saved;
     this.emit();
   };
@@ -224,9 +253,11 @@ export class Draft {
   errorFor = (path: string): string | undefined =>
     this.shownIssues().find((issue) => belongsTo(issue, path))?.message;
 
-  private differs = memo((value, saved) => canonical(value) !== canonical(saved));
+  private changedFrom = memo((value, saved) => this.differs(value as Intent, saved as Intent));
 
-  changed = (): boolean => this.differs(this.value, this.saved);
+  private differs = (a: Intent, b: Intent) => a !== b && canonicalOf(a) !== canonicalOf(b);
+
+  changed = (): boolean => this.changedFrom(this.value, this.saved);
 }
 
 const DraftContext = createContext<Draft | null>(null);
@@ -258,7 +289,7 @@ export function useDraftValue(path?: string): unknown {
   return useDerived((d) => getAt(d.value, path));
 }
 
-/** A list in the draft and its edits: add an item, change or remove one by its place. */
+/** A list in the draft and its edits: add an item, or remove one by its place (an item's fields are bound by path). */
 export const useDraftList = <N extends ListPath>(path: N) => {
   const draft = useDraft();
   const items = (useDerived((d) => getIn(d.value, path)) ?? []) as ItemOf<N>[];
@@ -266,7 +297,6 @@ export const useDraftList = <N extends ListPath>(path: N) => {
   return {
     items,
     add: (item: ItemOf<N>) => set([...items, item]),
-    update: (index: number, item: ItemOf<N>) => set(items.map((old, i) => (i === index ? item : old))),
     remove: (index: number) => set(items.filter((_, i) => i !== index)),
   };
 };
@@ -279,3 +309,6 @@ export const useFieldError = (path: string) => useDerived((d) => d.errorFor(path
 
 /** Whether the draft differs from the saved file. */
 export const useDraftChanged = () => useDerived((d) => d.changed());
+
+/** Why the last save failed, and the last merge of a change saved elsewhere: both until the next edit. */
+export const useDraftNotes = () => ({ saveError: useDerived((d) => d.saveError), merged: useDerived((d) => d.merged) });

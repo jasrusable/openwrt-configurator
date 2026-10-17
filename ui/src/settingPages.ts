@@ -1,9 +1,8 @@
 // Which page shows each setting, kept apart from the pages themselves so
-// anything (the problems list, a removal's consequences) can use it.
-/**
- * Which page shows each setting, by the start of its path; for a list, the
- * URL of one item's page. The problems list and the sidebar's marks use it.
- */
+// anything (the problems list, the sidebar's marks, a removal's
+// consequences) can use it.
+
+/** Each setting's page, by the start of its path; for a list, the URL of one item's page. */
 export const settingPages: { path: string; page: string; url?: string; item?: (index: string) => string }[] = [
   // The catalog is a tab of System, for the list and for one entry in it.
   { path: "system.patches", page: "system", url: "/settings/system/patches" },

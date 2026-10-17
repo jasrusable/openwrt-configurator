@@ -77,8 +77,12 @@ export const choiceIssues = (intent: Intent) =>
 export type Availability = {
   /** Why the setting as a whole is not available, if it is not, and whether the schema refuses it. */
   unavailable?: { reason: string; refuses: boolean };
-  /** For one value: why it is not available, or what choosing it also changes. */
-  option: (value: unknown) => { unavailable?: string; swap?: Swap };
+  /**
+   * For one value: why it is not available, or what choosing it also
+   * changes. `refuses`, with `unavailable`: whether the schema refuses the
+   * value where it is set (else it is kept, and ignored while unavailable).
+   */
+  option: (value: unknown) => { unavailable?: string; refuses?: boolean; swap?: Swap };
 };
 
 /** The rules for one setting, by its path (like "wifi.radios.2g.width"), given the rest of the intent. */
@@ -97,11 +101,12 @@ export const availability = (intent: Intent, path: PathsOf<Intent>): Availabilit
       .find(Boolean),
     option: (value) => {
       const about = matching.filter(({ choice }) => choice.values?.includes(value));
+      const reasons = about.flatMap(({ choice, at }) => {
+        const reason = choice.unavailable && reasonOf(choice.unavailable(intent, at, value));
+        return reason ? [{ reason, refuses: choice.refuses !== false }] : [];
+      });
       return {
-        unavailable: about
-          .filter(({ choice }) => choice.unavailable)
-          .map(({ choice, at }) => reasonOf(choice.unavailable!(intent, at, value)))
-          .find(Boolean),
+        ...(reasons.length ? { unavailable: reasons[0].reason, refuses: reasons.some((r) => r.refuses) } : {}),
         swap: about.map(({ choice, at }) => choice.swap?.(intent, at, value)).find(Boolean),
       };
     },

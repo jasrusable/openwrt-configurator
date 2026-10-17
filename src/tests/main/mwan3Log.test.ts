@@ -9,8 +9,9 @@ import { join } from "path";
 import { logProbe, parseLog } from "../../status/device/log";
 import { logWords } from "../../status/views";
 import { sampleIntent } from "../helpers/fixtures";
+import { withEpochs } from "../helpers/logread";
 
-const recorded = readFileSync(join(__dirname, "../helpers/status/mwan3-failover.txt"), "utf8");
+const recorded = withEpochs(readFileSync(join(__dirname, "../helpers/status/mwan3-failover.txt"), "utf8"));
 
 /** The log probe's own filter, run as the device runs it (grep -E), over the recorded lines. */
 const filtered = () => {

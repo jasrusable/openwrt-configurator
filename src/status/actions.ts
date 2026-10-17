@@ -15,12 +15,13 @@ import { read, stateLayout, StoreKey, tryWrite } from "../store";
 import { loadSettings } from "../settings";
 import { provisionableDevices } from "../apply/provisionConfig";
 import { readEach } from "../readEach";
-import { jobState } from "../server/provisionJob";
+import { applyRunning } from "../apply/job";
 import { withLock } from "../lock";
 import { shellQuote } from "../shell";
 import { DeviceView, restartable } from "./views";
 import { arr, bandOf, channelOf, obj } from "./values";
 import { parsePingOutput, pingNumbers } from "./device/internet";
+import { eachHostapd } from "./device/common";
 
 /**
  * One device, found and logged in to as anywhere else (src/locate.ts), within
@@ -34,7 +35,7 @@ export const onDevice = async <T>(
   timeoutMs: number,
   work: (session: Parameters<typeof runProbe>[0], state: () => ReturnType<typeof getOpenWrtState>) => Promise<Result<T, Problem>>
 ): Promise<Result<T, Problem>> => {
-  if ((await jobState({ intentPath, files: platform }).catch(() => undefined))?.state === "running") {
+  if (await applyRunning({ intentPath, files: platform }).catch(() => false)) {
     return fail("conflict", "An apply is running: try again when it has finished.");
   }
   const loaded = await loadSettings(intentPath, platform);
@@ -58,19 +59,19 @@ export const onDevice = async <T>(
 };
 
 /**
- * One at a time, per action, across processes (a CGI request is one): a second
- * click while one runs is told so. A lock left by a process that died is
- * taken over after a minute: every action ends sooner, inside uhttpd's 60 s
- * CGI limit (`actionBudgetMs`).
+ * One action at a time, of any kind, across processes (a CGI request is
+ * one): a click while one runs is told so, as two at once (a restart during
+ * a survey, two speed tests) would spoil or cut each other. A lock left by a
+ * process that died is taken over after a minute: every action ends sooner,
+ * inside uhttpd's 60 s CGI limit (`actionBudgetMs`).
  */
 export const oneAtATime = async <T>(
   platform: Platform,
   intentPath: string,
-  name: string,
   work: () => Promise<Result<T, Problem>>
 ): Promise<Result<T, Problem>> => {
-  const result = await withLock(platform, stateLayout(intentPath).actionLock(name), 1, work);
-  return result === "busy" ? fail("busy", "One is already running: wait for it to finish.") : result;
+  const result = await withLock(platform, stateLayout(intentPath).actionLock, 1, work);
+  return result === "busy" ? fail("busy", "Another action is running: wait for it to finish.") : result;
 };
 
 /** What an action may take in all: uhttpd ends a CGI request at 60 s. */
@@ -88,16 +89,18 @@ export const restartService = ({
   hostname: string;
   service: string;
 }) =>
-  onDevice(intentPath, platform, hostname, 20_000, async (session, state) => {
-    if (!(state().services ?? []).some((s) => s.name === service && restartable(s))) {
-      return fail("invalid", `${service} is not a service this page restarts on ${hostname}.`);
-    }
-    const restarted = await runProbe(session, {
-      command: `/etc/init.d/${shellQuote(service)} restart >/dev/null 2>&1; echo $?`,
-      parse: ({ stdout }) => stdout.trim() === "0",
-    } as Probe<boolean>);
-    return restarted ? ok({ ok: true as const }) : fail("failed", `${service} did not restart on ${hostname}.`);
-  });
+  oneAtATime(platform, intentPath, () =>
+    onDevice(intentPath, platform, hostname, 20_000, async (session, state) => {
+      if (!(state().services ?? []).some((s) => s.name === service && restartable(s))) {
+        return fail("invalid", `${service} is not a service this page restarts on ${hostname}.`);
+      }
+      const restarted = await runProbe(session, {
+        command: `/etc/init.d/${shellQuote(service)} restart >/dev/null 2>&1; echo $?`,
+        parse: ({ stdout }) => stdout.trim() === "0",
+      } as Probe<boolean>);
+      return restarted ? ok({ ok: true as const }) : fail("failed", `${service} did not restart on ${hostname}.`);
+    })
+  );
 
 /**
  * Started in the background, a moment after the answer: the command returns
@@ -155,7 +158,7 @@ export const rebootDevice = ({
   hostname: string;
   now?: () => number;
 }) =>
-  oneAtATime(platform, intentPath, "reboot", () =>
+  oneAtATime(platform, intentPath, () =>
     onDevice(intentPath, platform, hostname, 20_000, async (session) => {
       if (!(await runProbe(session, detached("reboot", "ONC_REBOOTING")))) return fail("failed", `${hostname} did not start rebooting.`);
       const at = now();
@@ -167,7 +170,7 @@ export const rebootDevice = ({
 
 /** Restart `hostname`'s Wi-Fi: its clients (and a mesh link through it) drop and reconnect within a minute. */
 export const restartWifi = ({ intentPath, platform, hostname }: { intentPath: string; platform: Platform; hostname: string }) =>
-  oneAtATime(platform, intentPath, "wifi-restart", () =>
+  oneAtATime(platform, intentPath, () =>
     onDevice(intentPath, platform, hostname, 20_000, async (session) => {
       const hasWifi = await runProbe(session, { command: "command -v wifi >/dev/null && echo ONC_WIFI", parse: ({ stdout }) => stdout.includes("ONC_WIFI") } as Probe<boolean>);
       if (!hasWifi) return fail("invalid", `${hostname} has no Wi-Fi.`);
@@ -193,7 +196,7 @@ export const parsePing = (stdout: string): PingResult | undefined => {
 /** Ping `target` from `hostname`: four pings, two seconds each at most. */
 export const pingFrom = ({ intentPath, platform, hostname, target }: { intentPath: string; platform: Platform; hostname: string; target: string }) =>
   pingTarget.test(target)
-    ? oneAtATime(platform, intentPath, "ping", () =>
+    ? oneAtATime(platform, intentPath, () =>
         onDevice(intentPath, platform, hostname, 20_000, async (session) => {
           const pinged = await runProbe(session, {
             command: `ping -c 4 -W 2 ${shellQuote(target)} 2>&1`,
@@ -224,7 +227,7 @@ export const parseTraceroute = (stdout: string): TraceHop[] =>
  */
 export const tracerouteFrom = ({ intentPath, platform, hostname, target }: { intentPath: string; platform: Platform; hostname: string; target: string }) =>
   pingTarget.test(target)
-    ? oneAtATime(platform, intentPath, "traceroute", () =>
+    ? oneAtATime(platform, intentPath, () =>
         onDevice(intentPath, platform, hostname, 45_000, async (session) => {
           const traced = await runProbe(session, {
             command: `traceroute -n -q 2 -w 1 -m 16 ${shellQuote(target)} 2>&1`,
@@ -297,44 +300,56 @@ export const parseSpeedTest = (stdout: string, at: number): SpeedTest => {
 // fill the rest of the window (it serves 1 MB to 99,999,999 bytes); the
 // upload sends 1 MB, then 2 MB at a time: uclient-fetch puts a whole body in
 // its buffer first, and a third of 4 MB bodies stalled (a 10 MB one always),
-// so a stalled one is tried again and its time not counted. Sums in awk: a
-// shell's arithmetic may be 32-bit. Skipped where free RAM is short.
-export const speedTestCommand = [
-  "d=$(mktemp -d)",
-  "now() { cut -d' ' -f1 /proc/uptime; }",
-  'since() { awk -v a="$1" -v b="$(now)" \'BEGIN { print b - a }\'; }',
-  'sum() { awk -v a="$1" -v b="$2" \'BEGIN { printf "%.0f", a + b }\'; }',
-  'sumf() { awk -v a="$1" -v b="$2" \'BEGIN { printf "%.3f", a + b }\'; }',
-  `over() { awk -v t="$1" 'BEGIN { exit !(t >= ${speedWindowSeconds}) }'; }`,
-  "ping -c 3 -W 1 1.1.1.1 >$d/idle 2>/dev/null",
-  "ping -c 30 -W 1 1.1.1.1 >$d/pdown 2>/dev/null & p=$!",
-  "a=$(now); total=0; size=1000000",
-  "while :; do",
-  '  n=$(uclient-fetch -q -T 5 -O - "https://speed.cloudflare.com/__down?bytes=$size" 2>/dev/null | wc -c)',
-  '  [ "$n" -gt 0 ] || break',
-  '  total=$(sum $total $n); t=$(since $a); over $t && break',
-  `  size=$(awk -v n="$total" -v t="$t" 'BEGIN { s = n / t * (${speedWindowSeconds} - t); if (s < 1000000) s = 1000000; if (s > 99999999) s = 99999999; printf "%.0f", s }')`,
-  "done",
-  "t=$(since $a); kill -INT $p 2>/dev/null; wait $p 2>/dev/null",
-  'echo "down $t $total"',
-  "free=$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo)",
-  `if [ "\${free:-0}" -gt ${uploadNeedsKb} ]; then`,
-  "  dd if=/dev/zero of=$d/b1 bs=1048576 count=1 2>/dev/null; dd if=/dev/zero of=$d/b2 bs=1048576 count=2 2>/dev/null",
-  "  ping -c 30 -W 1 1.1.1.1 >$d/pup 2>/dev/null & p=$!",
-  "  a=$(now); total=0; spent=0; fails=0; f=$d/b1",
-  "  while :; do",
-  "    r=$(now)",
-  "    if uclient-fetch -q -T 3 -O /dev/null --post-file=$f 'https://speed.cloudflare.com/__up' >/dev/null 2>&1; then",
-  '      total=$(sum $total $(wc -c <$f)); spent=$(sumf $spent $(since $r)); fails=0; f=$d/b2',
-  '    else fails=$((fails + 1)); [ $fails -ge 3 ] && break; fi',
-  "    over $(since $a) && break",
-  "  done",
-  "  kill -INT $p 2>/dev/null; wait $p 2>/dev/null",
-  '  echo "up $spent $total"',
-  "fi",
-  'echo "== idle"; cat $d/idle; echo "== down"; cat $d/pdown 2>/dev/null; echo "== up"; cat $d/pup 2>/dev/null; echo "== end"',
-  "rm -rf $d",
-].join("\n");
+// so a stalled one is tried again and its time not counted. Each transfer
+// runs aside, its pid noted, and a watchdog kills it once its direction is
+// `speedGraceSeconds` past the window: on a slow line one body could take far
+// longer, and the device would go on after the session ends (dropbear does
+// not end what a session leaves). Never `pgrep -f` the URL: it matches this
+// script's own command line. Sums in awk: a shell's arithmetic may be
+// 32-bit. Skipped where free RAM is short.
+export const speedGraceSeconds = 4;
+export const speedTestCommandFor = (window: number, grace = speedGraceSeconds) =>
+  [
+    "d=$(mktemp -d); mkfifo $d/f",
+    "now() { cut -d' ' -f1 /proc/uptime; }",
+    'since() { awk -v a="$1" -v b="$(now)" \'BEGIN { print b - a }\'; }',
+    'sum() { awk -v a="$1" -v b="$2" \'BEGIN { printf "%.0f", a + b }\'; }',
+    'sumf() { awk -v a="$1" -v b="$2" \'BEGIN { printf "%.3f", a + b }\'; }',
+    `over() { awk -v t="$1" 'BEGIN { exit !(t >= ${window}) }'; }`,
+    `watch() { ( sleep ${window + grace}; kill $(cat $d/p 2>/dev/null) 2>/dev/null ) & k=$!; }`,
+    "ping -c 3 -W 1 1.1.1.1 >$d/idle 2>/dev/null",
+    "ping -c 30 -W 1 1.1.1.1 >$d/pdown 2>/dev/null & p=$!",
+    "a=$(now); total=0; size=1000000; watch",
+    "while :; do",
+    '  uclient-fetch -q -T 5 -O - "https://speed.cloudflare.com/__down?bytes=$size" >$d/f 2>/dev/null & echo $! >$d/p',
+    "  n=$(wc -c <$d/f)",
+    '  [ "$n" -gt 0 ] || break',
+    "  total=$(sum $total $n); t=$(since $a); over $t && break",
+    `  size=$(awk -v n="$total" -v t="$t" 'BEGIN { s = n / t * (${window} - t); if (s < 1000000) s = 1000000; if (s > 99999999) s = 99999999; printf "%.0f", s }')`,
+    "done",
+    "t=$(since $a); kill $k 2>/dev/null; kill -INT $p 2>/dev/null; wait $p 2>/dev/null",
+    'echo "down $t $total"',
+    "free=$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo)",
+    `if [ "\${free:-0}" -gt ${uploadNeedsKb} ]; then`,
+    "  dd if=/dev/zero of=$d/b1 bs=1048576 count=1 2>/dev/null; dd if=/dev/zero of=$d/b2 bs=1048576 count=2 2>/dev/null",
+    "  ping -c 30 -W 1 1.1.1.1 >$d/pup 2>/dev/null & p=$!",
+    "  a=$(now); total=0; spent=0; fails=0; f=$d/b1; watch",
+    "  while :; do",
+    "    r=$(now)",
+    "    uclient-fetch -q -T 3 -O /dev/null --post-file=$f 'https://speed.cloudflare.com/__up' >/dev/null 2>&1 & echo $! >$d/p",
+    "    if wait $!; then",
+    '      total=$(sum $total $(wc -c <$f)); spent=$(sumf $spent $(since $r)); fails=0; f=$d/b2',
+    '    else fails=$((fails + 1)); [ $fails -ge 3 ] && break; fi',
+    "    over $(since $a) && break",
+    "  done",
+    "  kill $k 2>/dev/null; kill -INT $p 2>/dev/null; wait $p 2>/dev/null",
+    '  echo "up $spent $total"',
+    "fi",
+    'echo "== idle"; cat $d/idle; echo "== down"; cat $d/pdown 2>/dev/null; echo "== up"; cat $d/pup 2>/dev/null; echo "== end"',
+    "rm -rf $d",
+  ].join("\n");
+
+export const speedTestCommand = speedTestCommandFor(speedWindowSeconds);
 
 const speedTestsKey = (intentPath: string): StoreKey<SpeedTest[]> => ({
   path: stateLayout(intentPath).speedTests,
@@ -356,7 +371,7 @@ export const speedTests = (platform: Pick<Platform, "readTextFile">, intentPath:
  * few beside each other.
  */
 export const speedTest = ({ intentPath, platform, now = Date.now }: { intentPath: string; platform: Platform; now?: () => number }) =>
-  oneAtATime(platform, intentPath, "speed-test", async () => {
+  oneAtATime(platform, intentPath, async () => {
     const loaded = await loadSettings(intentPath, platform);
     if (!loaded.ok) return loaded;
     const router = provisionableDevices(loaded.value.plan).ready.find((d) => d.tags?.role === "router");
@@ -399,13 +414,13 @@ const bandOfScan = (n: Record<string, unknown>, channel: number) => {
 type Heard = Survey["neighbours"][number] & { bssid?: string };
 export type SurveyRead = { accessPoint: string; own: string[]; channels: Survey["channels"]; heard: Heard[] };
 
-/** The survey probe's array: each radio's ifname, its own BSSID, iwinfo scan and survey. */
 /** Far past any uptime, in ms: a counter this large wrapped (mt7915/mt7981 underflow them after days: mt76#1135). */
 const wrapped = 1e15;
 
 /** Whether a channel's survey counters can be right: busy no more than the time measured, neither wrapped. */
 const plausible = (active: number, busy: number) => busy <= active && active < wrapped && busy < wrapped;
 
+/** The survey probe's array (`surveyCommand`): each radio's ifname, its own BSSID, iwinfo scan and survey. */
 export const parseSurvey = (accessPoint: string, value: unknown): SurveyRead => {
   const radios = arr(value).map(obj);
   const seen = new Map<number, Survey["channels"][number]>();
@@ -467,24 +482,18 @@ export const neighboursOf = (surveys: SurveyRead[], ssids: string[], complete: b
   }));
 };
 
-  // Each call captured first, so one failing partway cannot leave half its JSON.
-  export const surveyCommand = [
-    'call() { r=$(ubus call "$@" 2>/dev/null) && [ -n "$r" ] && printf \'%s\' "$r" || printf null; }',
-    "printf '['; sep=''",
-    "for o in $(ubus list 'hostapd.*' 2>/dev/null); do d=${o#hostapd.}",
-    `  printf '%s{"ifname":"%s","bssid":"%s","status":' "$sep" "$d" "$(cat /sys/class/net/$d/address 2>/dev/null)"; call "$o" get_status`,
-    `  printf ',"scan":'; call iwinfo scan "{\\"device\\":\\"$d\\"}"`,
-    `  printf ',"survey":'; call iwinfo survey "{\\"device\\":\\"$d\\"}"`,
-    "  printf '}'; sep=','",
-    "done; printf ']'",
-  ].join("\n");
+export const surveyCommand = eachHostapd([
+  `printf '"ifname":"%s","bssid":"%s","status":' "$d" "$(cat /sys/class/net/$d/address 2>/dev/null)"; call "$o" get_status`,
+  `printf ',"scan":'; call iwinfo scan "{\\"device\\":\\"$d\\"}"`,
+  `printf ',"survey":'; call iwinfo survey "{\\"device\\":\\"$d\\"}"`,
+]);
 
 /**
  * Each access point's survey: on request only, one access point at a time, as
  * a scan briefly takes its radios off their channel and its clients may notice.
  */
 export const wifiSurvey = ({ intentPath, platform }: { intentPath: string; platform: Platform }) =>
-  oneAtATime(platform, intentPath, "survey", async () => {
+  oneAtATime(platform, intentPath, async () => {
     const loaded = await loadSettings(intentPath, platform);
     if (!loaded.ok) return loaded;
     const { plan, intent } = loaded.value;

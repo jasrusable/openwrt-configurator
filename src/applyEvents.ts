@@ -20,7 +20,7 @@ export const deviceSteps = [
 ] as const;
 export type DeviceStep = (typeof deviceSteps)[number];
 
-export const applyOutcomes = ["applied", "applied-with-problems", "rolled-back", "failed", "plan-stale"] as const;
+export const applyOutcomes = ["applied", "applied-with-problems", "rolled-back", "partial", "failed", "plan-stale"] as const;
 export type ApplyOutcome = (typeof applyOutcomes)[number];
 
 /**
@@ -51,6 +51,8 @@ export type ApplyProgress = {
   /** Each device's latest step. */
   devices: Record<string, DeviceStep>;
   outcome?: ApplyOutcome;
+  /** "partial": the devices that kept the change. */
+  kept?: string[];
   window?: ApplyWindow;
   /** When the run reported first, and when it said how it ended. */
   startedAt?: number;
@@ -83,7 +85,8 @@ export const progressOf = (events: unknown[]): ApplyProgress =>
       };
     }
     if (applyOutcomes.includes(e.outcome as ApplyOutcome)) {
-      return { ...seen, outcome: e.outcome as ApplyOutcome, ...(at === undefined ? {} : { endedAt: at }) };
+      const kept = Array.isArray(e.kept) ? e.kept.filter((name): name is string => typeof name === "string") : undefined;
+      return { ...seen, outcome: e.outcome as ApplyOutcome, ...(kept ? { kept } : {}), ...(at === undefined ? {} : { endedAt: at }) };
     }
     if (isWindow(e.window)) return { ...seen, window: e.window };
     if (typeof e.device === "string" && firmwareSteps.includes(e.firmware as FirmwareStep)) {

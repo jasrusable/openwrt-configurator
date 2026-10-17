@@ -2,8 +2,8 @@
 // ListSpec and shown as two pages: the table at /<page>, and one item's
 // detail page at /<page>/<index>. The detail page's fields edit the draft
 // directly, so Save and Revert in the header cover them like any other.
-import { Button, Group, Stack, Text, ThemeIcon } from "@mantine/core";
-import { IconAlertCircle, IconPlus } from "@tabler/icons-react";
+import { ActionIcon, Button, Group, Stack, Text, ThemeIcon } from "@mantine/core";
+import { IconAlertCircle, IconArrowDown, IconArrowUp, IconPlus } from "@tabler/icons-react";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { describePath } from "../../../src/intent/diff";
@@ -58,6 +58,8 @@ export type ListSpec<N extends ListName> = {
    */
   editor: (index: number) => ReactNode;
   empty: ReactNode;
+  /** Its order matters (firewall rules, first match wins): each row moves up and down. */
+  reorderable?: boolean;
 };
 
 /** The problems an item at `path` has in `intent`: its own and its settings'. */
@@ -93,6 +95,49 @@ export type HostPage = {
   after?: ReactNode;
 };
 
+/** A copy of `items` with item `from` moved to `to`. */
+const moved = <T,>(items: T[], from: number, to: number) => {
+  const rest = items.filter((_, i) => i !== from);
+  return [...rest.slice(0, to), items[from], ...rest.slice(to)];
+};
+
+/** Focus follows the moved item: its same button, else the other one (at an end, that one is off). */
+const focusMoved = (row: string, label: string) =>
+  requestAnimationFrame(() => {
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>(`[data-order-row="${CSS.escape(row)}"] button:not(:disabled)`)];
+    (buttons.find((b) => b.dataset.order === label) ?? buttons[0])?.focus();
+  });
+
+/** Move up and down, in a row that opens when clicked: they move it, and only that. */
+const OrderCell = ({ name, index, count }: { name: ListName; index: number; count: number }) => {
+  const draft = useDraft();
+  const move = (to: number) => draft.setPath(name, moved((getAt(draft.value, name) ?? []) as unknown[], index, to));
+  const button = (to: number, label: string, Icon: typeof IconArrowUp) => (
+    <ActionIcon
+      variant="subtle"
+      color="gray"
+      size="sm"
+      disabled={to < 0 || to >= count}
+      data-order={label}
+      aria-label={`${label}, from ${index + 1} of ${count}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        move(to);
+        focusMoved(`${name}.${to}`, label);
+      }}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      <Icon size={14} />
+    </ActionIcon>
+  );
+  return (
+    <Group gap={2} wrap="nowrap" data-order-row={`${name}.${index}`}>
+      {button(index - 1, "Move up", IconArrowUp)}
+      {button(index + 1, "Move down", IconArrowDown)}
+    </Group>
+  );
+};
+
 const ListTable = <N extends ListName>({
   list,
   base,
@@ -120,9 +165,12 @@ const ListTable = <N extends ListName>({
       {list.addLabel}
     </Button>
   );
+  const columns: Column[] = list.reorderable
+    ? [...list.columns, { header: "Order", width: 72, cell: (i) => <OrderCell name={list.name} index={i} count={items.length} /> }]
+    : list.columns;
   const table = (
     <DataTable
-      columns={list.columns}
+      columns={columns}
       rowCount={items.length}
       rowKey={(index) => String(index)}
       onRowClick={(index) => navigate(`${base}/${index}`)}

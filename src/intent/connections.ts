@@ -27,11 +27,17 @@ export const ipv6Interface = (connection: Pick<Connection, "id">) => `${connecti
 export const multiWan = (intent: Pick<Intent, "internet">) => intent.internet.lines.length > 1;
 
 /**
- * Which line already uses `port` (unset: the router's WAN port), other than
- * line `index`: a port carries one line.
+ * Whether two lines would be one device: the same port (unset: the router's
+ * WAN port) and VLAN. A port carries one line per VLAN, one of them untagged.
  */
-export const portTakenBy = (intent: Pick<Intent, "internet">, index: number, port: string | undefined) =>
-  intent.internet.lines.find((c, j) => j !== index && c.port === port);
+export const samePort = (a: Pick<Connection, "port" | "vlan">, b: Pick<Connection, "port" | "vlan">) =>
+  a.port === b.port && a.vlan === b.vlan;
+
+/** Which other line already uses `port` as line `index` would (with its VLAN). */
+export const portTakenBy = (intent: Pick<Intent, "internet">, index: number, port: string | undefined) => {
+  const line = { port, vlan: intent.internet.lines[index]?.vlan };
+  return intent.internet.lines.find((c, j) => j !== index && samePort(c, line));
+};
 
 /**
  * How mwan3 tells a line works: it pings these out of each line every

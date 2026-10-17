@@ -9,16 +9,18 @@
 //   revert                    discard every staged uci change, whoever made it
 //   prepare < records         revert, seed missing owned configs, packages, the reload baseline
 //   stage < records           the uci batch (the wipe and the declared config), then files
-//   finalise < records        commit each config, the commit's marker, reload_config
+//   finalise < records        commit each config, reload_config, then the commit's marker
 //   services < records        enable and start, or stop and disable, each declared service;
 //                             restart one with no reload trigger for a config this run changed
 //   hooks < records           the run_after_reload commands, once the config is live
 //   stage-packages <pkg>...   fetch them for an offline reinstall; prints the count
 //   arm [options] < lists     snapshots, the boot-time copy, the watchdog
 //   commit-finished           whether the commit's marker is there
-//   disarm                    stand the watchdog down (the applied marker set); or say it fired
+//   asleep                    whether the watchdog still sleeps, and the seconds before it fires
+//   disarm                    stand the watchdog down (the applied marker set, if this run
+//                             committed); or say it fired
 //   done                      the run is over here: what it leaves, removed
-//   rollback-now              end the watchdog's wait: it restores now
+//   rollback-now              end the watchdog's wait: it restores now (one that died, a new one)
 //   recovered                 once its restore is done, tell it access is back
 //   drop                      undo a failed or refused arm
 //   watchdog                  (started by arm) wait, then restore unless confirmed
@@ -35,7 +37,8 @@
 // while the watchdog restores (measured on 25.12.5: a loop writing only to a
 // file ran to its end after its client was killed; one writing stdout died).
 //
-// Lessons kept here, each found the hard way:
+// Lessons kept here, each found the hard way (and those every device script
+// shares, in prelude.ts: the log bounded, detached commands, the cgroup):
 // - Per-run paths: with fixed ones, a second run inside the window cleared the
 //   flag that had disarmed the first, whose watchdog then restored a stale
 //   snapshot over a good device.
@@ -61,8 +64,14 @@
 //   the watchdog writes nowhere a dropped session could close.
 // - The boot-time copy on flash (/etc/onc/rollback/<runId>) and its early
 //   init script cover a device restarted inside the window, when /tmp and the
-//   watchdog are gone; a confirm removes every run's copy.
+//   watchdog are gone: the config, the managed files and the boot links come
+//   back, not packages (their staged files were in /tmp). A confirm removes
+//   every run's copy.
+// - Another run's watchdog still alive on a device means its snapshot is
+//   restored at its deadline, over whatever came since: a run's planning
+//   refuses such a device until it is over (\`fires\` says when; apply/plan.ts).
 import { agentName, appliedKeepList, appliedMarker, deviceTmp, runDirName, stepsDirName, watchdogPidFile } from "./paths";
+import { prelude } from "./prelude";
 
 /**
  * Restores the config of an apply never confirmed when the device restarts
@@ -82,6 +91,19 @@ boot() {
 			mv "$root/etc/config" "$root/etc/config.onc-failed" && mv "$root/etc/config.onc-new" "$root/etc/config"
 			# The system log is not running this early: the kernel's is.
 			(echo "onc: restarted inside an unconfirmed apply's rollback window: its config restored" > /dev/kmsg) 2>/dev/null
+		fi
+		# What else the run changed, when the copy holds it whole: the files
+		# it made go, those it changed come back, then the boot links, swapped
+		# in only once copied. Packages stay as they are: their staged files
+		# were in /tmp.
+		if [ -d "$d/extra" ]; then
+			while IFS= read -r p; do rm -f "$root$p"; done < "$d/extra/delete"
+			[ ! -d "$d/extra/files" ] || cp -a "$d/extra/files/." "$root/"
+			if [ -d "$d/extra/rc.d" ] && rm -rf "$root/etc/rc.d.onc-new" && cp -a "$d/extra/rc.d" "$root/etc/rc.d.onc-new"; then
+				rm -rf "$root/etc/rc.d.onc-old"
+				mv "$root/etc/rc.d" "$root/etc/rc.d.onc-old" && mv "$root/etc/rc.d.onc-new" "$root/etc/rc.d" && rm -rf "$root/etc/rc.d.onc-old"
+			fi
+			(echo "onc: and its files and boot links; its packages are as the apply left them" > /dev/kmsg) 2>/dev/null
 		fi
 		break
 	done
@@ -103,14 +125,9 @@ DISARMED="$R.disarmed"
 BOOT_ROOT="$ROOT/etc/onc/rollback"
 BOOT="$BOOT_ROOT/$RUN"
 INIT="$ROOT/etc/init.d/onc-rollback"
-
-# To the system log, bounded: a wedged logd (its socket's queue full) blocks
-# a writer, and must never stall a rollback. busybox has no \`timeout\` here.
-say() {
-	logger -t onc "$*" < /dev/null > /dev/null 2>&1 & say_pid=$!
-	( sleep 2; kill "$say_pid" ) < /dev/null > /dev/null 2>&1 & say_killer=$!
-	wait "$say_pid" 2> /dev/null; kill "$say_killer" 2> /dev/null
-}
+# A detached command's output, in the step verbs' own directory.
+OUT="$W/out"
+${prelude}
 
 # What a pid runs now, and its parent, from /proc (ps where there is none, as in tests).
 comm_of() { { cat "/proc/$1/comm"; } 2>/dev/null || ps -o comm= -p "$1" 2>/dev/null; }
@@ -149,20 +166,13 @@ revert_pending() {
 cleanup() { rm -rf "$R" "$W" "$AGENT"; }
 
 begin() {
-	rm -rf "$R" "$DISARMED"
+	rm -rf "$R" "$DISARMED" "$R.committed"
 	mkdir -p "$R" && echo ONC_BEGUN
 }
 
 # --- The steps an apply changes the device with (prepare ... hooks) ---
 
 step() { printf 'ONC_STEP %s\\n' "$*"; }
-
-# A command that may leave a process behind (a service it starts, a daemon a
-# hook forks): its output goes to a file and is passed on once it ends, never
-# the session's own streams. A process left holding those would keep the SSH
-# channel open, and the call would never end (seen in the rig: a stage that
-# never answered).
-detached() { "$@" < /dev/null > "$W/out" 2>&1; detached_status=$?; cat "$W/out" >&2; rm -f "$W/out"; return $detached_status; }
 
 # The verb's records (stdin), kept: refused unless they end with "end", as
 # one cut short must not be half done.
@@ -297,7 +307,7 @@ write_file() {
 stage() { each_record stage_record; }
 
 # Commit each config this run changed, by name (a bare \`uci commit\` would
-# commit anyone's staged changes), then the commit's marker, then the reload.
+# commit anyone's staged changes), then the reload, then the commit's marker.
 # Guarded: \`uci commit\` and \`uci revert\` exit 1 on a config that is not
 # there (verified on 25.12.5).
 finalise_record() {
@@ -325,17 +335,18 @@ changed_configs() {
 finalise() {
 	: > "$W/protocols"
 	each_record finalise_record || return 1
-	# Confirming checks it: a link dropped before or during the commits looks
-	# the same as one dropped by the reload.
-	touch "$R/committed" 2> /dev/null
 	changed_configs
 	step reload_config
-	# One step, no write between: the reload can drop the link, and the next
-	# write would end this verb. netifd learns protocol handlers only as it
-	# starts, so one a package of this run brought (wireguard) leaves its
-	# interface down until netifd restarts. Its output nowhere: nothing
-	# written after the reload, and nothing it leaves behind holds the channel.
+	# Nothing written from here: the reload can drop the link, and the next
+	# write would end this verb. Its output nowhere: nothing it leaves behind
+	# holds the channel. Then the commit's marker, which confirming checks (a
+	# link dropped during the commits looks the same as one the reload
+	# dropped): there only once the commits and the reload are done, so a
+	# verb ended at the step's write above leaves none, and is rolled back.
 	reload_config < /dev/null > /dev/null 2>&1
+	touch "$R/committed" 2> /dev/null
+	# netifd learns protocol handlers only as it starts, so one a package of
+	# this run brought (wireguard) leaves its interface down until it restarts.
 	while IFS= read -r p; do
 		ubus call network get_proto_handlers 2> /dev/null | grep -q "\\"$p\\":" || { "$ROOT/etc/init.d/network" restart > /dev/null 2>&1; break; }
 	done < "$W/protocols"
@@ -463,8 +474,16 @@ arm() {
 	done
 	install_boot_script || { rm -f "$INIT.onc-new"; say "no room on flash for the boot-time rollback script"; }
 	snapshot || { echo "onc-agent: could not snapshot the device (no room in $TMP?)" >&2; return 1; }
-	# On flash too: a flash too full for it only loses this extra.
+	# On flash too: a flash too full for it only loses this extra. The config
+	# first; then, whole or not at all, what else a restore puts back.
 	{ mkdir -p "$BOOT" && cp -a "$ROOT/etc/config" "$BOOT/config"; } || { rm -rf "$BOOT"; say "no room on flash for a boot-time rollback copy"; }
+	if [ -d "$BOOT" ]; then
+		{ mkdir -p "$BOOT/extra.onc-new" && cp "$R/delete" "$BOOT/extra.onc-new/delete" &&
+			{ [ ! -d "$R/files" ] || cp -a "$R/files" "$BOOT/extra.onc-new/files"; } &&
+			{ [ ! -d "$R/rc.d" ] || cp -a "$R/rc.d" "$BOOT/extra.onc-new/rc.d"; } &&
+			mv "$BOOT/extra.onc-new" "$BOOT/extra"; } ||
+			{ rm -rf "$BOOT/extra.onc-new"; say "no room on flash for the boot-time copy of the managed files: a restart restores the config only"; }
+	fi
 	setsid sh "$AGENT" watchdog < /dev/null > /dev/null 2>&1 &
 	# Armed once its watchdog sleeps: until then a disarm or rollback-now could not find it.
 	settle [ -s "$R/sleep.pid" ] || { echo "onc-agent: the watchdog did not start" >&2; return 1; }
@@ -474,10 +493,17 @@ arm() {
 watchdog() {
 	[ -d "$R" ] || exit 0
 	echo $$ > "$R/${watchdogPidFile}"
+	# When it fires, on the device's own clock: what asleep says, and what
+	# another run's planning waits for.
+	echo $(( $(date +%s) + $(cat "$R/timeout") )) > "$R/fires"
 	sleep "$(cat "$R/timeout")" & echo $! > "$R/sleep.pid"; wait $!
 	# Dropped meanwhile (an arm taken back): there is nothing of this run to restore.
 	[ -d "$R" ] || exit 0
-	if [ -f "$R/confirmed" ]; then rm -rf "$BOOT" "$R"; touch "$DISARMED"; exit 0; fi
+	# Standing down: its markers first, so a disarm never finds neither them nor the run.
+	if [ -f "$R/confirmed" ]; then
+		[ ! -f "$R/committed" ] || touch "$R.committed"
+		touch "$DISARMED"; rm -rf "$BOOT" "$R"; exit 0
+	fi
 	# Past the point of no return: a disarm from now on must say it fired.
 	touch "$R/restoring"
 	mode="$(cat "$R/mode")"
@@ -544,17 +570,29 @@ watchdog() {
 	reboot
 }
 
-# Confirmed: this device's settings are this app's. An image's first-boot
-# defaults leave them alone after an upgrade that kept them: the marker says
-# so, and sysupgrade keeps it by its keep.d list.
+# Confirmed: this device's settings are this app's, if this run committed
+# them (a device the run never changed is left as it was). An image's
+# first-boot defaults leave them alone after an upgrade that kept them: the
+# marker says so, and sysupgrade keeps it by its keep.d list.
 mark_applied() {
+	[ -f "$R/committed" ] || [ -f "$R.committed" ] || return 0
 	mkdir -p "$ROOT/etc/onc" "$ROOT/lib/upgrade/keep.d" && touch "$ROOT${appliedMarker}" &&
 		echo "${appliedMarker}" > "$ROOT${appliedKeepList}"
 }
 
+# Its watchdog slept, and is gone without having started to restore (killed
+# asleep: out of memory, say): nothing restores this run's change now.
+died_asleep() { [ -f "$R/sleep.pid" ] && [ ! -f "$R/restoring" ] && ! is_watchdog "$p"; }
+
+# Confirmed: this config is the one a restart must keep, so every run's
+# boot-time copy goes (an earlier one reverted, say, whose watchdog has not
+# woken yet), or a restart would restore it over this.
+stood_down() { rm -rf "$BOOT_ROOT"; mark_applied; echo ONC_DISARMED; }
+
 disarm() {
-	if [ -f "$DISARMED" ]; then rm -rf "$BOOT_ROOT"; mark_applied; echo ONC_DISARMED; return; fi
+	if [ -f "$DISARMED" ]; then stood_down; return; fi
 	p="$(cat "$R/${watchdogPidFile}" 2>/dev/null)"; s="$(cat "$R/sleep.pid" 2>/dev/null)"
+	if died_asleep; then say "its watchdog had died before restoring anything: the change stays"; stood_down; return; fi
 	is_watchdog "$p" || { echo ONC_FIRED; return; }
 	touch "$R/confirmed"
 	own_sleep "$s" "$p" && kill "$s" 2> /dev/null
@@ -563,14 +601,21 @@ disarm() {
 	# down when it wakes), or it said so as it stood down. Asked in that
 	# order: one that exits between the two has written its marker first.
 	if { is_watchdog "$p" && [ -f "$R/confirmed" ] && [ ! -f "$R/restoring" ]; } || [ -f "$DISARMED" ]; then
-		# Confirmed: this config is the one a restart must keep, so every run's
-		# boot-time copy goes (an earlier one reverted, say, whose watchdog has
-		# not woken yet), or a restart would restore it over this.
-		rm -rf "$BOOT_ROOT"
-		mark_applied
-		echo ONC_DISARMED
+		stood_down
 	else
 		echo ONC_FIRED
+	fi
+}
+
+# Before any device is disarmed, each is asked: still asleep, and how many
+# seconds before it fires; or kept, its watchdog dead before restoring.
+# Nothing else (restoring, restored, gone) means it fired.
+asleep() {
+	p="$(cat "$R/${watchdogPidFile}" 2>/dev/null)"; s="$(cat "$R/sleep.pid" 2>/dev/null)"
+	if own_sleep "$s" "$p" && [ ! -f "$R/confirmed" ] && [ ! -f "$R/restoring" ]; then
+		echo "ONC_ASLEEP $(( $(cat "$R/fires" 2>/dev/null || date +%s) - $(date +%s) ))"
+	elif died_asleep; then
+		echo ONC_KEPT
 	fi
 }
 
@@ -582,32 +627,22 @@ drop() {
 		# Still running (restoring, past the flag): its run is its own to finish.
 		settle gone "$p" || { echo "onc-agent: its watchdog is still running" >&2; return 1; }
 	fi
-	rm -rf "$BOOT" "$R" "$W" "$DISARMED" "$AGENT"
+	rm -rf "$BOOT" "$R" "$W" "$DISARMED" "$R.committed" "$AGENT"
 	echo ONC_DROPPED
 }
 
 # End the watchdog's wait, so it restores now: woken only if it was asleep,
-# or already restoring.
+# or already restoring. One that died asleep is started again with no wait.
 rollback_now() {
 	p="$(cat "$R/${watchdogPidFile}" 2>/dev/null)"; s="$(cat "$R/sleep.pid" 2>/dev/null)"
-	if { own_sleep "$s" "$p" && kill "$s" 2> /dev/null; } || [ -f "$R/restoring" ]; then echo ONC_WOKEN; fi
+	if { own_sleep "$s" "$p" && kill "$s" 2> /dev/null; } || [ -f "$R/restoring" ]; then echo ONC_WOKEN; return; fi
+	if died_asleep && [ ! -f "$R/confirmed" ]; then
+		echo 0 > "$R/timeout" || return 1
+		setsid sh "$AGENT" watchdog < /dev/null > /dev/null 2>&1 &
+		echo ONC_WOKEN
+	fi
 }
 
-# Out of the SSH session's cgroup, before anything else: procd runs dropbear
-# in a cgroup of its own (/services/dropbear/instance1), and every verb
-# starts in it, as dropbear's child. A process left there (the watchdog, a
-# service this run restarted) keeps procd from removing that cgroup, and a
-# dropbear the run stopped is then never started again (seen on SNAPSHOT); a
-# procd that kills a stopped service's cgroup would kill the watchdog
-# mid-rollback. So each verb moves itself, and with it all it starts, into
-# the agent's own cgroup where cgroup v2 is mounted, else the root one; where
-# there are no cgroups, nothing. The session's dropbear stays where it is.
-leave_session_cgroup() {
-	cg="$ROOT/sys/fs/cgroup"
-	[ -f "$cg/cgroup.procs" ] || return 0
-	{ mkdir -p "$cg/onc" && echo $$ > "$cg/onc/cgroup.procs"; } 2> /dev/null || echo $$ > "$cg/cgroup.procs" 2> /dev/null
-	return 0
-}
 leave_session_cgroup
 
 case "$1" in
@@ -618,13 +653,14 @@ case "$1" in
 	arm) shift; arm "$@" ;;
 	watchdog) watchdog ;;
 	commit-finished) [ -f "$R/committed" ] && echo ONC_COMMITTED ;;
+	asleep) asleep ;;
 	disarm) disarm ;;
 	# The run is over here: its marker and agent go, and its directory unless
 	# a watchdog still has it (one standing down removes it itself).
 	done)
 		p="$(cat "$R/${watchdogPidFile}" 2>/dev/null)"
 		is_watchdog "$p" || rm -rf "$R"
-		rm -rf "$W" "$DISARMED" "$AGENT"; echo ONC_DONE ;;
+		rm -rf "$W" "$DISARMED" "$R.committed" "$AGENT"; echo ONC_DONE ;;
 	rollback-now) rollback_now ;;
 	recovered) [ -f "$R/restored" ] && touch "$R/recovered" && echo ONC_RECOVERED ;;
 	drop) drop ;;

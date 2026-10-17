@@ -220,7 +220,7 @@ export const AddHardwarePage = () => {
   const add = () =>
     device &&
     adopt.mutate(
-      { address: device.address, name: choice.name },
+      { address: device.address, name: choice.name, fingerprint: device.fingerprint ?? "" },
       {
         onSuccess: () => {
           const index = intent.hardware.length;

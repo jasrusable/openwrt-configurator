@@ -2,6 +2,16 @@
 import { z } from "zod";
 import { dnsServer, name, namePattern } from "../validators";
 
+/**
+ * A top-level domain of the internet: the router answers the whole domain
+ * itself (dnsmasq's local=/<domain>/). Two letters is a country's, but for
+ * ISO 3166's user-assigned codes (AA, QM-QZ, XA-XZ, ZZ), which no country
+ * gets; the rest, the usual ones.
+ */
+const internetTld = (domain: string) =>
+  (/^[a-z]{2}$/.test(domain) && !/^(aa|q[m-z]|x[a-z]|zz)$/.test(domain)) ||
+  ["com", "net", "org", "edu", "gov", "mil", "int", "info", "biz", "arpa"].includes(domain);
+
 export const dohProviders = ["cloudflare", "google", "quad9"] as const;
 export type DohProvider = (typeof dohProviders)[number];
 
@@ -37,6 +47,7 @@ export const dnsSchema = z
     domain: z
       .string()
       .refine((d) => d.length <= 200 && d.split(".").every((label) => namePattern.test(label)), "like lan or home.arpa")
+      .refine((d) => !internetTld(d), "the internet's: every name under it would be answered here, and fail; like lan or home.arpa")
       .default("lan"),
     /**
      * Refuse answers from the internet that point at your own addresses

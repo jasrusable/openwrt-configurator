@@ -1,11 +1,15 @@
 // DNS & DHCP: how names are looked up, for the whole network; and an
 // overview of each network's DHCP, which is edited on the network itself.
-import { ActionIcon, Button, Group, Text, TextInput } from "@mantine/core";
-import { IconPlus, IconWorldWww, IconX } from "@tabler/icons-react";
+import { Button, Text } from "@mantine/core";
+import { IconPlus, IconWorldWww } from "@tabler/icons-react";
 import { useNavigate } from "react-router";
 import { Intent } from "../../../src/intent/schema";
-import { useDraftList, useDraftValue, useFieldError } from "../form/draft";
+import { useDraftList, useDraftValue } from "../form/draft";
 import {
+  dnsLabel,
+  ItemColumns,
+  ItemRow,
+  ItemText,
   SelectField,
   SwitchField,
   TagsField,
@@ -17,8 +21,6 @@ import { DataTable } from "../kit/DataTable";
 import { EmptyState, Section, SettingsPage } from "../kit/layout";
 import { poolStart } from "../../../src/intent/networks";
 import { shownName } from "../../../src/intent/labels";
-
-type DnsRecord = { name: string; address: string };
 
 const LocalNames = () => {
   const records = useDraftList("dns.hosts");
@@ -41,76 +43,28 @@ const LocalNames = () => {
       {records.items.length === 0 ? (
         <EmptyState icon={IconWorldWww}>No local names.</EmptyState>
       ) : (
-        records.items.map((record, i) => (
-          <RecordRow
-            key={i}
-            index={i}
-            record={record}
-            onChange={(next) => records.update(i, next)}
-            onRemove={() => records.remove(i)}
+        <>
+          <ItemColumns
+            columns={[
+              { label: "Name", flex: 1 },
+              { label: "Address", flex: 1 },
+            ]}
           />
-        ))
+          {records.items.map((record, i) => (
+            <ItemRow key={i} onRemove={() => records.remove(i)} removeLabel={`Remove ${record.name || "name"}`}>
+              <ItemText name={`dns.hosts.${i}.name`} label="Name" placeholder="printer" tidy={dnsLabel} />
+              <ItemText
+                name={`dns.hosts.${i}.address`}
+                label="Address"
+                placeholder="10.0.0.30"
+                tidy={(typed) => typed.replace(/[^0-9a-fA-F.:]/g, "")}
+                mono
+              />
+            </ItemRow>
+          ))}
+        </>
       )}
     </Section>
-  );
-};
-
-const RecordRow = ({
-  index,
-  record,
-  onChange,
-  onRemove,
-}: {
-  index: number;
-  record: DnsRecord;
-  onChange: (next: DnsRecord) => void;
-  onRemove: () => void;
-}) => {
-  const nameError = useFieldError(`dns.hosts.${index}.name`);
-  const addressError = useFieldError(`dns.hosts.${index}.address`);
-  return (
-    <Group gap="xs" px="md" py="sm" wrap="nowrap" align="flex-start">
-      <TextInput
-        aria-label="Name"
-        placeholder="printer"
-        value={record.name}
-        onChange={(e) =>
-          onChange({
-            ...record,
-            name: e.currentTarget.value
-              .toLowerCase()
-              .replace(/[^a-z0-9-]/g, ""),
-          })
-        }
-        error={nameError}
-        spellCheck={false}
-        style={{ flex: 1 }}
-      />
-      <TextInput
-        aria-label="Address"
-        placeholder="10.0.0.30"
-        value={record.address}
-        onChange={(e) =>
-          onChange({
-            ...record,
-            address: e.currentTarget.value.replace(/[^0-9a-fA-F.:]/g, ""),
-          })
-        }
-        error={addressError}
-        spellCheck={false}
-        ff="monospace"
-        style={{ flex: 1 }}
-      />
-      <ActionIcon
-        variant="subtle"
-        color="gray"
-        size={36}
-        onClick={onRemove}
-        aria-label="Remove"
-      >
-        <IconX size={16} />
-      </ActionIcon>
-    </Group>
   );
 };
 

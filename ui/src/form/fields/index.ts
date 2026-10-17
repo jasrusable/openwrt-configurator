@@ -6,3 +6,5 @@ export { PasswordField, PasswordListField, SubnetField, TagsField, TextField } f
 export { DurationField, NumberField } from "./number";
 export { MultiSelectField, OptionalField, ReferenceField, SegmentedField, SelectField, SwitchField, VariantField } from "./choice";
 export { Value, When } from "./show";
+export { dnsLabel, ItemColumns, ItemRow, ItemText } from "./rows";
+export { useField } from "./binding";

@@ -24,7 +24,7 @@ export const findPlaintextSecrets = (value: unknown, path = ""): string[] => {
   const hits: string[] = [];
   for (const [key, child] of Object.entries(value)) {
     const childP = childPath(path, key);
-    if (isSecretField(key, child, value) && worthWarning(key, child)) {
+    if (isSecretField(key, child, value) && worthWarning(key, String(child))) {
       hits.push(childP);
     }
     hits.push(...findPlaintextSecrets(child, childP));

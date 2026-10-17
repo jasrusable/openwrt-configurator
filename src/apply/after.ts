@@ -5,7 +5,7 @@ import { notRunning, runProbe, servicesSettled } from "../deviceProbes";
 import { hookRecords } from "../getDeviceScript";
 import { Session } from "../platform";
 import { attempt, err, messageOf, ok, Result } from "../result";
-import { commandLabel, DeviceRun } from "./run";
+import { commandLabel, DeviceRun, scrubbed } from "./run";
 
 /**
  * The `run_after_reload` hooks, over a session known to be alive. One failing
@@ -27,7 +27,7 @@ export const runPostReloadHooks = async (run: DeviceRun, session: Session): Prom
   // "hook <n>": named by its command's first words, never its values.
   const index = Number(/^hook (\d+)$/.exec(steps.step)?.[1]) - 1;
   const which = hooks[index] === undefined ? steps.step : commandLabel(hooks[index]);
-  return err(`${live} a run_after_reload hook failed: ${which}\n${steps.stderr}`);
+  return err(`${live} a run_after_reload hook failed: ${which}\n${scrubbed(run, steps.stderr)}`);
 };
 
 /**

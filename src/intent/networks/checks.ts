@@ -2,7 +2,7 @@
 // subnet once, a line or tunnel to keep to that exists, access to networks
 // that exist, reservations inside their network, and DNS servers it can reach.
 import { vpnZoneIds } from "../access";
-import { networkHolding } from "../addresses";
+import { networkHolding, overlaps, prefixOf } from "../addresses";
 import type { FeatureModule } from "../feature";
 
 export const networksChecks: FeatureModule["check"] = (intent, issue) => {
@@ -24,7 +24,7 @@ export const networksChecks: FeatureModule["check"] = (intent, issue) => {
     if (network.vlan !== undefined && earlier.some((n) => n.vlan === network.vlan)) {
       issue(["networks", i, "vlan"], "already used by another network");
     }
-    if (earlier.some((n) => n.subnet === network.subnet)) {
+    if (earlier.some((n) => overlaps(n.subnet, network.subnet))) {
       issue(["networks", i, "subnet"], "already used by another network");
     }
   });
@@ -38,7 +38,7 @@ export const networksChecks: FeatureModule["check"] = (intent, issue) => {
   const deviceNames = intent.hardware.map((d) => d.name);
   const seen = { name: new Set<string>(), mac: new Set<string>(), address: new Set<string>() };
   intent.networks.forEach((network, i) => {
-    const prefix = network.subnet.split(".").slice(0, 3).join(".");
+    const prefix = prefixOf(network.subnet);
     network.dhcp.reservations.forEach((r, j) => {
       const at = (key: string) => ["networks", i, "dhcp", "reservations", j, key];
       const host = Number(r.address.split(".")[3]);

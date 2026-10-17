@@ -125,6 +125,9 @@ const PortField = ({ index }: { index: number }) => {
   );
 };
 
+/** Whether another line is on `port`, whatever its VLAN: it takes the port from the home network. */
+const onPort = (intent: Intent, index: number, port: string) => intent.internet.lines.some((c, i) => i !== index && c.port === port);
+
 /**
  * The home network's one remaining port, when only one is left free of the
  * other connections: giving it away would leave the router reachable by
@@ -133,7 +136,7 @@ const PortField = ({ index }: { index: number }) => {
 const lastLanPort = (lan: string[], intent: Intent, index: number) => {
   // The WAN port joins the home network when no other connection is on it.
   const wanFree = !intent.internet.lines.some((c, i) => i !== index && c.port === undefined);
-  const free = lan.filter((p) => !portTakenBy(intent, index, p));
+  const free = lan.filter((p) => !onPort(intent, index, p));
   return free.length === 1 && !wanFree ? free[0] : undefined;
 };
 
@@ -184,7 +187,7 @@ const connections = defineList({
       if (!items.some((c) => c.port === undefined)) return item;
       const last = lastLanPort(ports?.lan ?? [], intent, -1);
       const free = [...(ports?.wan.slice(1) ?? []), ...(ports?.lan ?? [])].find(
-        (p) => !portTakenBy(intent, -1, p) && p !== last
+        (p) => !onPort(intent, -1, p) && p !== last
       );
       return free ? { ...item, port: free } : item;
     };
@@ -343,9 +346,10 @@ const Together = () => {
           />
           <TextField name="internet.dynamic_dns.hostname" placeholder="myhome.duckdns.org" />
           <PasswordField name="internet.dynamic_dns.token" />
-          <When name="internet.dynamic_dns.provider" is="cloudflare">
+          {/* Cloudflare's; still shown while set for another, so what it holds can be seen and cleared. */}
+          {(intent.internet.dynamic_dns?.provider === "cloudflare" || intent.internet.dynamic_dns?.zone !== undefined) && (
             <TextField name="internet.dynamic_dns.zone" placeholder="example.com" />
-          </When>
+          )}
         </OptionalField>
       </Section>
       <Section description="Main network only; devices open ports for themselves.">

@@ -27,7 +27,7 @@ export const networkTypeLabels: Record<NetworkTemplate | "custom", string> = {
   custom: "Custom",
 };
 
-export const routerAccessLabels: Record<Intent["networks"][number]["access"]["router"], string> = {
+const routerAccessLabels: Record<Intent["networks"][number]["access"]["router"], string> = {
   services: "Network services",
   full: "Full",
 };

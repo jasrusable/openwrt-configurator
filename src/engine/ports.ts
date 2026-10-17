@@ -100,8 +100,17 @@ export const fitPorts = ({
       throw new Error(`${hostname}: VLAN ${vlan} is on both ${port} and ${other.port}; on this switch that would join the two lines.`);
     }
   });
+  // A port's untagged line: a bare reference where no line is tagged, or an
+  // interface on the bare port beside tagged ones (the port untagged in its
+  // own switch VLAN, tagged in theirs). A bare reference that is no
+  // interface's (a line's shaping) is a tagged line's port.
+  const bareInterfacePorts = (network.interface || []).flatMap((iface) => {
+    const device = iface.options.device;
+    const line = isPlaceholder(device) ? lineOf(device) : undefined;
+    return line && line.vlan === undefined ? [line.port] : [];
+  });
   const switchLines = linePorts
-    .filter((port) => !taggedLines.some((l) => l.port === port))
+    .filter((port) => !taggedLines.some((l) => l.port === port) || bareInterfacePorts.includes(port))
     .reduce<{ port: string; vlan: number; tagged: boolean }[]>((acc, port) => {
       const taken = [...networkVlans, ...acc.map((l) => l.vlan)];
       const vlan = firstFree(taken, 2);
@@ -109,8 +118,11 @@ export const fitPorts = ({
     }, taggedLines);
   const lineDevice = ({ port, vlan }: { port: string; vlan?: number }) => {
     if (!onSwitch(port)) return vlan ? `${port}.${vlan}` : port;
-    // A bare port is its line: the untagged one, or its first tagged.
-    const line = switchLines.find((l) => l.port === port && (vlan === undefined || l.vlan === vlan))!;
+    // A bare port is its line: the untagged one, else its first tagged.
+    const line =
+      vlan === undefined
+        ? (switchLines.find((l) => l.port === port && !l.tagged) ?? switchLines.find((l) => l.port === port))!
+        : switchLines.find((l) => l.port === port && l.tagged && l.vlan === vlan)!;
     return `${cpu().device}.${line.vlan}`;
   };
   // Line and CPU ports, and the switch, wherever they are: devices by name now.

@@ -4,14 +4,18 @@
 import type { Change } from "../../../src/intent/diff";
 import { diffIntent } from "../../../src/intent/diff";
 import { useProvision } from "../data/provision";
-import { useDraft, useDraftValue } from "../form/draft";
+import type { Intent } from "../../../src/intent/schema";
+import { useDerived } from "../form/draft";
+
+/** The last diff made: every button and sheet asking about one draft shares it. */
+let last: { saved: Intent; value: Intent; changes: Change[] } | undefined;
+const changesOf = (saved: Intent, value: Intent) => {
+  if (last?.saved !== saved || last.value !== value) last = { saved, value, changes: diffIntent(saved, value) };
+  return last.changes;
+};
 
 /** Edits not saved yet, in the same terms as the sheet's change list. */
-export const useDraftChanges = (): Change[] => {
-  const draft = useDraft();
-  const value = useDraftValue();
-  return diffIntent(draft.saved, value);
-};
+export const useDraftChanges = (): Change[] => useDerived((d) => changesOf(d.saved, d.value));
 
 /** Rows the sheet will list: the draft's edit wins where both name the same change. */
 export const pendingCount = (saved: Change[], draft: Change[]): number => {

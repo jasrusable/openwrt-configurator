@@ -1,11 +1,8 @@
 import {
-  ActionIcon,
   Button,
-  Group,
   NumberInput,
   SegmentedControl,
   Text,
-  TextInput,
 } from "@mantine/core";
 import {
   IconAddressBook,
@@ -14,9 +11,8 @@ import {
   IconHome,
   IconPlus,
   IconUsers,
-  IconX,
 } from "@tabler/icons-react";
-import { useDraft, useDraftList, useDraftValue, useFieldError } from "../form/draft";
+import { IntentField, useDraft, useDraftList, useDraftValue } from "../form/draft";
 import { withNetworkAdded, withoutNetwork } from "../../../src/intent/edits";
 import { availability } from "../../../src/intent/choices";
 import { reachableNetworks } from "../../../src/intent/networks";
@@ -33,7 +29,11 @@ import { where } from "../../../src/intent/places";
 import { Intent } from "../../../src/intent/schema";
 import { parseSubnet } from "../../../src/intent/validators";
 import {
+  dnsLabel,
   DurationField,
+  ItemColumns,
+  ItemRow,
+  ItemText,
   MultiSelectField,
   NumberField,
   OptionalField,
@@ -44,6 +44,7 @@ import {
   SwitchField,
   TagsField,
   TextField,
+  useField,
   Value,
   When,
 } from "../form/fields";
@@ -76,7 +77,10 @@ const TypeIcon = ({ index }: { index: number }) => {
   return <ItemIcon icon={type.icon} color={type.color} />;
 };
 
-/** A fresh network: the next free id, VLAN (10, 20, ...) and address range. */
+/**
+ * A fresh network: the next free id, VLAN (10, 20, ..., below the mesh's
+ * 4000, and none an internet line is tagged with) and address range.
+ */
 const newNetwork = (
   networks: { id: string; vlan?: number; subnet: string }[],
   intent: Intent,
@@ -84,8 +88,8 @@ const newNetwork = (
   const free = <T,>(candidates: T[], used: T[]) =>
     candidates.find((c) => !used.includes(c))!;
   const vlan = free(
-    Array.from({ length: 400 }, (_, i) => (i + 1) * 10),
-    networks.map((n) => n.vlan),
+    Array.from({ length: 399 }, (_, i) => (i + 1) * 10),
+    [...networks, ...intent.internet.lines].map((n) => n.vlan),
   );
   const [a, b] = parseSubnet(networks[0]?.subnet ?? "") ?? [10, 0];
   const subnet = free(
@@ -351,33 +355,19 @@ const ReservationsSection = ({ index }: { index: number }) => {
         <EmptyState icon={IconAddressBook}>No reserved addresses.</EmptyState>
       ) : (
         <>
-          <Group gap="xs" px="md" pt="sm" wrap="nowrap">
-            {[
-              ["Name", 1],
-              ["MAC address", 1.3],
-              ["Address", 1.2],
-            ].map(([label, flex]) => (
-              <Text
-                key={label}
-                size="xs"
-                c="dimmed"
-                fw={500}
-                style={{ flex: flex as number }}
-              >
-                {label}
-              </Text>
-            ))}
-            <div style={{ width: 36 }} />
-          </Group>
+          <ItemColumns
+            columns={[
+              { label: "Name", flex: 1 },
+              { label: "MAC address", flex: 1.3 },
+              { label: "Address", flex: 1.2 },
+            ]}
+          />
           {reservations.map((r, j) => (
-            <ReservationRow
-              key={j}
-              path={`${base}.${j}`}
-              reservation={r}
-              prefix={prefix}
-              onChange={(next) => list.update(j, next)}
-              onRemove={() => list.remove(j)}
-            />
+            <ItemRow key={j} onRemove={() => list.remove(j)} removeLabel={`Remove ${r.name || "device"}`}>
+              <ItemText name={`${base}.${j}.name`} label="Name" placeholder="nas" tidy={dnsLabel} />
+              <ItemText name={`${base}.${j}.mac`} label="MAC address" placeholder="aa:bb:cc:dd:ee:ff" tidy={tidyMac} flex={1.3} mono />
+              <HostInput name={`${base}.${j}.address`} prefix={prefix} />
+            </ItemRow>
           ))}
         </>
       )}
@@ -385,89 +375,32 @@ const ReservationsSection = ({ index }: { index: number }) => {
   );
 };
 
-type Reservation = { name: string; mac: string; address: string };
-
-const ReservationRow = ({
-  path,
-  reservation: r,
-  prefix,
-  onChange,
-  onRemove,
-}: {
-  path: string;
-  reservation: Reservation;
-  prefix: string;
-  onChange: (next: Reservation) => void;
-  onRemove: () => void;
-}) => {
-  const errors = {
-    name: useFieldError(`${path}.name`),
-    mac: useFieldError(`${path}.mac`),
-    address: useFieldError(`${path}.address`),
-  };
-  const host = r.address.startsWith(`${prefix}.`)
-    ? r.address.split(".")[3]
-    : "";
+/** A reserved address, typed as its last number within the network's prefix. */
+const HostInput = ({ name, prefix }: { name: IntentField; prefix: string }) => {
+  const field = useField(name);
+  const address = typeof field.value === "string" ? field.value : "";
+  const host = address.startsWith(`${prefix}.`) ? address.split(".")[3] : "";
   return (
-    <Group gap="xs" px="md" py="sm" wrap="nowrap" align="flex-start">
-      <TextInput
-        placeholder="nas"
-        aria-label="Name"
-        value={r.name}
-        onChange={(e) =>
-          onChange({
-            ...r,
-            name: e.currentTarget.value
-              .toLowerCase()
-              .replace(/[^a-z0-9-]/g, ""),
-          })
-        }
-        error={errors.name}
-        spellCheck={false}
-        style={{ flex: 1 }}
-      />
-      <TextInput
-        placeholder="aa:bb:cc:dd:ee:ff"
-        aria-label="MAC address"
-        value={r.mac}
-        onChange={(e) =>
-          onChange({ ...r, mac: tidyMac(e.currentTarget.value) })
-        }
-        error={errors.mac}
-        spellCheck={false}
-        ff="monospace"
-        style={{ flex: 1.3 }}
-      />
-      <NumberInput
-        aria-label="Address"
-        leftSection={
-          <Text size="sm" c="dimmed" ff="monospace">
-            {prefix}.
-          </Text>
-        }
-        leftSectionWidth={prefix.length * 8 + 16}
-        value={host === "" ? "" : Number(host)}
-        min={2}
-        max={254}
-        clampBehavior="strict"
-        allowDecimal={false}
-        allowNegative={false}
-        hideControls
-        onChange={(n) => onChange({ ...r, address: `${prefix}.${n}` })}
-        error={errors.address}
-        ff="monospace"
-        style={{ flex: 1.2 }}
-      />
-      <ActionIcon
-        variant="subtle"
-        color="gray"
-        size={36}
-        onClick={onRemove}
-        aria-label="Remove"
-      >
-        <IconX size={16} />
-      </ActionIcon>
-    </Group>
+    <NumberInput
+      aria-label="Address"
+      leftSection={
+        <Text size="sm" c="dimmed" ff="monospace">
+          {prefix}.
+        </Text>
+      }
+      leftSectionWidth={prefix.length * 8 + 16}
+      value={host === "" ? "" : Number(host)}
+      min={2}
+      max={254}
+      clampBehavior="strict"
+      allowDecimal={false}
+      allowNegative={false}
+      hideControls
+      onChange={(n) => field.onChange(`${prefix}.${n}`)}
+      error={field.error}
+      ff="monospace"
+      style={{ flex: 1.2 }}
+    />
   );
 };
 

@@ -4,6 +4,7 @@
 // placeholder the engine resolves against the live device.
 import { Fragment, Plan, Section, Service } from "../plan/types";
 import { when, When } from "../plan/when";
+import { hostIn } from "./addresses";
 import { Intent } from "./schema";
 
 export type Feature = (intent: Intent) => Fragment;
@@ -28,8 +29,7 @@ export const isMain = (network: Pick<Network, "vlan">) => network.vlan === undef
 export const mainNetwork = (intent: Pick<Intent, "networks">) => intent.networks.find(isMain)!;
 
 /** The router takes the first address of each network. */
-export const gatewayOf = (network: Network) =>
-  network.subnet.replace(/\.0\/24$/, ".1");
+export const gatewayOf = (network: Pick<Network, "subnet">) => hostIn(network.subnet, 1);
 
 /** The router's address on the main network: how it is managed. */
 export const routerAddress = (intent: Intent) => gatewayOf(mainNetwork(intent));

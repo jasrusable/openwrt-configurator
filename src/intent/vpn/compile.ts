@@ -15,7 +15,7 @@ import { clientAddresses, vpnRouterAddresses } from "./model";
 import type { Intent } from "../schema";
 
 /** A tunnel's routing table: 100 and its number (tun1: 101). */
-export const tunnelTable = (id: string) => 100 + Number(id.replace(/\D/g, ""));
+const tunnelTable = (id: string) => 100 + Number(id.replace(/\D/g, ""));
 
 /** Mobile carriers' NAT forgets an idle mapping: a packet every 25 s keeps it. */
 const keepalive = 25;

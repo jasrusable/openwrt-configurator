@@ -53,8 +53,9 @@ export const sshConnectOptions = ({
       : {}),
     ...(password ? { password } : {}),
     ...(!keyPath && !password && agentSocket ? { agent: agentSocket } : {}),
+    // Set but empty is unset: never no file, which would check no key.
     knownHostsFile:
-      platform.env("ONC_KNOWN_HOSTS") ??
+      platform.env("ONC_KNOWN_HOSTS") ||
       join(platform.homedir(), ".config/openwrt-configurator/known_hosts"),
   };
 };
@@ -183,9 +184,9 @@ export const provisionConfig = async ({
   onDeviceSchema,
   hostKeys = {},
   report,
-  verify = {},
+  verify,
 }: {
-  /** Per hostname: the state hash its reviewed plan was read from (src/applyPlan.ts); a device that differs stops the run before anything is armed. */
+  /** Per hostname: the state hash its reviewed plan was read from (src/applyPlan.ts); a device that differs, or is not in it, stops the run before anything is armed. */
   verify?: Record<string, string>;
   /** Where each device is, and how the run ended, as data (applyEvents.ts). */
   report?: Reporter;
@@ -274,7 +275,7 @@ export const provisionConfig = async ({
       now: Date.now,
       timing: timing ?? confirmTiming(),
       report,
-      ...(verify[deviceConfig.hostname] ? { verify: { hash: verify[deviceConfig.hostname], sha256: platform.sha256 } } : {}),
+      ...(verify ? { verify: { hash: verify[deviceConfig.hostname], sha256: platform.sha256 } } : {}),
     })),
     await defaultGateway(platform),
     await accessPointsOf(platform, planned)

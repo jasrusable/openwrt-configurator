@@ -9,7 +9,7 @@ import { runProbe, uciConfigs } from "../deviceProbes";
 import { finaliseRecords, stageRecords } from "../getDeviceScript";
 import { err, ok, Result } from "../result";
 import { declaredConfigs, isKept, UciConfigs, unmatchedKeeps, verifyConfigs } from "../engine/uci";
-import { DeviceRun, failure, guarded, PhaseFailure, PhaseResult, step } from "./run";
+import { DeviceRun, failure, guarded, PhaseFailure, PhaseResult, scrubbed, step } from "./run";
 
 /**
  * Discard this run's staged UCI changes. Whether the watchdog stays armed is
@@ -20,7 +20,7 @@ export const revertStaged = async (run: DeviceRun) => {
   console.error(`Reverting ${run.hostname}...`);
   const reverted = await agent.call(run.ssh, agent.revert(run.runId));
   if (!reverted.ok) console.error(`Could not revert ${run.hostname}: ${reverted.error.message}`);
-  else if (!reverted.value.done) console.error(`Could not revert ${run.hostname}: ${reverted.value.stderr}`);
+  else if (!reverted.value.done) console.error(`Could not revert ${run.hostname}: ${scrubbed(run, reverted.value.stderr)}`);
 };
 
 /**
@@ -28,24 +28,27 @@ export const revertStaged = async (run: DeviceRun) => {
  * watchdog undoes. So may anything, if the link dropped (`unknown`): what the
  * device did is then not known, and its revert ran over a dead session.
  */
-const configureFailure = (run: DeviceRun, message: string, { unknown = false } = {}) =>
-  failure(message, { leftArmed: run.hasIrreversibleSteps || unknown });
+const configureFailure = (run: DeviceRun, message: string, { unknown = false, ranAfter = run.ranAfter ?? false } = {}) =>
+  failure(message, { leftArmed: run.hasIrreversibleSteps || unknown, ranAfter: ranAfter || unknown });
+
+/** A changed file's run_after was started among these steps. */
+const ranAfterIn = (started: string[]) => started.some((s) => s.startsWith("run_after "));
 
 /**
  * One of the agent's step verbs: done, or the failure it leaves. A link that
  * dropped gave no answer, so what the device did is not known.
  */
-const runSteps = async (run: DeviceRun, verb: agent.Verb<agent.Steps>): Promise<Result<void, PhaseFailure>> => {
+const runSteps = async (run: DeviceRun, verb: agent.Verb<agent.Steps>): Promise<Result<string[], PhaseFailure>> => {
   const answer = await agent.call(run.ssh, verb);
   if (!answer.ok) {
     // A link that dropped, or a step with no answer within its time limit:
     // either way what the device did is not known.
     return err(configureFailure(run, `Lost the connection to ${run.hostname} while configuring it (${answer.error.message}).`, { unknown: true }));
   }
-  if (answer.value.done) return ok(undefined);
+  if (answer.value.done) return ok(answer.value.started);
   console.error(`${run.hostname} failed at: ${answer.value.step}`);
-  if (answer.value.stderr) console.error(answer.value.stderr);
-  return err(configureFailure(run, `Failed to configure ${run.hostname}.`));
+  if (answer.value.stderr) console.error(scrubbed(run, answer.value.stderr));
+  return err(configureFailure(run, `Failed to configure ${run.hostname}.`, { ranAfter: ranAfterIn(answer.value.started) }));
 };
 
 /** The device's config, staged changes included; an unreadable config that is not kept refuses the run. */
@@ -85,23 +88,24 @@ const configureSteps = async (run: DeviceRun): Promise<PhaseResult> => {
   step(run, "configuring");
   const staged = await runSteps(run, agent.stage(run.runId, stageRecords({ state, current: current.value, managedFiles: run.managedFiles })));
   if (!staged.ok) return staged;
+  const ran = { ...run, ranAfter: ranAfterIn(staged.value) };
 
   // The guarantee, checked rather than assumed: whatever the wipe missed or
   // something else changed meanwhile shows up here, before anything commits.
-  const actual = await readConfigs(run);
+  const actual = await readConfigs(ran);
   if (!actual.ok) return actual;
   const problems = verifyConfigs({ actual: actual.value, declared: declaredConfigs(state.config), keep });
   if (problems.length > 0) {
     console.error(problems.map((problem) => `  ${problem}`).join("\n"));
     return err(
       configureFailure(
-        run,
+        ran,
         `The staged configuration on ${hostname} does not match the config file (${problems.length} difference(s)). Nothing was committed.`
       )
     );
   }
   console.log("Configuration set and verified.");
-  return ok({ ...run, finaliseRecords: finaliseRecords({ state, current: current.value }) });
+  return ok({ ...ran, finaliseRecords: finaliseRecords({ state, current: current.value }) });
 };
 
 export const configureDevice = async (run: DeviceRun): Promise<PhaseResult> => {

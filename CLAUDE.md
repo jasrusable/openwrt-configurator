@@ -146,9 +146,19 @@ Secrets are hidden in everything printed unless `--show-secrets`
     redirect, DoT refused, the Firefox and iCloud canaries), refused where its
     devices are given other servers. A WireGuard peer dialled by name puts
     `wireguard_watchdog` in root's crontab, a file this app then owns whole.
-  - Root's password is `system.app_login.password`, set on every device;
-    password login off needs a key, and an apply that would lock this app
-    out is refused first (`src/loginAccess.ts`).
+  - Root's password is `system.app_login.password`, required (a stock root
+    has none, and rpcd then takes any: `system/checks.ts`) and set on every
+    device; password login off needs a key, and an apply that would lock
+    this app out is refused first (`src/loginAccess.ts`).
+  - The schema is `intentShape` (shape and defaults) refined by the checks
+    across settings (`intentSchema`); a saved file failing only a check is
+    read with its defaults, so an editor never meets a missing one. Issues
+    are placed by `intent/issues.ts`, for the server and the UI alike.
+  - A port carries one line per VLAN (an untagged and tagged ones);
+    `availability().option` says whether a value a rule rules out is refused
+    or only ignored (`refuses`), so a switch shows an ignored value off.
+  - `dns.domain` is never an internet top-level domain (the router answers
+    the whole domain); private-use ISO codes (`zz`, `xa`–`xz`, …) are fine.
 
 ### Plan — `src/plan/`, `src/lowLevel/`
 
@@ -174,10 +184,12 @@ merged) → `getOpenWrtConfig.ts` with `ports.ts`, `radios.ts`, `values.ts`
 radios by band, a band's channel and single-interface mesh on the radio
 whose channels hold it (tri-band; else the band's first), best `htmode`) →
 `getOpenWrtState.ts` (config, packages, keeps, services, files) →
-`getUciCommands.ts` and `uci.ts` (the UCI text model, `declaredConfigs`,
-`verifyConfigs`, `changedConfigs`). `uciOrder.ts` keeps the order configs and
-options have always been written in: change it and every service reloads on
-the next apply. `getDeviceScript.ts` turns a state into the agent's records
+`getUciCommands.ts` (operations as data, rendered once) and `uci.ts` (the
+UCI text model, `declaredConfigs`, `verifyConfigs`, `changedConfigs`).
+`plan/uciOrder.ts` keeps the order configs and options have always been
+written in: change it and every service reloads on the next apply. Declared
+radios map to a band's radios in order; declaring more than the device has
+is refused. `getDeviceScript.ts` turns a state into the agent's records
 and renders the dry run. The engine never names a package and never parses a
 condition.
 
@@ -185,11 +197,14 @@ condition.
 
 `provisionNetwork.ts` runs every device as one change: plan → stage the
 rollback (packages fetched for all before any arm) → arm → configure → commit
-→ confirm all → disarm all → hooks → services check. Each phase is a module
-returning a `Result` (`run.ts`: `DeviceRun`, `guarded` turns any throw into a
+→ confirm all → every watchdog still asleep (`asleep`, else all roll back) →
+disarm all → hooks → services check. Planning refuses a device another run's
+watchdog still guards (it writes when it fires), whoever started that run.
+Each phase is a module returning a `Result` (`run.ts`: `DeviceRun`, `guarded` turns any throw into a
 failure that says what it left: committed, left armed). The run returns a
 `RunResult` (`outcome.ts`); `cli/provision.ts` maps it to exit codes (3:
-applied, a later step failed). `reconnect.ts` reconnects and waits for procd
+applied, a later step failed; 4: `partial`, some devices kept it, named in
+`kept`). `reconnect.ts` reconnects and waits for procd
 to settle; `provisionConfig.ts` connects and orders devices (the local
 device, then the gateway, then the access point this machine is on by Wi-Fi
 last, `gateway.ts`; mesh repeaters deepest first: `meshOrder.ts`).
@@ -226,19 +241,22 @@ renames, packages, files. Served at `GET /api/apply/plan`, printed by
 
 ### Firmware — `src/firmware/`
 
-System › Firmware. The network picks a release (`system.firmware.release`): `stable` (Latest OpenWrt, any series), a series (`25.12`: its newest), or one release. Each device follows it, holds, or is pinned (`hardware.*.firmware`); its row in the tab and its Hardware page edit the same value. Where each stands is pure (`target.ts`), from the draft, the facts and ASU's overview (`releases.ts`: asked once a day by the collector, the last answer kept offline). Release candidates and snapshots never count. "Updates available" is one derivation (`updatesAvailable`, the UI's `useUpdates`) behind one mark (`ui/src/kit/UpdateDot.tsx`): the sidebar's System, the Firmware tab, its Upgrade section and device rows, a device's page and Overview always agree.
+System › Firmware. The network picks a release (`system.firmware.release`): `stable` (Latest OpenWrt, any series), a series (`25.12`: its newest), or one release. Each device follows it, holds, or is pinned (`hardware.*.firmware`); its row in the tab and its Hardware page edit the same value. Where each stands is pure (`target.ts`), from the draft, the facts and ASU's overview (`releases.ts`: asked once a day by the collector, the last answer kept offline). Release candidates and snapshots never count; a device running newer than the series it follows is current, never a downgrade (only a pin or an exact release can be one). "Updates available" is one derivation (`updatesAvailable`, the UI's `useUpdates`) behind one mark (`ui/src/kit/UpdateDot.tsx`): the sidebar's System, the Firmware tab, its Upgrade section and device rows, a device's page and Overview always agree.
 
 `provision --upgrade <devices|all>` (the UI's `POST /api/firmware/upgrade` starts the apply job with it) upgrades first, then applies the saved settings:
-- **Plan** (`upgradePlan.ts`): devices behind, access points first and the router last (the device this app runs on last of all). A downgrade, or a move into a series newer than `newestCheckedSeries`, is refused unless acknowledged (`--accept-downgrade`, `--accept-new-series`).
-- **Builds** (`builds.ts`): one image per board, role and release, all requested from ASU before anything flashes. An image holds the role's packages and the first-boot script (`firstBoot.ts`): per role, no hostname, no MAC, nothing secret (`firmwareBuilds.test.ts` checks generated intents). `build-images` on an intent downloads them into `<intent>.state/images/` by hash.
-- **Flash** (`upgrade.ts`, the device script `upgradeScript.ts`): each device fetches its own image from ASU into its RAM (never through this machine), refused first if RAM is short, checks the sha256 and `sysupgrade -T`, and removes it on any failure. Settings are kept, except back to an older series: then only `/etc/dropbear`, from a tarball made on the device (`sysupgrade -f`). The run waits for the new release before the next device.
-- **The device this app runs on** (`self.ts`): it keeps its own `.apk` and a one-shot offline reinstall through the upgrade (keep.d), notes the release, and the collector's next start finishes the run.
-- **A confirmed apply** writes `/etc/onc/applied` (kept by keep.d): the first-boot script then leaves an upgraded device's settings alone. A reset device has a new host key: Hardware offers to take it back under its own name if its MACs match (`inspectReset`, `readopt`).
+- **Plan** (`upgradePlan.ts`): devices behind, in `inFlashOrder` (`target.ts`, the UI's too): mesh, then cabled access points, the router, and the device this app runs on last of all. A downgrade, or a move into a series newer than `newestCheckedSeries`, is refused unless acknowledged (`--accept-downgrade`, `--accept-new-series`). `run.ts` refuses what the plan alone can tell first, then reads each moving device once (is this app on it, is this machine on its Wi-Fi) and plans again: back to an older series is refused for this app's device, a mesh repeater or a device repeaters may reach the network through, and the access point this machine is on (first-boot settings have no Wi-Fi or mesh). From the UI, nothing unapplied goes out with an upgrade but firmware choices (`isFirmwareChoice`), and its acknowledgements are exact device→release pairs the server matches.
+- **Builds** (`builds.ts`): one image per board, role and release, all requested from ASU before anything flashes. An image holds the role's packages and the first-boot script (`firstBoot.ts`): per role, no hostname, no MAC, nothing secret (`firmwareBuilds.test.ts` checks generated intents); it gives root a random password, as LuCI is in every image. Boards are found by `findProfile`, low-level `build-images` too. `build-images` on an intent downloads them into `<intent>.state/images/` by hash.
+- **Flash** (`upgrade.ts`, the device script `upgradeScript.ts`, on the agent's prelude and verb runner): each device fetches its own image from ASU into its RAM (never through this machine), refused first if RAM is short, checks the sha256 and `sysupgrade -T`, and removes it on any failure. First it reads what the device runs (refused unless it is the step's `from`) and checks the session is local exactly when the step was planned as `host`. Settings are kept, except back to an older series: then only `/etc/dropbear`, from a tarball made on the device (`sysupgrade -f`). The run waits for the new release before the next device; when it stops, the saved settings are still applied to those already upgraded (`planAfterUpgrade`), each found again first.
+- **The device this app runs on** (`self.ts`): it keeps its own `.apk`, its feed's list and key (never `distfeeds.list`, which names the old release) and a one-shot offline reinstall through the upgrade (keep.d; a failed reinstall is logged and runs again next boot), notes the release, and the collector's next start finishes the run once the network is up, applying the run's own snapshot (on another release too). A flash that does not go ahead forgets the note, and `clean` removes what keep-self left.
+- **No image without this app's key authorized** (`missingKey`, checked once, in `imagePlans`; the UI only shows it): a device fresh from an image has password login off and lets in only `authorized_keys`, so the key the app logs in with (`appPublicKey`) must be among them.
+- **The applied marker** `/etc/onc/applied` (kept by keep.d) is written by a confirmed apply and by the settings-kept flash just before `sysupgrade`: the first-boot script then leaves an upgraded device's settings alone (devices applied before the marker, or with `--no-confirm`, included).
+- **Trusting a key** (`discover.ts`): reading a device (Hardware › Add, or a reset device's `inspectReset`) records its key aside, never in the shared known_hosts; only `adopt`/`readopt` with the fingerprint the user confirmed pins that exact key. Cancelling leaves any old pin; a device's MACs only say which device it claims to be. `readopt` drops the pin at the device's previous address.
 
 ### Agent — `src/agent/`
 
 One fixed POSIX sh script (`script.ts`, its verbs and lessons in its header
-comment), written once per run to `/tmp/onc-agent-<runId>.sh`; every step on
+comment; `prelude.ts` the part the firmware script shares: the cgroup
+escape, `detached`, `say`), written once per run to `/tmp/onc-agent-<runId>.sh`; every step on
 the device is a verb with data on stdin (`records.ts`), never argv.
 `paths.ts` is the device-side contract other code reads (the mesh rescue
 watcher). `index.ts` calls verbs and returns `Result`s.
@@ -269,10 +287,13 @@ the channel's own streams, which a leftover process would hold open; and
   prints it (`sshFingerprint.ts`) to compare before trusting it.
 - `status/collector.ts` owns device reads for the Status pages: every 10 s
   while someone looks (a `wanted` mark), once a minute otherwise, never during
-  an apply; `/api/status` answers its snapshot. Each read is `digest`ed with
+  an apply (`applyRunning`, `src/apply/job.ts`, which every apply path, the
+  CLI's included, records); its hourly work runs aside, never holding a
+  read, and requests answered without it share one read; `/api/status` answers its snapshot. Each read is `digest`ed with
   what the last left: events from what changed (`events.ts`), every client
-  remembered (`registry.ts`), busy channels and client series
-  (`history.ts`); a router copies those to flash hourly and as it stops. On a router it runs as the
+  remembered (`registry.ts`) and where each went (`moves.ts`), busy channels
+  and client series (`history.ts`); a router copies those to flash hourly and
+  as it stops. On a router it runs as the
   `onc-collector` procd service, writing to RAM. It keeps the settings
   compiled between reads (`readStatusSettings`: loaded again only when the
   file changes, a device's state only when its facts do; 32 ms a read cold,
@@ -284,7 +305,8 @@ the channel's own streams, which a leftover process would hold open; and
   that model, their services, their name and a few makers. The wired mesh is
   read where it runs: `br-lan.4000` on DSA, the CPU's `eth0.4000` on swconfig
   (`meshWiredLink`).
-- Actions (`status/actions.ts`) run only on request, one at a time, within
+- Actions (`status/actions.ts`) run only on request, one at a time across
+  all kinds (one lock, which an apply's start also respects), within
   the CGI's 60 s, refused during an apply: restart a declared service, reboot
   a device, restart its Wi-Fi, ping from it, speed test, Wi-Fi survey. Ones
   that cut the link (reboot, Wi-Fi) start detached a moment after answering;
@@ -304,13 +326,16 @@ the channel's own streams, which a leftover process would hold open; and
 over `router.ts` (routes as data; `respond`/`problemResponse` map a
 `Problem` to a status) and one module per area in `api/`. `onc ui` serves it
 with Node, loopback only, no login; `onc cgi` answers one request under
-uhttpd (`cgi.ts`). `provisionJob.ts` starts an apply as a detached
+uhttpd (`cgi.ts`). `src/apply/job.ts` starts an apply as a detached
 `provision --job --run-id` process (`--verify` when the start carried a
-plan's hashes) and reads its record (alive while its pid
+plan's hashes; a CLI `provision <intent>` takes the same lock and keeps the
+same record and live settings) and reads its record (alive while its pid
 has its run id on its command line). Its events (`applyEvents.ts`) give each
 device's step and, once armed, the `window` (confirm by, restored by at the
 latest) the Apply sheet counts down. The sheet (`ApplyModal.tsx`, a Mantine
-Modal) has three states, each replacing the last: the review (`Review.tsx`:
+Modal) has three states, each replacing the last: the review (with unsaved
+edits, "Save and review" first: Apply only on a plan read since the sheet
+opened, of the saved version, which the start sends as `version`) (`Review.tsx`:
 verdict, acknowledgements gating Apply, by change or by device, up to date
 with "Re-apply anyway"; a `plan-stale` end brings it back, read again), the
 run (`RunProgress.tsx`), and the result with Undo of the last apply
@@ -321,11 +346,18 @@ lockout checks, the saved intent untouched unless `restoreSettings`. The UI (`ui
 the intent file and nothing else; `ui/src/data/` is its only HTTP code.
 System › Backup (`src/backup.ts`, `api/backup.ts`) downloads the file as
 stored and replaces it with a backup, the defaults (`intent/starter.ts`,
-keeping the devices, addresses and login) or, with none saved, a new
-network (the first-run screen): each reviewed first (migrated, checked,
-its changes listed; a backup with `$secret` refs refused), the file it
-replaces kept as `<intent>.bak` (`writeIntentFile`, also on a save over an
-older format).
+keeping the devices, the main network's subnet and reservations, and the
+login) or, with none saved or one that does not read, a new network (its
+own random `site_id`) on the first-run/recovery screen (`backup/FirstRun.tsx`):
+each reviewed first (migrated, `checkedIntent` as a save is, its changes
+listed; a backup with `$secret` refs refused), written only over the
+version reviewed, the file it replaces kept as
+`<intent>.<compact ISO time>.bak`, the last five, 0600 (`writeIntentFile`,
+also on a save over an older format). Unsaved edits survive a reload in
+sessionStorage (`ui/src/form/stash.ts`), per network, forgotten on a 401.
+Edits are put back over a newer file by `intent/merge.ts`: list items by id
+or a natural key (mac, ssid, name), never by place; where items cannot be
+told apart, the edit's whole list is kept and the page says so.
 
 ### Status pages and settings mode — `ui/src/pages/status/`
 
@@ -350,7 +382,11 @@ Nothing outside `src/platforms/` imports a Node built-in or touches
 `process` (`platformBoundary.test.ts`). One bundle runs under Node and under
 QuickJS on a router (`qjsGlobals.ts` first; SSH as a spawned `dbclient` or
 OpenSSH per command, exit status from a marker; local mode runs commands with
-`sh -c`). Functions take only the `Pick<Platform, …>` they use.
+`sh -c`). Functions take only the `Pick<Platform, …>` they use. A directory under a
+shared `/tmp` is made by `privateDir` (this user's, 0700, not a link, else
+refused); a local command with a time limit runs in its own process group,
+killed whole; HTTP has a time limit (`httpTimeoutMs`), a download one once
+it stalls.
 
 Every command on a device ends by a time limit (`commandTimeoutMs`, 2 min;
 longer for package steps and hooks, per agent verb): QuickJS kills the
@@ -362,7 +398,8 @@ than wait. A stalled dbclient once held a rig run forever
 ## Contracts worth knowing before changing the apply path
 
 - **The wipe.** Every run leaves each device's UCI config exactly as
-  declared, except what keeps (`configs_to_not_reset`) hold. Configure reads
+  declared, except what keeps (`configs_to_not_reset`) hold (every device keeps LuCI's,
+  LEDs, and the board's `ubootenv` and `fstab` where present). Configure reads
   every config after prepare (packages change configs), stages the wipe and
   the declaration in one `uci batch`, reads back and verifies; any difference
   reverts with nothing committed (`verifyConfigs`).
@@ -371,7 +408,9 @@ than wait. A stalled dbclient once held a rig run forever
   before any staging) → stage → files (before commit) → commit by name →
   `reload_config` → services over the first reconnect → hooks over their own
   session. Why each is where it is: the agent's comments.
-- **Commit-confirm.** The watchdog restores unless confirmed in
+- **Commit-confirm.** The commit's marker is written after `reload_config`,
+  nothing printed between, so a verb cut off there is rolled back. The
+  watchdog restores unless confirmed in
   `--confirm-timeout` (90 s, minimum 60) per device; confirming waits for
   procd to settle and reconnects again; all devices are confirmed before any
   is disarmed. `ONC_TEST_MIN_CONFIRM_WINDOW` is for tests only.
@@ -382,19 +421,24 @@ than wait. A stalled dbclient once held a rig run forever
 | Managed files that existed / this run created | Restored / deleted |
 | Packages installed / removed by this run | Removed / reinstalled offline from staged files (a removal that cannot be staged is refused) |
 | Services enabled at boot, running or not | Yes, `/etc/rc.d` and the running set restored |
-| A restart inside the window | Yes, a boot-time copy and `onc-rollback` (START=11) |
+| A restart inside the window | Config, managed files and boot links, from a boot-time copy and `onc-rollback` (START=11); not packages (staged in `/tmp`) |
 | Root's password | No: it is the password the app logs back in with |
 
-- **Host keys.** Trust on first use, a changed key refused; Node and OpenSSH
-  share `~/.config/openwrt-configurator/known_hosts` (`src/knownHosts.ts`),
-  `dbclient` is held to a pin through a throwaway `$HOME`.
+- **Host keys.** Trust on first use, a changed key refused; Node, OpenSSH
+  and `dbclient` share `~/.config/openwrt-configurator/known_hosts`
+  (`src/knownHosts.ts`), `dbclient` always through a throwaway `$HOME`
+  holding exactly the file or pin meant (never `/root/.ssh`), a host on
+  record held to its keys. No known_hosts and no pin is refused.
 - **Quoting.** Every config value reaching a shell or `uci batch` goes
   through `shellQuote` (`src/shell.ts`); names cannot be quoted, so they are
   validated.
 - **Router UI behind uhttpd.** Only fixed headers reach a CGI, so CSRF comes
   from Origin vs Host and the version from `?version=` (`cgi.ts`); unknown
   Hosts are refused (`hosts.ts`); a status needs its reason phrase; logins go
-  through rpcd (`auth.ts`) and are refused while root has no password.
+  through rpcd (`auth.ts`), are refused while root has no password, and are
+  slowed per client only (a shared limit let one client lock the owner out;
+  rpcd's own login is reachable unthrottled through `/ubus` anyway); the session cookie is `Secure` over
+  HTTPS.
 
 ## Where to change things
 
@@ -575,6 +619,7 @@ named.
 ## Gotchas
 
 - **Node's stdout into a pipe is asynchronous, and `process.exit` drops what the pipe has not taken**, which cut `compile | jq` off at 64 KiB. The entry point (`bin/index.ts`) makes stdout and stderr blocking first (`blockingStdio`), so `platform.exit` stays synchronous (`never`: callers rely on it); QuickJS flushes in its own `exit`. `cliOutput.test.ts` pipes 200 KB+ through.
+- **A JSON parse error says line and column only**, never the line's text: a password could be on it (`src/parseJson.ts`).
 - **The CLI version is duplicated.** `package.json` `version` and the `version` in the spec in `src/cli/index.ts` must be bumped together.
 - **Releases are tag-driven.** `.github/workflows/release.yml` fires on a pushed `X.Y.Z` or `vX.Y.Z` tag, runs `test.yml` (tests, typecheck, rig) as a gate, checks the tag against the version, then publishes the binaries, the bundle, the OpenWrt feed and the Homebrew formula (see "Packaging").
 - **`print-uci-commands` builds against the live SSH session**, the same as `provision`. It used to call `getDeviceScript({ state })` with no session, so package diffing never ran: every package the config named was printed as an install and every removal as a removal, regardless of what was on the device. That reported a 21-package `apk del` cascade for packages that were not installed at all. Keep the session open until the script is built, or the dry run stops matching what a provision would do. Resolved `$secret` values are redacted in the printed script; `--show-secrets` turns that off — don't pass it unless the user asks.
