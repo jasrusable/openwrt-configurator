@@ -5,8 +5,10 @@
 // background); each ask also tells the server someone is looking, so it
 // reads the devices fast.
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { NetworkEvent } from "../../../src/status/events";
+import type { Tone } from "../../../src/status/health";
 import type { NetworkStatus } from "../../../src/status/network";
-import { loadNetworkStatus, pingFrom, rebootDevice, restartService, restartWifi, runSpeedTest, runWifiSurvey } from "./api";
+import { loadClient, loadEvents, loadNetworkStatus, loadSpeedTests, pingFrom, rebootDevice, restartService, restartWifi, runSpeedTest, runWifiSurvey } from "./api";
 
 export const statusKey = ["network-status"] as const;
 
@@ -40,7 +42,25 @@ export const useRestartService = () => {
   });
 };
 
-export const useSpeedTest = () => useMutation({ mutationFn: runSpeedTest });
+/** A speed test; the kept ones read again after. */
+export const useSpeedTest = () => {
+  const queryClient = useQueryClient();
+  return useMutation({ mutationFn: runSpeedTest, onSettled: () => queryClient.invalidateQueries({ queryKey: ["speed-tests"] }) });
+};
+
+/** The speed tests kept, the latest first. */
+export const useSpeedTests = () => useQuery({ queryKey: ["speed-tests"], queryFn: loadSpeedTests, staleTime: 60_000 });
+
+/** Every event kept: a page that lists more than the snapshot's latest. */
+export const useAllEvents = () => useQuery({ queryKey: ["events"], queryFn: () => loadEvents(0), refetchInterval: 30_000, staleTime: 10_000 });
+
+/** One client as remembered, with its series for the last day. */
+export const useClientDetail = (mac: string) =>
+  useQuery({ queryKey: ["client", mac], queryFn: () => loadClient(mac), refetchInterval: 60_000, staleTime: 30_000 });
+
+/** An event's tone, for its dot and its mark on a chart. */
+export const eventTone = (e: Pick<NetworkEvent, "severity">): Tone =>
+  e.severity === "problem" ? "poor" : e.severity === "warning" ? "fair" : e.severity === "ok" ? "good" : "off";
 
 /** Reboot a device; status is read again so it says "rebooting" at once. */
 export const useReboot = () => {

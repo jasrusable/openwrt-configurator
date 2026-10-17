@@ -117,3 +117,96 @@ button.onc-device-row:focus-visible {
     max-width: 100%;
   }
 }
+
+/* A summary card that opens its page: the whole card answers. */
+.onc-link-card {
+  cursor: pointer;
+  transition: background 120ms;
+}
+
+.onc-link-card:hover {
+  background: var(--onc-hover);
+}
+
+.onc-link-card:focus-visible,
+.onc-table-row:focus-visible {
+  outline: 2px solid var(--mantine-color-blue-filled);
+  outline-offset: -2px;
+}
+
+/* A crumb back to a list: a button that reads as the title's text. */
+.onc-crumb {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.onc-crumb:hover {
+  text-decoration: underline;
+}
+
+/* A sortable column's header: the whole header is the button. */
+.onc-sort {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.onc-table-row {
+  cursor: pointer;
+}
+
+.onc-table-row:hover {
+  background: var(--onc-hover);
+}
+
+/* A table's rows, as two lines each on a phone. */
+.onc-list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  background: none;
+  border: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.onc-list-row + .onc-list-row {
+  border-top: 1px solid var(--onc-separator);
+}
+
+.onc-list-row:hover {
+  background: var(--onc-hover);
+}
+
+/* A chart's crosshair readout: above the chart, never in the way of the pointer. */
+.onc-chart-tip {
+  position: absolute;
+  top: 0;
+  pointer-events: none;
+  background: var(--onc-card);
+  border: 1px solid var(--onc-separator);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  padding: 6px 8px;
+  z-index: 2;
+  min-width: 120px;
+}
+
+/* The sidebar's two lists: status, and settings as its own mode. */
+.onc-nav-mode {
+  color: var(--onc-label-2);
+}

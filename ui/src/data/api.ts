@@ -9,7 +9,9 @@ import type { Releases } from "../../../src/firmware/target";
 import type { SelfUpgradeResult } from "../../../src/firmware/self";
 import type { NetworkStatus } from "../../../src/status/network";
 import type { History, Range } from "../../../src/status/history";
-import type { Survey } from "../../../src/status/actions";
+import type { SpeedTest, Survey } from "../../../src/status/actions";
+import type { NetworkEvent } from "../../../src/status/events";
+import type { KnownClient } from "../../../src/status/registry";
 import type { Intent } from "../../../src/intent/schema";
 import type { ProvisionStatus } from "../../../src/server/provisionJob";
 
@@ -242,7 +244,6 @@ export const restartService = (device: string, service: string) =>
 export const runWifiSurvey = () =>
   postJson<{ surveys: Survey[]; failed: { accessPoint: string; error: string }[] }>("api/wifi/survey", {}, "The survey did not finish.");
 
-/** The router's download speed now. */
 /** Reboot a device: it drops off for a minute or so. */
 export const rebootDevice = (device: string) =>
   postJson<{ rebootingSince: number }>("api/device/reboot", { device }, "It did not start rebooting.");
@@ -255,7 +256,18 @@ export const restartWifi = (device: string) =>
 export const pingFrom = (device: string, target: string) =>
   postJson<{ sent: number; received: number; averageMs?: number }>("api/device/ping", { device, target }, "The ping did not run.");
 
-export const runSpeedTest = () => postJson<{ downMbps: number }>("api/internet/speed", {}, "The speed test did not finish.");
+/** The router's speed now, down and up, and how its round trip grows under load: about half a minute. */
+export const runSpeedTest = () => postJson<SpeedTest>("api/internet/speed", {}, "The speed test did not finish.");
+
+/** The speed tests kept, the latest first. */
+export const loadSpeedTests = () => getJson<SpeedTest[]>("api/internet/speed", "Could not read the speed tests.");
+
+/** Every event kept after `since` (the snapshot carries only the latest). */
+export const loadEvents = (since = 0) => getJson<NetworkEvent[]>(`api/events/${since}`, "Could not read what happened.");
+
+/** One client as remembered, and its own series for the last day. */
+export const loadClient = (mac: string) =>
+  getJson<{ known?: KnownClient; history: History }>(`api/clients/${encodeURIComponent(mac)}`, "Could not read this device.");
 
 /** OpenWrt's latest stable release. */
 /** OpenWrt's releases, as last read (asked again when a day old), and why a fresh ask failed. */

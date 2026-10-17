@@ -71,5 +71,11 @@ export const useSeries = (key: string): Point[] => {
   return points.map(([t, v]) => [t, v]);
 };
 
+/** A series as kept, with how many reads made each point (an outage strip weighs them). */
+export const useSeriesPoints = (key: string): [number, number, number][] => useHistory(useChartRange()).data?.[key] ?? [];
+
+/** Every series in the range the graphs show: for one picked by a prefix (each radio's, say). */
+export const useAllSeries = (): History => useHistory(useChartRange()).data ?? {};
+
 /** The range switch a graph's card shows: every graph's range. */
 export const useRangeSwitch = () => ({ value: useChartRange(), onChange: setChartRange });
