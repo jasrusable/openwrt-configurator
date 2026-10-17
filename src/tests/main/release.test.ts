@@ -8,8 +8,8 @@ test("25.12 and later are provisioned; older releases are refused up front", (t)
   for (const old of ["24.10.2", "23.05.5", "21.02.7", "25.10.0", "", "garbage"]) {
     t.false(supportedRelease(old), old);
   }
-  t.throws(() => assertSupportedRelease("jaculu-ap-1", "24.10.2"), {
-    message: /jaculu-ap-1 runs OpenWrt 24\.10\.2; this tool needs 25\.12 or later/,
+  t.throws(() => assertSupportedRelease("ap-1", "24.10.2"), {
+    message: /ap-1 runs OpenWrt 24\.10\.2; this tool needs 25\.12 or later/,
   });
 });
 

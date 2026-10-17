@@ -3,8 +3,8 @@
 // 802.11s carries the links (SAE, no forwarding of its own) and batman-adv
 // routes over them; bat0 joins each node's LAN bridge like a port, the main
 // network untagged and the others tagged, and batman's bridge loop avoidance
-// keeps a node that is also cabled from making a loop. As run at the
-// Stellenberg site, plus the MTU: batman adds its header to every frame, so
+// keeps a node that is also cabled from making a loop. As run on a live
+// network, plus the MTU: batman adds its header to every frame, so
 // the mesh link carries 1532 bytes and nothing is fragmented.
 import { Feature, onAccessPoints, onDevice, onDsa, onRouter, onSwConfig } from "../fragment";
 import { placeholder, section } from "../../plan/types";

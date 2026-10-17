@@ -86,7 +86,7 @@ over `src/server/`, and the React UI in `ui/`.
       bridge). Needs per-port networks first (wired ports netifd cannot
       isolate by UCI at all), then filtering on the uplinks, or every
       client routed through the router's firewall.
-- [ ] Provisioning jaculu from its intent. Parity checked offline (both
+- [ ] Provisioning the live network from its intent. Parity checked offline (both
       configs through the engine against the captured R6S and NWA50AX Pro
       schemas, secrets masked): the R6S and odhcpd scripts match byte for
       byte, the per-band AQL hook sets the same limits, and every other
@@ -98,7 +98,7 @@ over `src/server/`, and the React UI in `ui/`.
       must be the real ones before a provision (the hand config takes them
       from the keychain).
       Then a print-uci-commands against the devices, on request.
-- [ ] Open schema questions: a second AP (`jaculu-ap-2`)? Why two SSIDs on
+- [ ] Open schema questions: a second AP (`ap-2`)? Why two SSIDs on
       one LAN? What are the extra Wi-Fi passwords for? Keep LuCI?
 - [ ] **A broadcasting router and the mesh's reserved band.** The router is not
       a mesh node (it joins by cable), yet `wifi.mesh.band_reserved` keeps its

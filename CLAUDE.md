@@ -12,7 +12,7 @@ Real network config files in this repo may still contain live credentials: SSH r
 
 Do **not** open, `cat`, `grep`, print, or otherwise pull the contents of:
 
-- `*.config.json` at the repo root (e.g. `stellenberg.config.json`) — gitignored, mode `0600`, real.
+- `*.config.json` at the repo root (e.g. `home.config.json`) — gitignored, mode `0600`, real.
 - Anything under `configs/` — gitignored, and a separate nested git repo of the user's live network configs.
 - Any file the user points at as "my config" / "my network config", wherever it lives.
 

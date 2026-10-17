@@ -12,7 +12,7 @@ export const meshHopPenalty = 30;
 
 /**
  * Weakest signal a mesh link may form at, dBm: a node does not pair with one
- * fainter (a flaky long hop batman would then route over). Stellenberg took 0
+ * fainter (a flaky long hop batman would then route over). A live network took 0
  * (no limit); -80 is the usual guidance for a usable 802.11s link.
  */
 export const meshRssiThreshold = -80;
@@ -20,7 +20,7 @@ export const meshRssiThreshold = -80;
 /**
  * batman-adv's routing: V chooses paths by each link's measured throughput
  * (ELP), where IV judges only by lost packets; better over mixed links (2.4 and
- * 5 GHz, cables). Stellenberg ran IV.
+ * 5 GHz, cables). A live network ran IV.
  */
 export const meshRouting = "BATMAN_V";
 
