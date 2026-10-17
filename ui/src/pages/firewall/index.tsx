@@ -8,8 +8,8 @@ import { PortForwardsPage } from "./PortForwardsPage";
 import { RulesPage } from "./RulesPage";
 
 const tabs = [
-  { value: "port-forwards", label: placeName("portForwards"), path: "/firewall" },
-  { value: "rules", label: placeName("rules"), path: "/firewall/rules" },
+  { value: "port-forwards", label: placeName("portForwards"), path: "/settings/firewall" },
+  { value: "rules", label: placeName("rules"), path: "/settings/firewall/rules" },
 ];
 
 export const FirewallPage = () => {

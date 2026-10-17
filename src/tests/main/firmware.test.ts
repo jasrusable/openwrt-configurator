@@ -101,9 +101,9 @@ test("the settings take a series or a release from 25.12 on; a device holds or p
 });
 
 test("a device's firmware is set in the Firmware tab", (t) => {
-  t.deepEqual(whereIs("hardware.1.firmware"), { page: "system", url: "/system/firmware" });
-  t.deepEqual(whereIs("system.firmware.release"), { page: "system", url: "/system/firmware" });
-  t.deepEqual(whereIs("hardware.1.name"), { page: "hardware", url: "/hardware/1" });
+  t.deepEqual(whereIs("hardware.1.firmware"), { page: "system", url: "/settings/system/firmware" });
+  t.deepEqual(whereIs("system.firmware.release"), { page: "system", url: "/settings/system/firmware" });
+  t.deepEqual(whereIs("hardware.1.name"), { page: "hardware", url: "/settings/hardware/1" });
 });
 
 /** A platform whose HTTP answers `answer`, counting the asks. */

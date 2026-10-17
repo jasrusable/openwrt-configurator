@@ -357,19 +357,40 @@ where RAM has none. Mac and Pi: written beside the intent, as before.
 
 ## Phases
 
-Each one ships on its own, tests first (parsers on recorded output, events
-and the registry as pure functions).
+All six built on the `status-redesign` branch (2026-10-17), tests first
+(parsers on recorded output, events, the registry and health as pure
+functions), each page looked at in the preview (`scripts/status-preview.ts`),
+desktop and phone.
 
-1. **Data**: the probe additions, events, the registry, the history
-   additions with watched spans, persistence, the API. No UI change beyond
-   what breaks.
-2. **Kit**: Verdict, StatusTable, MetricChart, OutageStrip, the cells, the
-   colours for each state.
+1. **Data**: probes, events, the registry, history, persistence, the API.
+2. **Kit**: `src/status/health.ts` (tones and thresholds, a client's causes),
+   `ui/src/kit/status.tsx`, `StatusTable`, `TimeChart`, `OutageStrip`.
 3. **Clients**: the table and the client page.
-4. **Devices**: the list and the device page.
+4. **Devices**: the list and the device page (with the router's networks
+   and VPN peers, as Overview's sections were).
 5. **Internet and Wi-Fi**; Performance removed, with redirects.
-6. **Overview, Activity and settings mode**: the two sidebars, Edit ›
-   links, ⌘K, the unapplied banner, `/settings/*` with redirects.
+6. **Overview, Activity and settings mode**: the two sidebars, settings
+   under `/settings/*` with every old address redirected, attention linking
+   to the live thing (an unreachable device to its page).
+
+Changed from the plan while building, for reasons found then:
+
+- A client's link rate is shown, never judged: an idle link drops to 1 or
+  6 Mbit/s at any signal (the real AP's recording). "Needs a look" counts a
+  poor client or one with something to do (a better AP or band, a crowded
+  channel), not a fair signal alone.
+- No separate record of when the collector ran: a point not there is a gap.
+- More than four series on one chart would break the colour rule: each
+  radio's air is a small chart of its own.
+
+Not built yet (TODO.md):
+
+- ⌘K across settings, and Edit › beside each live value (each page has its
+  settings button; a client's page gives a fixed address).
+- Settings marking what differs on the devices.
+- Traceroute as a device action; a client's roams and joins on its page.
+- Measuring the history's size and a read's time under QuickJS on a router
+  with 128 MB.
 
 ## Open risks
 

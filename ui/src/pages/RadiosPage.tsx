@@ -89,7 +89,7 @@ const RadiosTable = () => {
       <DataTable
         rowCount={bands.length}
         rowKey={(i) => bands[i].band}
-        onRowClick={(i) => navigate(`/wifi/radios/${bands[i].band}`)}
+        onRowClick={(i) => navigate(`/settings/wifi/radios/${bands[i].band}`)}
         rowMarker={(i) =>
           issues.some((issue) =>
             issue.path.startsWith(`wifi.radios.${bands[i].band}.`),
@@ -168,7 +168,7 @@ const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
   return (
     <SettingsPage
       title={[
-        { label: "Radios", onClick: () => navigate("/wifi/radios") },
+        { label: "Radios", onClick: () => navigate("/settings/wifi/radios") },
         { label },
       ]}
     >
@@ -213,13 +213,13 @@ const RadioPage = ({ band, label, description }: (typeof bands)[number]) => {
         {band === "5g" && <SwitchField name={at("avoid_radar")} />}
         {meshChannel !== undefined ? (
           <SettingRow label="Channel" description={`Set by the mesh, on every access point (${where("mesh")}).`}>
-            <Button variant="subtle" size="compact-sm" onClick={() => navigate("/wifi/mesh")}>
+            <Button variant="subtle" size="compact-sm" onClick={() => navigate("/settings/wifi/mesh")}>
               {meshChannel} · {placeName("mesh")}
             </Button>
           </SettingRow>
         ) : (
           <SettingRow label="Channel" description={`Picked automatically; pin one under ${where("hardware")}.`}>
-            <Button variant="subtle" size="compact-sm" onClick={() => navigate("/hardware")}>
+            <Button variant="subtle" size="compact-sm" onClick={() => navigate("/settings/hardware")}>
               Auto · {placeName("hardware")}
             </Button>
           </SettingRow>

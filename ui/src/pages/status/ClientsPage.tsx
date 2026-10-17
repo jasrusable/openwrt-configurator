@@ -1,207 +1,214 @@
-// Clients: every device on the network, how it is connected and where, and
-// how much it has used, from the router's leases, neighbours and traffic
-// count and each access point's Wi-Fi clients. One click gives one a fixed
-// address (a draft edit).
-import { Badge, Button, Group, SegmentedControl, Select, SimpleGrid, Stack, Text, TextInput } from "@mantine/core";
-import {
-  IconBulb,
-  IconCamera,
-  IconDeviceDesktop,
-  IconDeviceGamepad2,
-  IconDeviceLaptop,
-  IconDeviceMobile,
-  IconDeviceSpeaker,
-  IconDeviceTablet,
-  IconDeviceTv,
-  IconDeviceWatch,
-  IconDevices,
-  IconPrinter,
-  IconSearch,
-} from "@tabler/icons-react";
+// Clients: who is on the network, and is anyone badly served? Every device
+// seen, online or remembered (src/status/registry.ts), as a table: how and
+// where it is connected, its signal and link, its address, how much it has
+// used, when it was last here. A row opens its own page (ClientPage).
+import { Badge, Group, SegmentedControl, Select, Stack, Text, TextInput } from "@mantine/core";
+import { IconSearch } from "@tabler/icons-react";
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import type { Intent } from "../../../../src/intent/schema";
+import { clientHealth, needsLook, tone as toneOf } from "../../../../src/status/health";
 import type { ClientView } from "../../../../src/status/views";
-import { useSeries } from "../../data/history";
 import { useNetworkStatus } from "../../data/status";
-import { duration } from "../../facts";
-import { useDraft, useDraftValue } from "../../form/draft";
-import { AreaChart, SignalBars, Tile } from "../../kit/charts";
-import { EmptyState, ItemIcon, Section, SettingRow, SettingsPage } from "../../kit/layout";
+import { ago } from "../../facts";
+import { useDraftValue } from "../../form/draft";
 import { bytes } from "../../kit/format";
-import { BandBadge, liveLine, unread } from "./shared";
-import { bandLabels } from "../../../../src/intent/labels";
-import type { ClientKind } from "../../../../src/status/clientKind";
+import { dbm, Panel, StatusPage, ToneValue, Verdict } from "../../kit/status";
+import { StatusColumn, StatusTable } from "../../kit/StatusTable";
+import { ClientPage } from "./ClientPage";
+import { clientName, connectionWords, kindIcon, liveLine, ThingIcon, unread } from "./shared";
 
-/** Each kind's icon (src/status/clientKind.ts works out what a client is). */
-const kindIcons: Record<ClientKind, [typeof IconDevices, string]> = {
-  phone: [IconDeviceMobile, "blue"],
-  tablet: [IconDeviceTablet, "blue"],
-  watch: [IconDeviceWatch, "blue"],
-  laptop: [IconDeviceLaptop, "indigo"],
-  computer: [IconDeviceDesktop, "indigo"],
-  tv: [IconDeviceTv, "violet"],
-  speaker: [IconDeviceSpeaker, "violet"],
-  printer: [IconPrinter, "teal"],
-  camera: [IconCamera, "orange"],
-  console: [IconDeviceGamepad2, "pink"],
-  iot: [IconBulb, "yellow"],
-};
-// Unknown: a colour of its own, as grey is how a client that is not online is drawn.
-const kindOf = (c: ClientView) => (c.kind ? kindIcons[c.kind] : ([IconDevices, "cyan"] as const));
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-const how = (c: ClientView) =>
-  c.connection.kind === "wifi"
-    ? [
-        c.connection.ssid,
-        `on ${c.connection.accessPoint}`,
-        c.connection.connected !== undefined ? `for ${duration(c.connection.connected)}` : undefined,
-      ]
-        .filter(Boolean)
-        .join(" ")
-    : c.connection.kind === "wired"
-      ? "Cable"
-      : "Not seen lately";
+/** Which clients the list shows. */
+const shows = {
+  online: (c: ClientView) => c.state === "online",
+  all: () => true,
+  new: (c: ClientView) => !!c.new,
+  look: (c: ClientView, poor: Set<string>) => poor.has(c.mac),
+} as const;
 
-const Chip = ({ color, children }: { color: string; children: React.ReactNode }) => (
-  <Badge variant="light" color={color} radius="sm" size="sm" style={{ textTransform: "none" }}>
+const Tag = ({ children }: { children: React.ReactNode }) => (
+  <Badge variant="default" radius="sm" size="xs" style={{ textTransform: "none", fontWeight: 500 }}>
     {children}
   </Badge>
 );
 
-const ClientRow = ({ client }: { client: ClientView }) => {
-  const draft = useDraft();
+const ClientList = () => {
   const navigate = useNavigate();
   const intent: Intent = useDraftValue();
-  const network = intent.networks.findIndex((n) => n.id === client.network);
-  // A fixed address: its current one, under its name, in the draft (Save shows it).
-  const reserve = () => {
-    const n = intent.networks[network];
-    const name = (client.name ?? `device-${client.mac.slice(-5).replace(":", "")}`).toLowerCase().replace(/[^a-z0-9-]/g, "-");
-    draft.set(`networks.${network}.dhcp.reservations`, [...n.dhcp.reservations, { name, mac: client.mac, address: client.ipv4! }]);
-    navigate(`/networks/${network}`);
-  };
-  const [icon, color] = kindOf(client);
-  const wifi = client.connection.kind === "wifi" ? client.connection : undefined;
-  return (
-    <SettingRow
-      label={
-        <Group gap={10} wrap="nowrap">
-          <ItemIcon icon={icon} color={color} off={client.state !== "online"} />
+  const status = useNetworkStatus();
+  const live = status.data;
+  const [which, setWhich] = useState<keyof typeof shows>("online");
+  const [network, setNetwork] = useState<string | null>(null);
+  const [accessPoint, setAccessPoint] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const all = live?.clientList ?? [];
+  const radios = live?.radios ?? [];
+  const online = all.filter((c) => c.state === "online");
+  const health = new Map(all.map((c) => [c.mac, clientHealth(c, radios)]));
+  const poor = new Set(online.filter((c) => needsLook(health.get(c.mac)!)).map((c) => c.mac));
+  const fresh = all.filter((c) => c.new);
+  const term = search.trim().toLowerCase();
+  const rows = all.filter(
+    (c) =>
+      shows[which](c, poor) &&
+      (!network || c.network === network) &&
+      (!accessPoint || (c.connection.kind === "wifi" && c.connection.accessPoint === accessPoint)) &&
+      (!term || [c.name, c.mac, c.model, c.ipv4, ...c.ipv6].some((v) => v?.toLowerCase().includes(term)))
+  );
+  const networkName = (id?: string) => intent.networks.find((n) => n.id === id)?.name;
+  const wifi = (c: ClientView) => (c.connection.kind === "wifi" ? c.connection : undefined);
+  const seen = (c: ClientView) => (c.state === "online" ? "now" : c.lastSeen ? ago(c.lastSeen) : c.state === "recent" ? "lately" : "—");
+  const columns: StatusColumn<ClientView>[] = [
+    {
+      key: "name",
+      header: "Name",
+      sort: (c) => clientName(c).toLowerCase(),
+      cell: (c) => (
+        <Group gap={10} wrap="nowrap" style={{ minWidth: 0 }}>
+          <ThingIcon icon={kindIcon(c.kind)} away={c.state !== "online"} />
           <Stack gap={0} style={{ minWidth: 0 }}>
-            <Text size="sm" fw={500} truncate>
-              {client.name ?? client.mac}
-            </Text>
-            <Text size="xs" c="dimmed" truncate>
-              {[client.ipv4, intent.networks[network]?.name, how(client)].filter(Boolean).join(" · ")}
-            </Text>
+            <Group gap={6} wrap="nowrap">
+              <Text size="sm" fw={500} truncate maw={220}>
+                {clientName(c)}
+              </Text>
+              {c.new && <Tag>New</Tag>}
+              {c.reserved && <Tag>Fixed address</Tag>}
+            </Group>
+            {c.model && (
+              <Text size="xs" c="dimmed" truncate>
+                {c.model}
+              </Text>
+            )}
           </Stack>
         </Group>
-      }
-    >
-      <Group gap="sm" justify="flex-end">
-        {client.traffic && (
-          <Text size="xs" c="dimmed" ta="right" style={{ whiteSpace: "nowrap" }}>
-            ↓ {bytes(client.traffic.down)} · ↑ {bytes(client.traffic.up)}
-          </Text>
-        )}
-        <BandBadge band={wifi?.band} />
-        {wifi && <SignalBars dbm={wifi.signal} />}
-        {client.connection.kind === "wired" && <Chip color="gray">Cable</Chip>}
-        {client.reserved ? (
-          <Chip color="gray">Fixed address</Chip>
+      ),
+    },
+    { key: "network", header: "Network", sort: (c) => networkName(c.network), cell: (c) => <Text size="sm">{networkName(c.network) ?? "—"}</Text> },
+    { key: "connection", header: "Connection", sort: connectionWords, cell: (c) => <Text size="sm">{connectionWords(c)}</Text> },
+    {
+      key: "signal",
+      header: "Signal",
+      align: "right",
+      sort: (c) => wifi(c)?.signal,
+      cell: (c) => {
+        const h = health.get(c.mac)!;
+        return wifi(c)?.signal !== undefined ? (
+          <ToneValue tone={c.state === "online" ? toneOf.signal(wifi(c)!.signal) : undefined} hint={h.causes.length ? h.causes.map((x) => x.text).join("; ") : undefined}>
+            {dbm(wifi(c)!.signal)}
+          </ToneValue>
         ) : (
-          client.ipv4 &&
-          network >= 0 && (
-            <Button size="compact-xs" variant="subtle" color="gray" onClick={reserve}>
-              Reserve
-            </Button>
-          )
-        )}
-        {client.state !== "online" && <Chip color="gray">{client.state === "recent" ? "Seen lately" : "Away"}</Chip>}
+          <Text size="sm" c="dimmed">
+            —
+          </Text>
+        );
+      },
+    },
+    {
+      key: "rate",
+      header: "Link ↓ / ↑",
+      align: "right",
+      sort: (c) => wifi(c)?.txRate,
+      cell: (c) => (
+        <Text size="sm" style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+          {wifi(c)?.txRate !== undefined ? `${Math.round(wifi(c)!.txRate!)} / ${wifi(c)!.rxRate !== undefined ? Math.round(wifi(c)!.rxRate!) : "—"}` : "—"}
+        </Text>
+      ),
+    },
+    {
+      key: "address",
+      header: "Address",
+      // Numerically, by each part.
+      sort: (c) => (c.ipv4 ? c.ipv4.split(".").map((p) => p.padStart(3, "0")).join(".") : undefined),
+      cell: (c) => (
+        <Text size="sm" ff="monospace" fz={12.5}>
+          {c.ipv4 ?? "—"}
+        </Text>
+      ),
+    },
+    {
+      key: "traffic",
+      header: "Used",
+      align: "right",
+      sort: (c) => (c.traffic ? c.traffic.down + c.traffic.up : undefined),
+      cell: (c) => (
+        <Text size="sm" style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }} title={c.traffic ? `↓ ${bytes(c.traffic.down)} · ↑ ${bytes(c.traffic.up)} ${c.traffic.over === "month" ? "this month" : "since it joined"}` : undefined}>
+          {c.traffic ? bytes(c.traffic.down + c.traffic.up) : "—"}
+        </Text>
+      ),
+    },
+    {
+      key: "seen",
+      header: "Seen",
+      align: "right",
+      sort: (c) => (c.state === "online" ? Number.MAX_SAFE_INTEGER : (c.lastSeen ?? 0)),
+      cell: (c) => (
+        <Text size="sm" c={c.state === "online" ? undefined : "dimmed"} style={{ whiteSpace: "nowrap" }}>
+          {seen(c)}
+        </Text>
+      ),
+    },
+  ];
+  const accessPoints = [...new Set(online.flatMap((c) => (c.connection.kind === "wifi" ? [c.connection.accessPoint] : [])))].sort();
+  const onWifi = online.filter((c) => c.connection.kind === "wifi").length;
+  return (
+    <StatusPage title="Clients" live={liveLine(status)}>
+      <Verdict
+        tone={!live ? "off" : poor.size ? "fair" : "good"}
+        detail={live && [`${onWifi} on Wi-Fi`, `${online.length - onWifi} by cable`, fresh.length ? `${plural(fresh.length, "new device")} today` : undefined].filter(Boolean).join(" · ")}
+      >
+        {!live ? "Reading the network…" : `${online.length} online${poor.size ? ` · ${poor.size} could be better served` : ""}`}
+      </Verdict>
+      <Group gap="sm" wrap="wrap">
+        <SegmentedControl
+          size="xs"
+          value={which}
+          onChange={(v) => setWhich(v as keyof typeof shows)}
+          data={[
+            { value: "online", label: `Online ${online.length}` },
+            { value: "all", label: `All ${all.length}` },
+            { value: "new", label: `New ${fresh.length}` },
+            { value: "look", label: `Needs a look ${poor.size}` },
+          ]}
+        />
+        <Select size="xs" placeholder="Every network" clearable data={intent.networks.map((n) => ({ value: n.id, label: n.name || "Unnamed" }))} value={network} onChange={setNetwork} w={150} />
+        <Select size="xs" placeholder="Every access point" clearable data={accessPoints} value={accessPoint} onChange={setAccessPoint} w={170} />
+        <TextInput size="xs" placeholder="Name, address, MAC or model" leftSection={<IconSearch size={14} />} value={search} onChange={(e) => setSearch(e.currentTarget.value)} w={230} />
       </Group>
-    </SettingRow>
+      <Panel padded={false}>
+        <StatusTable
+          id="clients"
+          rows={rows}
+          columns={columns}
+          rowKey={(c) => c.mac}
+          onOpen={(c) => navigate(`/clients/${encodeURIComponent(c.mac)}`)}
+          empty={live ? "No devices match." : unread(status, "Reading the network…")}
+          phone={(c) => ({
+            lead: (
+              <Group gap={6} wrap="nowrap">
+                <Text size="sm" fw={500} truncate>
+                  {clientName(c)}
+                </Text>
+                {c.new && <Tag>New</Tag>}
+              </Group>
+            ),
+            sub: [connectionWords(c), c.ipv4, c.state !== "online" ? seen(c) : undefined].filter(Boolean).join(" · "),
+            end: wifi(c)?.signal !== undefined && c.state === "online" ? <ToneValue tone={toneOf.signal(wifi(c)!.signal)}>{dbm(wifi(c)!.signal)}</ToneValue> : undefined,
+          })}
+        />
+      </Panel>
+      {which === "all" && (
+        <Text size="xs" c="dimmed" px={4}>
+          Devices are remembered for 30 days after they were last online; one with a fixed address, always. A private address (one a phone makes up for each network) may come back as another.
+        </Text>
+      )}
+    </StatusPage>
   );
-};
-
-const sorts: Record<string, (a: ClientView, b: ClientView) => number> = {
-  name: (a, b) => (a.name ?? a.mac).localeCompare(b.name ?? b.mac),
-  traffic: (a, b) => (b.traffic ? b.traffic.down + b.traffic.up : -1) - (a.traffic ? a.traffic.down + a.traffic.up : -1),
-  signal: (a, b) =>
-    (b.connection.kind === "wifi" ? (b.connection.signal ?? -200) : -300) - (a.connection.kind === "wifi" ? (a.connection.signal ?? -200) : -300),
 };
 
 export const ClientsPage = () => {
-  const intent: Intent = useDraftValue();
-  const status = useNetworkStatus();
-  const history = useSeries("clients");
-  const [search, setSearch] = useState("");
-  const [network, setNetwork] = useState<string | null>(null);
-  const [which, setWhich] = useState("online");
-  const [sort, setSort] = useState("name");
-  const all = status.data?.clientList ?? [];
-  const online = all.filter((c) => c.state === "online");
-  const wifi = online.filter((c) => c.connection.kind === "wifi");
-  const bands = Object.values(bandLabels)
-    .map((b) => [b, wifi.filter((c) => c.connection.kind === "wifi" && c.connection.band === b).length] as const)
-    .filter(([, n]) => n);
-  // Like with like: the router's monthly counts where it keeps them, else the access points'.
-  const counted = online.filter((c) => c.traffic);
-  const pool = counted.some((c) => c.traffic?.over === "month") ? counted.filter((c) => c.traffic?.over === "month") : counted;
-  const top = [...pool].sort(sorts.traffic)[0];
-  const term = search.trim().toLowerCase();
-  const shown = all
-    .filter(
-      (c) =>
-        (which === "all" || c.state === "online") &&
-        (!network || c.network === network) &&
-        (!term || [c.name, c.mac, c.ipv4, ...c.ipv6, c.connection.kind === "wifi" ? c.connection.accessPoint : ""].some((v) => v?.toLowerCase().includes(term)))
-    )
-    .sort(sorts[sort]);
-  return (
-    <SettingsPage title="Clients" description={liveLine(intent.system.name, status)}>
-      <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
-        <Tile label="Online" value={status.data ? online.length : "—"} color="cyan" sub={status.data ? `${all.length} known` : undefined}>
-          <AreaChart series={[history]} colors={["cyan"]} height={28} />
-        </Tile>
-        <Tile label="On Wi-Fi" value={status.data ? wifi.length : "—"} sub={status.data ? bands.map(([b, n]) => `${n} on ${b}`).join(" · ") || "None now" : undefined} />
-        <Tile label="By cable" value={status.data ? online.filter((c) => c.connection.kind === "wired").length : "—"} sub={status.data ? "Or not on Wi-Fi" : undefined} />
-        <Tile
-          label="Most traffic"
-          value={<Text component="span" fz={18} fw={600} truncate display="block">{top?.traffic ? (top.name ?? top.mac) : "—"}</Text>}
-          sub={
-            top?.traffic
-              ? `↓ ${bytes(top.traffic.down)} · ↑ ${bytes(top.traffic.up)} ${top.traffic.over === "month" ? "this month" : "since it joined"}`
-              : status.data
-                ? "Not counted yet"
-                : undefined
-          }
-        />
-      </SimpleGrid>
-      <Group gap="sm">
-        <TextInput placeholder="Name, address or MAC" leftSection={<IconSearch size={14} />} value={search} onChange={(e) => setSearch(e.currentTarget.value)} w={220} />
-        <Select placeholder="Every network" clearable data={intent.networks.map((n) => ({ value: n.id, label: n.name || "Unnamed" }))} value={network} onChange={setNetwork} w={160} />
-        <SegmentedControl size="xs" value={which} onChange={setWhich} data={[{ value: "online", label: "Online" }, { value: "all", label: "All" }]} />
-        <Select
-          size="xs"
-          w={130}
-          value={sort}
-          onChange={(v) => setSort(v ?? "name")}
-          allowDeselect={false}
-          data={[
-            { value: "name", label: "By name" },
-            { value: "traffic", label: "By traffic" },
-            { value: "signal", label: "By signal" },
-          ]}
-        />
-      </Group>
-      <Section>
-        {shown.length === 0 ? (
-          <EmptyState icon={IconDevices}>{status.data ? "No devices match." : unread(status, "Reading the network…")}</EmptyState>
-        ) : (
-          shown.map((c) => <ClientRow key={c.mac} client={c} />)
-        )}
-      </Section>
-    </SettingsPage>
-  );
+  const mac = useParams()["*"];
+  return mac ? <ClientPage mac={decodeURIComponent(mac)} /> : <ClientList />;
 };
+

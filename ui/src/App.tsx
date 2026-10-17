@@ -1,12 +1,12 @@
-import { Alert, AppShell, Burger, Button, Center, Group, NavLink, Paper, PasswordInput, Skeleton, Stack, Text, ThemeIcon } from "@mantine/core";
+import { Alert, AppShell, Badge, Burger, Button, Center, Divider, Group, NavLink, Paper, PasswordInput, Skeleton, Stack, Text, ThemeIcon } from "@mantine/core";
 import { Hint } from "./kit/Hint";
 import { useDisclosure } from "@mantine/hooks";
-import { IconTopologyStar3 } from "@tabler/icons-react";
+import { IconChevronLeft, IconSettings, IconTopologyStar3 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { logIn, NoSettingsError, onLoginNeeded } from "./data/api";
 import { prefetchApplyPlan, useFreshDevices } from "./data/devices";
-import { prefetchNetworkStatus } from "./data/status";
+import { prefetchNetworkStatus, useNetworkStatus } from "./data/status";
 import {
   createHashRouter,
   Navigate,
@@ -25,8 +25,8 @@ import { IntentForm, useSaveActions } from "./form/IntentForm";
 import { ProblemCount, ProblemsButton, usePageProblems } from "./form/Problems";
 import { useUpdates } from "./data/firmware";
 import { UpdateDot } from "./kit/UpdateDot";
-import { AppIcon } from "./kit/layout";
-import { groups, pages } from "./pages";
+import { AppIcon, StatusDot } from "./kit/layout";
+import { settingsPages, statusPages } from "./pages";
 import { ApplyModal } from "./provision/ApplyModal";
 import { ProvisionButton } from "./provision/ProvisionButton";
 
@@ -60,10 +60,11 @@ const SaveBar = () => {
           </Text>
         )
       )}
-      <Button variant="subtle" color="gray" onClick={revert} disabled={!dirty || saving}>
+      {/* On a phone, only while there is something to save: room for the rest of the header. */}
+      <Button variant="subtle" color="gray" onClick={revert} disabled={!dirty || saving} visibleFrom={dirty ? undefined : "sm"}>
         Revert
       </Button>
-      <Button variant={dirty ? "filled" : "default"} onClick={save} disabled={!dirty || !valid} loading={saving}>
+      <Button variant={dirty ? "filled" : "default"} onClick={save} disabled={!dirty || !valid} loading={saving} visibleFrom={dirty ? undefined : "sm"}>
         Save
       </Button>
     </Group>
@@ -77,7 +78,7 @@ const Mark = () => (
   </ThemeIcon>
 );
 
-/** Beside a page in the sidebar: its problems' count, and System's update dot. */
+/** Beside a settings page in the sidebar: its problems' count, and System's update dot. */
 const NavMarks = ({ id, problems }: { id: string; problems: number }) => {
   const updates = useUpdates();
   return (
@@ -87,6 +88,56 @@ const NavMarks = ({ id, problems }: { id: string; problems: number }) => {
     </Group>
   );
 };
+
+/**
+ * Beside a status page: quiet unless something needs you. What needs
+ * attention on Overview, a dot on Internet while it is down (amber on a
+ * backup line), on Devices while one does not answer; who is online.
+ */
+const StatusMarks = ({ id }: { id: string }) => {
+  const live = useNetworkStatus().data;
+  if (!live) return null;
+  if (id === "overview") {
+    const items = (live.attention ?? []).filter((a) => a.severity !== "info");
+    return items.length ? (
+      <Badge size="sm" circle color={items.some((a) => a.severity === "problem") ? "red" : "orange"} variant="filled" aria-label={`${items.length} need attention`}>
+        {items.length}
+      </Badge>
+    ) : null;
+  }
+  if (id === "internet" && live.internet) {
+    const backup = live.connections.length > 1 && live.internet.up && !live.connections[0]?.inUse;
+    return !live.internet.up ? <StatusDot color="red" /> : backup ? <StatusDot color="orange" /> : null;
+  }
+  if (id === "devices") return (live.deviceViews ?? []).some((d) => !d.reachable && !d.rebooting) ? <StatusDot color="red" /> : null;
+  if (id === "clients") {
+    const online = (live.clientList ?? []).filter((c) => c.state === "online").length;
+    return (
+      <Text size="xs" c="dimmed" style={{ fontVariantNumeric: "tabular-nums" }}>
+        {online}
+      </Text>
+    );
+  }
+  return null;
+};
+
+// Where each mode was left, so going back and forth returns there (a per-viewer convenience).
+const remembered = (key: string, fallback: string, prefix: (path: string) => boolean) => {
+  try {
+    const path = localStorage.getItem(key);
+    return path && prefix(path) ? path : fallback;
+  } catch {
+    return fallback;
+  }
+};
+const remember = (key: string, path: string) => {
+  try {
+    localStorage.setItem(key, path);
+  } catch {
+    // Storage blocked: each mode opens on its first page.
+  }
+};
+const isSettings = (path: string) => path === "/settings" || path.startsWith("/settings/");
 
 const Shell = () => {
   const navigate = useNavigate();
@@ -98,7 +149,15 @@ const Shell = () => {
   useEffect(() => {
     document.title = site;
   }, [site]);
-  const isActive = (id: string) => pathname === `/${id}` || pathname.startsWith(`/${id}/`);
+  const inSettings = isSettings(pathname);
+  useEffect(() => remember(inSettings ? "onc-last-settings" : "onc-last-status", pathname), [pathname, inSettings]);
+  const isActive = (base: string) => pathname === base || pathname.startsWith(`${base}/`);
+  const go = (path: string) => {
+    navigate(path);
+    nav.close();
+  };
+  const allProblems = settingsPages.reduce((n, page) => n + problems(page.id), 0);
+  const updates = useUpdates();
   return (
     <AppShell
       header={{ height: 56 }}
@@ -122,33 +181,66 @@ const Shell = () => {
         </Group>
       </AppShell.Header>
       <AppShell.Navbar p="sm" className="onc-chrome">
-        {groups.map((group) => (
-          <Stack key={group.id} gap={0} mb="md">
-            {/* A group's title: a quiet label, not a page. */}
+        {inSettings ? (
+          <Stack gap={0}>
+            <NavLink
+              label="Status"
+              leftSection={<IconChevronLeft size={18} />}
+              className="onc-nav onc-nav-mode"
+              onClick={() => go(remembered("onc-last-status", "/overview", (p) => !isSettings(p)))}
+              style={{ borderRadius: 8 }}
+              mb="sm"
+            />
+            {/* The mode's title: a quiet label, not a page. */}
             <Text size="xs" fw={600} c="dimmed" px={12} pb={6}>
-              {group.label}
+              Settings
             </Text>
-            {pages
-              .filter((page) => page.group === group.id)
-              .map(({ id, label, icon, color }) => (
-                <NavLink
-                  key={id}
-                  label={label}
-                  leftSection={<AppIcon icon={icon} color={color} />}
-                  rightSection={<NavMarks id={id} problems={problems(id)} />}
-                  active={isActive(id)}
-                  // A soft fill, as macOS selects among coloured icons.
-                  className="onc-nav"
-                  onClick={() => {
-                    navigate(`/${id}`);
-                    nav.close();
-                  }}
-                  style={{ borderRadius: 8 }}
-                  mb={2}
-                />
-              ))}
+            {settingsPages.map(({ id, label, icon, color }) => (
+              <NavLink
+                key={id}
+                label={label}
+                leftSection={<AppIcon icon={icon} color={color} />}
+                rightSection={<NavMarks id={id} problems={problems(id)} />}
+                active={isActive(`/settings/${id}`)}
+                // A soft fill, as macOS selects among coloured icons.
+                className="onc-nav"
+                onClick={() => go(`/settings/${id}`)}
+                style={{ borderRadius: 8 }}
+                mb={2}
+              />
+            ))}
           </Stack>
-        ))}
+        ) : (
+          <Stack gap={0} h="100%">
+            {statusPages.map(({ id, label, icon, color }) => (
+              <NavLink
+                key={id}
+                label={label}
+                leftSection={<AppIcon icon={icon} color={color} />}
+                rightSection={<StatusMarks id={id} />}
+                active={isActive(`/${id}`)}
+                className="onc-nav"
+                onClick={() => go(`/${id}`)}
+                style={{ borderRadius: 8 }}
+                mb={2}
+              />
+            ))}
+            <Divider my="sm" color="var(--onc-separator)" />
+            <NavLink
+              label="Settings"
+              leftSection={<AppIcon icon={IconSettings} color="gray" />}
+              rightSection={
+                <Group gap={6} wrap="nowrap">
+                  {updates && <UpdateDot label={updates.text} />}
+                  <ProblemCount count={allProblems} />
+                </Group>
+              }
+              className="onc-nav"
+              onClick={() => go(remembered("onc-last-settings", "/settings/internet", isSettings))}
+              style={{ borderRadius: 8 }}
+            />
+          </Stack>
+        )}
       </AppShell.Navbar>
       <AppShell.Main>
         <Outlet />
@@ -173,8 +265,8 @@ const PageError = ({ inShell = false }: { inShell?: boolean }) => {
         <Text size="sm" mb="md">
           {(error as Error)?.message ?? String(error)}
         </Text>
-        <Button variant="default" onClick={() => (window.location.hash = "/system")}>
-          Go to System
+        <Button variant="default" onClick={() => (window.location.hash = "/overview")}>
+          Go to Overview
         </Button>
       </Alert>
     </Center>
@@ -198,19 +290,25 @@ const router = createHashRouter([
         errorElement: <PageError inShell />,
         children: [
           { index: true, element: <Navigate to="overview" replace /> },
-          ...pages.map((page) => ({ path: `${page.id}/*`, element: <page.Page /> })),
+          // Status pages; Clients and Devices have one page per item beneath.
+          ...statusPages.map((page) => ({ path: ["clients", "devices"].includes(page.id) ? `${page.id}/*` : page.id, element: <page.Page /> })),
+          { path: "settings", element: <Navigate to="/settings/internet" replace /> },
+          ...settingsPages.map((page) => ({ path: `settings/${page.id}/*`, element: <page.Page /> })),
           // Apply was a page: it is the sheet over the Overview now.
           { path: "apply", element: <Navigate to="/overview?apply" replace /> },
-          { path: "general/*", element: <MovedTo base="/system" /> },
+          // Settings were at the top before their mode: /internet/0 is a line's settings, /internet itself its status.
+          ...["system", "networks", "firewall", "vpn", "dns", "hardware", "internet", "wifi"].map((id) => ({ path: `${id}/*`, element: <MovedTo base={`/settings/${id}`} /> })),
+          { path: "general/*", element: <MovedTo base="/settings/system" /> },
           // The catalog was its own page, named Fixes.
-          { path: "fixes", element: <Navigate to="/system/patches" replace /> },
-          { path: "fixes/*", element: <Navigate to="/system/patches" replace /> },
+          { path: "fixes", element: <Navigate to="/settings/system/patches" replace /> },
+          { path: "fixes/*", element: <Navigate to="/settings/system/patches" replace /> },
           // Old addresses: General is System, SSIDs and Radios are Wi-Fi's tabs.
-          { path: "ssids/*", element: <MovedTo base="/wifi" /> },
-          { path: "radios/*", element: <MovedTo base="/wifi/radios" /> },
+          { path: "ssids/*", element: <MovedTo base="/settings/wifi" /> },
+          { path: "radios/*", element: <MovedTo base="/settings/wifi/radios" /> },
+          // Performance was the line and the air: each has its own page now.
+          { path: "performance", element: <Navigate to="/internet" replace /> },
           // Status's tabs were under the Overview: each is its own page now.
-          ...["clients", "devices", "activity"].map((tab) => ({ path: `overview/${tab}`, element: <Navigate to={`/${tab}`} replace /> })),
-          ...["internet", "wifi"].map((tab) => ({ path: `overview/${tab}`, element: <Navigate to="/performance" replace /> })),
+          ...["clients", "devices", "activity", "internet", "wifi"].map((tab) => ({ path: `overview/${tab}`, element: <Navigate to={`/${tab}`} replace /> })),
           { path: "*", element: <Navigate to="overview" replace /> },
         ],
       },

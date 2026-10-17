@@ -8,9 +8,9 @@ import { RemoteAccessPage } from "./RemoteAccessPage";
 import { SitesPage } from "./SitesPage";
 
 const tabs = [
-  { value: "remote", label: placeName("vpnRemote"), path: "/vpn" },
-  { value: "sites", label: placeName("vpnSites"), path: "/vpn/sites" },
-  { value: "providers", label: placeName("vpnProviders"), path: "/vpn/providers" },
+  { value: "remote", label: placeName("vpnRemote"), path: "/settings/vpn" },
+  { value: "sites", label: placeName("vpnSites"), path: "/settings/vpn/sites" },
+  { value: "providers", label: placeName("vpnProviders"), path: "/settings/vpn/providers" },
 ];
 
 export const VpnPage = () => {

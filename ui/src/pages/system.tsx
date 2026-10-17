@@ -18,7 +18,7 @@ const sections = [
   { value: "backup", Page: BackupPage },
 ] as const;
 
-const tabs = sections.map(({ value }, i) => ({ value, label: placeName(value), path: i === 0 ? "/system" : `/system/${value}` }));
+const tabs = sections.map(({ value }, i) => ({ value, label: placeName(value), path: i === 0 ? "/settings/system" : `/settings/system/${value}` }));
 
 export const SystemSection = () => {
   const [first = ""] = (useParams()["*"] ?? "").split("/");

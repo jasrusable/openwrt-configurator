@@ -1,7 +1,7 @@
 // The four words every Status page colours by, and a client's health with
 // its cause: the thresholds of docs/status-redesign.md, held.
 import test from "ava";
-import { cellTone, clientHealth, tone, uptimeOf, worst } from "../../status/health";
+import { cellTone, clientHealth, needsLook, tone, uptimeOf, worst } from "../../status/health";
 import type { ClientView } from "../../status/views";
 
 test("each reading's tone at its thresholds; unknown is off", (t) => {
@@ -33,10 +33,10 @@ const wifi = (over: Partial<Extract<ClientView["connection"], { kind: "wifi" }>>
 
 test("a client: good, or what makes it less, each cause named", (t) => {
   t.deepEqual(clientHealth(wifi()), { tone: "good", causes: [] });
-  t.deepEqual(clientHealth(wifi({ signal: -79 })), { tone: "poor", causes: [{ tone: "poor", text: "Weak signal (-79 dBm)" }] });
-  t.deepEqual(clientHealth(wifi({ signal: -70 })).causes.map((c) => c.text), ["Fair signal (-70 dBm)"]);
+  t.deepEqual(clientHealth(wifi({ signal: -79 })), { tone: "poor", causes: [{ kind: "signal", tone: "poor", text: "Weak signal (−79 dBm)" }] });
+  t.deepEqual(clientHealth(wifi({ signal: -70 })).causes.map((c) => c.text), ["Fair signal (−70 dBm)"]);
   const busy = clientHealth(wifi(), [{ accessPoint: "loft", ifname: "phy1-ap0", band: "5 GHz", clients: 9, busy: 72 }]);
-  t.deepEqual(busy, { tone: "fair", causes: [{ tone: "fair", text: "Busy channel (72% of the air in use)" }] });
+  t.deepEqual(busy, { tone: "fair", causes: [{ kind: "busy", tone: "fair", text: "Busy channel (72% of the air in use)" }] });
   const sticky = clientHealth(
     wifi({ signal: -74 }, {
       heardBy: [
@@ -45,7 +45,7 @@ test("a client: good, or what makes it less, each cause named", (t) => {
       ],
     })
   );
-  t.deepEqual(sticky.causes.map((c) => c.text), ["Fair signal (-74 dBm)", "office hears it 19 dB better"]);
+  t.deepEqual(sticky.causes.map((c) => c.text), ["Fair signal (−74 dBm)", "office hears it 19 dB better"]);
   const slowBand = clientHealth(
     wifi({ band: "2.4 GHz", signal: -60 }, { heardBy: [{ accessPoint: "loft", band: "2.4 GHz", signal: -60, connected: true }, { accessPoint: "loft", band: "5 GHz", signal: -66, connected: false }] })
   );
@@ -66,4 +66,11 @@ test("uptime: each point weighed by its reads; nothing read, nothing said", (t) 
   t.is(uptimeOf([[0, 1, 6], [60_000, 0.5, 6]]), 0.75);
   t.is(uptimeOf([]), undefined);
   t.deepEqual([undefined, 1, 0.9995, 0.7, 0.2].map(cellTone), ["off", "good", "good", "fair", "poor"]);
+});
+
+test("worth a look: served poorly, or with something to do; a fair signal alone is ordinary", (t) => {
+  t.false(needsLook(clientHealth(wifi({ signal: -70 }))));
+  t.true(needsLook(clientHealth(wifi({ signal: -80 }))));
+  t.true(needsLook(clientHealth(wifi({ signal: -70 }, { heardBy: [{ accessPoint: "loft", band: "5 GHz", signal: -70, connected: true }, { accessPoint: "office", band: "5 GHz", signal: -55, connected: false }] }))));
+  t.false(needsLook(clientHealth(wifi())));
 });

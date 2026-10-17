@@ -29,7 +29,7 @@ const NewClientPage = () => {
   const [route, setRoute] = useState<VpnClient["route"]>("home");
   const [made, setMade] = useState<{ client: VpnClient; privateKey: string }>();
   const [error, setError] = useState<string>();
-  const back = () => navigate("/vpn");
+  const back = () => navigate("/settings/vpn");
   const add = () => {
     const host = nextClientHost(intent.vpn.remote_access.clients);
     if (!host || !name.trim()) return;
@@ -199,7 +199,7 @@ export const RemoteAccessPage = ({ sub }: { sub: string }) => {
     <ListPage
       list={clients}
       sub={sub}
-      base="/vpn"
+      base="/settings/vpn"
       page={{ title: <Experimental>Remote access</Experimental>, description: "Your phones and laptops, home from anywhere.", before: <Settings /> }}
     />
   ) : (

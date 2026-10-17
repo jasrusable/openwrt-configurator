@@ -1,91 +1,85 @@
-// Activity: what happened on each device, in words: lines and networks going
-// up and down, ports connecting, restarts, applies from this app, its own
-// marks. Read from the devices' logs while this page is open, and kept beside
-// the settings, as logs roll over.
-import { Group, SegmentedControl, Select, Text, ThemeIcon } from "@mantine/core";
-import { IconAlertTriangle, IconCircleCheck, IconInfoCircle } from "@tabler/icons-react";
+// Activity: what happened, and when. Every event the collector told from
+// one read to the next (src/status/events.ts): lines going down and coming
+// back, failovers, devices lost and restarted, services, ports, Wi-Fi and
+// mesh links, new clients, applies; by day, newest first, each opening what
+// it is about. A device's own log is on its page.
+import { Group, SegmentedControl, Select, Stack, Text } from "@mantine/core";
 import { useState } from "react";
-import type { Intent } from "../../../../src/intent/schema";
-import type { NetworkEvent } from "../../../../src/status/events";
-import { useNetworkStatus } from "../../data/status";
-import { useDraftValue } from "../../form/draft";
-import { EmptyState, Section, SettingRow, SettingsPage } from "../../kit/layout";
-import { liveLine, unread } from "./shared";
+import { useNavigate } from "react-router";
+import type { EventKind, NetworkEvent } from "../../../../src/status/events";
+import { eventTone, useAllEvents, useNetworkStatus } from "../../data/status";
+import { EmptyState } from "../../kit/layout";
+import { Panel, StatusPage, ToneDot } from "../../kit/status";
+import { liveLine, subjectLink, unread } from "./shared";
 
 const day = (at: number) => new Date(at).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
 const time = (at: number) => new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 
-const look: Record<NetworkEvent["severity"], [typeof IconInfoCircle, string]> = {
-  problem: [IconAlertTriangle, "red"],
-  warning: [IconAlertTriangle, "orange"],
-  ok: [IconCircleCheck, "green"],
-  info: [IconInfoCircle, "gray"],
-};
-
 /** The filter's choices: what each shows. */
-const shows: Record<string, (e: NetworkEvent) => boolean> = {
-  all: () => true,
-  problems: (e) => e.severity === "problem" || e.severity === "warning",
-  changes: (e) => e.kind === "apply" || e.kind === "reboot",
+const shows: Record<string, { label: string; kinds?: EventKind[]; problems?: true }> = {
+  all: { label: "Everything" },
+  problems: { label: "Problems", problems: true },
+  internet: { label: "Internet", kinds: ["line", "failover"] },
+  devices: { label: "Devices", kinds: ["device", "reboot", "service", "port"] },
+  wifi: { label: "Wi-Fi", kinds: ["radio", "mesh"] },
+  clients: { label: "Clients", kinds: ["client"] },
+  applies: { label: "Applies", kinds: ["apply"] },
 };
 
 export const ActivityPage = () => {
-  const intent: Intent = useDraftValue();
+  const navigate = useNavigate();
   const status = useNetworkStatus();
-  const [device, setDevice] = useState<string | null>(null);
+  const kept = useAllEvents();
   const [which, setWhich] = useState("all");
-  const all = status.data?.events ?? [];
-  const events = all.filter((e) => (!device || e.device === device) && shows[which](e));
+  const [device, setDevice] = useState<string | null>(null);
+  // Every event kept, once read; the snapshot's latest until then.
+  const all: NetworkEvent[] = kept.data ?? status.data?.events ?? [];
+  const show = shows[which];
+  const events = all.filter(
+    (e) => (!device || e.device === device) && (!show.kinds || show.kinds.includes(e.kind)) && (!show.problems || e.severity === "problem" || e.severity === "warning")
+  );
   const days = [...new Set(events.map((e) => day(e.at)))];
+  const oldest = all[all.length - 1]?.at;
   return (
-    <SettingsPage title="Activity" description={liveLine(intent.system.name, status)}>
-      <Group gap="sm">
-        <SegmentedControl
-          size="xs"
-          value={which}
-          onChange={setWhich}
-          data={[
-            { value: "all", label: "Everything" },
-            { value: "problems", label: "Problems" },
-            { value: "changes", label: "Applies and restarts" },
-          ]}
-        />
-        <Select size="xs" placeholder="Every device" clearable data={[...new Set(all.flatMap((e) => (e.device ? [e.device] : [])))]} value={device} onChange={setDevice} w={180} />
+    <StatusPage title="Activity" live={liveLine(status)}>
+      <Group gap="sm" wrap="wrap">
+        <SegmentedControl size="xs" value={which} onChange={setWhich} data={Object.entries(shows).map(([value, { label }]) => ({ value, label }))} />
+        <Select size="xs" placeholder="Every device" clearable data={[...new Set(all.flatMap((e) => (e.device ? [e.device] : [])))].sort()} value={device} onChange={setDevice} w={180} />
       </Group>
       {events.length === 0 && (
-        <Section>
-          <EmptyState>{status.data ? "Nothing to tell here." : unread(status, "Reading the devices' logs…")}</EmptyState>
-        </Section>
+        <Panel>
+          <EmptyState>{status.data ? (all.length ? "Nothing of this kind." : "Nothing has happened since the app started watching.") : unread(status, "Reading…")}</EmptyState>
+        </Panel>
       )}
       {days.map((d) => (
-        <Section key={d} title={d}>
+        <Panel key={d} title={d} padded={false}>
           {events
             .filter((e) => day(e.at) === d)
-            .map((e, i) => {
-              const [Icon, color] = look[e.severity];
-              return (
-                <SettingRow
-                  key={`${e.at}-${e.device}-${i}`}
-                  label={
-                    <Group gap={10} wrap="nowrap">
-                      <Text size="xs" c="dimmed" w={60} style={{ whiteSpace: "nowrap" }}>
-                        {time(e.at)}
-                      </Text>
-                      <ThemeIcon variant="light" color={color} radius="xl" size={22}>
-                        <Icon size={13} />
-                      </ThemeIcon>
-                      {e.text}
-                    </Group>
-                  }
-                >
-                  <Text size="xs" c="dimmed">
+            .map((e, i) => (
+              <button key={`${e.at}-${e.subject}-${i}`} type="button" className="onc-list-row" onClick={() => navigate(subjectLink(e))}>
+                <Text size="xs" c="dimmed" w={68} style={{ flexShrink: 0, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                  {time(e.at)}
+                </Text>
+                <ToneDot tone={eventTone(e)} label={e.severity} />
+                <Text size="sm" style={{ flex: 1, minWidth: 0 }}>
+                  {e.text}
+                </Text>
+                {e.device && (
+                  <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
                     {e.device}
                   </Text>
-                </SettingRow>
-              );
-            })}
-        </Section>
+                )}
+              </button>
+            ))}
+        </Panel>
       ))}
-    </SettingsPage>
+      {oldest !== undefined && (
+        <Stack gap={0} px={4}>
+          <Text size="xs" c="dimmed">
+            Kept for 30 days. The earliest here is from {day(oldest)}; what happened while the app was not running is told where a device keeps a time for it (a line's or a device's uptime).
+          </Text>
+        </Stack>
+      )}
+    </StatusPage>
   );
 };

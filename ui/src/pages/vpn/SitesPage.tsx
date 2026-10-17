@@ -33,7 +33,7 @@ const NewSitePage = () => {
   const [error, setError] = useState<string>();
   // As typed, so a comma can be typed; read as a list when added.
   const [subnets, setSubnets] = useState("");
-  const back = () => navigate("/vpn/sites");
+  const back = () => navigate("/settings/vpn/sites");
   const read = (text: string) => {
     setCode(text);
     if (!text.trim()) return setError(undefined);
@@ -183,7 +183,7 @@ export const SitesPage = ({ sub }: { sub: string }) => {
     <ListPage
       list={sitesList}
       sub={sub}
-      base="/vpn/sites"
+      base="/settings/vpn/sites"
       page={{ title: <Experimental>Sites</Experimental>, description: "Other places linked to this one.", before: <ThisSite /> }}
     />
   ) : (

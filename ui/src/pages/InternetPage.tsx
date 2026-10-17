@@ -149,7 +149,7 @@ const PriorityRow = ({ index }: { index: number }) => {
   if (connections.length < 2) return null;
   const makeMain = () => {
     draft.replace({ ...intent, internet: { ...intent.internet, lines: withMain(connections, index) } });
-    navigate("/internet/0");
+    navigate("/settings/internet/0");
   };
   return (
     <SettingRow label={role.label} description={role.description}>

@@ -66,6 +66,9 @@ npm run equivalence -- [<git-ref>] [--state]
 npm run package          # pkg -> ./artifacts (needs npm run build first)
 npm run ui -- <intent>   # build the web UI and serve it on http://127.0.0.1:8080
 npm run dev -- <intent>  # the same, with hot reload: UI rebuilds and reloads, backend restarts
+npx ts-node --transpile-only scripts/status-preview.ts [--port 8090]
+                         # the Status pages over a made-up day, offline (TEST-NET addresses,
+                         # a frozen clock): for looking at them; build the UI first
 
 # Against real devices — only on explicit request:
 npm run provision          <config-file>
@@ -323,6 +326,18 @@ network (the first-run screen): each reviewed first (migrated, checked,
 its changes listed; a backup with `$secret` refs refused), the file it
 replaces kept as `<intent>.bak` (`writeIntentFile`, also on a save over an
 older format).
+
+### Status pages and settings mode — `ui/src/pages/status/`
+
+The app opens on status; settings are their own mode (`/settings/*`, its
+own sidebar), so live and draft never share a page (docs/status-redesign.md).
+Status: Overview (verdict, attention, a card each, the map, recent events),
+Clients and `/clients/<mac>`, Devices and `/devices/<name>`, Internet,
+Wi-Fi, Activity. Every reading is coloured by `src/status/health.ts`'s
+tones (good, fair, poor, off; colour means state only, the series colours
+are indigo and cyan); collections are `kit/StatusTable`, charts
+`kit/TimeChart` (the whole range across, gaps where nothing was read, events
+marked), uptime `kit/OutageStrip`.
 
 ### Platforms — `src/platform.ts`, `src/platforms/`
 

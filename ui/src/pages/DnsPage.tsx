@@ -130,7 +130,7 @@ const DhcpOverview = () => {
       <DataTable
         rowCount={networks.length}
         rowKey={(i) => networks[i].id}
-        onRowClick={(i) => navigate(`/networks/${i}`)}
+        onRowClick={(i) => navigate(`/settings/networks/${i}`)}
         empty={null}
         columns={[
           {

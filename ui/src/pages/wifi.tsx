@@ -9,10 +9,10 @@ import { RoamingPage } from "./RoamingPage";
 import { WifiPage } from "./WifiPage";
 
 const tabs = [
-  { value: "ssids", label: placeName("ssids"), path: "/wifi" },
-  { value: "radios", label: placeName("radios"), path: "/wifi/radios" },
-  { value: "roaming", label: placeName("roaming"), path: "/wifi/roaming" },
-  { value: "mesh", label: placeName("mesh"), path: "/wifi/mesh" },
+  { value: "ssids", label: placeName("ssids"), path: "/settings/wifi" },
+  { value: "radios", label: placeName("radios"), path: "/settings/wifi/radios" },
+  { value: "roaming", label: placeName("roaming"), path: "/settings/wifi/roaming" },
+  { value: "mesh", label: placeName("mesh"), path: "/settings/wifi/mesh" },
 ];
 
 export const WifiSection = () => {

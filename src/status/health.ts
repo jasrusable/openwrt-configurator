@@ -61,7 +61,19 @@ export const roamGainDb = 10;
 /** On 2.4 GHz while a 5 or 6 GHz radio hears it at least this well: it could use the faster band. */
 const otherBandUsable = -70;
 
-export type ClientHealth = { tone: Tone; causes: { tone: Tone; text: string }[] };
+/** Why a client is not served well: its signal, its channel, a better access point, a faster band. */
+export type CauseKind = "signal" | "busy" | "roam" | "band";
+export type ClientHealth = { tone: Tone; causes: { kind: CauseKind; tone: Tone; text: string }[] };
+
+/** "−67 dBm", with a true minus. */
+const dbm = (value: number) => `${value < 0 ? "−" : ""}${Math.abs(Math.round(value))} dBm`;
+
+/**
+ * Worth a look: served poorly, or with something to do about it (a better
+ * access point or band in reach, a crowded channel). A fair signal alone is
+ * ordinary at the edge of a home, and not counted.
+ */
+export const needsLook = (health: ClientHealth) => health.tone === "poor" || health.causes.some((c) => c.kind !== "signal");
 
 /**
  * How a client is served, and why not well: its signal, its channel's air,
@@ -76,17 +88,17 @@ export const clientHealth = (client: ClientView, radios: RadioView[] = []): Clie
   if (c.kind !== "wifi") return { tone: c.kind === "wired" ? "good" : "off", causes: [] };
   const causes: ClientHealth["causes"] = [];
   const signal = tone.signal(c.signal);
-  if (signal === "poor" || signal === "fair") causes.push({ tone: signal, text: `${signal === "poor" ? "Weak" : "Fair"} signal (${c.signal} dBm)` });
+  if (signal === "poor" || signal === "fair") causes.push({ kind: "signal", tone: signal, text: `${signal === "poor" ? "Weak" : "Fair"} signal (${dbm(c.signal!)})` });
   const air = radios.find((r) => r.accessPoint === c.accessPoint && r.band === c.band && r.busy !== undefined)?.busy;
-  if (tone.busy(air) === "poor") causes.push({ tone: "fair", text: `Busy channel (${air}% of the air in use)` });
+  if (tone.busy(air) === "poor") causes.push({ kind: "busy", tone: "fair", text: `Busy channel (${air}% of the air in use)` });
   const heard = client.heardBy.filter((h) => h.signal !== undefined);
   const here = heard.find((h) => h.connected) ?? (c.signal !== undefined ? { accessPoint: c.accessPoint, band: c.band, signal: c.signal } : undefined);
   const best = [...heard].sort((a, b) => b.signal! - a.signal!)[0];
   if (here?.signal !== undefined && best && best.accessPoint !== c.accessPoint && best.signal! - here.signal >= roamGainDb) {
-    causes.push({ tone: "fair", text: `${best.accessPoint} hears it ${best.signal! - here.signal} dB better` });
+    causes.push({ kind: "roam", tone: "fair", text: `${best.accessPoint} hears it ${best.signal! - here.signal} dB better` });
   }
   const faster = heard.find((h) => h.band && h.band !== "2.4 GHz" && h.signal! >= otherBandUsable);
-  if (c.band === "2.4 GHz" && faster) causes.push({ tone: "fair", text: `On 2.4 GHz, though ${faster.band} reaches it` });
+  if (c.band === "2.4 GHz" && faster) causes.push({ kind: "band", tone: "fair", text: `On 2.4 GHz, though ${faster.band} reaches it` });
   return { tone: causes.length ? worst(...causes.map((x) => x.tone)) : signal === "off" ? "good" : signal, causes };
 };
 

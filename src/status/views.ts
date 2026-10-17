@@ -337,7 +337,7 @@ const meshReleaseHints = (intent: Intent, facts: Record<string, DeviceFacts | un
             severity: "warning" as const,
             title: "Mesh nodes run different OpenWrt releases",
             detail: `${nodes.map((n) => `${n.name} ${n.version}`).join(", ")}: links between different releases can fall to the slowest rate (mt76#1066). Run the same release on every node.`,
-            link: "/hardware",
+            link: "/settings/system/firmware",
           },
         ]
       : []),
@@ -377,7 +377,7 @@ export const attentionOf = ({
         severity: "problem",
         title: `${d.name} cannot be reached`,
         detail: whyUnread(read) ?? "It did not answer.",
-        link: "/hardware",
+        link: `/devices/${encodeURIComponent(d.name)}`,
       });
       continue;
     }
@@ -487,7 +487,7 @@ export const attentionOf = ({
         severity: "info",
         title: `“${fix.title}” is no longer needed`,
         detail: `Every device it applies to runs a release with the fix (${fix.devices.find((d) => d.state === "fixed")?.why}). It does nothing now; the app can drop it (${fix.dropWhen}).`,
-        link: "/system/patches",
+        link: "/settings/system/patches",
       })
     )
   );
@@ -532,7 +532,7 @@ const routerHints = (intent: Intent, router: DeviceStatus, facts: DeviceFacts | 
           severity: "info" as const,
           title: "UPnP is behind another router",
           detail: `This router's internet address (${lineAddress}) is a private one, so ports opened here reach only the router in front. Make this router its exposed host there, or forward the ports there too.`,
-          link: "/internet",
+          link: "/settings/internet",
         }]
       : []),
     ...(limit && portUsed && !portIsLine && tagged >= limit.vlans
@@ -541,7 +541,7 @@ const routerHints = (intent: Intent, router: DeviceStatus, facts: DeviceFacts | 
           severity: "warning" as const,
           title: `${router.hostname}'s ${limit.port} carries only ${limit.vlans} networks`,
           detail: `Its driver can filter only ${limit.vlans} tagged networks, and ${tagged} are carried there: the rest are missing on that port. Use another port for devices that need them.`,
-          link: "/networks",
+          link: "/settings/networks",
         }]
       : []),
   ];

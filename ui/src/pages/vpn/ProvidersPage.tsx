@@ -66,7 +66,7 @@ const NewProviderPage = () => {
   const inputs = JSON.stringify([kind, name, text, login]);
   const error = failed?.inputs === inputs ? failed.message : undefined;
   const setError = (message: string) => setFailed({ message, inputs });
-  const back = () => navigate("/vpn/providers");
+  const back = () => navigate("/settings/vpn/providers");
   const free = [...Array(9).keys()].map((n) => `tun${n + 1}`).find((id) => !intent.vpn.providers.some((t) => t.id === id));
   const add = () => {
     try {
@@ -215,7 +215,7 @@ export const ProvidersPage = ({ sub }: { sub: string }) => (
   <ListPage
     list={providers}
     sub={sub}
-    base="/vpn/providers"
+    base="/settings/vpn/providers"
     page={{ title: <Experimental>Providers</Experimental>, description: "Send a network's internet through a VPN provider." }}
   />
 );

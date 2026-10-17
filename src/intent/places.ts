@@ -6,7 +6,6 @@ export const places = {
   overview: ["Overview"],
   clients: ["Clients"],
   devices: ["Devices"],
-  performance: ["Performance"],
   activity: ["Activity"],
   system: ["System"],
   general: ["System", "General"],

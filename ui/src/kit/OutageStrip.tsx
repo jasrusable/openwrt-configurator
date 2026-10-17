@@ -2,10 +2,11 @@
 // green where every read found it up, amber where some did not, red where
 // most did not, grey where nothing was read (the collector was not running:
 // never counted as up). The share up leaves unread time out.
-import { Box, Group, Text, Tooltip } from "@mantine/core";
+import { Box, Group, Text } from "@mantine/core";
 import { cellTone, uptimeOf } from "../../../src/status/health";
 import { ranges } from "../../../src/status/history";
 import type { Range } from "../data/history";
+import { Hint } from "./Hint";
 import { toneColor } from "./status";
 
 type Point = [number, number, number];
@@ -48,9 +49,9 @@ export const OutageStrip = ({ points, range, now = Date.now(), label }: { points
     <Group gap="md" wrap="nowrap" align="center">
       <Group gap={2} wrap="nowrap" style={{ flex: 1, minWidth: 0 }} role="img" aria-label={`${label}: ${share === undefined ? "nothing read" : `${(share * 100).toFixed(2)}% up`}`}>
         {cells.map((cell) => (
-          <Tooltip
+          <Hint
             key={cell.start}
-            withinPortal
+            width={220}
             label={`${when(cell.start)}${range === "day" ? `–${when(cell.end)}` : ""} · ${
               !cell.read ? "not read" : cell.down < 1000 ? "up" : `down about ${minutes(cell.down)}`
             }`}
@@ -65,7 +66,7 @@ export const OutageStrip = ({ points, range, now = Date.now(), label }: { points
                 opacity: cell.read ? 0.9 : 1,
               }}
             />
-          </Tooltip>
+          </Hint>
         ))}
       </Group>
       <Text size="sm" fw={600} style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>

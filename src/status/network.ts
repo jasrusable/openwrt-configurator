@@ -35,6 +35,12 @@ export type NetworkStatus = {
     uptime?: number;
     line?: { state: string; since: number };
     inUse?: boolean;
+    /** How it gets its address (dhcp, pppoe…), its gateway, the IPv6 prefix delegated to it, its provider's DNS servers, its Linux device. */
+    proto?: string;
+    gateway?: string;
+    prefixes?: string[];
+    dns?: string[];
+    device?: string;
   }[];
   devices: {
     name: string;
@@ -149,6 +155,11 @@ export const networkStatus = (
       ipv6: [...(v4?.ipv6 ?? []), ...(v6?.ipv6 ?? [])],
       ...(v4?.uptime !== undefined ? { uptime: v4.uptime } : {}),
       ...(line ? { line: { state: line.state, since: line.since } } : {}),
+      ...(v4?.proto ? { proto: v4.proto } : {}),
+      ...(v4?.gateway ? { gateway: v4.gateway } : {}),
+      ...(v6?.prefixes?.length ? { prefixes: v6.prefixes } : v4?.prefixes?.length ? { prefixes: v4.prefixes } : {}),
+      ...(v4?.dns?.length || v6?.dns?.length ? { dns: [...(v4?.dns ?? []), ...(v6?.dns ?? [])] } : {}),
+      ...(v4?.device ? { device: v4.device } : {}),
     };
   });
   const inUse = connections.find((c) => c.inUse);

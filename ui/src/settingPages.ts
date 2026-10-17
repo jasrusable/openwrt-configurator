@@ -6,31 +6,31 @@
  */
 export const settingPages: { path: string; page: string; url?: string; item?: (index: string) => string }[] = [
   // The catalog is a tab of System, for the list and for one entry in it.
-  { path: "system.patches", page: "system", url: "/system/patches" },
-  { path: "system.firmware", page: "system", url: "/system/firmware" },
+  { path: "system.patches", page: "system", url: "/settings/system/patches" },
+  { path: "system.firmware", page: "system", url: "/settings/system/firmware" },
   // A device's firmware is set in the Firmware tab's table, beside the others'.
-  { path: "hardware.*.firmware", page: "system", url: "/system/firmware" },
+  { path: "hardware.*.firmware", page: "system", url: "/settings/system/firmware" },
   { path: "system", page: "system" },
-  { path: "internet.lines", page: "internet", item: (i) => `/internet/${i}` },
+  { path: "internet.lines", page: "internet", item: (i) => `/settings/internet/${i}` },
   { path: "internet", page: "internet" },
-  { path: "firewall.rules", page: "firewall", item: (i) => `/firewall/rules/${i}` },
-  { path: "firewall.port_forwards", page: "firewall", item: (i) => `/firewall/${i}` },
+  { path: "firewall.rules", page: "firewall", item: (i) => `/settings/firewall/rules/${i}` },
+  { path: "firewall.port_forwards", page: "firewall", item: (i) => `/settings/firewall/${i}` },
   { path: "firewall", page: "firewall" },
-  { path: "networks", page: "networks", item: (i) => `/networks/${i}` },
-  { path: "wifi.networks", page: "wifi", item: (i) => `/wifi/${i}` },
-  { path: "wifi.radios", page: "wifi", item: (band) => `/wifi/radios/${band}` },
-  { path: "wifi.roaming", page: "wifi", item: () => "/wifi/roaming" },
-  { path: "wifi.mesh", page: "wifi", item: () => "/wifi/mesh" },
+  { path: "networks", page: "networks", item: (i) => `/settings/networks/${i}` },
+  { path: "wifi.networks", page: "wifi", item: (i) => `/settings/wifi/${i}` },
+  { path: "wifi.radios", page: "wifi", item: (band) => `/settings/wifi/radios/${band}` },
+  { path: "wifi.roaming", page: "wifi", item: () => "/settings/wifi/roaming" },
+  { path: "wifi.mesh", page: "wifi", item: () => "/settings/wifi/mesh" },
   { path: "wifi", page: "wifi" },
   { path: "dns", page: "dns" },
   // Most specific first: the first whose path starts the setting's is its page.
-  { path: "vpn.remote_access.clients", page: "vpn", item: (i) => `/vpn/${i}` },
+  { path: "vpn.remote_access.clients", page: "vpn", item: (i) => `/settings/vpn/${i}` },
   { path: "vpn.remote_access", page: "vpn" },
-  { path: "vpn.sites.peers", page: "vpn", item: (i) => `/vpn/sites/${i}` },
-  { path: "vpn.sites", page: "vpn", item: () => "/vpn/sites" },
-  { path: "vpn.providers", page: "vpn", item: (i) => `/vpn/providers/${i}` },
+  { path: "vpn.sites.peers", page: "vpn", item: (i) => `/settings/vpn/sites/${i}` },
+  { path: "vpn.sites", page: "vpn", item: () => "/settings/vpn/sites" },
+  { path: "vpn.providers", page: "vpn", item: (i) => `/settings/vpn/providers/${i}` },
   { path: "vpn", page: "vpn" },
-  { path: "hardware", page: "hardware", item: (i) => `/hardware/${i}` },
+  { path: "hardware", page: "hardware", item: (i) => `/settings/hardware/${i}` },
 ];
 
 /** The page, and the URL, where the setting at `path` is edited. */
@@ -47,6 +47,6 @@ export const whereIs = (path: string) => {
   return {
     page: home.page,
     // A fixed address (a tab), else a list item by its index, else the page.
-    url: home.url ?? (home.item && index ? home.item(index) : `/${home.page}`),
+    url: home.url ?? (home.item && index ? home.item(index) : `/settings/${home.page}`),
   };
 };

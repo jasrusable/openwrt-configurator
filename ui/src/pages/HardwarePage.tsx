@@ -1,5 +1,5 @@
-import { Anchor, Group, Text } from "@mantine/core";
-import { Link } from "react-router";
+import { Anchor, Button, Group, Text } from "@mantine/core";
+import { Link, useNavigate } from "react-router";
 import { where } from "../../../src/intent/places";
 import { FixStateBadge, useFixes } from "../fixes";
 import {
@@ -10,7 +10,7 @@ import {
   When,
 } from "../form/fields";
 import { defineList, ListPage } from "../form/ListPage";
-import { IconAccessPoint, IconRouter } from "@tabler/icons-react";
+import { IconAccessPoint, IconChevronRight, IconRouter } from "@tabler/icons-react";
 import { useDraftValue } from "../form/draft";
 import { useDevices, useFreshDevices } from "../data/devices";
 import { useFirmwareRows } from "../data/firmware";
@@ -20,7 +20,7 @@ import { rescueAddress, rescueAfterMinutes, rescueSsid } from "../../../src/inte
 import { AddHardwarePage } from "./AddHardwarePage";
 import { keyRefused, ResetDevice } from "./ResetDevice";
 import { useNetworkStatus } from "../data/status";
-import { ago, bandsOf, duration, meshAbility, modelOf, portsOf } from "../facts";
+import { ago, bandsOf, meshAbility, modelOf, portsOf } from "../facts";
 import { ItemIcon, ItemName, Section, SettingRow, StatusDot } from "../kit/layout";
 import { bandLabels } from "../../../src/intent/labels";
 import { channelsOf } from "../../../src/intent/radios";
@@ -57,8 +57,9 @@ const useFactsOf = (index: number) => {
 };
 
 /**
- * Device `index` online, offline or not known yet, from the live status read
- * while the page is open; the list and the device's page say it the same way.
+ * Device `index` reached, not reached or not known yet, from the live status
+ * read while the page is open: only so much, as how it is doing is its
+ * status page's (Status › Devices), never a settings page's.
  */
 const useOnline = (index: number) => {
   const name: string | undefined = useDraftValue(`hardware.${index}.name`);
@@ -70,11 +71,7 @@ const useOnline = (index: number) => {
       ? { color: "gray" as const, label: "Not read", detail: (status.error as Error).message }
       : { color: "gray" as const, label: "Checking…" }
     : health
-    ? {
-        color: "green" as const,
-        label: "Online",
-        detail: `Up ${duration(health.uptime)} · load ${health.load.toFixed(2)} · memory ${Math.round(health.memoryUsed * 100)}%`,
-      }
+    ? { color: "green" as const, label: "Online", detail: "Reached" }
     : { color: "orange" as const, label: "Offline", detail: `Not reached: ${now.error}` };
 };
 
@@ -90,11 +87,20 @@ const Online = ({ index }: { index: number }) => {
   );
 };
 
-const StatusRow = ({ index }: { index: number }) => (
-  <SettingRow label="Status" description={useOnline(index).detail}>
-    <Online index={index} />
-  </SettingRow>
-);
+const StatusRow = ({ index }: { index: number }) => {
+  const navigate = useNavigate();
+  const name: string = useDraftValue(`hardware.${index}.name`) ?? "";
+  return (
+    <SettingRow label="Status" description={useOnline(index).detail}>
+      <Group gap="sm" wrap="nowrap">
+        <Online index={index} />
+        <Button size="compact-sm" variant="subtle" color="gray" rightSection={<IconChevronRight size={14} />} onClick={() => navigate(`/devices/${encodeURIComponent(name)}`)}>
+          How it is doing
+        </Button>
+      </Group>
+    </SettingRow>
+  );
+};
 
 const ModelCell = ({ index }: { index: number }) => {
   const { known, unreached, reading } = useFactsOf(index);
@@ -120,7 +126,7 @@ const DeviceFixes = ({ index }: { index: number }) => {
   return (
     <Section title="Patches on this device" description={`What this app changes a setting for here. Each is under ${where("patches")}.`}>
       {fixes.map(({ fix, on }) => (
-        <SettingRow key={fix.id} label={<Anchor component={Link} to="/system/patches" size="sm">{fix.title}</Anchor>} description={on!.why}>
+        <SettingRow key={fix.id} label={<Anchor component={Link} to="/settings/system/patches" size="sm">{fix.title}</Anchor>} description={on!.why}>
           <FixStateBadge state={on!.state} why={on!.why} />
         </SettingRow>
       ))}
@@ -141,7 +147,7 @@ const FirmwareSection = ({ index }: { index: number }) => {
       description={
         <>
           {row?.state === "update" ? "An update is available: " : "Upgrades are run from "}
-          <Anchor component={Link} to="/system/firmware" size="xs">
+          <Anchor component={Link} to="/settings/system/firmware" size="xs">
             {where("firmware")}
           </Anchor>
           .

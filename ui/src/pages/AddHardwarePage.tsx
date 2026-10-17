@@ -240,13 +240,13 @@ export const AddHardwarePage = () => {
           const swap =
             choice.role === "router" ? availability(added, `hardware.${index}.role`).option("router").swap : undefined;
           draft.replace(swap ? swap.apply(added) : added);
-          navigate(`/hardware/${index}`);
+          navigate(`/settings/hardware/${index}`);
         },
       }
     );
   return (
     <SettingsPage
-      title={[{ label: "Hardware", onClick: () => navigate("/hardware") }, { label: "Add" }]}
+      title={[{ label: "Hardware", onClick: () => navigate("/settings/hardware") }, { label: "Add" }]}
       description="A router or access point on your network. Pick it, and it is read to see what it is; nothing on it changes until you apply."
       actions={
         device ? (

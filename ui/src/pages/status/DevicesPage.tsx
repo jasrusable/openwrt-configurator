@@ -1,126 +1,129 @@
-// Devices: each router and access point's health (processor, memory,
-// storage, temperature, with their history), its ports' links as a
-// faceplate, whether a newer OpenWrt release is out, and what can be done to
-// it (ping from it, restart its Wi-Fi, reboot it: DeviceActions).
-import { Badge, Box, Group, SimpleGrid, Stack, Text } from "@mantine/core";
-import { IconAccessPoint, IconRouter } from "@tabler/icons-react";
+// Devices: are the routers and access points healthy? Each as a row: what
+// it is and runs, whether it answers and since when, its processor, memory
+// and temperature, its clients and how it reaches the router. A row opens
+// its own page (DevicePage); its settings are Settings › Hardware.
+import { Group, Stack, Text } from "@mantine/core";
+import { useNavigate, useParams } from "react-router";
+import { where } from "../../../../src/intent/places";
 import type { Intent } from "../../../../src/intent/schema";
+import { tone as toneOf } from "../../../../src/status/health";
 import type { DeviceView } from "../../../../src/status/views";
-import { compareReleases } from "../../../../src/release";
-import { targetOf } from "../../../../src/firmware/target";
-import { useSeries } from "../../data/history";
-import { useReleases } from "../../data/firmware";
+import { useUpdates } from "../../data/firmware";
 import { useNetworkStatus } from "../../data/status";
-import { duration } from "../../facts";
 import { useDraftValue } from "../../form/draft";
-import { AreaChart, PortFace, Ring } from "../../kit/charts";
-import { EmptyState, ItemIcon, Section, SettingsPage, StatusDot } from "../../kit/layout";
-import { DeviceActions } from "./DeviceActions";
-import { liveLine, unread } from "./shared";
+import { UpdateDot } from "../../kit/UpdateDot";
+import { Panel, percent, StatusPage, ToneValue, Verdict } from "../../kit/status";
+import { StatusColumn, StatusTable } from "../../kit/StatusTable";
+import { DevicePage } from "./DevicePage";
+import { deviceState, liveLine, roleIcon, ThingIcon, unread, uplinkWords } from "./shared";
 
-const heat = (c: number) => (c >= 85 ? "red" : c >= 70 ? "orange" : c >= 55 ? "yellow" : "teal");
-
-/** The release a device should run (System › Firmware), when it runs an older one. */
-const useUpdate = (device: DeviceView) => {
+const DeviceList = () => {
+  const navigate = useNavigate();
   const intent: Intent = useDraftValue();
-  const target = targetOf(intent, device.name, useReleases().data?.releases);
-  return target.kind === "release" && !!device.version && (compareReleases(device.version, target.version) ?? 0) < 0
-    ? target.version
-    : undefined;
-};
-
-const DeviceCard = ({ device: d }: { device: DeviceView }) => {
-  const load = useSeries(`load:${d.name}`);
-  const temperature = useSeries(`temperature:${d.name}`);
-  const update = useUpdate(d);
-  const cpu = d.load !== undefined ? d.load / (d.cores ?? 1) : undefined;
+  const status = useNetworkStatus();
+  const updates = useUpdates();
+  const live = status.data;
+  const views = live?.deviceViews ?? [];
+  const clientsOn = (name: string) => (live?.clientList ?? []).filter((c) => c.state === "online" && c.connection.kind === "wifi" && c.connection.accessPoint === name).length;
+  const hasRadios = (name: string) => (live?.radios ?? []).some((r) => r.accessPoint === name);
+  const perCore = (d: DeviceView) => (d.load !== undefined ? d.load / (d.cores ?? 1) : undefined);
+  const down = views.filter((d) => !d.reachable && !d.rebooting);
+  const warned = (live?.attention ?? []).filter((a) => /^(storage|temperature|memory|service|unread):/.test(a.id));
+  const columns: StatusColumn<DeviceView>[] = [
+    {
+      key: "name",
+      header: "Name",
+      sort: (d) => d.name.toLowerCase(),
+      cell: (d) => (
+        <Group gap={10} wrap="nowrap" style={{ minWidth: 0 }}>
+          <ThingIcon icon={roleIcon(d.role)} away={!d.reachable} />
+          <Stack gap={0} style={{ minWidth: 0 }}>
+            <Text size="sm" fw={500} truncate>
+              {d.name}
+            </Text>
+            <Text size="xs" c="dimmed" truncate>
+              {d.model ?? (d.role === "router" ? "Router" : "Access point")}
+            </Text>
+          </Stack>
+        </Group>
+      ),
+    },
+    {
+      key: "release",
+      header: "OpenWrt",
+      sort: (d) => d.version,
+      cell: (d) => (
+        <Group gap={6} wrap="nowrap">
+          <Text size="sm">{d.version ?? "—"}</Text>
+          {updates?.devices.includes(d.name) && <UpdateDot label={`OpenWrt ${updates.version} is out`} />}
+        </Group>
+      ),
+    },
+    {
+      key: "state",
+      header: "State",
+      sort: (d) => (d.reachable ? (d.uptime ?? 0) : -1),
+      cell: (d) => <ToneValue tone={deviceState(d).tone}>{deviceState(d).word}</ToneValue>,
+    },
+    { key: "load", header: "Processor", align: "right", sort: perCore, cell: (d) => <ToneValue tone={toneOf.load(perCore(d))}>{perCore(d) !== undefined ? percent(perCore(d)) : "—"}</ToneValue> },
+    { key: "memory", header: "Memory", align: "right", sort: (d) => d.memoryUsed, cell: (d) => <ToneValue tone={toneOf.memory(d.memoryUsed)}>{percent(d.memoryUsed)}</ToneValue> },
+    {
+      key: "temperature",
+      header: "Temp.",
+      align: "right",
+      sort: (d) => d.temperature,
+      cell: (d) => <ToneValue tone={toneOf.temperature(d.temperature)}>{d.temperature !== undefined ? `${Math.round(d.temperature)} °C` : "—"}</ToneValue>,
+    },
+    {
+      key: "clients",
+      header: "Clients",
+      align: "right",
+      sort: (d) => clientsOn(d.name),
+      // On its Wi-Fi: a device without radios has none to count.
+      cell: (d) => <Text size="sm">{d.reachable && hasRadios(d.name) ? clientsOn(d.name) : "—"}</Text>,
+    },
+    {
+      key: "uplink",
+      header: "Uplink",
+      sort: (d) => uplinkWords(intent, live, d.name).word,
+      cell: (d) => {
+        const u = uplinkWords(intent, live, d.name);
+        return <ToneValue tone={u.tone}>{u.word}</ToneValue>;
+      },
+    },
+  ];
   return (
-    <Box className="onc-card" p="md">
-      <Stack gap="md">
-        <Group justify="space-between" wrap="nowrap">
-          <Group gap={10} wrap="nowrap" style={{ minWidth: 0 }}>
-            <ItemIcon icon={d.role === "router" ? IconRouter : IconAccessPoint} color="grape" off={!d.reachable} />
-            <Stack gap={0} style={{ minWidth: 0 }}>
-              <Text fw={600} truncate>
+    <StatusPage title="Devices" live={liveLine(status)}>
+      <Verdict
+        tone={!live ? "off" : down.length ? "poor" : warned.length ? "fair" : "good"}
+        detail={live && [warned.map((a) => a.title).join(" · ") || undefined, updates ? `OpenWrt ${updates.version} is out for ${updates.devices.join(", ")}` : undefined].filter(Boolean).join(" · ")}
+      >
+        {!live ? "Reading the devices…" : down.length ? `${down.map((d) => d.name).join(", ")} not answering` : `${views.length} of ${views.length} up`}
+      </Verdict>
+      <Panel padded={false}>
+        <StatusTable
+          id="devices"
+          rows={views}
+          columns={columns}
+          rowKey={(d) => d.name}
+          onOpen={(d) => navigate(`/devices/${encodeURIComponent(d.name)}`)}
+          empty={live ? `No devices yet: add them in the ${where("hardware")} settings.` : unread(status, "Reading the devices…")}
+          phone={(d) => ({
+            lead: (
+              <Text size="sm" fw={500}>
                 {d.name}
               </Text>
-              <Text size="xs" c="dimmed" truncate>
-                {[d.model ?? (d.role === "router" ? "Router" : "Access point"), d.version && `OpenWrt ${d.version}`].filter(Boolean).join(" · ")}
-              </Text>
-            </Stack>
-          </Group>
-          <Group gap={8} wrap="nowrap">
-            {update && (
-              <Badge variant="light" color="blue" radius="sm" style={{ textTransform: "none" }}>
-                {update} is out
-              </Badge>
-            )}
-            <StatusDot color={d.rebooting ? "orange" : d.reachable ? "green" : "red"} />
-            <Text size="sm" c="dimmed" style={{ whiteSpace: "nowrap" }}>
-              {d.rebooting ? "Rebooting…" : d.reachable ? (d.uptime ? `Up ${duration(d.uptime)}` : "Up") : "Not reached"}
-            </Text>
-            <DeviceActions device={d} />
-          </Group>
-        </Group>
-        {d.reachable && !d.rebooting ? (
-          <>
-            <Group justify="space-around" wrap="wrap" gap="md">
-              {cpu !== undefined && <Ring share={Math.min(cpu, 1)} label={`Processor${d.cores ? ` · ${d.cores} cores` : ""}`} />}
-              {d.memoryUsed !== undefined && <Ring share={d.memoryUsed} label="Memory" />}
-              {d.storage && d.storage.totalKb > 0 && <Ring share={1 - d.storage.availableKb / d.storage.totalKb} label={`Storage · ${Math.round(d.storage.availableKb / 1024)} MiB free`} />}
-              {d.temperature !== undefined && (
-                <Stack gap={2} align="center" justify="center" h={100}>
-                  <Text fz={28} fw={600} c={`${heat(d.temperature)}.6`} lh={1}>
-                    {Math.round(d.temperature)}°
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    Temperature
-                  </Text>
-                </Stack>
-              )}
-            </Group>
-            <SimpleGrid cols={temperature.length ? 2 : 1} spacing="md">
-              <Stack gap={2}>
-                <Text size="xs" c="dimmed">
-                  Processor load
-                </Text>
-                <AreaChart series={[load]} colors={["grape"]} height={44} max={1} />
-              </Stack>
-              {temperature.length > 0 && (
-                <Stack gap={2}>
-                  <Text size="xs" c="dimmed">
-                    Temperature
-                  </Text>
-                  <AreaChart series={[temperature]} colors={["orange"]} height={44} min={20} max={100} />
-                </Stack>
-              )}
-            </SimpleGrid>
-            {d.ports.length > 0 && <PortFace ports={d.ports} />}
-          </>
-        ) : (
-          <Text size="sm" c="dimmed">
-            {d.rebooting ? "It is restarting: back in a minute or so." : (d.error ?? "It did not answer.")}
-          </Text>
-        )}
-      </Stack>
-    </Box>
+            ),
+            sub: [d.model, d.version && `OpenWrt ${d.version}`, uplinkWords(intent, live, d.name).word].filter(Boolean).join(" · "),
+            end: <ToneValue tone={deviceState(d).tone}>{deviceState(d).word}</ToneValue>,
+          })}
+        />
+      </Panel>
+    </StatusPage>
   );
 };
 
 export const DevicesPage = () => {
-  const intent: Intent = useDraftValue();
-  const status = useNetworkStatus();
-  const devices = status.data?.deviceViews ?? [];
-  return (
-    <SettingsPage title="Devices" description={liveLine(intent.system.name, status)}>
-      {devices.length === 0 && (
-        <Section>
-          <EmptyState>{status.data ? "No devices in Hardware." : unread(status, "Reading the devices…")}</EmptyState>
-        </Section>
-      )}
-      {devices.map((d) => (
-        <DeviceCard key={d.name} device={d} />
-      ))}
-    </SettingsPage>
-  );
+  const name = useParams()["*"];
+  return name ? <DevicePage name={decodeURIComponent(name)} /> : <DeviceList />;
 };

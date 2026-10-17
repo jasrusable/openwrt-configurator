@@ -9,7 +9,7 @@ import { Box, Group, Stack, Text } from "@mantine/core";
 import { useElementSize } from "@mantine/hooks";
 import { KeyboardEvent, PointerEvent, useId, useState } from "react";
 import type { Tone } from "../../../src/status/health";
-import { ranges } from "../../../src/status/history";
+import { ranges, RangeRule } from "../../../src/status/history";
 import type { Range } from "../data/history";
 import { seriesColor, toneColor } from "./status";
 
@@ -20,13 +20,13 @@ export type ChartEvent = { at: number; text: string; tone: Tone };
 /** A stretch of values that reads as a tone: from, to (open: the top). */
 export type ChartBand = { from: number; to?: number; tone: Tone };
 
-const pad = { left: 44, right: 10, top: 10, bottom: 20 };
+const margins = { right: 10, top: 10, bottom: 20 };
 
-/** A round top for the scale: 1, 2, 2.5 or 5 times a power of ten, at least `v`. */
-export const niceTop = (v: number) => {
+/** A round span for the scale, at least `v`: 1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6 or 8 times a power of ten (60 stays 60). */
+export const niceSpan = (v: number) => {
   if (!(v > 0)) return 1;
   const p = 10 ** Math.floor(Math.log10(v));
-  return ([1, 2, 2.5, 5, 10].find((m) => m * p >= v) ?? 10) * p;
+  return ([1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].find((m) => m * p >= v - 1e-9) ?? 10) * p;
 };
 
 /** A series as its unbroken runs: points further apart than three of the range's steps were not read between. */
@@ -37,9 +37,10 @@ const runsOf = (points: Point[], stepMs: number) =>
     return out;
   }, []);
 
+/** A tick's time: the hour for a day ("14:00", "2 PM"), the date for 30 days. */
 const timeLabel = (t: number, range: Range) =>
   range === "day"
-    ? new Date(t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+    ? new Date(t).toLocaleTimeString(undefined, { hour: "numeric" })
     : new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
 const whenLabel = (t: number, range: Range) =>
@@ -57,6 +58,7 @@ export const TimeChart = ({
   bands = [],
   events = [],
   label,
+  step,
   now = Date.now(),
 }: {
   series: ChartSeries[];
@@ -71,16 +73,23 @@ export const TimeChart = ({
   events?: ChartEvent[];
   /** What it shows, for a screen reader. */
   label: string;
+  /** Points kept at another step and span than the range's (a client's: 10 minutes for a day). */
+  step?: RangeRule;
   now?: number;
 }) => {
   const id = useId();
   const { ref, width } = useElementSize();
   const [at, setAt] = useState<number | undefined>();
-  const { bucketMs, keepMs } = ranges[range];
+  const { bucketMs, keepMs } = step ?? ranges[range];
   const [t0, t1] = [now - keepMs, now];
   const shown = series.map((s) => ({ ...s, points: s.points.filter(([t]) => t >= t0) }));
   const values = shown.flatMap((s) => s.points.map((p) => p[1]));
-  const top = niceTop(Math.max(max ?? 0, ...values, min + 1e-9) - min) + min;
+  // The scale from its floor up to a round span over the readings (and `max`), so a scale below zero (dBm) reads right.
+  const top = min + niceSpan(Math.max(max ?? min, ...values) - min);
+  const ticks = [min, (min + top) / 2, top];
+  // Room on the left for the longest tick label, at about 6 px a character.
+  const left = Math.max(32, Math.max(...ticks.map((v) => format(v).length)) * 6 + 10);
+  const pad = { ...margins, left };
   const inner = { w: Math.max(width - pad.left - pad.right, 1), h: height - pad.top - pad.bottom };
   const x = (t: number) => pad.left + ((t - t0) / (t1 - t0)) * inner.w;
   const y = (v: number) => pad.top + inner.h - ((Math.min(Math.max(v, min), top) - min) / (top - min)) * inner.h;
@@ -107,8 +116,8 @@ export const TimeChart = ({
   const summary = `${label}, ${range === "day" ? "the last day" : "the last 30 days"}: ${
     times.length ? shown.map((s, i) => `${s.label} now ${latest[i] !== undefined ? format(latest[i]!) : "not read"}`).join(", ") : "nothing read yet"
   }.`;
-  const ticks = [min, (min + top) / 2, top];
-  const xTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => t0 + f * (t1 - t0));
+  // Five times across a wide chart, three across a narrow one, so none run into each other.
+  const xTicks = (inner.w < 420 ? [0, 0.5, 1] : [0, 0.25, 0.5, 0.75, 1]).map((f) => t0 + f * (t1 - t0));
   const tipLeft = at !== undefined && x(at) > width / 2;
   return (
     <Stack gap={6}>
