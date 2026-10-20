@@ -9,7 +9,9 @@ case $version in
   SNAPSHOT) tag=SNAPSHOT ;;
   *) tag=v$version ;;
 esac
-case "$(uname -m)" in
+# ONC_RIG_ARCH: x86_64 or arm64, this machine's by default; x86_64 on an
+# arm64 Mac runs CI's image under emulation.
+case "${ONC_RIG_ARCH:-$(uname -m)}" in
   # The arm64 rootfs is labelled linux/aarch64_generic, which no --platform
   # matches, so it runs with none; the node image is a normal multi-arch one.
   arm64 | aarch64) image=openwrt/rootfs:armsr-armv8-$tag platform='' pull_platform=linux/aarch64_generic node_platform=linux/arm64 ;;

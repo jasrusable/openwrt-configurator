@@ -104,6 +104,7 @@ if wait_for '[ "$(ubus call network.interface.wan6 status | jsonfilter -e @.auto
   pass "connected: the hook brings wan6 back"
 else
   fail "connected: the hook brings wan6 back"
+  on_router 'ubus call network.interface.wan6 status | jsonfilter -e @.up -e @.autostart -e @.pending; logread | grep -E "onc-ipv6|mwan3track|netifd: wan6" | tail -12' || true
 fi
 
 if [ "${RECORD:-}" = 1 ]; then
