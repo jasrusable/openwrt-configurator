@@ -11,7 +11,9 @@
 # (src/tests/helpers/status/mwan3-failover.txt) for mwan3Log.test.ts.
 #
 # Docker networks run no DHCP server, so each line gets Docker's address
-# statically; mwan3 tracks a line by its pings either way.
+# statically; mwan3 tracks a line by its pings either way. Its pings go to the
+# line's gateway (this machine), not the internet's servers the app tracks:
+# GitHub's runners send no ICMP out, so there every line looked offline.
 #
 # Needs docker (privileged containers) and `npm ci` done.
 # Usage: [ONC_RIG_VERSION=...] [RECORD=1] scripts/mwan3-test.sh
@@ -71,6 +73,8 @@ on_router 'sh /root/config.sh'
 for line in wan:"$prefix-a" wanb:"$prefix-b"; do
   name=${line%%:*} net=${line#*:}
   on_router "uci set network.$name.proto=static; uci set network.$name.ipaddr=$(address_on "$net"); uci set network.$name.netmask=255.255.0.0; uci set network.$name.gateway=$(gateway_on "$net"); uci commit network"
+  # One target, so one answer is enough (the app asks two of its three).
+  on_router "uci -q delete mwan3.$name.track_ip; uci add_list mwan3.$name.track_ip=$(gateway_on "$net"); uci set mwan3.$name.reliability=1; uci commit mwan3"
 done
 on_router 'reload_config; /etc/init.d/mwan3 enable; /etc/init.d/mwan3 restart >/dev/null 2>&1'
 
@@ -94,11 +98,15 @@ else
   fail "disconnected: the hook takes wan6 down"; on_router 'ubus call network.interface.wan6 status | jsonfilter -e @.up -e @.autostart -e @.pending' || true
 fi
 
+# A new "online": the first, from the start, matched at once and hid a line
+# that never came back.
+online='logread | grep -c -E "mwan3track.*[Ii]nterface wan .*online"'
+before=$(on_router "$online || true")
 on_router 'nft delete table inet onc_test'
-if wait_for 'logread | grep -E "mwan3track.*[Ii]nterface wan .*online"' 90; then
+if wait_for "[ \"\$($online)\" -gt $before ]" 90; then
   pass "mwan3track logs the main line online again"
 else
-  fail "mwan3track logs the main line online again"
+  fail "mwan3track logs the main line online again"; on_router 'ubus call mwan3 status | jsonfilter -e "@.interfaces.wan.status"; logread | grep -E "mwan3track" | tail -6' || true
 fi
 if wait_for '[ "$(ubus call network.interface.wan6 status | jsonfilter -e @.autostart)" = true ]' 30; then
   pass "connected: the hook brings wan6 back"

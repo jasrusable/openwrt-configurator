@@ -335,6 +335,10 @@ test("a watchdog whose run was taken away while it slept restores nothing, reloa
     } catch {
       return true;
     }
+  }).catch((e) => {
+    // Seen on CI only: what the watchdog was doing when it did not go.
+    const ps = spawnSync("ps", ["-o", "pid,ppid,stat,etime,args", "-p", String(watchdog)], { encoding: "utf8" }).stdout;
+    throw new Error(`${e.message}: ${ps.trim()}; run dir ${existsSync(d.runDir) ? "back" : "gone"}`);
   });
   t.notRegex(d.log(), /reload_config|^reboot|uci revert/m);
   t.is(readFileSync(`${d.root}/etc/config/network`, "utf8"), "config interface 'wan'\n", "the change stays");
