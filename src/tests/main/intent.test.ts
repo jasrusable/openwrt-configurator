@@ -1527,3 +1527,17 @@ test("odhcpd's prefix memory is on flash and kept through a flash, so a prefix t
   t.is((state.config as any).dhcp.odhcpd[0].piodir, "/etc/odhcpd-piodir");
   t.is(state.files.find((f) => f.path === "/lib/upgrade/keep.d/onc-odhcpd")!.content, "/etc/odhcpd-piodir/\n");
 });
+
+test("every DHCP client keeps its identity and its lease: the MAC as client-id, no release on stop", (t) => {
+  const plan = planFor(sample());
+  const clients = (hostname: string, model: string) => {
+    const deviceSchema = deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", `${model}.json`), "utf8")));
+    const { config } = getOpenWrtState({ plan, deviceConfig: plan.devices.find((d) => d.hostname === hostname)!, deviceSchema });
+    return ((config as any).network.interface as any[]).filter((i) => i.proto === "dhcp" || i.proto === "dhcpv6");
+  };
+  const router = clients("home-router", "friendlyarm,nanopi-r6s");
+  const ap = clients("home-ap-1", "zyxel,nwa50ax-pro");
+  t.deepEqual(router.map((i) => i.proto).sort(), ["dhcp", "dhcpv6"], "the line, both sides");
+  t.deepEqual(ap.map((i) => i.proto).sort(), ["dhcp", "dhcpv6"], "the access point's own address, both sides");
+  [...router, ...ap].forEach((i) => t.like(i, { sendclientid: "hardware", norelease: true }));
+});

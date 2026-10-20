@@ -4,7 +4,7 @@
 // The router routes and serves each network (addresses, IPv6, DHCP); every
 // other device is a client of the main network and only bridges the rest.
 import { tunnelDns } from "../vpn";
-import { everyDevice, Feature, gatewayOf, isMain, mainNetwork, Network, onAccessPoints, onDsa, onRouter, onSwConfig, sendclientid } from "../fragment";
+import { everyDevice, Feature, gatewayOf, isMain, mainNetwork, Network, onAccessPoints, onDsa, onRouter, onSwConfig, dhcpClient } from "../fragment";
 import { named } from "../names";
 import { Options, placeholder, section, SectionMeta } from "../../plan/types";
 import { when } from "../../plan/when";
@@ -187,7 +187,7 @@ export const network: Feature = (intent) => {
                   // only carried, for their Wi-Fi to join.
                   // IPv6 on: `ipv6 0` disables it on the device, and lan6's
                   // DHCPv6 below then has no link to send on.
-                  { when: onAccessPoints, options: isMain(n) ? { proto: "dhcp", sendclientid } : { proto: "none" } },
+                  { when: onAccessPoints, options: isMain(n) ? { proto: "dhcp", ...dhcpClient } : { proto: "none" } },
                 ],
               },
               { device: deviceOf(n), delegate: false }
@@ -197,7 +197,7 @@ export const network: Feature = (intent) => {
             ? [
                 // netifd's alias, as the router's wan6 is: the IPv6 side of
                 // the main network's own interface, up and down with it.
-                section({ name: `${main.id}6`, when: onAccessPoints }, { device: `@${main.id}`, proto: "dhcpv6", sendclientid, reqprefix: "no" }),
+                section({ name: `${main.id}6`, when: onAccessPoints }, { device: `@${main.id}`, proto: "dhcpv6", ...dhcpClient, reqprefix: "no" }),
               ]
             : []),
         ],
@@ -212,7 +212,7 @@ export const network: Feature = (intent) => {
         // device a new lease once, an access point a new address mid-apply.
         // The uci-default runs again on each flash's first boot, though, and
         // its DUID then outlives the boot until an apply wipes it: hence
-        // `sendclientid` (below). A stable DUID of our own: TODO.md.
+        // `sendclientid` (fragment.ts, dhcpClient). A stable DUID of our own: TODO.md.
         globals: [
           section(
             {

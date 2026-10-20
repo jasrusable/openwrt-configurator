@@ -1,7 +1,7 @@
 // The router's internet side: each connection (a line on a port), smart
 // queueing on each line whose speed is known, and with several lines mwan3
 // using them together. The firewall is its own feature (firewall/).
-import { Feature, mainNetwork, onRouter, routerOnly, sendclientid, serviceWhen } from "../fragment";
+import { Feature, mainNetwork, onRouter, routerOnly, dhcpClient, serviceWhen } from "../fragment";
 import { named } from "../names";
 import { Options, placeholder, Placeholder, section, Value } from "../../plan/types";
 import { fnv, siteSeed } from "../site";
@@ -125,7 +125,7 @@ export const internet: Feature = (intent) => {
               gateway: c.static.gateway,
               ...(c.static.dns?.length ? { dns: c.static.dns } : {}),
             }
-          : { proto: "dhcp", sendclientid };
+          : { proto: "dhcp", ...dhcpClient };
     return [
       section(
         { name: c.id },
@@ -146,7 +146,7 @@ export const internet: Feature = (intent) => {
                 // netifd's alias: the IPv6 side of the line's own interface.
                 device: `@${c.id}`,
                 proto: "dhcpv6",
-                sendclientid,
+                ...dhcpClient,
                 peerdns,
                 ...(ipv6Prefix === "auto" ? {} : { reqprefix: ipv6Prefix }),
               }

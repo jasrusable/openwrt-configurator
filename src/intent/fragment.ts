@@ -77,10 +77,17 @@ export const serviceWhen = (condition: When, name: string, used: boolean): Servi
   used ? { when: condition, name, running: true } : { when: condition, name, enabled: false };
 
 /**
- * The MAC as DHCP identity (25.12.6's `sendclientid`; older releases ignore
- * it): a flash's first boot writes a random dhcp_default_duid (base-files'
- * 14_network-generate-duid; see networks/compile.ts on globals), which would
- * otherwise be sent as the client-id until the next apply wipes it. Seen on the user's access point,
- * 25.12.5 to 25.12.6: a new lease, so a new address, mid-upgrade.
+ * How every DHCP client the app declares (a line, an access point's own
+ * address) holds on to what it was given, IPv4 and IPv6 alike:
+ * - the MAC as its identity (25.12.6's `sendclientid`; older releases ignore
+ *   it): a flash's first boot writes a random dhcp_default_duid (base-files'
+ *   14_network-generate-duid; see networks/compile.ts on globals), which would
+ *   otherwise be sent as the client-id until the next apply wipes it;
+ * - no release when it stops (`norelease`): netifd's clients release on every
+ *   stop, so an apply that restarts the interface, or a reboot, hands the
+ *   address or delegated prefix back, and the next request may get another.
+ * Seen on the user's network, 25.12.6: an access point moved address on a
+ * flash and again on an apply, and the router's prefix changed across its
+ * flash, leaving clients with dead IPv6 addresses.
  */
-export const sendclientid = "hardware";
+export const dhcpClient = { sendclientid: "hardware", norelease: true } as const;
