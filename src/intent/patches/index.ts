@@ -15,6 +15,7 @@ import { ftKeyRace } from "./ft-key-race";
 import { usteerNudgeRequests } from "./usteer-nudge-requests";
 import { nwa50axEeeOff } from "./nwa50ax-eee-off";
 import { wpadSwapRestart } from "./wpad-swap-restart";
+import { nlbwmonRmem } from "./nlbwmon-rmem";
 
 export const patches = [
   r6sPacketSteering,
@@ -27,6 +28,7 @@ export const patches = [
   nwa50axEeeOff,
   wpadSwapRestart,
   miniupnpdFirewallReload,
+  nlbwmonRmem,
 ];
 
 /** A fix turned off must be one, and not one whose absence breaks something silently. */

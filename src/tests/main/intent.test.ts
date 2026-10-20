@@ -516,6 +516,7 @@ test("patches apply only where they say: by model, by role", (t) => {
     "/etc/hotplug.d/iface/30-odhcpd-ra-fix",
     "/usr/libexec/onc/ubihealthd-config",
     "/usr/libexec/onc/leases-to-ram",
+    "/etc/sysctl.d/12-onc-nlbwmon.conf",
   ]);
   t.deepEqual(files("home-ap-1", "zyxel,nwa50ax-pro"), [
     "/etc/hotplug.d/net/20-aql",
@@ -526,7 +527,7 @@ test("patches apply only where they say: by model, by role", (t) => {
     files("home-router", "friendlyarm,nanopi-r6s", (i) => (i.internet.lines[0].ipv6.enabled = false)).filter(
       (p: string) => !p.includes("avahi")
     ),
-    ["/usr/libexec/platform/packet-steering.sh", "/usr/libexec/onc/ubihealthd-config", "/usr/libexec/onc/leases-to-ram"],
+    ["/usr/libexec/platform/packet-steering.sh", "/usr/libexec/onc/ubihealthd-config", "/usr/libexec/onc/leases-to-ram", "/etc/sysctl.d/12-onc-nlbwmon.conf"],
     "the odhcpd fix only where the internet's IPv6 is on"
   );
 });

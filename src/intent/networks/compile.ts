@@ -185,7 +185,9 @@ export const network: Feature = (intent) => {
                   { when: onRouter, options: routerInterface(n, ipv6(n), ipv6Upstream) },
                   // Access points: a client of the main network; the others
                   // only carried, for their Wi-Fi to join.
-                  { when: onAccessPoints, options: isMain(n) ? { proto: "dhcp", sendclientid, ipv6: false } : { proto: "none" } },
+                  // IPv6 on: `ipv6 0` disables it on the device, and lan6's
+                  // DHCPv6 below then has no link to send on.
+                  { when: onAccessPoints, options: isMain(n) ? { proto: "dhcp", sendclientid } : { proto: "none" } },
                 ],
               },
               { device: deviceOf(n), delegate: false }
