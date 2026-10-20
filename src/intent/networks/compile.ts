@@ -194,7 +194,11 @@ export const network: Feature = (intent) => {
             )
           ),
           ...(ipv6(main)
-            ? [section({ name: `${main.id}6`, when: onAccessPoints }, { device: deviceOf(main), proto: "dhcpv6", sendclientid, reqprefix: "no" })]
+            ? [
+                // netifd's alias, as the router's wan6 is: the IPv6 side of
+                // the main network's own interface, up and down with it.
+                section({ name: `${main.id}6`, when: onAccessPoints }, { device: `@${main.id}`, proto: "dhcpv6", sendclientid, reqprefix: "no" }),
+              ]
             : []),
         ],
         // No dhcp_default_duid, deliberately: 25.12 makes a random one at
