@@ -36,7 +36,7 @@ export const main = async ({
     {
       name: "openwrt-configurator",
       description: "OpenWrt Configurator",
-      version: "0.1.0",
+      version: "0.1.1",
       // In the order help lists them.
       commands: [
         provisionCommand,
