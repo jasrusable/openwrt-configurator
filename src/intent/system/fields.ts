@@ -28,7 +28,7 @@ export const systemFields: FieldInfo[] = [
     label: "SSH key",
     openwrt: "dropbear authorized key",
     explain:
-      "The private key on this computer that the app logs in to every device with, as root over SSH. Its public half must already be in each device's authorized keys (LuCI: System › Administration › SSH-Keys); the app does not install it.",
+      "The key the app logs in to every device with, as root over SSH: a private key on this computer, or a public key (.pub) whose private half an SSH agent such as 1Password holds. Its public half must already be in each device's authorized keys (LuCI: System › Administration › SSH-Keys); the app does not install it.",
   },
   {
     path: "system.app_login.password",

@@ -20,8 +20,8 @@
 # the real 90 s default.
 #
 # Needs docker (privileged containers), jq, openssl and `npm ci` done.
-# Usage: [ONC_RIG_VERSION=25.12.0|25.12.5|SNAPSHOT] [ONC_RIG_KEEP=1] scripts/rig-test.sh [job ...]
-#        (default: 25.12.5; jobs dbclient openssh node network)
+# Usage: [ONC_RIG_VERSION=25.12.0|25.12.6|SNAPSHOT] [ONC_RIG_KEEP=1] scripts/rig-test.sh [job ...]
+#        (default: 25.12.6; jobs dbclient openssh node network)
 
 # Device-side snippets are single-quoted on purpose: they expand in the container.
 # shellcheck disable=SC2016

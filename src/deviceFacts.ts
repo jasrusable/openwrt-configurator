@@ -229,6 +229,7 @@ export const withLocatedAddresses = async (plan: Plan, intentPath: string, platf
   const found = await Promise.all(locateEach({ devices: ready, facts, platform }));
   const addresses = new Map<string, string>();
   const hostKeys: Record<string, { type: string; key: string }> = {};
+  const alsoAt: Record<string, string[]> = {};
   // Not found (or not trusted where it was): never connected to anyway at
   // its configured name, which anyone on the network can claim in DHCP.
   const unreached: { hostname: string; error: string }[] = [];
@@ -245,7 +246,12 @@ export const withLocatedAddresses = async (plan: Plan, intentPath: string, platf
     // Found by its key (anywhere but a configured address): the apply's own
     // connections are held to it too, or a box that took the address since
     // would be handed the login.
-    if (f.hostKey && !(f.address === configured && isAddress(f.address))) hostKeys[f.hostname] = f.hostKey;
+    if (f.hostKey && !(f.address === configured && isAddress(f.address))) {
+      hostKeys[f.hostname] = f.hostKey;
+      // Where it may answer instead if its address changes mid-apply (a
+      // lease renewed at commit): its configured name, held to that key.
+      if (configured && configured !== f.address) alsoAt[f.hostname] = [configured];
+    }
   }
   return {
     plan: {
@@ -255,6 +261,7 @@ export const withLocatedAddresses = async (plan: Plan, intentPath: string, platf
       ),
     },
     hostKeys,
+    alsoAt,
     unreached,
   };
 };

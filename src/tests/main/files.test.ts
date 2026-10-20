@@ -7,7 +7,7 @@ import test from "ava";
 import { stateOf } from "../helpers/fixtures";
 import { finaliseRecords, getDeviceScript, hookCommands, prepareRecords, stageRecords } from "../../getDeviceScript";
 
-test("stage writes each managed file, its mode and run_after with it, then the manifest", (t) => {
+test("stage writes each managed file, its mode and run_after with it, then the manifest and its keep list", (t) => {
   const content = '#!/bin/sh\necho "$ACTION"\n';
   const runAfter = "ACTION=add INTERFACE=phy1-ap0 sh /etc/hotplug.d/net/20-aql";
   const state = stateOf({
@@ -21,6 +21,14 @@ test("stage writes each managed file, its mode and run_after with it, then the m
     { kind: "write", path: "/etc/plain", mode: "0644", content: "x" },
     // So a file dropped from the config can be pruned on the next run.
     { kind: "write", path: "/etc/onc/managed_files", mode: "0644", content: "/etc/hotplug.d/net/20-aql\n/etc/plain" },
+    // Kept through a flash that keeps the config, the manifest with them, so
+    // one no longer declared on the new release is still pruned after it.
+    {
+      kind: "write",
+      path: "/lib/upgrade/keep.d/onc-files",
+      mode: "0644",
+      content: "/etc/hotplug.d/net/20-aql\n/etc/onc/managed_files\n/etc/plain\n",
+    },
   ]);
   // Before the commit (a failed write leaves nothing committed), which is finalise's.
   t.false(finaliseRecords({ state, current: {} }).some((r) => r.kind === "write"));

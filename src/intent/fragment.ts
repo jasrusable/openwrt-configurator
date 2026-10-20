@@ -75,3 +75,12 @@ export const merge = (fragments: Fragment[]): Merged =>
  */
 export const serviceWhen = (condition: When, name: string, used: boolean): Service =>
   used ? { when: condition, name, running: true } : { when: condition, name, enabled: false };
+
+/**
+ * The MAC as DHCP identity (25.12.6's `sendclientid`; older releases ignore
+ * it): a flash's first boot writes a random dhcp_default_duid (base-files'
+ * 14_network-generate-duid; see networks/compile.ts on globals), which would
+ * otherwise be sent as the client-id until the next apply wipes it. Seen on the user's access point,
+ * 25.12.5 to 25.12.6: a new lease, so a new address, mid-upgrade.
+ */
+export const sendclientid = "hardware";

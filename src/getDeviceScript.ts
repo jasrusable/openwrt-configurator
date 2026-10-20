@@ -5,6 +5,7 @@
 // For a dry run, `getDeviceScript` shows the verbs with their records, as
 // they would be sent.
 import { AgentRecord, encodeRecords } from "./agent/records";
+import { filesKeepList } from "./agent/paths";
 import { Redact } from "./secretOptions";
 import { UciOperation, uciLine, uciOperations } from "./engine/getUciCommands";
 import { changedConfigs, declaredConfigs, uciFileText, UciConfigs, wipeOperations } from "./engine/uci";
@@ -102,9 +103,16 @@ export const stageRecords = ({
     ...wipeOperations(current, state.keep),
     ...uciOperations({ openWrtConfig: state.config, redact }),
   ];
+  // The manifest, and sysupgrade's list keeping the files and it through a
+  // flash that keeps the config: a fix is not off from the flash to the
+  // apply after it, and one no longer declared on the new release is still
+  // pruned then, its stock file put back (the agent's remove-file).
   const manifest: AgentRecord[] =
     files.length > 0 || stale.length > 0
-      ? [{ kind: "write", path: managedFilesManifest, mode: "0644", content: files.map((file) => file.path).join("\n") }]
+      ? [
+          { kind: "write", path: managedFilesManifest, mode: "0644", content: files.map((file) => file.path).join("\n") },
+          { kind: "write", path: filesKeepList, mode: "0644", content: `${[...files.map((file) => file.path), managedFilesManifest].sort().join("\n")}\n` },
+        ]
       : [];
   return [
     ...uciRecords(operations),

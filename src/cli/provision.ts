@@ -216,7 +216,7 @@ const provisionWith =
     // (its own facts beside it), from the UI or not. A low-level config's
     // addresses are the user's own, used as written.
     const factsFor = options.factsFor ?? (loaded.intent ? configPath : undefined);
-    const locate = (plan: Plan): Promise<Located> => (factsFor ? locatedOrRefused(plan, factsFor, platform) : Promise.resolve({ plan, hostKeys: {} }));
+    const locate = (plan: Plan): Promise<Located> => (factsFor ? locatedOrRefused(plan, factsFor, platform) : Promise.resolve({ plan, hostKeys: {}, alsoAt: {} }));
     const located = await locate(loaded.plan);
     // Each device's facts as the run reads them: an applied run stamps what
     // it left there (src/applyDiff.ts stampApplied), for the next one's
@@ -235,10 +235,11 @@ const provisionWith =
       report?.({ at: Date.now(), outcome: "failed" });
       return upgrading;
     }
-    const { plan, hostKeys, stopped } = upgrading.value;
+    const { plan, hostKeys, alsoAt, stopped } = upgrading.value;
     const result = await provisionConfig({
       plan,
       hostKeys,
+      alsoAt,
       report,
       ...(factsFor
         ? {
@@ -276,7 +277,7 @@ const provisionWith =
   };
 
 /** A plan with its devices found where they are, and the host keys they were found by (cli/context.ts locatedOrRefused). */
-type Located = { plan: Plan; hostKeys: Record<string, { type: string; key: string }> };
+type Located = { plan: Plan; hostKeys: Record<string, { type: string; key: string }>; alsoAt: Record<string, string[]> };
 
 /**
  * `--upgrade`: the firmware first (src/firmware/run.ts), then what the apply

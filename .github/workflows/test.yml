@@ -43,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        openwrt: ["25.12.0", "25.12.5"]
+        openwrt: ["25.12.0", "25.12.6"]
         experimental: [false]
         include:
           - openwrt: SNAPSHOT

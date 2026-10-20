@@ -1,5 +1,5 @@
 import test from "ava";
-import { provisionableDevices, sshConnectOptions } from "../../apply/provisionConfig";
+import { agentSocketFor, following, provisionableDevices, sshConnectOptions } from "../../apply/provisionConfig";
 import { PlanDevice } from "../../plan/types";
 import { planOf } from "../helpers/fixtures";
 import { deviceFromJson } from "../../lowLevel/names";
@@ -23,7 +23,20 @@ test("password-only auth", (t) => {
   t.is(opts.host, "10.0.0.1");
   t.is(opts.password, "secret");
   t.is(opts.privateKeyPath, undefined);
-  t.is(opts.agent, undefined);
+  t.is(opts.agent, "/tmp/agent.sock");
+});
+
+test("a public key path names the agent's key, beside the password", (t) => {
+  const opts = sshConnectOptions({
+    platform: nodePlatform,
+    deviceConfig: device({
+      ssh_auth: { username: "root", password: "secret", private_key_path: "~/.ssh/id_1password.pub" },
+    }),
+    agentSocket: "/tmp/agent.sock",
+  });
+  t.is(opts.privateKeyPath, undefined);
+  t.is(opts.agent, "/tmp/agent.sock");
+  t.is(opts.password, "secret");
 });
 
 test("private_key_path without password", (t) => {
@@ -128,4 +141,49 @@ test("a device needs no ipaddr to be valid", (t) => {
       config: {},
     })
   );
+});
+
+test("the agent is OpenSSH's IdentityAgent for the host, else SSH_AUTH_SOCK", async (t) => {
+  const platform = (stdout: string, code = 0) => ({
+    run: async () => ({ code, stdout, stderr: "" }),
+    env: (name: string) => (name === "SSH_AUTH_SOCK" ? "/tmp/env.sock" : undefined),
+    homedir: () => "/home/me",
+  });
+  t.is(await agentSocketFor("a.lan", platform('user root\nidentityagent "~/Library/1p/agent.sock"\n')), "/home/me/Library/1p/agent.sock");
+  t.is(await agentSocketFor("b.lan", platform("identityagent SSH_AUTH_SOCK\n")), "/tmp/env.sock");
+  t.is(await agentSocketFor("c.lan", platform("identityagent none\n")), undefined);
+  t.is(await agentSocketFor("d.lan", platform("", 255)), "/tmp/env.sock");
+});
+
+test("an apply's connections follow a device that moved, only held to its key", async (t) => {
+  const key = { type: "ssh-ed25519", key: "AAAA" };
+  const answering = new Set(["192.0.2.67"]);
+  const tried: string[] = [];
+  const connectAt = async (d: PlanDevice, hostKey?: { type: string; key: string }) => {
+    tried.push(`${d.ipaddr}${hostKey ? " pinned" : ""}`);
+    if (!answering.has(d.ipaddr!)) throw new Error(`${d.ipaddr} is not answering`);
+    return { address: d.ipaddr } as never;
+  };
+  const ap = { ...device({ ssh_auth: { username: "root" } }), hostname: "ap", ipaddr: "192.0.2.67" };
+  const connect = following({ hostKeys: { ap: key }, alsoAt: { ap: ["ap.lan"] }, connectAt, log: () => {} });
+  await connect(ap);
+  t.deepEqual(tried, ["192.0.2.67 pinned"]);
+  // Its lease renewed at commit: the configured name now leads to it.
+  answering.clear();
+  answering.add("ap.lan");
+  tried.length = 0;
+  await connect(ap);
+  t.deepEqual(tried, ["192.0.2.67 pinned", "ap.lan pinned"]);
+  // And it is looked for there first from then on.
+  tried.length = 0;
+  await connect(ap);
+  t.deepEqual(tried, ["ap.lan pinned"]);
+  // Nowhere answering: each address's failure is said.
+  answering.clear();
+  await t.throwsAsync(connect(ap), { message: "ap.lan: ap.lan is not answering; 192.0.2.67: 192.0.2.67 is not answering" });
+  // Without a key on record, nowhere but where it was found.
+  const unpinned = following({ hostKeys: {}, alsoAt: { ap: ["ap.lan"] }, connectAt, log: () => {} });
+  tried.length = 0;
+  await t.throwsAsync(unpinned(ap), { message: /192\.0\.2\.67 is not answering/ });
+  t.deepEqual(tried, ["192.0.2.67"]);
 });

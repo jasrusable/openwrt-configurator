@@ -207,7 +207,9 @@ failure that says what it left: committed, left armed). The run returns a
 `RunResult` (`outcome.ts`); `cli/provision.ts` maps it to exit codes (3:
 applied, a later step failed; 4: `partial`, some devices kept it, named in
 `kept`). `reconnect.ts` reconnects and waits for procd
-to settle; `provisionConfig.ts` connects and orders devices (the local
+to settle; `provisionConfig.ts` connects and orders devices (its
+connections follow a device that moves mid-apply, `following`: where it
+last answered, then its configured name, held to its pinned key; the local
 device, then the gateway, then the access point this machine is on by Wi-Fi
 last, `gateway.ts`; mesh repeaters deepest first: `meshOrder.ts`).
 
@@ -248,7 +250,7 @@ System › Firmware. The network picks a release (`system.firmware.release`): `s
 `provision --upgrade <devices|all>` (the UI's `POST /api/firmware/upgrade` starts the apply job with it) upgrades first, then applies the saved settings:
 - **Plan** (`upgradePlan.ts`): devices behind, in `inFlashOrder` (`target.ts`, the UI's too): mesh, then cabled access points, the router, and the device this app runs on last of all. A downgrade, or a move into a series newer than `newestCheckedSeries`, is refused unless acknowledged (`--accept-downgrade`, `--accept-new-series`). `run.ts` refuses what the plan alone can tell first, then reads each moving device once (is this app on it, is this machine on its Wi-Fi) and plans again: back to an older series is refused for this app's device, a mesh repeater or a device repeaters may reach the network through, and the access point this machine is on (first-boot settings have no Wi-Fi or mesh). From the UI, nothing unapplied goes out with an upgrade but firmware choices (`isFirmwareChoice`), and its acknowledgements are exact device→release pairs the server matches.
 - **Builds** (`builds.ts`): one image per board, role and release, all requested from ASU before anything flashes. An image holds the role's packages and the first-boot script (`firstBoot.ts`): per role, no hostname, no MAC, nothing secret (`firmwareBuilds.test.ts` checks generated intents); it gives root a random password, as LuCI is in every image. Boards are found by `findProfile`, low-level `build-images` too. `build-images` on an intent downloads them into `<intent>.state/images/` by hash.
-- **Flash** (`upgrade.ts`, the device script `upgradeScript.ts`, on the agent's prelude and verb runner): each device fetches its own image from ASU into its RAM (never through this machine), refused first if RAM is short, checks the sha256 and `sysupgrade -T`, and removes it on any failure. First it reads what the device runs (refused unless it is the step's `from`) and checks the session is local exactly when the step was planned as `host`. Settings are kept, except back to an older series: then only `/etc/dropbear`, from a tarball made on the device (`sysupgrade -f`). The run waits for the new release before the next device; when it stops, the saved settings are still applied to those already upgraded (`planAfterUpgrade`), each found again first.
+- **Flash** (`upgrade.ts`, the device script `upgradeScript.ts`, on the agent's prelude and verb runner): each device fetches its own image from ASU into its RAM (never through this machine), refused first if RAM is short, checks the sha256 and `sysupgrade -T`, and removes it on any failure. First it reads what the device runs (refused unless it is the step's `from`) and checks the session is local exactly when the step was planned as `host`. Settings are kept, except back to an older series: then only `/etc/dropbear`, from a tarball made on the device (`sysupgrade -f`). Kept settings include the managed files and their manifest (`/lib/upgrade/keep.d/onc-files`, written beside the manifest), so fixes stay on until the apply after, which prunes those no longer declared; a pruned file that stood over the image's own gets the image's back (`/rom`), never an `rm` that hides it. The run waits for the new release before the next device; when it stops, the saved settings are still applied to those already upgraded (`planAfterUpgrade`), each found again first.
 - **The device this app runs on** (`self.ts`): it keeps its own `.apk`, its feed's list and key (never `distfeeds.list`, which names the old release) and a one-shot offline reinstall through the upgrade (keep.d; a failed reinstall is logged and runs again next boot), notes the release, and the collector's next start finishes the run once the network is up, applying the run's own snapshot (on another release too). A flash that does not go ahead forgets the note, and `clean` removes what keep-self left.
 - **No image without this app's key authorized** (`missingKey`, checked once, in `imagePlans`; the UI only shows it): a device fresh from an image has password login off and lets in only `authorized_keys`, so the key the app logs in with (`appPublicKey`) must be among them.
 - **The applied marker** `/etc/onc/applied` (kept by keep.d) is written by a confirmed apply and by the settings-kept flash just before `sysupgrade`: the first-boot script then leaves an upgraded device's settings alone (devices applied before the marker, or with `--no-confirm`, included).
@@ -539,8 +541,8 @@ prose:
   `scripts/equivalence.expected.json` (`--expect`).
 - **The rig:** `scripts/rig-test.sh` provisions OpenWrt in Docker over every
   SSH client path (`dbclient`, OpenSSH, Node, two devices).
-  `ONC_RIG_VERSION` picks the release (25.12.5 by default; CI runs 25.12.0,
-  25.12.5 and SNAPSHOT, the snapshot allowed to fail), `ONC_RIG_KEEP=1` keeps
+  `ONC_RIG_VERSION` picks the release (25.12.6 by default; CI runs 25.12.0,
+  25.12.6 and SNAPSHOT, the snapshot allowed to fail), `ONC_RIG_KEEP=1` keeps
   the containers for a look; the image choice is `scripts/openwrt-image.sh`
   (the arm64 rootfs is labelled `linux/aarch64_generic`: pulled by that
   label, run with no `--platform`).
@@ -553,7 +555,7 @@ prose:
   through the engine on each side of its release range;
   `swconfigLayout.test.ts` checks a swconfig router's layout against
   OpenWrt's own `config_generate` for the same board.
-- **The router UI end to end:** boot `openwrt/rootfs:armsr-armv8-v25.12.5`
+- **The router UI end to end:** boot `openwrt/rootfs:armsr-armv8-v25.12.6`
   with `docker run -d --privileged … /sbin/init`. Once booted it has no route
   out (netifd moves eth0 into `br-lan`), so fetch `quickjs` and its
   dependencies from an un-booted container (`apk fetch -R quickjs`), copy them
@@ -614,6 +616,12 @@ named.
   in-use flag: the radio's own frequency says which (same, and the survey
   action); mt76 wraps its busy counter and counts on (`status/history.ts`
   `airtimeOf`).
+- 25.12.6: base-files' `14_network-generate-duid` runs on each flash's first
+  boot and writes a random DUID where none is set, which netifd then sends as
+  the DHCP client-id: a new lease, a new address (`sendclientid`,
+  `intent/fragment.ts`). odhcpd's RFC 9096 memory (`piodir`) is in `/tmp` as
+  stock, so a reboot forgot the old prefix and clients kept dead addresses
+  (`intent/networks/compile.ts`).
 - busybox's `ping -i` takes whole seconds and prints no mdev
   (`status/device/internet.ts`); uclient-fetch `--post-file` holds the
   whole body and stalls on 4 MB and more (`status/actions.ts`, speed test).

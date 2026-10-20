@@ -4,18 +4,18 @@
 // lock it out, so it is refused before any device is touched.
 import type { Intent } from "./intent/schema";
 import { Platform } from "./platform";
-import { expandHome } from "./apply/provisionConfig";
+import { expandHome, isPublicKeyPath } from "./apply/provisionConfig";
 import { where } from "./intent/places";
 import { keyIdentity } from "./sshKeys";
 
-/** This app's public key: the private key's .pub beside it, or ssh-keygen's reading of it. */
+/** This app's public key: the file itself when it is one (the agent's key), else the private key's .pub beside it, or ssh-keygen's reading of it. */
 export const ownPublicKey = async (
   platform: Pick<Platform, "readTextFile" | "run" | "homedir">,
   keyPath: string
 ): Promise<string | undefined> => {
   const path = expandHome(keyPath, platform.homedir());
   try {
-    return platform.readTextFile(`${path}.pub`).trim();
+    return platform.readTextFile(isPublicKeyPath(path) ? path : `${path}.pub`).trim();
   } catch {
     // No .pub beside it: ask ssh-keygen, where there is one.
   }

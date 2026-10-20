@@ -162,7 +162,7 @@ const openSsh = (target: SshTarget, host: string, knownHostsFile: string): Trans
       ? [
           "-o",
           "NumberOfPasswordPrompts=1",
-          ...(target.privateKeyPath ? [] : ["-o", "PubkeyAuthentication=no"]),
+          ...(target.privateKeyPath || target.agent ? [] : ["-o", "PubkeyAuthentication=no"]),
         ]
       : ["-o", "BatchMode=yes"]),
     ...(target.username ? ["-l", target.username] : []),

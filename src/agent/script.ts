@@ -278,7 +278,9 @@ stage_record() {
 				/etc/init.d/*/*) ;;
 				/etc/init.d/*) if [ -x "$ROOT$rest" ]; then "$ROOT$rest" stop; "$ROOT$rest" disable; fi > /dev/null 2>&1 ;;
 			esac
-			rm -f "$ROOT$rest" ;;
+			# One that stood over a stock file gives it back: an rm on the
+			# overlay would hide the image's copy too.
+			if [ -e "$ROOT/rom$rest" ]; then cp -a "$ROOT/rom$rest" "$ROOT$rest"; else rm -f "$ROOT$rest"; fi ;;
 		write) write_file ;;
 		*) echo "onc-agent stage: unexpected $kind" >&2; return 1 ;;
 	esac

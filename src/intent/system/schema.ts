@@ -33,7 +33,7 @@ export const systemSchema = z
     /** How this app logs in to the devices, as root. */
     app_login: z
       .object({
-        /** The private key on this computer; else the agent's. */
+        /** The private key on this computer, or a public key whose private half the agent holds (1Password); else the agent's. */
         key: z.string().optional(),
         /**
          * Also set as root's password on every device (system/compile.ts).

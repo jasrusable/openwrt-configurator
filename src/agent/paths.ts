@@ -34,3 +34,8 @@ export const agentGlob = `${deviceTmp}/${agentName}*.sh`;
 export const appliedMarker = "/etc/onc/applied";
 /** What sysupgrade keeps for the marker (one list per package or purpose in keep.d). */
 export const appliedKeepList = "/lib/upgrade/keep.d/onc-applied";
+/**
+ * What sysupgrade keeps of the managed files, written with them: kept as the
+ * config is, so a fix in a file is not off from a flash until the apply after it.
+ */
+export const filesKeepList = "/lib/upgrade/keep.d/onc-files";

@@ -2,9 +2,9 @@
 # image to boot, and how. Sets version, image, platform (for docker run),
 # pull_platform and node_platform, and pulls the image if it is not here.
 #
-# ONC_RIG_VERSION: a 25.12 point release (25.12.0, 25.12.5, ...) or SNAPSHOT;
+# ONC_RIG_VERSION: a 25.12 point release (25.12.0, 25.12.6, ...) or SNAPSHOT;
 # CI runs several (.github/workflows/test.yml).
-version=${ONC_RIG_VERSION:-25.12.5}
+version=${ONC_RIG_VERSION:-25.12.6}
 case $version in
   SNAPSHOT) tag=SNAPSHOT ;;
   *) tag=v$version ;;

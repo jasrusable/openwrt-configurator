@@ -25,7 +25,7 @@ import { where } from "./intent/places";
 import { parseKnownHosts } from "./knownHosts";
 import { PlanDevice } from "./plan/types";
 import { Platform, Session } from "./platform";
-import { ProvisionableDevice, sshConnectOptions } from "./apply/provisionConfig";
+import { agentSocketOf, ProvisionableDevice, sshConnectOptions } from "./apply/provisionConfig";
 import { Lease, parseLeases } from "./status/device";
 
 export type Neighbour = { address: string; mac: string };
@@ -174,7 +174,7 @@ const tryAddress = async (
   // A known device is held to its recorded key, by the SSH client itself:
   // another machine at this address is refused before credentials are sent.
   const session = await platform.connect({
-    ...sshConnectOptions({ deviceConfig: at, agentSocket: platform.env("SSH_AUTH_SOCK"), platform }),
+    ...sshConnectOptions({ deviceConfig: at, agentSocket: await agentSocketOf({ deviceConfig: at, platform }), platform }),
     readyTimeout: attemptTimeoutMs,
     ...(pin ? { hostKey: pin } : {}),
   });

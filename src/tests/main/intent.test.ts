@@ -506,8 +506,10 @@ test("patches apply only where they say: by model, by role", (t) => {
       JSON.parse(readFileSync(join(root, "deviceSchemas", `${model}.json`), "utf8"))
     );
     const deviceConfig = plan.devices.find((d) => d.hostname === hostname)!;
-    // The patches' files: root's password is every device's.
-    return (getOpenWrtState({ plan, deviceConfig, deviceSchema }).files ?? []).map((f: any) => f.path).filter((p: string) => p !== "/etc/onc/root-password");
+    // The patches' files: root's password is every device's, odhcpd's keep.d list the networks'.
+    return (getOpenWrtState({ plan, deviceConfig, deviceSchema }).files ?? [])
+      .map((f: any) => f.path)
+      .filter((p: string) => p !== "/etc/onc/root-password" && p !== "/lib/upgrade/keep.d/onc-odhcpd");
   };
   t.deepEqual(files("home-router", "friendlyarm,nanopi-r6s").filter((p: string) => !p.includes("avahi")), [
     "/usr/libexec/platform/packet-steering.sh",
@@ -1515,4 +1517,12 @@ test("a value's availability says whether the schema refuses it, or keeps it ign
   t.like(availability({ ...intent, system: { ...intent.system, country: "US" } }, "hardware.0.radios.2g.channel").option(13), { refuses: true });
   // Ignored: metered with one line only matters with several.
   t.like(availability(intent, "internet.lines.0.failover.metered").option(true), { refuses: undefined });
+});
+
+test("odhcpd's prefix memory is on flash and kept through a flash, so a prefix that went is deprecated after a reboot", (t) => {
+  const plan = planFor(sample());
+  const deviceSchema = deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", "friendlyarm,nanopi-r6s.json"), "utf8")));
+  const state = getOpenWrtState({ plan, deviceConfig: plan.devices.find((d) => d.hostname === "home-router")!, deviceSchema });
+  t.is((state.config as any).dhcp.odhcpd[0].piodir, "/etc/odhcpd-piodir");
+  t.is(state.files.find((f) => f.path === "/lib/upgrade/keep.d/onc-odhcpd")!.content, "/etc/odhcpd-piodir/\n");
 });

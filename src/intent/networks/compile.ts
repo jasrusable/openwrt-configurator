@@ -4,7 +4,7 @@
 // The router routes and serves each network (addresses, IPv6, DHCP); every
 // other device is a client of the main network and only bridges the rest.
 import { tunnelDns } from "../vpn";
-import { everyDevice, Feature, gatewayOf, isMain, mainNetwork, Network, onAccessPoints, onDsa, onRouter, onSwConfig } from "../fragment";
+import { everyDevice, Feature, gatewayOf, isMain, mainNetwork, Network, onAccessPoints, onDsa, onRouter, onSwConfig, sendclientid } from "../fragment";
 import { named } from "../names";
 import { Options, placeholder, section, SectionMeta } from "../../plan/types";
 import { when } from "../../plan/when";
@@ -14,6 +14,16 @@ import { meshMtu, meshNode } from "../mesh";
 
 /** The bridge VLAN a network rides on: 1 for the main network. */
 const vlanOf = (network: Network) => network.vlan ?? 1;
+/**
+ * Where odhcpd remembers the prefixes it announced (RFC 9096): after it starts
+ * again it announces one that is gone as deprecated, so clients drop
+ * addresses that no longer work. On flash, and kept through upgrades: in
+ * stock's /tmp a reboot forgets them, and when the ISP gave a new prefix
+ * after the router's 25.12.6 flash, clients kept the dead one until they
+ * joined the Wi-Fi again. Written only when a prefix comes, changes or goes.
+ */
+const piodir = "/etc/odhcpd-piodir";
+
 export const deviceOf = (network: Network) => `br-lan.${vlanOf(network)}`;
 
 /** One per network, so each gets its own /64 of the delegated prefix. */
@@ -101,6 +111,8 @@ export const network: Feature = (intent) => {
       // whole LAN lost IPv6 (seen on a real router). So a rollback restarts it.
       { when: onRouter, name: "odhcpd", running: true, restartAfterRollback: true },
     ],
+    // Kept through a flash (piodir, below).
+    files: [{ when: onRouter, path: "/lib/upgrade/keep.d/onc-odhcpd", content: `${piodir}/\n` }],
     config: {
       network: {
         // The VLANs, on each kind of switch: DSA bridges VLAN-filter in the
@@ -173,14 +185,14 @@ export const network: Feature = (intent) => {
                   { when: onRouter, options: routerInterface(n, ipv6(n), ipv6Upstream) },
                   // Access points: a client of the main network; the others
                   // only carried, for their Wi-Fi to join.
-                  { when: onAccessPoints, options: isMain(n) ? { proto: "dhcp", ipv6: false } : { proto: "none" } },
+                  { when: onAccessPoints, options: isMain(n) ? { proto: "dhcp", sendclientid, ipv6: false } : { proto: "none" } },
                 ],
               },
               { device: deviceOf(n), delegate: false }
             )
           ),
           ...(ipv6(main)
-            ? [section({ name: `${main.id}6`, when: onAccessPoints }, { device: deviceOf(main), proto: "dhcpv6", reqprefix: "no" })]
+            ? [section({ name: `${main.id}6`, when: onAccessPoints }, { device: deviceOf(main), proto: "dhcpv6", sendclientid, reqprefix: "no" })]
             : []),
         ],
         // No dhcp_default_duid, deliberately: 25.12 makes a random one at
@@ -192,8 +204,9 @@ export const network: Feature = (intent) => {
         // (https://github.com/openwrt/openwrt/issues/21671,
         // https://github.com/openwrt/openwrt/issues/22332), and give every
         // device a new lease once, an access point a new address mid-apply.
-        // Revisit with `sendclientid` (commit eae2afc352, after 25.12.5):
-        // TODO.md.
+        // The uci-default runs again on each flash's first boot, though, and
+        // its DUID then outlives the boot until an apply wipes it: hence
+        // `sendclientid` (below). A stable DUID of our own: TODO.md.
         globals: [
           section(
             {
@@ -227,7 +240,7 @@ export const network: Feature = (intent) => {
         odhcpd: [
           section(
             { name: "odhcpd", when: onRouter },
-            { leasefile: "/tmp/odhcpd.leases", leasetrigger: "/usr/sbin/odhcpd-update", hostsdir: "/tmp/hosts", piodir: "/tmp/odhcpd-piodir" }
+            { leasefile: "/tmp/odhcpd.leases", leasetrigger: "/usr/sbin/odhcpd-update", hostsdir: "/tmp/hosts", piodir }
           ),
         ],
       },

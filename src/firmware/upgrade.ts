@@ -167,17 +167,27 @@ export const flashOne = async ({
   return ok({ self: !!session.local });
 };
 
-/** Waits for a device to answer on `version`, at most `rebootLimitMs`. */
-export const backOn = async (device: string, version: string, deps: Pick<UpgradeDeps, "onDevice" | "sleep" | "now">) => {
+/**
+ * Waits for a device to answer on `version`, at most `rebootLimitMs`, saying
+ * why it does not about once a minute: a wait that only ends tells nothing.
+ */
+export const backOn = async (device: string, version: string, deps: Pick<UpgradeDeps, "onDevice" | "sleep" | "now" | "log">) => {
   const until = deps.now() + rebootLimitMs;
-  let seen: string | undefined;
-  while (deps.now() < until) {
+  const wait = async (seen: string | undefined, why: string | undefined, saidAt: number): Promise<Result<void, string>> => {
+    if (deps.now() >= until) {
+      const last = why ? ` (last: ${why})` : "";
+      return err(seen ? `it came back on ${seen}, not ${version}` : `it did not answer within ${rebootLimitMs / 60_000} minutes${last}`);
+    }
     await deps.sleep(pollEveryMs);
     const answer = await deps.onDevice(device, 30_000, releaseOf);
-    seen = (answer.ok ? answer.value : undefined) ?? seen;
     if (answer.ok && answer.value === version) return ok(undefined);
-  }
-  return err(seen ? `it came back on ${seen}, not ${version}` : `it did not answer within ${rebootLimitMs / 60_000} minutes`);
+    const now = deps.now();
+    const reason = answer.ok ? `it runs ${answer.value ?? "an unknown release"}` : answer.error.message;
+    const say = now - saidAt >= 60_000;
+    if (say) deps.log(`${device}: not back yet: ${reason}`);
+    return wait((answer.ok ? answer.value : undefined) ?? seen, reason, say ? now : saidAt);
+  };
+  return wait(undefined, undefined, deps.now());
 };
 
 /** What a step's flash kept, in words. */

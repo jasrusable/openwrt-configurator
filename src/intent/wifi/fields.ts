@@ -40,7 +40,7 @@ export const wifiFields: FieldInfo[] = [
     description: "WPA3 is stronger; WPA2/WPA3 lets older devices still join.",
     openwrt: "wifi-iface encryption: psk2, sae-mixed, sae",
     explain:
-      "WPA2/WPA3 lets newer devices use WPA3 (SAE) while older ones use WPA2. WPA3 only is the most secure but locks out older devices. WPA3 always brings protected management frames.",
+      "WPA2/WPA3 lets newer devices use WPA3 (SAE) while older ones use WPA2. WPA3 only is the most secure but locks out older devices. WPA3 always brings protected management frames, and from OpenWrt 25.12.6 beacon protection too.",
   },
   { path: "wifi.networks.*.hidden", label: "Hidden", description: "Not announced; devices must be told the name." },
   {

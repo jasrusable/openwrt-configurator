@@ -452,6 +452,23 @@ test("stage: one batch, a value spanning lines on its own, stale files gone, fil
   t.false(existsSync(`${d.root}${path}.onc-new`));
 });
 
+test("stage: a dropped file that stood over a stock one gives the stock one back; others go", async (t) => {
+  const d = device();
+  await d.run("begin");
+  mkdirSync(`${d.root}/rom/usr/libexec/platform`, { recursive: true });
+  mkdirSync(`${d.root}/usr/libexec/platform`, { recursive: true });
+  writeFileSync(`${d.root}/rom/usr/libexec/platform/packet-steering.sh`, "stock\n");
+  writeFileSync(`${d.root}/usr/libexec/platform/packet-steering.sh`, "ours\n");
+  writeFileSync(`${d.root}/etc/ours-only`, "ours\n");
+  const out = await d.steps("stage", [
+    { kind: "remove-file", path: "/usr/libexec/platform/packet-steering.sh" },
+    { kind: "remove-file", path: "/etc/ours-only" },
+  ]);
+  t.regex(out.stdout, /^ONC_OK$/m, out.stderr);
+  t.is(readFileSync(`${d.root}/usr/libexec/platform/packet-steering.sh`, "utf8"), "stock\n");
+  t.false(existsSync(`${d.root}/etc/ours-only`));
+});
+
 test("stage: a run_after that leaves a process running never holds the call open", async (t) => {
   // Over SSH a call ends only once its streams close: a daemon a run_after
   // starts must not keep them (seen in the rig: a stage that never answered).

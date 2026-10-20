@@ -38,7 +38,16 @@ const targetOf = (row: FirmwareRow) => (row.target.kind === "release" ? row.targ
 
 /** Where each device is in the run, and how it ended. */
 const Progress = ({ steps, running, failed, log }: { steps: Record<string, FirmwareStep>; running: boolean; failed: boolean; log: string }) => (
-  <Section title="Upgrading" description={running ? "One device at a time; each is offline while it restarts." : undefined}>
+  <Section
+    title={running ? "Upgrading" : "Last upgrade"}
+    description={
+      running
+        ? "One device at a time; each is offline while it restarts."
+        : failed
+          ? undefined
+          : "Finished. How the settings applied after it went is the apply's own result."
+    }
+  >
     {Object.entries(steps).map(([device, step]) => (
       <SettingRow key={device} label={device}>
         <Group gap={6} wrap="nowrap">
