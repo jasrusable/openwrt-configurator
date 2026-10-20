@@ -326,7 +326,10 @@ test("a snapshot that cannot be taken whole (a /tmp full of staged packages) fai
 
 test("a watchdog whose run was taken away while it slept restores nothing, reloads nothing, reboots nothing", async (t) => {
   const d = device();
-  await armed(d, "--timeout", "1", "--mode", "reload-then-reboot");
+  // Long enough that the run is gone before it wakes, however slow the
+  // machine: with 1 s a CI runner sometimes took longer to get here, and the
+  // watchdog was already restoring when its run went.
+  await armed(d, "--timeout", "5", "--mode", "reload-then-reboot");
   const watchdog = Number(readFileSync(join(d.runDir, "watchdog.pid"), "utf8"));
   rmSync(d.runDir, { recursive: true, force: true });
   await until(() => {
