@@ -94,7 +94,9 @@ export const dns: Feature = (intent) => {
             domain,
             expandhosts: true,
             nonegcache: false,
-            cachesize: 1000,
+            // Most answers from the router, and still for a while when the
+            // provider blips; ~1 MB at this size.
+            cachesize: 10000,
             authoritative: true,
             readethers: true,
             // In RAM, as stock: a lease file on flash is written on every lease.
@@ -159,18 +161,26 @@ export const dns: Feature = (intent) => {
           // capturing clients' DNS. dnsmasq is configured above, by us.
           section({ name: "config", when: onRouter }, { dnsmasq_config_update: "-", force_dns: false }),
         ],
-        // Off: no instance, so the proxy runs nothing.
+        // Off: no instance, so the proxy runs nothing. Each logs warnings
+        // (one -v; its default is errors only): a failed lookup of the
+        // provider or a lost connection says so, where it said nothing
+        // while DNS was down.
         "https-dns-proxy": provider
           ? [
               section(
                 { when: onRouter },
-                { resolver_url: provider.url, bootstrap_dns: provider.bootstrap, listen_port: String(proxyPort) }
+                { resolver_url: provider.url, bootstrap_dns: provider.bootstrap, listen_port: String(proxyPort), verbosity: "1" }
               ),
               ...(fallback
                 ? [
                     section(
                       { when: onRouter },
-                      { resolver_url: providers[fallback].url, bootstrap_dns: providers[fallback].bootstrap, listen_port: String(fallbackPort) }
+                      {
+                        resolver_url: providers[fallback].url,
+                        bootstrap_dns: providers[fallback].bootstrap,
+                        listen_port: String(fallbackPort),
+                        verbosity: "1",
+                      }
                     ),
                   ]
                 : []),

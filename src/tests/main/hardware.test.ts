@@ -397,6 +397,41 @@ test("swconfig with the WAN on a NIC beside the switch: a line there is that NIC
   t.deepEqual(config.network.device[0].ports, ["eth0.1"]);
 });
 
+test("a port's board MAC is kept: on a section of its own, or on the one the port already has; a switch's port gets none", (t) => {
+  const macs = {
+    sw_config: false,
+    ports: [
+      { name: "eth0", default_role: "wan" as const, macaddr: "02:00:00:00:00:02" },
+      { name: "eth1", default_role: "lan" as const, macaddr: "02:00:00:00:00:01" },
+      { name: "eth2", default_role: "lan" as const },
+    ],
+  };
+  const config = build(
+    {
+      network: {
+        device: [
+          { name: "br-lan", type: "bridge", ports: "*" },
+          { ".name": "eth1_mtu", name: "eth1", mtu: 1560 },
+        ],
+        interface: [{ ".name": "wan", device: "@wan_port", proto: "dhcp" }],
+      },
+    },
+    macs
+  );
+  const devices = config.network.device.map(({ ports, ...d }: any) => d);
+  t.deepEqual(devices, [
+    { ".name": "device0", name: "br-lan", type: "bridge" },
+    { ".name": "eth1_mtu", name: "eth1", mtu: 1560, macaddr: "02:00:00:00:00:01" },
+    { ".name": "mac_eth0", name: "eth0", macaddr: "02:00:00:00:00:02" },
+  ]);
+
+  const switchBoard = build(
+    { network: { switch_vlan: [{ device: "switch0", vlan: 1, ports: "*" }] } },
+    { ...swconfig, ports: swconfig.ports.map((p) => ({ ...p, macaddr: "02:00:00:00:00:01" })) }
+  );
+  t.deepEqual(switchBoard.network.device ?? [], []);
+});
+
 test("@cpu_port is expanded wherever it is a whole value, an interface's device included", (t) => {
   const config = build({ network: { interface: [{ ".name": "lan", device: "@cpu_port.3", proto: "none" }] } }, swconfig);
   t.is(config.network.interface[0].device, "eth0.3");

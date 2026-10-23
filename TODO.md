@@ -163,6 +163,11 @@ over `src/server/`, and the React UI in `ui/`.
 - **A renamed item moves to the end** of its list after `merge3`, with no conflict reported: only its order changes.
 - **A greyed value's reason** can be the ignoring rule's when another rule refuses it: say the refusing rule's first.
 
+## From the router outage (2026-10-23)
+
+- **Board MACs on swconfig boards.** A port's `board.json` MAC is kept on DSA and on a NIC beside the switch (`engine/ports.ts`); on a switch, OpenWrt puts the network's MAC on its VLAN device (`eth0.1`, `eth0.2`), which the engine names differently: still dropped there.
+- **https-dns-proxy after a line comes up:** DNS stayed dead ~70 s after the WAN came up although the proxy retries every 5 s; why is unknown (it logged errors only). The restart hook (`https-dns-proxy-line-restart`) covers it, and the proxies now log warnings: once a stall says why, a setting (`force_ip_family`, `conn_loss_time`) may replace the hook.
+
 ## Roadmap (2026-10-13)
 
 - **App updates in status.** The Apply sheet now names an app update, a fix or a change on the device per line (`src/applyChanges.ts`, a stamp of hashes beside the intent, `<intent>.state/applied/`). Still to do: Overview says "not applied" when the current app would write something other than what the stamp holds, without opening Apply (a compile against stored facts, no device read).

@@ -91,7 +91,7 @@ test("on the router: each network routed, served and firewalled by purpose", (t)
   );
   t.true(config.dhcp.dhcp[2].ignore, "as stock: no DHCP on an internet line");
   // As stock 25.12: one instance on every attached network, leases in RAM.
-  t.like(config.dhcp.dnsmasq[0], { localservice: true, nonwildcard: true, boguspriv: true, ednspacket_max: 1232, cachesize: 1000, leasefile: "/tmp/dhcp.leases" });
+  t.like(config.dhcp.dnsmasq[0], { localservice: true, nonwildcard: true, boguspriv: true, ednspacket_max: 1232, cachesize: 10000, leasefile: "/tmp/dhcp.leases" });
   t.is(config.dhcp.dnsmasq[0].interface, undefined);
   // Home reaches everything; guests only the internet and the router's
   // DHCP and DNS.
@@ -517,6 +517,7 @@ test("patches apply only where they say: by model, by role", (t) => {
     "/usr/libexec/onc/ubihealthd-config",
     "/usr/libexec/onc/leases-to-ram",
     "/etc/sysctl.d/12-onc-nlbwmon.conf",
+    "/etc/hotplug.d/iface/40-onc-doh-restart",
   ]);
   t.deepEqual(files("home-ap-1", "zyxel,nwa50ax-pro"), [
     "/etc/hotplug.d/net/20-aql",
@@ -527,7 +528,13 @@ test("patches apply only where they say: by model, by role", (t) => {
     files("home-router", "friendlyarm,nanopi-r6s", (i) => (i.internet.lines[0].ipv6.enabled = false)).filter(
       (p: string) => !p.includes("avahi")
     ),
-    ["/usr/libexec/platform/packet-steering.sh", "/usr/libexec/onc/ubihealthd-config", "/usr/libexec/onc/leases-to-ram", "/etc/sysctl.d/12-onc-nlbwmon.conf"],
+    [
+      "/usr/libexec/platform/packet-steering.sh",
+      "/usr/libexec/onc/ubihealthd-config",
+      "/usr/libexec/onc/leases-to-ram",
+      "/etc/sysctl.d/12-onc-nlbwmon.conf",
+      "/etc/hotplug.d/iface/40-onc-doh-restart",
+    ],
     "the odhcpd fix only where the internet's IPv6 is on"
   );
 });

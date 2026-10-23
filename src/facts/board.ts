@@ -42,14 +42,24 @@ const switchPorts = (board: Json): Port[] | undefined => {
   });
 };
 
-/** DSA or plain interfaces: each network's ports, or its one device, by whatever name. */
+const macAddress = (value: unknown) => {
+  const mac = string(value);
+  return mac && /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/i.test(mac) ? mac.toLowerCase() : undefined;
+};
+
+/**
+ * DSA or plain interfaces: each network's ports, or its one device, by
+ * whatever name, with the network's MAC where the board gives one (each of
+ * its ports gets it, as OpenWrt's config_generate does).
+ */
 const networkPorts = (board: Json): Port[] => {
   const network = object(board.network);
   return (["lan", "wan"] as const).flatMap((role) => {
     const net = object(network[role]);
     const ports = strings(net.ports);
     const names = ports.length ? ports : string(net.device) ? [net.device as string] : [];
-    return names.map((name) => ({ name, default_role: role }));
+    const macaddr = macAddress(net.macaddr);
+    return names.map((name) => ({ name, default_role: role, ...(macaddr ? { macaddr } : {}) }));
   });
 };
 

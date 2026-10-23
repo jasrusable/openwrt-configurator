@@ -12,18 +12,27 @@ const facts = (name: string, uciWireless?: unknown) =>
     parseDeviceFacts({ board: read_(`${name}.board.json`), system: read_(`${name}.system.json`), uciWireless })
   );
 
-test("a DSA router: ports from network.lan's list and network.wan's device; model and release from ubus", (t) => {
+test("a DSA router: ports from network.lan's list and network.wan's device, each with its network's MAC; model and release from ubus", (t) => {
   t.deepEqual(facts("nanopi-r6s"), {
     name: "friendlyarm,nanopi-r6s",
     model: "FriendlyElec NanoPi R6S",
     version: "25.12.5",
     sw_config: false,
     ports: [
-      { name: "eth0", default_role: "lan" },
-      { name: "eth2", default_role: "lan" },
-      { name: "eth1", default_role: "wan" },
+      { name: "eth0", default_role: "lan", macaddr: "02:00:00:00:00:01" },
+      { name: "eth2", default_role: "lan", macaddr: "02:00:00:00:00:01" },
+      { name: "eth1", default_role: "wan", macaddr: "02:00:00:00:00:02" },
     ],
   });
+});
+
+test("a board.json MAC that is not one is left out", (t) => {
+  const board = read_("nanopi-r6s.board.json");
+  const facts = parseDeviceFacts({
+    board: { ...board, network: { ...board.network, wan: { ...board.network.wan, macaddr: "not-a-mac" } } },
+    system: read_("nanopi-r6s.system.json"),
+  });
+  t.deepEqual(facts.ports?.find((p) => p.name === "eth1"), { name: "eth1", default_role: "wan" });
 });
 
 test("an access point: one port as network.lan's device; radios from board.json's wlan, with their modes", (t) => {

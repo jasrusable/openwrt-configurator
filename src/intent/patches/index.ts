@@ -16,6 +16,7 @@ import { usteerNudgeRequests } from "./usteer-nudge-requests";
 import { nwa50axEeeOff } from "./nwa50ax-eee-off";
 import { wpadSwapRestart } from "./wpad-swap-restart";
 import { nlbwmonRmem } from "./nlbwmon-rmem";
+import { httpsDnsProxyLineRestart } from "./https-dns-proxy-line-restart";
 
 export const patches = [
   r6sPacketSteering,
@@ -29,6 +30,7 @@ export const patches = [
   wpadSwapRestart,
   miniupnpdFirewallReload,
   nlbwmonRmem,
+  httpsDnsProxyLineRestart,
 ];
 
 /** A fix turned off must be one, and not one whose absence breaks something silently. */

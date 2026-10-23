@@ -19,6 +19,8 @@ export const deviceSchemaSchema = z.object({
         sw_config_cpu_name: z.string().optional(),
         /** swconfig: its number on the switch; absent for a port beside the switch (a NIC of its own). */
         switch_port: z.number().int().optional(),
+        /** The MAC OpenWrt gives it at first boot (board.json's, for its network), where the board names one. */
+        macaddr: z.string().optional(),
       })
     )
     .optional(),

@@ -235,7 +235,22 @@ export const fitPorts = ({
       ? freePorts.map((port) => ({ name: `${d.name ?? "port"}_${sanitizeName(port)}`, options: { ...d.options, name: port } }))
       : [d]
   );
-  const withPortDevices: ResolvedSections = { ...withLines, ...(withLines.network ? { network: { ...net, device: devices } } : {}) };
+  // Each port's MAC, as OpenWrt's first boot sets it from board.json and the
+  // wipe would otherwise remove: a NIC with none of its own (the R6S's
+  // RTL8125s) gets a random one each boot, a new device to the upstream
+  // router every time (a new address, a new IPv6 prefix). On a section the
+  // port already has, else one of its own; never on a switch's port, which
+  // is no device.
+  const withMacs = physicalPorts
+    .filter((port) => port.macaddr && !onSwitch(port.name))
+    .reduce(
+      (acc, port) =>
+        acc.some((d) => d.options.name === port.name)
+          ? acc.map((d) => (d.options.name === port.name ? { ...d, options: { ...d.options, macaddr: port.macaddr! } } : d))
+          : [...acc, { name: `mac_${sanitizeName(port.name)}`, options: { name: port.name, macaddr: port.macaddr! } }],
+      devices
+    );
+  const withPortDevices: ResolvedSections = { ...withLines, ...(withLines.network ? { network: { ...net, device: withMacs } } : {}) };
 
   // What the ports make of each section: a device's, a VLAN's or a switch VLAN's port list.
   const portOptions = (configKey: string, type: string, s: ResolvedSection): Record<string, Value> =>
