@@ -42,13 +42,20 @@ const config = {
   mwan3: state.config.mwan3 ?? {},
   network: { interface: (state.config.network?.interface ?? []).filter((s) => lines.has(s[".name"])) },
 };
+// The main network's router advertisements as compiled, over the container's
+// stock LAN (its own ULA, the lines giving it no public prefix).
+const lanDhcp = (state.config.dhcp?.dhcp ?? []).find((s) => s.interface === "lan");
+if (!lanDhcp) throw new Error("The compiler emitted no DHCP section for the main network.");
+const raDefault = lanDhcp.ra_default === undefined ? [] : [`uci set dhcp.lan.ra_default=${shellQuote(String(lanDhcp.ra_default))}`];
 const hook = (state.files ?? []).find((f) => f.path.endsWith("17-onc-ipv6-follows-line"));
 if (!hook) throw new Error("The compiler emitted no IPv6-follows-the-line hook for two lines with IPv6 on the main one.");
 console.log(
   [
     "set -e",
     ...getUciCommands({ openWrtConfig: config as never }),
-    "uci commit mwan3; uci commit network",
+    "uci -q delete dhcp.lan.ra_default || true",
+    ...raDefault,
+    "uci commit mwan3; uci commit network; uci commit dhcp",
     `printf '%s' ${shellQuote(hook.content)} > ${hook.path}`,
   ].join("\n")
 );

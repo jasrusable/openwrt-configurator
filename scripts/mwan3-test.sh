@@ -78,6 +78,17 @@ for line in wan:"$prefix-a" wanb:"$prefix-b"; do
 done
 on_router 'reload_config; /etc/init.d/mwan3 enable; /etc/init.d/mwan3 restart >/dev/null 2>&1'
 
+echo "== IPv6 with only the ULA"
+# No public prefix on the LAN: odhcpd must announce no default route
+# (router lifetime 0), or clients try IPv6 internet from a ULA. Logged at
+# warning, which stock odhcpd logs; only lines after the restart count.
+on_router 'logger -t onc-test "odhcpd restart"; /etc/init.d/odhcpd restart'
+if wait_for 'logread | sed -n "/onc-test: odhcpd restart/,\$p" | grep -q "setting ra_lifetime to 0"' 30; then
+  pass "only the ULA: no IPv6 default route announced"
+else
+  fail "only the ULA: no IPv6 default route announced"; on_router 'uci show dhcp.lan; logread | grep odhcpd | tail -8' || true
+fi
+
 echo "== mwan3 on two lines"
 if wait_for 'ubus call mwan3 status | jsonfilter -e "@.interfaces.wan.status" | grep -qx online && ubus call mwan3 status | jsonfilter -e "@.interfaces.wanb.status" | grep -qx online' 90; then
   pass "both lines tracked online"

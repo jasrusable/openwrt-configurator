@@ -51,11 +51,12 @@ const dhcpServer = (network: Network, ipv6: boolean, tunnelDns: string[] = []): 
     ? {
         dhcpv6: "server",
         ra: "server",
-        // Announce the router as the IPv6 default route whenever the network
-        // has a public prefix, even if odhcpd sees no plain default route (a
-        // delegated prefix's is source-specific). Not without one: clients
-        // would then try IPv6 internet that is not there.
-        ra_default: 1,
+        // No ra_default: odhcpd's own (0) announces the router as the IPv6
+        // default route only with a default route and a public prefix (a
+        // delegated prefix's source-specific route counts: router.c
+        // parse_routes). 1 counts the ULA as public, so with the line down or
+        // the prefix gone clients were given a default route with only a ULA
+        // to send from.
         ra_slaac: true,
         ra_flags: ["managed-config", "other-config"],
         // The network's own DNS servers (a Pi-hole): odhcpd must not also

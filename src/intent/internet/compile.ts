@@ -277,8 +277,8 @@ export const internet: Feature = (intent) => {
   // Several lines, IPv6 from the main one only: while mwan3 has the main
   // line offline (IPv4 to another), its IPv6 interface is taken down, so the
   // networks' prefix and IPv6 default route go and clients use IPv4 over the
-  // backup, rather than keep sending IPv6 into the dead line (the router
-  // advertises itself on the prefix alone, ra_default 1). Back with the line.
+  // backup, rather than keep sending IPv6 into the dead line (with only the
+  // ULA left odhcpd announces no default route). Back with the line.
   const mainLine = primaryConnection(intent);
   const ipv6Failover = several && mainLine.ipv6.enabled;
   return {

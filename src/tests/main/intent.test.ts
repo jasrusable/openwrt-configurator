@@ -300,7 +300,10 @@ test("IPv6: per network, announced only with a public prefix, and only with the 
   const on = router(() => {});
   const lan = on.network.interface.find((i: any) => i[".name"] === "lan");
   t.like(lan, { ip6assign: "64", ip6hint: "1" });
-  t.like(on.dhcp.dhcp.find((d: any) => d.interface === "lan"), { ra: "server", ra_default: 1 });
+  const dhcpLan = on.dhcp.dhcp.find((d: any) => d.interface === "lan");
+  t.like(dhcpLan, { ra: "server" });
+  // odhcpd's default: no default route announced with only the ULA (scripts/mwan3-test.sh).
+  t.false("ra_default" in dhcpLan);
   t.regex(on.network.globals[0].ula_prefix, /^fd/);
 
   // No IPv6 on the internet side: no network gets any, not even local-only.

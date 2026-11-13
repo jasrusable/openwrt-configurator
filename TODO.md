@@ -91,7 +91,7 @@ over `src/server/`, and the React UI in `ui/`.
       schemas, secrets masked): the R6S and odhcpd scripts match byte for
       byte, the per-band AQL hook sets the same limits, and every other
       difference is deliberate (rebind protection on, DHCP
-      pool .5-.254, ra_default 1, LuCI's cgi_prefix, DirectInterface, the
+      pool .5-.254, odhcpd's own ra_default (the hand config's 2 announces a default route with only the ULA), LuCI's cgi_prefix, DirectInterface, the
       off states of UPnP/avahi, ubihealthd kept from the device, stock
       uhttpd limits, the ULA prefix derived from the site's seed, no
       conloglevel, no curl: https-dns-proxy's HTTP/2 is libcurl's). The intent's Wi-Fi passwords
