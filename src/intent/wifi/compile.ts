@@ -15,6 +15,7 @@ import {
   serviceWhen,
 } from "../fragment";
 import { Options, Origin, placeholder, section, SectionMeta, Value } from "../../plan/types";
+import { when, When } from "../../plan/when";
 import { uniqueNames } from "../names";
 import { broadcastBands, radios, radioWidth } from "../radios";
 import type { Band } from "../radios";
@@ -94,6 +95,7 @@ const radioOrigin = (band: Band): Origin => {
       disabled: at("enabled"),
       htmode: at("width"),
       cell_density: at("cell_density"),
+      legacy_rates: at("cell_density"),
       acs_exclude_dfs: at("avoid_radar"),
       txpower: at("power"),
       country: "system.country",
@@ -115,12 +117,14 @@ export const wifi: Feature = (intent) => {
   const broadcasting = onBroadcasting(intent);
   const ap = (meta: SectionMeta, options: Record<string, Value | undefined>) =>
     section({ ...meta, when: broadcasting }, options);
-  // The router's Wi-Fi off: its radios written off, not left unconfigured.
-  const routerOff: { when: typeof onRouter; options: Options }[] = routerBroadcasts(intent)
-    ? []
-    : [{ when: onRouter, options: { disabled: true } }];
-  const ssidNames = uniqueNames("wifi", intent.wifi.networks, (ssid) => ssid.ssid);
   const meshBand = intent.wifi.mesh.enabled ? intent.wifi.mesh.band : undefined;
+  // The router's Wi-Fi off: its radios written off, not left unconfigured;
+  // except the mesh's, where the router is a mesh node (its repeaters' uplink).
+  const routerOff = (band: Band): { when: When; options: Options }[] =>
+    routerBroadcasts(intent)
+      ? []
+      : [{ when: meshBand === band ? when.all(onRouter, when.not(when.meshRadio(band))) : onRouter, options: { disabled: true } }];
+  const ssidNames = uniqueNames("wifi", intent.wifi.networks, (ssid) => ssid.ssid);
 
   return {
     packages: [
@@ -148,7 +152,7 @@ export const wifi: Feature = (intent) => {
             return channel !== undefined ? [{ when: onDevice(device.name), options: { channel } as Options }] : [];
           });
           return section(
-            { name, when: onRadioDevices, overrides: [...routerOff, ...pinned], origin: radioOrigin(band) },
+            { name, when: onRadioDevices, overrides: [...routerOff(band), ...pinned], origin: radioOrigin(band) },
             {
               band,
               ...(settings.enabled ? {} : { disabled: true }),
@@ -158,6 +162,10 @@ export const wifi: Feature = (intent) => {
               // The mesh's band: every node on its channel, pinned or not.
               channel: meshBand === band ? intent.wifi.mesh.channel : "auto",
               cell_density: cellDensity[settings.cell_density],
+              // Off: 25.12 has legacy_rates off by default, and with it off
+              // level 0 gives the same rates as 1 (hostapd.uc
+              // device_cell_density_append); on, 2.4 GHz has 1-11 Mbps back.
+              ...(settings.cell_density === "off" ? { legacy_rates: true } : {}),
               // Only an automatic channel: one pinned per device is the device's.
               ...(band === "5g" && settings.avoid_radar ? { acs_exclude_dfs: true } : {}),
               ...(settings.power === "auto" ? {} : { txpower: txpower[settings.power] }),

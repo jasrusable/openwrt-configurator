@@ -257,7 +257,7 @@ test("a patch marks exactly the settings it overrides, by item: derived from ori
   t.true(marks.some(([id, path]) => id === "usteer-nudge-requests" && path === "wifi.roaming.steering"));
   t.deepEqual(marksAt(intent, "wifi.networks.1.roaming.fast".split(".")), [], "the other SSID: no mark");
   // The ⓘ: the patch's note, where it holds, and its reference.
-  t.regex(explainFor("wifi.networks.0.roaming.fast".split("."), intent)!, /Held off with WPA3 on OpenWrt 25\.12.*from OpenWrt 25\.12\.0.*https:\/\/github\.com\/openwrt\/openwrt\/pull\/23181/);
+  t.regex(explainFor("wifi.networks.0.roaming.fast".split("."), intent)!, /Held off with WPA3 on OpenWrt 25\.12.*from OpenWrt 25\.12\.0.*https:\/\/github\.com\/openwrt\/openwrt\/pull\/26652/);
   t.notRegex(explainFor("wifi.networks.1.roaming.fast".split("."), intent) ?? "", /Held off/);
 });
 

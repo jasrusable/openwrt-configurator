@@ -83,7 +83,7 @@ export const describeSteering = (level: SteeringLevel) => {
 export const describePrefer5g = (level: SteeringLevel) =>
   `A device that supports 802.11v and holds ${bandSteering.strongerThan} dBm or better on 2.4 GHz for ${seconds(bandSteering.forMs)} is asked to move to a faster band on the same access point${
     steeringValues[level].aggressiveness >= 3
-      ? `, and disconnected after ${seconds(moveWithinMs)} if it does not (Steering is ${steeringLabels[level]})`
+      ? `, and disconnected after ${seconds(moveWithinMs)} if it does not (Steering is ${steeringLabels[level]}; OpenWrt 25.12's usteer only asks)`
       : `; it may ignore it (with Steering on ${steeringLabels.push}, it would be disconnected)`
   }.`;
 

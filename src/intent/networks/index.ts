@@ -24,5 +24,6 @@ export const networksFeature: FeatureModule = {
 
 export { deviceOf, poolStart } from "./compile";
 export { reachableNetworks } from "./rules";
+export { nlbwmonBuffer } from "./traffic";
 export { networkTemplates, templateOf, templateSettings, withTemplate } from "./templates";
 export type { NetworkTemplate } from "./templates";

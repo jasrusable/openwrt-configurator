@@ -281,10 +281,42 @@ export const internet: Feature = (intent) => {
   // ULA left odhcpd announces no default route). Back with the line.
   const mainLine = primaryConnection(intent);
   const ipv6Failover = several && mainLine.ipv6.enabled;
+  // A line mwan3 has offline keeps its routes until ifdown, and mwan3
+  // restores each flow's mark per packet, so a flow that never goes idle (a
+  // VPN's keepalive, a call) stayed on the dead line. Its flows are dropped
+  // by the line's address (OpenWrt's 600-netfilter_conntrack_flush: an
+  // address flushes the flows to or from it) and are routed again; in
+  // failover, the others' too when the main line is back. Not mwan3's
+  // flush_conntrack: it flushes every flow, and a reply on a healthy line
+  // arriving before its device sends again then meets wan's REJECT, a reset.
+  const preferred = failoverOrder(connections)[0];
+  const lineFlows = {
+    when: onRouter,
+    path: "/etc/hotplug.d/iface/16-onc-line-flows",
+    mode: "0644",
+    content: `. /lib/functions/network.sh
+flush() {
+  network_get_ipaddr addr "$1" && [ -n "$addr" ] || return 0
+  logger -t onc-mwan3 "flows through $1 ($addr) flushed: $2"
+  echo "$addr" > /proc/net/nf_conntrack 2>/dev/null || logger -t onc-mwan3 "no /proc/net/nf_conntrack: flows through $1 left"
+}
+case "$ACTION" in
+  disconnected) case " ${connections.map((c) => c.id).join(" ")} " in *" $INTERFACE "*) flush "$INTERFACE" "it is offline" ;; esac ;;
+${
+  mode === "failover"
+    ? `  connected) [ "$INTERFACE" = "${preferred.id}" ] || exit 0
+    for line in ${connections.filter((c) => c !== preferred).map((c) => c.id).join(" ")}; do flush "$line" "${preferred.id} is back"; done ;;
+`
+    : ""
+}esac
+`,
+  };
   return {
+    ...(several ? { files: [lineFlows] } : {}),
     ...(ipv6Failover
       ? {
           files: [
+            lineFlows,
             {
               when: onRouter,
               path: "/etc/hotplug.d/iface/17-onc-ipv6-follows-line",

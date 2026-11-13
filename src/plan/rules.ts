@@ -67,8 +67,9 @@ export const optionRules: Record<string, z.ZodTypeAny> = {
   "dhcp.dhcp.dhcpv4": z.enum(["server", "disabled"]),
   "dhcp.dhcp.dhcpv6": z.enum(["server", "hybrid", "disabled"]),
   "dhcp.dhcp.ra": z.enum(["server", "hybrid", "disabled"]),
-  // 2 = always advertise router lifetime: IPv6-PD installs `default from
-  // PREFIX`, which odhcpd does not treat as a default route.
+  // 0 (odhcpd's default) advertises a router lifetime only with a default
+  // route, a source-specific one from a delegated prefix included, and a
+  // public prefix; 1 counts a ULA as public; 2 always.
   "dhcp.dhcp.ra_default": z.union([z.literal(0), z.literal(1), z.literal(2)]),
   "dhcp.dhcp.ra_flags": z.array(z.enum(["managed-config", "other-config"])),
   "dhcp.dnsmasq.add_local_fqdn": z.number().min(0).max(4),

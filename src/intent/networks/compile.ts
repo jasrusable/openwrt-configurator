@@ -41,7 +41,7 @@ const routerInterface = (network: Network, ipv6: boolean, ipv6Upstream: string):
 /** The DHCP pool's first host number: it ends at .254, so the low addresses stay free. */
 export const poolStart = (network: Pick<Network, "dhcp">) => 255 - network.dhcp.pool_size;
 
-const dhcpServer = (network: Network, ipv6: boolean, tunnelDns: string[] = []): Options => ({
+const dhcpServer = (network: Network, ipv6: boolean, domain: string, tunnelDns: string[] = []): Options => ({
   force: true,
   start: poolStart(network),
   limit: network.dhcp.pool_size,
@@ -59,6 +59,10 @@ const dhcpServer = (network: Network, ipv6: boolean, tunnelDns: string[] = []): 
         // to send from.
         ra_slaac: true,
         ra_flags: ["managed-config", "other-config"],
+        // The search domain in router advertisements and DHCPv6: odhcpd's
+        // only source since it stopped reading resolv.conf's (odhcpd 1450e1e2,
+        // in 25.12); stock sets it in uci-defaults, which the wipe removes.
+        domain: [domain],
         // The network's own DNS servers (a Pi-hole): odhcpd must not also
         // announce the router as an IPv6 one, or clients that prefer it go
         // around them. None announced: they use the network's (IPv4) ones.
@@ -233,7 +237,7 @@ export const network: Feature = (intent) => {
         dhcp: networks.map((n) =>
           section(
             { name: n.id, when: onRouter },
-            { interface: n.id, ...dhcpServer(n, ipv6(n), tunnelOf(n) ? tunnelDns(tunnelOf(n)!) : []) }
+            { interface: n.id, ...dhcpServer(n, ipv6(n), intent.dns.domain, tunnelOf(n) ? tunnelDns(tunnelOf(n)!) : []) }
           )
         ),
         // Reservations: the same address every time, and a name in DNS.

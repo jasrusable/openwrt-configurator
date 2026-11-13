@@ -1,7 +1,7 @@
 // For scripts/mwan3-test.sh: what the app compiles for a router with two
 // lines (wan on eth1 with IPv6, wanb on eth2, failover), offline, from the
 // sample intent: the mwan3 config, the lines' interfaces, and the
-// IPv6-follows-the-line hook. Printed as a shell script the test runs on the
+// IPv6-follows-the-line and line-flows hooks. Printed as a shell script the test runs on the
 // router container: uci commands, then the hook written in place.
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -47,8 +47,11 @@ const config = {
 const lanDhcp = (state.config.dhcp?.dhcp ?? []).find((s) => s.interface === "lan");
 if (!lanDhcp) throw new Error("The compiler emitted no DHCP section for the main network.");
 const raDefault = lanDhcp.ra_default === undefined ? [] : [`uci set dhcp.lan.ra_default=${shellQuote(String(lanDhcp.ra_default))}`];
-const hook = (state.files ?? []).find((f) => f.path.endsWith("17-onc-ipv6-follows-line"));
-if (!hook) throw new Error("The compiler emitted no IPv6-follows-the-line hook for two lines with IPv6 on the main one.");
+const hooks = ["16-onc-line-flows", "17-onc-ipv6-follows-line"].map((name) => {
+  const hook = (state.files ?? []).find((f) => f.path.endsWith(name));
+  if (!hook) throw new Error(`The compiler emitted no ${name} hook for two lines with IPv6 on the main one.`);
+  return hook;
+});
 console.log(
   [
     "set -e",
@@ -56,6 +59,6 @@ console.log(
     "uci -q delete dhcp.lan.ra_default || true",
     ...raDefault,
     "uci commit mwan3; uci commit network; uci commit dhcp",
-    `printf '%s' ${shellQuote(hook.content)} > ${hook.path}`,
+    ...hooks.map((hook) => `printf '%s' ${shellQuote(hook.content)} > ${hook.path}`),
   ].join("\n")
 );

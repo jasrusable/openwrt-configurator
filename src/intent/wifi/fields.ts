@@ -113,7 +113,7 @@ export const wifiFields: FieldInfo[] = [
     label: "Cell density",
     openwrt: "wifi-device cell_density",
     explain:
-      "Raises the slowest data rate devices may use, so slow, distant devices cannot hold the air for long. Normal, High and Very high are OpenWrt's levels 1 to 3; Off allows the slowest legacy rates.",
+      "Raises the slowest data rate devices may use, so slow, distant devices cannot hold the air for long. Normal, High and Very high are OpenWrt's levels 1 to 3; Off allows the slowest legacy rates too (802.11b's 1-11 Mbps, on 2.4 GHz).",
   },
   {
     path: "wifi.radios.*.avoid_radar",

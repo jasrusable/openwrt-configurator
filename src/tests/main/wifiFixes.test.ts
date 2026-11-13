@@ -36,7 +36,7 @@ test("fast roaming is held off on 25.12 with WPA3 (the FT key race), kept with W
   const ifaces = sections(stateOn(intent, "home-ap-1", "zyxel,nwa50ax-pro"), "wireless", "wifi-iface");
   const ssid = intent.wifi.networks[0].ssid;
   t.true(ifaces.filter((s) => option(s, "ssid") === ssid).every((s) => [false, 0, "0"].includes(option(s, "ieee80211r") as never)), "WPA2/WPA3: held off");
-  t.regex(explainFor(["wifi", "networks", "0", "roaming", "fast"], intent) ?? "", /Held off with WPA3 on OpenWrt 25\.12.*https:\/\/github\.com\/openwrt\/openwrt\/pull\/23181/);
+  t.regex(explainFor(["wifi", "networks", "0", "roaming", "fast"], intent) ?? "", /Held off with WPA3 on OpenWrt 25\.12.*https:\/\/github\.com\/openwrt\/openwrt\/pull\/26652/);
   t.notRegex(explainFor(["wifi", "networks", "1", "roaming", "fast"], intent) ?? "", /Held off/);
 });
 

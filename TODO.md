@@ -168,6 +168,31 @@ over `src/server/`, and the React UI in `ui/`.
 - **Board MACs on swconfig boards.** A port's `board.json` MAC is kept on DSA and on a NIC beside the switch (`engine/ports.ts`); on a switch, OpenWrt puts the network's MAC on its VLAN device (`eth0.1`, `eth0.2`), which the engine names differently: still dropped there.
 - **https-dns-proxy after a line comes up:** DNS stayed dead ~70 s after the WAN came up although the proxy retries every 5 s; why is unknown (it logged errors only). The restart hook (`https-dns-proxy-line-restart`) covers it, and the proxies now log warnings: once a stall says why, a setting (`force_ip_family`, `conn_loss_time`) may replace the hook.
 
+## From the config audit (2026-11-13)
+
+- [ ] R6S packet steering (`patches/r6s-packet-steering.ts`): eth2's RPS goes to
+      CPU4, which also takes eth0's IRQs, and eth0 is a busy LAN port on the
+      user's router (316 GB received by 2026-11-13); and the mapping follows
+      the board's port names, not the intent's line port. Measure softirq per
+      core with all three ports loaded before changing it.
+- [ ] Software flow offloading on a single-line router (fw4 `flow_offloading`;
+      never with mwan3, whose marks it bypasses; never the hardware kind on
+      rockchip): measure softirq before and after.
+- [ ] SSH to the router from the VPN or a network with full router access:
+      dropbear binds the main network's device (`DirectInterface`), so only it
+      reaches it, whatever the firewall allows.
+- [ ] Wi-Fi security choices: PMF optional on WPA2; WPA3 compatibility mode
+      (`sae-compat`) over mixed; fast roaming off on MT7981 beyond WPA3
+      (openwrt#22308, mt76#1098 with WPA2-PSK).
+- [ ] DoH fallback default: Cloudflare (Google with Cloudflare the provider)
+      over Quad9, which has TLS/curl errors with https-dns-proxy on 25.12
+      (openwrt/packages#29241).
+- [ ] Rig check: a network kept on the router's DNS, with IPv6 (the DNAT
+      without `dest_ip` is verified for IPv4 only).
+- [ ] Note only: stmmac's "Timeout accessing MAC_VLAN_Tag_Filter" on the R6S's
+      eth0 is harmless while it is a bridge port (promiscuous); the fix is
+      upstream ("net: stmmac: Fix VLAN handling when interface is down").
+
 ## Roadmap (2026-10-13)
 
 - **App updates in status.** The Apply sheet now names an app update, a fix or a change on the device per line (`src/applyChanges.ts`, a stamp of hashes beside the intent, `<intent>.state/applied/`). Still to do: Overview says "not applied" when the current app would write something other than what the stamp holds, without opening Apply (a compile against stored facts, no device read).

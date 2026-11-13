@@ -6,7 +6,8 @@
 #   - mwan3track must log the line offline, in the words Activity reads
 #     (src/status/views.ts), and send `disconnected` to the hotplug scripts;
 #   - the hook must take the main line's IPv6 interface (wan6) down;
-# and let through again: online, `connected`, wan6 brought back up.
+# and let through again: online, `connected`, wan6 brought back up. Each
+# time the line-flows hook flushes the flows of the line they leave.
 # With RECORD=1 the router's mwan3 and hook log lines are saved as a fixture
 # (src/tests/helpers/status/mwan3-failover.txt) for mwan3Log.test.ts.
 #
@@ -108,6 +109,15 @@ if wait_for 'logread | grep -q "onc-ipv6: wan is offline"' 30 && wait_for '[ "$(
 else
   fail "disconnected: the hook takes wan6 down"; on_router 'ubus call network.interface.wan6 status | jsonfilter -e @.up -e @.autostart -e @.pending' || true
 fi
+# Flows on the dead line are routed again (mwan3 restores each flow's mark per
+# packet, and keeps the line's routes until ifdown): flushed by its address.
+# This container's kernel (the host's) has no /proc/net/nf_conntrack, so the
+# hook's own log says it ran, with the line's address.
+if wait_for "logread | grep -q 'onc-mwan3: flows through wan ($(address_on "$prefix-a")) flushed: it is offline'" 15; then
+  pass "disconnected: the line's flows flushed"
+else
+  fail "disconnected: the line's flows flushed"; on_router 'logread | grep -E "onc-mwan3|mwan3-hotplug" | tail -4' || true
+fi
 
 # A new "online": the first, from the start, matched at once and hid a line
 # that never came back.
@@ -124,6 +134,11 @@ if wait_for '[ "$(ubus call network.interface.wan6 status | jsonfilter -e @.auto
 else
   fail "connected: the hook brings wan6 back"
   on_router 'ubus call network.interface.wan6 status | jsonfilter -e @.up -e @.autostart -e @.pending; logread | grep -E "onc-ipv6|mwan3track|netifd: wan6" | tail -12' || true
+fi
+if wait_for "logread | grep -q 'onc-mwan3: flows through wanb ($(address_on "$prefix-b")) flushed: wan is back'" 15; then
+  pass "connected: the backup's flows flushed, back to the main line"
+else
+  fail "connected: the backup's flows flushed, back to the main line"; on_router 'logread | grep -E "onc-mwan3" | tail -4' || true
 fi
 
 if [ "${RECORD:-}" = 1 ]; then

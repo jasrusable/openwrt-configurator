@@ -30,16 +30,20 @@ export const ftKeyRace: Patch = {
     "mac80211 marks it associated; the kernel refuses it ('key addition failed') and a retry " +
     "sometimes fails too. In mac80211, so on every driver (seen on MT7981 and ath10k); unfixed " +
     "in every 25.12 release. With WPA2 the roam still completes (the user's access point: 35 " +
-    "failures in 11.5 h, 33 with no full reconnect after), so it is mostly noise in the log; the " +
-    "multi-minute disconnects are reported with WPA3 and WPA2/WPA3, and 802.11r also stops some " +
-    "older clients joining WPA3 at all. So it is held off where an SSID uses WPA3 (on 6 GHz, " +
+    "failures in 11.5 h, 33 with no full reconnect after; 25.12.6, 2026-11-13: each one a roam " +
+    "between its own bands, associated in the same second), so here it is mostly noise in the " +
+    "log; multi-minute disconnects are reported with WPA3 and WPA2/WPA3, and once with WPA2-PSK " +
+    "(mt76#1098), and 802.11r also stops some older clients joining WPA3 at all. So it is held " +
+    "off where an SSID uses WPA3 (on 6 GHz, " +
     "which allows nothing else, included), until a release " +
     "has the fix: 802.11k/v and steering keep working, a roam just takes 10-50 ms longer. The " +
     "setting is kept, and its explainer says so.",
   kind: "fix",
   references: [
-    { kind: "pr", url: "https://github.com/openwrt/openwrt/pull/23181", note: "mac80211: defer AP-side FT key upload until station association (open)" },
-    { kind: "issue", url: "https://github.com/openwrt/mt76/issues/1098", note: "MT7981 (Cudy WR3000S): multi-minute disconnects during FT roaming, persists on 25.12.5" },
+    { kind: "pr", url: "https://github.com/openwrt/openwrt/pull/26652", note: "hostapd: configure the FT PTK after association (open): the fix pending" },
+    { kind: "pr", url: "https://github.com/openwrt/openwrt/pull/23181", note: "mac80211: defer AP-side FT key upload until station association (closed unmerged 2026-11-12, for the hostapd fix)" },
+    { kind: "issue", url: "https://github.com/openwrt/mt76/issues/1098", note: "MT7981 (Cudy WR3000S), WPA2-PSK: multi-minute disconnects during FT roaming, persists on 25.12.5" },
+    { kind: "issue", url: "https://github.com/openwrt/openwrt/issues/22308", note: "open: MT7981, 25.12: the 5 GHz radio disappears with 802.11r on" },
     { kind: "issue", url: "https://github.com/openwrt/openwrt/issues/9071", note: "the same kernel race, ath10k" },
     { kind: "forum", url: "https://forum.openwrt.org/t/802-11r-iphone-can-not-connect/150643", note: "iPhones that cannot join with 802.11r" },
     { kind: "forum", url: "https://forum.openwrt.org/t/wpa3-personal-only-and-802-11r-ft/93810", note: "WPA3 with FT and older clients" },
@@ -47,8 +51,9 @@ export const ftKeyRace: Patch = {
   added: "2026-10-13",
   verified:
     "user's NWA50AX Pro, 25.12.5, 2026-10-13: 35 failures in 11.5 h, 33 without a following full reconnect, WPA2; " +
-    "the WPA3 disconnects from openwrt#23181 and mt76#1098; the override checked in the compiled config (patches.test.ts)",
-  dropWhen: "an OpenWrt release carries the fix (openwrt#23181)",
+    "25.12.6, 2026-11-13: each failure followed by the association in the same second (auth_alg=ft); " +
+    "the WPA3 disconnects from openwrt#23181; the override checked in the compiled config (patches.test.ts)",
+  dropWhen: "an OpenWrt release carries the fix (openwrt#26652)",
   target: {
     releases: { from: "25.12.0" },
     requires: { when: when.any(when.radio("2g"), when.radio("5g"), when.radio("6g")), note: "has Wi-Fi" },

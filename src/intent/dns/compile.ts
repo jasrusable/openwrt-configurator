@@ -89,7 +89,12 @@ export const dns: Feature = (intent) => {
             // Answers from outside may not point inside (DNS rebinding);
             // the router itself (127.0.0.0/8) stays allowed. Off is written
             // out: dnsmasq's init script defaults it to on (verified on 25.12.5).
-            ...(intent.dns.rebind_protection ? { rebind_protection: true, rebind_localhost: true } : { rebind_protection: false }),
+            // Windows' IPv6 check (NCSI) asks dns.msftncsi.com, whose AAAA is
+            // a ULA on purpose (fd3e:4f5a:5b81::1): dropped, Windows says it
+            // has no IPv6 internet.
+            ...(intent.dns.rebind_protection
+              ? { rebind_protection: true, rebind_localhost: true, rebind_domain: ["dns.msftncsi.com"] }
+              : { rebind_protection: false }),
             local: `/${domain}/`,
             domain,
             expandhosts: true,

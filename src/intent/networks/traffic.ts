@@ -5,6 +5,15 @@
 import { section } from "../../plan/types";
 import { Feature, onRouter } from "../fragment";
 
+/**
+ * nlbwmon's netlink receive buffer, above its stock 512 KiB: its conntrack
+ * events and its dump share one socket, and bursts of events overflowed
+ * 512 KiB a few times a day with ~5,500 connections tracked (the user's
+ * R6S, 25.12.6), losing that refresh's counts. The kernel caps it at
+ * net.core.rmem_max (patches/nlbwmon-rmem.ts raises it to this).
+ */
+export const nlbwmonBuffer = 2 * 1024 * 1024;
+
 export const traffic: Feature = (intent) => ({
   packages: [{ when: onRouter, add: ["nlbwmon"] }],
   services: [{ when: onRouter, name: "nlbwmon", running: true }],
@@ -14,7 +23,7 @@ export const traffic: Feature = (intent) => ({
         section(
           { name: "nlbwmon", when: onRouter },
           {
-            netlink_buffer_size: 524288,
+            netlink_buffer_size: nlbwmonBuffer,
             commit_interval: "24h",
             refresh_interval: "30s",
             database_directory: "/var/lib/nlbwmon",

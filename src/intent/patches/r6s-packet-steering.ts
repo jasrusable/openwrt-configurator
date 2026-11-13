@@ -47,9 +47,11 @@ if [ "$1" = 0 ]; then
 	exit 0
 fi
 
-set_rps eth1 80 # WAN: IRQ on CPU5, RPS to CPU7
-set_rps eth2 10 # LAN: IRQ on CPU6, RPS to CPU4
-set_rps eth0 0  # unused 1G port: stay on its IRQ core
+# By the board's port names (its default WAN is eth1); a line moved to another
+# port keeps this mapping.
+set_rps eth1 80 # 2.5G, WAN: IRQ on CPU5, RPS to CPU7
+set_rps eth2 10 # 2.5G, LAN: IRQ on CPU6, RPS to CPU4 (eth0's IRQ core too)
+set_rps eth0 0  # 1G, LAN: stays on its IRQ core, CPU4
 `,
         // When the file changed: packet_steering runs it on every interface event anyway.
         runAfter: "/etc/init.d/packet_steering reload",

@@ -2,7 +2,7 @@ import test from "ava";
 import { sampleIntentJson } from "../helpers/fixtures";
 import { tempDir } from "../helpers/tempDir";
 import { spawnSync } from "child_process";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { deviceSchemaSchema } from "../../deviceSchema";
 import { getOpenWrtConfig } from "../../engine/getOpenWrtConfig";
@@ -304,6 +304,7 @@ test("IPv6: per network, announced only with a public prefix, and only with the 
   t.like(dhcpLan, { ra: "server" });
   // odhcpd's default: no default route announced with only the ULA (scripts/mwan3-test.sh).
   t.false("ra_default" in dhcpLan);
+  t.deepEqual(dhcpLan.domain, ["lan"], "the search domain in RAs and DHCPv6");
   t.regex(on.network.globals[0].ula_prefix, /^fd/);
 
   // No IPv6 on the internet side: no network gets any, not even local-only.
@@ -430,10 +431,11 @@ test("SSIDs: security mode, hidden, off, and fast roaming", (t) => {
     band_steering_interval: "0",
   });
   // On 25.12's usteer (no aggressiveness: a request is always followed by a
-  // disconnect), Nudge's move trigger is off: the usteer-nudge-requests patch.
+  // disconnect, and its roam check runs on roam_scan_snr alone), Nudge's
+  // roam check is off: the usteer-nudge-requests patch.
   t.like(roaming("nudge"), {
     aggressiveness: "1",
-    roam_scan_snr: "-70",
+    roam_scan_snr: "0",
     roam_trigger_snr: "0",
     roam_kick_delay: "10000",
     min_snr: "0",
@@ -463,6 +465,7 @@ test("DNS: where names are looked up, rebind protection, own names, DHCP's DNS",
   const encrypted = dns(() => {});
   // The provider's proxy, then the fallback provider's, strictly in that order (dnsAndTunnels.test.ts).
   t.like(encrypted.dnsmasq, { noresolv: true, server: ["127.0.0.1#5053", "127.0.0.1#5054"], strictorder: true, rebind_protection: true, rebind_localhost: true });
+  t.deepEqual(encrypted.dnsmasq.rebind_domain, ["dns.msftncsi.com"], "Windows' IPv6 check answers a ULA on purpose");
   t.is(encrypted.wan.peerdns, false);
 
   const provider = dns((i) => (i.dns.upstream = { type: "provider" }));
@@ -516,6 +519,8 @@ test("patches apply only where they say: by model, by role", (t) => {
   };
   t.deepEqual(files("home-router", "friendlyarm,nanopi-r6s").filter((p: string) => !p.includes("avahi")), [
     "/usr/libexec/platform/packet-steering.sh",
+    "/usr/libexec/onc/odhcpd-watch",
+    "/etc/init.d/onc-odhcpd-watch",
     "/etc/hotplug.d/iface/30-odhcpd-ra-fix",
     "/usr/libexec/onc/ubihealthd-config",
     "/usr/libexec/onc/leases-to-ram",
@@ -742,6 +747,17 @@ test("a router with radios broadcasts as an access point does; its Wi-Fi off wri
   t.true(off.config.wireless["wifi-device"].every((r: any) => r.disabled === true), "its radios written off");
   t.true(off.packages.add.includes("wpad-mbedtls"), "packages follow the hardware, not the setting");
   t.like(usteer(off), { enabled: false });
+
+  // Off, but a mesh node: its mesh radio stays on, the repeaters' uplink.
+  const meshOnly = stateOf((i) => {
+    i.hardware.find((d: any) => d.role === "router").wifi = false;
+    i.wifi.mesh = { enabled: true, band: "5g", channel: 44, key: "mesh-key-123456", band_reserved: false, over_cable: false, large_frames: true };
+    i.hardware.push({ name: "home-ap-2", role: "access-point", uplink: "mesh" });
+  });
+  const radio = (band: string) => meshOnly.config.wireless!["wifi-device"].find((r: any) => r.band === band)!;
+  t.false(radio("5g").disabled === true, "the mesh's radio on");
+  t.true(radio("2g").disabled, "the rest off");
+  t.true(meshOnly.config.wireless!["wifi-iface"].some((w: any) => w.mode === "mesh" && w.device === radio("5g")[".name"]));
 });
 
 test("services: each role's kept enabled and started; those that must run are checked", (t) => {
@@ -800,6 +816,9 @@ test("two internet connections: a line on a LAN port, mwan3 over both, queueing 
   t.deepEqual(config.firewall.zone.find((z: any) => z.name === "wan").network, ["wan", "wan6", "wanb"]);
   t.deepEqual(config.mwan3.member.map((m: any) => [m.interface, m.metric]), [["wan", 1], ["wanb", 2]]);
   t.deepEqual(config.mwan3.policy[0].use_member, ["wan_m1", "wanb_m2"]);
+  const flows = compile(twoLines("failover")).files!.find((f: any) => f.path === "/etc/hotplug.d/iface/16-onc-line-flows")!.content;
+  t.regex(flows, /disconnected\) case " wan wanb " in/, "flows leave a line that goes offline");
+  t.regex(flows, /connected\) \[ "\$INTERFACE" = "wan" \][^\n]*\n\s*for line in wanb;/, "and come back to the main one");
   t.deepEqual(config.mwan3.rule.map((r: any) => r[".name"]), ["default"]);
 
   // A network kept to the backup line has no IPv6, which only the main line carries.
@@ -1241,39 +1260,17 @@ test("larger frames over cable off: the mesh splits its packets there, and no MT
   t.deepEqual(devices.filter((d: any) => d.mtu), []);
 });
 
-test("odhcpd is re-bound when a network comes up, and restarted after a rollback", (t) => {
+test("odhcpd is restarted after a rollback; its hook restarts it once wan6 has a route, not for a network", (t) => {
   const state = getOpenWrtState({
     plan: planFor(),
     deviceConfig: planFor().devices.find((d) => d.hostname === "home-router")!,
     deviceSchema: deviceSchemaSchema.parse(JSON.parse(readFileSync(join(root, "deviceSchemas", "friendlyarm,nanopi-r6s.json"), "utf8"))),
   });
   t.like(state.services!.find((s) => s.name === "odhcpd"), { restartAfterRollback: true });
+  t.like(state.services!.find((s) => s.name === "onc-odhcpd-watch"), { running: true });
   const hook = state.files!.find((f) => f.path === "/etc/hotplug.d/iface/30-odhcpd-ra-fix")!.content;
-  // Run it as netifd would, with odhcpd's init script and pidof stubbed.
-  const dir = tempDir("hook");
-  const stub = (name: string, body: string) => writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
-  stub("pidof", "exit 0");
-  stub("logger", "true");
-  stub("sleep", "true");
-  // Its locks into the test's directory first: that directory may itself be
-  // under /tmp/onc- (Linux), and must not be rewritten in the log's path.
-  const script = hook.replace(/\/tmp\/onc-/g, `${dir}/onc-`).replace(/\/etc\/init\.d\/odhcpd restart/g, `echo restarted >> ${dir}/log`);
-  const run = (iface: string, action = "ifup") =>
-    spawnSync("sh", ["-c", `${script}\nwait`], { env: { PATH: `${dir}:/usr/bin:/bin`, ACTION: action, INTERFACE: iface }, encoding: "utf8" });
-  // The hook restarts in the background, as netifd must not wait on it: read
-  // its log once it is there (a loaded CI runner takes its time).
-  const logAfter = (minimumMs: number) => {
-    const until = Date.now() + 10_000;
-    spawnSync("sleep", [String(minimumMs / 1000)]);
-    while (!existsSync(join(dir, "log")) && Date.now() < until) spawnSync("sleep", ["0.1"]);
-    return readFileSync(join(dir, "log"), "utf8").trim();
-  };
-  run("guest");
-  t.is(logAfter(0), "restarted", "a network up: restarted");
-  run("lan", "ifdown");
-  run("somethingelse");
-  // Nothing new may appear: give anything that would a moment to show.
-  t.is(logAfter(500).split("\n").length, 1, "down, or not ours: nothing");
+  t.regex(hook, /\[ "\$INTERFACE" = "wan6" \] \|\| exit 0/);
+  t.notRegex(hook, /guest|lan\b/, "networks are the watcher's");
 });
 
 test("on an access point, a network only carried has no IPv6, link-local included; the main one keeps it", (t) => {
