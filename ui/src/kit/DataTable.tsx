@@ -1,5 +1,7 @@
 // A list of things as a table: a row per item that opens it when clicked, and
 // a friendly empty state. Its title and Add live in the page's header.
+// Fixed layout: columns hold still as values change; one without a width
+// shares what is left.
 import { Group, Table, Text } from "@mantine/core";
 import { IconChevronRight } from "@tabler/icons-react";
 import { ReactNode, useContext } from "react";
@@ -34,7 +36,7 @@ export const DataTable = ({
     ) : (
       // Scrolls sideways on a phone rather than squeezing its columns.
       <Table.ScrollContainer minWidth={520} type="native">
-        <Table verticalSpacing="sm" horizontalSpacing="md" withRowBorders={false}>
+        <Table layout="fixed" verticalSpacing="sm" horizontalSpacing="md" withRowBorders={false}>
           <Table.Thead>
             <Table.Tr>
               {columns.map((column) => (
@@ -44,7 +46,7 @@ export const DataTable = ({
                   </Text>
                 </Table.Th>
               ))}
-              <Table.Th w={32} />
+              <Table.Th w={48} />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -58,7 +60,7 @@ export const DataTable = ({
                 style={{ cursor: "pointer", transition: "background 120ms" }}
               >
                 {columns.map((column, c) => (
-                  <Table.Td key={column.header}>
+                  <Table.Td key={column.header} style={{ overflow: "hidden" }}>
                     <Group gap={8} wrap="nowrap">
                       {c === 0 && rowMarker?.(index)}
                       {column.cell(index)}

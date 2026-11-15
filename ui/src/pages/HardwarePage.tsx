@@ -320,9 +320,10 @@ const hardware = defineList({
         </ItemName>
       ),
     },
-    { header: "Status", cell: (i) => <Online index={i} /> },
+    { header: "Status", width: 120, cell: (i) => <Online index={i} /> },
     {
       header: "Role",
+      width: 130,
       cell: (i) => (
         <Value
           name={`hardware.${i}.role`}
@@ -337,6 +338,7 @@ const hardware = defineList({
     { header: "Model", cell: (i) => <ModelCell index={i} /> },
     {
       header: "Channels",
+      width: 110,
       cell: (i) => <ChannelsCell index={i} />,
     },
   ],

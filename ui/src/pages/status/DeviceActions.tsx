@@ -105,12 +105,14 @@ const Traceroute = ({ device, onClose }: { device: DeviceView; onClose: () => vo
           </Text>
         )}
         {hops && (
-          <Table fz="sm" verticalSpacing={4} style={{ fontVariantNumeric: "tabular-nums" }}>
+          <Table layout="fixed" fz="sm" verticalSpacing={4} style={{ fontVariantNumeric: "tabular-nums" }}>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th w={48}>Hop</Table.Th>
                 <Table.Th>Answered by</Table.Th>
-                <Table.Th ta="right">Time</Table.Th>
+                <Table.Th ta="right" w={140}>
+                  Time
+                </Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
