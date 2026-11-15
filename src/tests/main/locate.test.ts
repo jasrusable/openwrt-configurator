@@ -45,6 +45,11 @@ test("where to look: last reached, the settings, the router's leases by name, th
   );
 });
 
+test("the settings' address stays trusted on first use when it is also where the device was last reached", (t) => {
+  const facts: DeviceFacts = { ...apFacts, hostname: "home-router", address: "10.0.0.1", hostKey: undefined };
+  t.deepEqual(candidatesFor({ deviceConfig: router, facts }), [{ address: "10.0.0.1", why: "where your settings put it", configured: true }]);
+});
+
 test("a device that moved is found by its MAC in the router's leases, and pinned to its own key", async (t) => {
   const net = network({
     "10.0.0.1": routerMachine("1 aa:bb:cc:00:00:01 10.0.0.77 * *"),

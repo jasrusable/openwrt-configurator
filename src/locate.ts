@@ -73,7 +73,12 @@ export const candidatesFor = ({
       .filter((n) => macs.has(n.mac))
       .map((n) => ({ address: n.address, why: "its MAC on the router's network", configured: false })),
   ];
-  return all.filter((c, i) => all.findIndex((d) => d.address === c.address) === i);
+  // Each address once, in its first place; one the settings give stays trusted
+  // on first use, wherever else it was also found (the router last reached
+  // at its own settings address, with no key on record yet).
+  return all
+    .filter((c, i) => all.findIndex((d) => d.address === c.address) === i)
+    .map((c) => ({ ...c, ...all.find((d) => d.address === c.address && d.configured) }));
 };
 
 /** Every interface's MAC, so the device can be recognised in the router's leases. */
