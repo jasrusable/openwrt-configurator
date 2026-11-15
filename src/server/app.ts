@@ -8,6 +8,7 @@ import { actionRoutes } from "./api/actions";
 import { devicesRoutes } from "./api/devices";
 import { discoverRoutes } from "./api/discover";
 import { firmwareRoutes } from "./api/firmware";
+import { appRoutes } from "./api/app";
 import { intentRoutes } from "./api/intent";
 import { provisionRoutes } from "./api/provision";
 import { sessionRoutes } from "./api/session";
@@ -55,7 +56,7 @@ export const uiHandler = ({
   const context: ApiContext = { intentPath, platform, statusDir, now };
   const notFound = async () => refuse("not-found", "Not found.");
   const api = router(
-    [intentRoutes, provisionRoutes, devicesRoutes, statusRoutes, discoverRoutes, actionRoutes, patchesRoutes, firmwareRoutes, backupRoutes].flatMap((routes) => routes(context)),
+    [intentRoutes, provisionRoutes, devicesRoutes, statusRoutes, discoverRoutes, actionRoutes, patchesRoutes, firmwareRoutes, backupRoutes, appRoutes].flatMap((routes) => routes(context)),
     notFound
   );
   const session = auth && router(sessionRoutes({ auth, platform, intentPath, attemptsDir: loginAttemptsDir, now }), notFound);

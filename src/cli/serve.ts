@@ -1,6 +1,7 @@
 // The web UI: served on this machine (`ui`), answered one request at a time
 // under uhttpd on a router (`cgi`), and the router's status collector
 // (`collect`; `ui` runs its own).
+import { refreshAppIndex } from "../appUpdate";
 import { intentFileOrNothing } from "../settings";
 import { stateLayout } from "../store";
 import { CommandSpec, OptionSpec } from "../args";
@@ -86,7 +87,8 @@ export const collectCommand = ({ platform }: CliContext): CommandSpec => ({
       dir: options.dir,
       // What it reads lives in RAM; its history, events and clients are copied beside the intent (flash) every hour and as it stops.
       persistDir: stateLayout(intentPath).status,
-      everyHour: () => readReleases({ intentPath, platform }),
+      // OpenWrt's releases, and this app's own (each fetched at most once a day).
+      everyHour: () => Promise.all([readReleases({ intentPath, platform }), refreshAppIndex({ intentPath, platform })]),
     });
   },
 });

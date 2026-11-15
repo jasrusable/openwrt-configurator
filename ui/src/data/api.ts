@@ -21,6 +21,7 @@ import { forgetDeviceReads } from "./persist";
 import { forgetEdits } from "../form/stash";
 
 import type { Issue } from "../../../src/intent/issues";
+import type { AppUpdate } from "../../../src/appUpdate";
 
 /** Every write carries it: the server refuses writes without (CSRF). */
 // On every request, reads too: a cross-site page cannot send it without a
@@ -103,6 +104,12 @@ export const logOut = async () => {
   forgetEdits();
   loginListeners.forEach((listener) => listener());
 };
+
+/** This app's own version and update, where it runs on a router; `here: false` elsewhere. */
+export type AppState = AppUpdate | { here: false };
+export const loadApp = () => getJson<AppState>("api/app", "Could not read this app's version.");
+export const checkApp = () => postJson<AppState>("api/app/check", {}, "Could not check for a new version.");
+export const startAppUpdate = () => postJson<unknown>("api/app/update", {}, "Could not start the update.");
 
 export class SaveError extends Error {
   constructor(

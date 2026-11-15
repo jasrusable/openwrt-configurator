@@ -29,6 +29,7 @@ import { AppIcon, StatusDot } from "./kit/layout";
 import { settingsPages, statusPages } from "./pages";
 import { ApplyModal } from "./provision/ApplyModal";
 import { Finder } from "./Finder";
+import { AppUpdateLink } from "./AppUpdateLink";
 import { useLanding } from "./form/landing";
 import { ProvisionButton } from "./provision/ProvisionButton";
 
@@ -162,10 +163,17 @@ const LogOutLink = ({ dirty }: { dirty: boolean }) => {
       className="onc-nav"
       onClick={() => void logOut()}
       style={{ borderRadius: 8 }}
-      mt="auto"
     />
   );
 };
+
+/** The foot of either sidebar: this app's update, then Log out (each only on a router). */
+const SidebarFoot = ({ dirty }: { dirty: boolean }) => (
+  <Stack gap={2} mt="auto" pt="sm">
+    <AppUpdateLink />
+    <LogOutLink dirty={dirty} />
+  </Stack>
+);
 
 const Shell = () => {
   const navigate = useNavigate();
@@ -238,7 +246,7 @@ const Shell = () => {
                 mb={2}
               />
             ))}
-            <LogOutLink dirty={dirty} />
+            <SidebarFoot dirty={dirty} />
           </Stack>
         ) : (
           <Stack gap={0} h="100%">
@@ -269,7 +277,7 @@ const Shell = () => {
               onClick={() => go(remembered("onc-last-settings", "/settings/internet", isSettings))}
               style={{ borderRadius: 8 }}
             />
-            <LogOutLink dirty={dirty} />
+            <SidebarFoot dirty={dirty} />
           </Stack>
         )}
       </AppShell.Navbar>
