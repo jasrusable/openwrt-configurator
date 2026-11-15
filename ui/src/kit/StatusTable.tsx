@@ -1,4 +1,6 @@
-// A Status list as a table: fixed columns that line up, sorted by any of
+// A Status list as a table: fixed columns that line up and hold still as
+// values change (table-layout fixed: a column's width is its own, never its
+// content's; one without shares what is left), sorted by any of
 // them (the choice kept in this browser), each row opening its item's page.
 // On a phone, each row is two lines instead: its name and what matters,
 // and a value at the right.
@@ -16,8 +18,12 @@ export type StatusColumn<T> = {
   sort?: (row: T) => number | string | undefined;
   /** Numbers line up at the right. */
   align?: "right";
+  /** Its width; a right-aligned value's is valueWidth unless given, others share the rest. */
   width?: number | string;
 };
+
+const valueWidth = 104;
+const widthOf = <T,>(c: StatusColumn<T>) => c.width ?? (c.align === "right" ? valueWidth : undefined);
 
 type Sort = { key: string; descending: boolean };
 
@@ -111,11 +117,11 @@ export const StatusTable = <T,>({
   }
   return (
     <Table.ScrollContainer minWidth={640} type="native">
-      <Table verticalSpacing={8} horizontalSpacing="md" withRowBorders={false}>
+      <Table layout="fixed" verticalSpacing={8} horizontalSpacing="md" withRowBorders={false}>
         <Table.Thead>
           <Table.Tr>
             {columns.map((c) => (
-              <Table.Th key={c.key} w={c.width} ta={c.align} aria-sort={sort?.key === c.key ? (sort.descending ? "descending" : "ascending") : undefined}>
+              <Table.Th key={c.key} w={widthOf(c)} ta={c.align} aria-sort={sort?.key === c.key ? (sort.descending ? "descending" : "ascending") : undefined}>
                 {c.sort ? (
                   <button type="button" className="onc-sort" onClick={() => choose(c.key)}>
                     <Text span size="xs" c="dimmed" fw={500}>
@@ -132,7 +138,7 @@ export const StatusTable = <T,>({
                 )}
               </Table.Th>
             ))}
-            {onOpen && <Table.Th w={28} />}
+            {onOpen && <Table.Th w={48} />}
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -145,7 +151,7 @@ export const StatusTable = <T,>({
               onKeyDown={onOpen && ((e) => e.key === "Enter" && onOpen(row))}
             >
               {columns.map((c) => (
-                <Table.Td key={c.key} ta={c.align}>
+                <Table.Td key={c.key} ta={c.align} style={{ overflow: "hidden" }}>
                   <Group gap={8} wrap="nowrap" justify={c.align === "right" ? "flex-end" : undefined}>
                     {c.cell(row)}
                   </Group>

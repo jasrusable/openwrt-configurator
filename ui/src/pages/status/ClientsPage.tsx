@@ -96,7 +96,7 @@ const ClientList = () => {
         </Group>
       ),
     },
-    { key: "network", header: "Network", sort: (c) => networkName(c.network), cell: (c) => <Text size="sm">{networkName(c.network) ?? "—"}</Text> },
+    { key: "network", header: "Network", width: 140, sort: (c) => networkName(c.network), cell: (c) => <Text size="sm">{networkName(c.network) ?? "—"}</Text> },
     {
       key: "connection",
       header: "Wi-Fi",

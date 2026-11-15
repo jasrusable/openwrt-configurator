@@ -56,11 +56,11 @@ const SpeedTestPanel = () => {
         </Text>
         {tests.length > 0 && (
           <Table.ScrollContainer minWidth={520} type="native">
-            <Table verticalSpacing={6} horizontalSpacing="md" withRowBorders={false}>
+            <Table layout="fixed" verticalSpacing={6} horizontalSpacing="md" withRowBorders={false}>
               <Table.Thead>
                 <Table.Tr>
                   {["When", "Down", "Up", "At rest", "Under load", "Bufferbloat"].map((h, i) => (
-                    <Table.Th key={h} ta={i ? "right" : undefined}>
+                    <Table.Th key={h} ta={i ? "right" : undefined} w={i ? 112 : undefined}>
                       <Text span size="xs" c="dimmed" fw={500}>
                         {h}
                       </Text>

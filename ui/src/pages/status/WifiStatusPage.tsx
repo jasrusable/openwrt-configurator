@@ -243,11 +243,11 @@ export const WifiStatusPage = () => {
           </Text>
         ) : (
           <Table.ScrollContainer minWidth={640} type="native">
-            <Table verticalSpacing={8} horizontalSpacing="md" withRowBorders={false}>
+            <Table layout="fixed" verticalSpacing={8} horizontalSpacing="md" withRowBorders={false}>
               <Table.Thead>
                 <Table.Tr>
                   {["Access point", "Band", "Channel", "Networks", "Busy", "Noise", "Power", "Clients"].map((h, i) => (
-                    <Table.Th key={h} ta={i >= 4 ? "right" : undefined}>
+                    <Table.Th key={h} ta={i >= 4 ? "right" : undefined} w={i === 0 || i === 3 ? undefined : 104}>
                       <Text span size="xs" c="dimmed" fw={500}>
                         {h}
                       </Text>

@@ -205,11 +205,11 @@ export const DevicePage = ({ name }: { name: string }) => {
       {radios.length > 0 && (
         <Panel title="Radios" padded={false} actions={<EditLink setting={`hardware.${index}.radios`} label="Channels ›" />}>
           <Table.ScrollContainer minWidth={560} type="native">
-            <Table verticalSpacing={8} horizontalSpacing="md" withRowBorders={false}>
+            <Table layout="fixed" verticalSpacing={8} horizontalSpacing="md" withRowBorders={false}>
               <Table.Thead>
                 <Table.Tr>
                   {["Network name", "Band", "Channel", "Busy", "Noise", "Power", "Clients"].map((h, i) => (
-                    <Table.Th key={h} ta={i >= 3 ? "right" : undefined}>
+                    <Table.Th key={h} ta={i >= 3 ? "right" : undefined} w={i ? 104 : undefined}>
                       <Text span size="xs" c="dimmed" fw={500}>
                         {h}
                       </Text>

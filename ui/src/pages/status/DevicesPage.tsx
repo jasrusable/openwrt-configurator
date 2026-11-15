@@ -51,6 +51,7 @@ const DeviceList = () => {
     {
       key: "release",
       header: "OpenWrt",
+      width: 120,
       sort: (d) => d.version,
       cell: (d) => (
         <Group gap={6} wrap="nowrap">
@@ -62,6 +63,7 @@ const DeviceList = () => {
     {
       key: "state",
       header: "State",
+      width: 140,
       sort: (d) => (d.reachable ? (d.uptime ?? 0) : -1),
       cell: (d) => <ToneValue tone={deviceState(d).tone}>{deviceState(d).word}</ToneValue>,
     },
@@ -85,6 +87,7 @@ const DeviceList = () => {
     {
       key: "uplink",
       header: "Uplink",
+      width: 120,
       sort: (d) => uplinkWords(intent, live, d.name).word,
       cell: (d) => {
         const u = uplinkWords(intent, live, d.name);
