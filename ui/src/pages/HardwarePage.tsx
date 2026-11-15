@@ -58,6 +58,53 @@ const useFactsOf = (index: number) => {
 };
 
 /**
+ * Device `index` read and holding no Wi-Fi radio (a router without one):
+ * its Wi-Fi switch is greyed and its channels left out. Its settings are
+ * kept, as they never depend on the device: they apply again on hardware
+ * with radios. Not read yet, nothing is known, so all is shown.
+ */
+const useNoRadios = (index: number) => {
+  const { known } = useFactsOf(index);
+  return !!known && (known.schema.radios ?? []).length === 0;
+};
+
+const noRadio = "No Wi-Fi radio on this device.";
+
+const WifiSection = ({ index }: { index: number }) => {
+  const none = useNoRadios(index);
+  return (
+    <Section title="Wi-Fi">
+      <SwitchField name={`hardware.${index}.wifi`} disabled={none} description={none ? noRadio : undefined} />
+    </Section>
+  );
+};
+
+const ChannelsCell = ({ index }: { index: number }) => {
+  const none = useNoRadios(index);
+  return (
+    <Text size="sm" c="dimmed">
+      <Value
+        name={`hardware.${index}`}
+        format={(device) =>
+          device && broadcasts(device) && !none ? `${channel(device.radios?.["2g"]?.channel)} · ${channel(device.radios?.["5g"]?.channel)}` : "—"
+        }
+      />
+    </Text>
+  );
+};
+
+const ChannelsSection = ({ index }: { index: number }) => {
+  const device: Intent["hardware"][number] | undefined = useDraftValue(`hardware.${index}`);
+  if (useNoRadios(index) || !device || !broadcasts(device)) return null;
+  return (
+    <Section title="Channels" description="Pin one only to avoid a crowded channel.">
+      <SelectField name={`hardware.${index}.radios.2g.channel`} label={`${bandLabels["2g"]} channel`} options={channels2g} emptyLabel="Automatic" />
+      <SelectField name={`hardware.${index}.radios.5g.channel`} label={`${bandLabels["5g"]} channel`} options={channels5g} emptyLabel="Automatic" />
+    </Section>
+  );
+};
+
+/**
  * Device `index` reached, not reached or not known yet, from the live status
  * read while the page is open: only so much, as how it is doing is its
  * status page's (Status › Devices), never a settings page's.
@@ -290,20 +337,7 @@ const hardware = defineList({
     { header: "Model", cell: (i) => <ModelCell index={i} /> },
     {
       header: "Channels",
-      cell: (i) => (
-        <Text size="sm" c="dimmed">
-          <Value
-            name={`hardware.${i}`}
-            format={(device) =>
-              device && broadcasts(device)
-                ? `${channel(device.radios?.["2g"]?.channel)} · ${channel(
-                    device.radios?.["5g"]?.channel,
-                  )}`
-                : "—"
-            }
-          />
-        </Text>
-      ),
+      cell: (i) => <ChannelsCell index={i} />,
     },
   ],
   editor: (i) => (
@@ -323,35 +357,9 @@ const hardware = defineList({
       </Section>
       <UplinkSection index={i} />
       <When name={`hardware.${i}.role`} is="router">
-        <Section title="Wi-Fi">
-          <SwitchField name={`hardware.${i}.wifi`} />
-        </Section>
+        <WifiSection index={i} />
       </When>
-      <When
-        name={`hardware.${i}`}
-        test={(d) => {
-          const device = d as Intent["hardware"][number] | undefined;
-          return !!device && broadcasts(device);
-        }}
-      >
-        <Section
-          title="Channels"
-          description="Pin one only to avoid a crowded channel."
-        >
-          <SelectField
-            name={`hardware.${i}.radios.2g.channel`}
-            label={`${bandLabels["2g"]} channel`}
-            options={channels2g}
-            emptyLabel="Automatic"
-          />
-          <SelectField
-            name={`hardware.${i}.radios.5g.channel`}
-            label={`${bandLabels["5g"]} channel`}
-            options={channels5g}
-            emptyLabel="Automatic"
-          />
-        </Section>
-      </When>
+      <ChannelsSection index={i} />
       <FirmwareSection index={i} />
       <DeviceFacts index={i} />
       <DeviceFixes index={i} />

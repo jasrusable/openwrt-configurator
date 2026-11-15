@@ -1,7 +1,8 @@
 // Clients: who is on the network, and is anyone badly served? Every device
-// seen, online or remembered (src/status/registry.ts), as a table: how and
-// where it is connected, its signal and link, its address, how much it has
-// used, when it was last here. A row opens its own page (ClientPage).
+// seen, online or remembered (src/status/registry.ts), as a table of one line
+// a row: its name over its address, its Wi-Fi over the access point, signal,
+// speed and use. A column or filter that would say the same on every row is
+// left out (one network, "now" on the online tabs). A row opens its own page (ClientPage).
 import { Badge, Group, SegmentedControl, Select, Stack, Text, TextInput } from "@mantine/core";
 import { IconSearch } from "@tabler/icons-react";
 import { useState } from "react";
@@ -59,6 +60,16 @@ const ClientList = () => {
   );
   const networkName = (id?: string) => intent.networks.find((n) => n.id === id)?.name;
   const wifi = (c: ClientView) => (c.connection.kind === "wifi" ? c.connection : undefined);
+  const accessPoints = [...new Set(online.flatMap((c) => (c.connection.kind === "wifi" ? [c.connection.accessPoint] : [])))].sort();
+  const shown = {
+    network: intent.networks.length > 1 && !network,
+    seen: which === "all" || which === "new",
+  };
+  const wifiWords = (c: ClientView) =>
+    c.connection.kind === "wifi"
+      ? [c.connection.band, c.connection.ssid].filter(Boolean).join(" · ")
+      : connectionWords(c);
+  const mbps = (rate?: number) => (rate !== undefined ? `${Math.round(rate)} Mb/s` : "—");
   const seen = (c: ClientView) => (c.state === "online" ? "now" : c.lastSeen ? ago(c.lastSeen) : c.state === "recent" ? "lately" : "—");
   const columns: StatusColumn<ClientView>[] = [
     {
@@ -76,9 +87,9 @@ const ClientList = () => {
               {c.new && <Tag>New</Tag>}
               {c.reserved && <Tag>Fixed address</Tag>}
             </Group>
-            {c.model && (
+            {(c.ipv4 || c.model) && (
               <Text size="xs" c="dimmed" truncate>
-                {c.model}
+                {[c.ipv4, c.model].filter(Boolean).join(" · ")}
               </Text>
             )}
           </Stack>
@@ -86,7 +97,23 @@ const ClientList = () => {
       ),
     },
     { key: "network", header: "Network", sort: (c) => networkName(c.network), cell: (c) => <Text size="sm">{networkName(c.network) ?? "—"}</Text> },
-    { key: "connection", header: "Connection", sort: connectionWords, cell: (c) => <Text size="sm">{connectionWords(c)}</Text> },
+    {
+      key: "connection",
+      header: "Wi-Fi",
+      sort: wifiWords,
+      cell: (c) => (
+        <Stack gap={0} style={{ minWidth: 0 }}>
+          <Text size="sm" truncate>
+            {wifiWords(c)}
+          </Text>
+          {c.connection.kind === "wifi" && (
+            <Text size="xs" c="dimmed" truncate>
+              {c.connection.accessPoint}
+            </Text>
+          )}
+        </Stack>
+      ),
+    },
     {
       key: "signal",
       header: "Signal",
@@ -107,23 +134,17 @@ const ClientList = () => {
     },
     {
       key: "rate",
-      header: "Link ↓ / ↑",
+      header: "Speed",
       align: "right",
+      // The access point's rate to it, what it downloads at; both ways in the hint.
       sort: (c) => wifi(c)?.txRate,
       cell: (c) => (
-        <Text size="sm" style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
-          {wifi(c)?.txRate !== undefined ? `${Math.round(wifi(c)!.txRate!)} / ${wifi(c)!.rxRate !== undefined ? Math.round(wifi(c)!.rxRate!) : "—"}` : "—"}
-        </Text>
-      ),
-    },
-    {
-      key: "address",
-      header: "Address",
-      // Numerically, by each part.
-      sort: (c) => (c.ipv4 ? c.ipv4.split(".").map((p) => p.padStart(3, "0")).join(".") : undefined),
-      cell: (c) => (
-        <Text size="sm" ff="monospace" fz={12.5}>
-          {c.ipv4 ?? "—"}
+        <Text
+          size="sm"
+          style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}
+          title={wifi(c)?.txRate !== undefined ? `↓ ${mbps(wifi(c)!.txRate)} · ↑ ${mbps(wifi(c)!.rxRate)}` : undefined}
+        >
+          {mbps(wifi(c)?.txRate)}
         </Text>
       ),
     },
@@ -150,7 +171,6 @@ const ClientList = () => {
       ),
     },
   ];
-  const accessPoints = [...new Set(online.flatMap((c) => (c.connection.kind === "wifi" ? [c.connection.accessPoint] : [])))].sort();
   const onWifi = online.filter((c) => c.connection.kind === "wifi").length;
   return (
     <StatusPage title="Clients" live={liveLine(status)}>
@@ -172,15 +192,19 @@ const ClientList = () => {
             { value: "look", label: `Needs a look ${poor.size}` },
           ]}
         />
-        <Select size="xs" placeholder="Every network" clearable data={intent.networks.map((n) => ({ value: n.id, label: n.name || "Unnamed" }))} value={network} onChange={setNetwork} w={150} />
-        <Select size="xs" placeholder="Every access point" clearable data={accessPoints} value={accessPoint} onChange={setAccessPoint} w={170} />
+        {intent.networks.length > 1 && (
+          <Select size="xs" placeholder="Every network" clearable data={intent.networks.map((n) => ({ value: n.id, label: n.name || "Unnamed" }))} value={network} onChange={setNetwork} w={150} />
+        )}
+        {accessPoints.length > 1 && (
+          <Select size="xs" placeholder="Every access point" clearable data={accessPoints} value={accessPoint} onChange={setAccessPoint} w={170} />
+        )}
         <TextInput size="xs" placeholder="Name, address, MAC or model" leftSection={<IconSearch size={14} />} value={search} onChange={(e) => setSearch(e.currentTarget.value)} w={230} />
       </Group>
       <Panel padded={false}>
         <StatusTable
           id="clients"
           rows={rows}
-          columns={columns}
+          columns={columns.filter((column) => shown[column.key as keyof typeof shown] ?? true)}
           rowKey={(c) => c.mac}
           onOpen={(c) => navigate(`/clients/${encodeURIComponent(c.mac)}`)}
           empty={live ? "No devices match." : unread(status, "Reading the network…")}
