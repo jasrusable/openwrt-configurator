@@ -14,4 +14,6 @@ test("the CGI answers only to the router's addresses and names, so a rebound nam
     t.false(hostAllowed(host, names), String(host));
   }
   t.true(hostAllowed("openwrt.lan", routerNames(undefined)), "an unreadable intent still has OpenWrt's defaults");
+  t.true(hostAllowed("jaculu-router.lan", routerNames(undefined, "jaculu-router\n")), "a fresh install answers to the device's own name");
+  t.false(hostAllowed("evil.example", routerNames(undefined, "")), "an empty hostname adds nothing");
 });

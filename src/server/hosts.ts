@@ -16,9 +16,10 @@ const hostOf = (header: string) => {
 /**
  * The names the router goes by, from the intent as written (read loosely:
  * a file that does not validate still has them): its own, with the local
- * domain, its dynamic DNS name, and OpenWrt's defaults.
+ * domain, its dynamic DNS name, and OpenWrt's defaults; and the name the
+ * device has now (a fresh install has no intent yet, or another router's).
  */
-export const routerNames = (intent: unknown): string[] => {
+export const routerNames = (intent: unknown, hostname?: string): string[] => {
   const i = (intent ?? {}) as {
     hardware?: { name?: unknown; role?: unknown }[];
     dns?: { domain?: unknown };
@@ -27,11 +28,12 @@ export const routerNames = (intent: unknown): string[] => {
   const domain = typeof i.dns?.domain === "string" ? i.dns.domain : "lan";
   const router = (Array.isArray(i.hardware) ? i.hardware : []).find((h) => h?.role === "router")?.name;
   const ddns = i.internet?.dynamic_dns?.hostname;
+  const own = [router, hostname?.trim()].filter((name): name is string => typeof name === "string" && name !== "");
   return [
     "localhost",
     "openwrt",
     `openwrt.${domain}`,
-    ...(typeof router === "string" ? [router, `${router}.${domain}`] : []),
+    ...own.flatMap((name) => [name, `${name}.${domain}`]),
     ...(typeof ddns === "string" ? [ddns] : []),
   ].map((name) => name.toLowerCase());
 };

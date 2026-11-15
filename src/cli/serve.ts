@@ -98,7 +98,14 @@ export const cgiCommand = ({ platform, uiDir }: CliContext): CommandSpec => ({
   args: [{ name: "intent-file", description: "the intent file to edit" }],
   options: uiOptions(uiDir),
   action: async ([intentPath], options) => {
-    const names = routerNames(intentFileOrNothing(platform, intentPath));
+    const hostname = (() => {
+      try {
+        return platform.readTextFile("/proc/sys/kernel/hostname");
+      } catch {
+        return undefined;
+      }
+    })();
+    const names = routerNames(intentFileOrNothing(platform, intentPath), hostname);
     const request = cgiRequest(platform.env, names, platform.readStdin);
     const refusal = ({ refused, error }: { refused: number; error: string }) => ({
       status: refused,
