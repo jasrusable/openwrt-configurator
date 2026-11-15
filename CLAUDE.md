@@ -76,6 +76,10 @@ npm run provision          <config-file>
 npm run print-uci-commands <config-file>   # the plan's summary, then each script
 npm run provision -- <intent> --plan        # the change plan only: reads devices, applies nothing
 npm run build-images       <config-file> [--dry-run] [--out ./images] [--concurrency 3]
+scripts/router-install.sh  <host> [--intent <file>]   # this checkout as the apk, installed on the device
+scripts/router-intent.sh   pull|push <host> <file>    # the router's intent is the source of truth; a Mac edits a copy
+                           # (each refuses to overwrite the other's changes; by hash). A router logs in with its
+                           # own key, /etc/onc/id_ed25519, where the settings' key is another machine's (loginKeyOn)
 npm run provision          <intent> --upgrade <devices|all>   # firmware first, then apply
 ```
 
