@@ -1,10 +1,10 @@
 import { Alert, AppShell, Badge, Burger, Button, Center, Divider, Group, NavLink, Paper, PasswordInput, Skeleton, Stack, Text, ThemeIcon } from "@mantine/core";
 import { Hint } from "./kit/Hint";
 import { useDisclosure } from "@mantine/hooks";
-import { IconChevronLeft, IconSettings, IconTopologyStar3 } from "@tabler/icons-react";
+import { IconChevronLeft, IconLogout, IconSettings, IconTopologyStar3 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { logIn, NoSettingsError, onLoginNeeded, UnreadableSettingsError } from "./data/api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { loadSession, logIn, logOut, NoSettingsError, onLoginNeeded, UnreadableSettingsError } from "./data/api";
 import { prefetchApplyPlan, useFreshDevices } from "./data/devices";
 import { prefetchNetworkStatus, useNetworkStatus } from "./data/status";
 import {
@@ -150,6 +150,23 @@ const remember = (key: string, path: string) => {
 };
 const isSettings = (path: string) => path === "/settings" || path.startsWith("/settings/");
 
+/** Log out, at the foot of the sidebar, where there is a login (a router). Unsaved edits go with it, as on any logout. */
+const LogOutLink = ({ dirty }: { dirty: boolean }) => {
+  const session = useQuery({ queryKey: ["session"], queryFn: loadSession, staleTime: Infinity });
+  if (!session.data?.login) return null;
+  return (
+    <NavLink
+      label="Log out"
+      description={dirty ? "Unsaved edits are lost" : undefined}
+      leftSection={<IconLogout size={18} />}
+      className="onc-nav"
+      onClick={() => void logOut()}
+      style={{ borderRadius: 8 }}
+      mt="auto"
+    />
+  );
+};
+
 const Shell = () => {
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -194,7 +211,7 @@ const Shell = () => {
       </AppShell.Header>
       <AppShell.Navbar p="sm" className="onc-chrome">
         {inSettings ? (
-          <Stack gap={0}>
+          <Stack gap={0} h="100%">
             <NavLink
               label="Status"
               leftSection={<IconChevronLeft size={18} />}
@@ -221,6 +238,7 @@ const Shell = () => {
                 mb={2}
               />
             ))}
+            <LogOutLink dirty={dirty} />
           </Stack>
         ) : (
           <Stack gap={0} h="100%">
@@ -251,6 +269,7 @@ const Shell = () => {
               onClick={() => go(remembered("onc-last-settings", "/settings/internet", isSettings))}
               style={{ borderRadius: 8 }}
             />
+            <LogOutLink dirty={dirty} />
           </Stack>
         )}
       </AppShell.Navbar>

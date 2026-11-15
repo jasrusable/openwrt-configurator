@@ -12,6 +12,24 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- A browser that cannot start the app says why, rather than showing a blank page:
+         a module it cannot parse, a throw before the first render, or nothing at all. -->
+    <script>
+      (function () {
+        var root = document.getElementById("root");
+        var say = function (why) {
+          if (root.childNodes.length) return;
+          var p = document.createElement("p");
+          p.style.cssText = "font:15px -apple-system,system-ui,sans-serif;padding:24px;max-width:560px";
+          p.textContent = "This browser could not start the app: " + why + " (" + navigator.userAgent + ")";
+          root.appendChild(p);
+        };
+        addEventListener("error", function (e) { say(e.message || "a script failed to load"); }, true);
+        addEventListener("unhandledrejection", function (e) { say(String(e.reason)); });
+        setTimeout(function () { say("it did not start within 20 seconds"); }, 20000);
+      })();
+    </script>
+    <script nomodule>document.getElementById("root").textContent = "This browser is too old for this app.";</script>
     <script type="module" src="app.js"></script>
   </body>
 </html>

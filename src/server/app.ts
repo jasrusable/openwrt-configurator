@@ -16,7 +16,7 @@ import { statusRoutes } from "./api/status";
 import { patchesRoutes } from "./api/patches";
 import { backupRoutes } from "./api/backup";
 import { Auth } from "./auth";
-import { ApiContext, refuse, router } from "./router";
+import { ApiContext, json, refuse, router } from "./router";
 import { messageOf } from "../result";
 import { keepStatePrivate, stateLayout } from "../store";
 
@@ -77,6 +77,8 @@ export const uiHandler = ({
     // devices, which an <img> on any page could otherwise make it do).
     if (request.headers["x-onc"] !== "1") return refuse("forbidden", "Missing the X-ONC header.");
     if (session && (request.path === "/api/login" || request.path === "/api/logout")) return session(request);
+    // Whether there is a login to leave (a router), for the UI's Log out: no secret, so asked before one.
+    if (request.path === "/api/session" && request.method === "GET") return json(200, { login: !!auth });
     // On a router, logged in: the UI's own files are no secret, the API is.
     if (auth && !(await auth.check(request))) return refuse("unauthorized", "Log in first.", { login: true });
     return api(request);

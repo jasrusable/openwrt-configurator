@@ -28,6 +28,12 @@ const request = (method: string, path: string, body = "", headers: Record<string
   headers,
 });
 
+test("with no login (onc ui), the session says so: the UI offers no Log out", async (t) => {
+  await withServer(async (handle) => {
+    t.deepEqual(JSON.parse((await handle(request("GET", "/api/session"))).body as string), { login: false });
+  });
+});
+
 test("an API request without the X-ONC header is refused (CSRF), reads too", async (t) => {
   await withServer(async (handle, intentPath) => {
     const before = readFileSync(intentPath, "utf8");
@@ -161,6 +167,7 @@ test("on a router, the API needs a session from the root password; the UI's file
   const api = (method: string, path: string, body = "", cookie = "") =>
     handle({ method, path, body, headers: { "x-onc": "1", ...(cookie ? { cookie } : {}) } });
   t.is((await api("GET", "/api/intent")).status, 401);
+  t.deepEqual(JSON.parse((await api("GET", "/api/session")).body as string), { login: true }, "says there is a login, before one");
   const wrong = await api("POST", "/api/login", JSON.stringify({ password: "nope" }));
   t.is(wrong.status, 401);
   t.false("set-cookie" in wrong.headers);

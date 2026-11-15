@@ -93,6 +93,17 @@ export const logIn = async (password: string): Promise<string | undefined> => {
   }
 };
 
+/** Whether the server has a login to leave: a router has, `onc ui` on a Mac has not. */
+export const loadSession = () => getJson<{ login: boolean }>("api/session", "Could not read the session.");
+
+/** Ends the session, then forgets the network here as any logout does, and shows the login. */
+export const logOut = async () => {
+  await call("api/logout", { method: "POST" }).catch(() => undefined);
+  forgetDeviceReads();
+  forgetEdits();
+  loginListeners.forEach((listener) => listener());
+};
+
 export class SaveError extends Error {
   constructor(
     message: string,
