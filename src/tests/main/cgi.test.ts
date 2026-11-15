@@ -20,11 +20,15 @@ test("under uhttpd, the CSRF check is the browser's Origin against Host", (t) =>
 });
 
 test("under uhttpd, the page asked without its slash is sent to it, so its files resolve under it", (t) => {
-  t.deepEqual(request({ HTTP_HOST: "gateway", SCRIPT_NAME: "/cgi-bin/onc" }), { redirect: "/cgi-bin/onc/" });
-  t.deepEqual(request({ HTTP_HOST: "gateway", SCRIPT_NAME: "/cgi-bin/onc", QUERY_STRING: "a=1" }), { redirect: "/cgi-bin/onc/?a=1" });
-  t.false("redirect" in request({ HTTP_HOST: "gateway", SCRIPT_NAME: "/cgi-bin/onc", PATH_INFO: "/" }));
-  t.false("redirect" in request({ REQUEST_METHOD: "POST", HTTP_HOST: "gateway", SCRIPT_NAME: "/cgi-bin/onc" }), "a write is never redirected");
-  t.deepEqual(request({ HTTP_HOST: "evil.example", SCRIPT_NAME: "/cgi-bin/onc" }), { refused: 403, error: "Forbidden." }, "the host first");
+  // As uhttpd 25.12.6 sets them: PATH_INFO empty with the slash and without.
+  const at = (uri: string, more: Record<string, string> = {}) =>
+    request({ HTTP_HOST: "gateway", SCRIPT_NAME: "/cgi-bin/onc", REQUEST_URI: uri, ...more });
+  t.deepEqual(at("/cgi-bin/onc"), { redirect: "/cgi-bin/onc/" });
+  t.deepEqual(at("/cgi-bin/onc?a=1", { QUERY_STRING: "a=1" }), { redirect: "/cgi-bin/onc/?a=1" });
+  t.false("redirect" in at("/cgi-bin/onc/"), "with the slash: no loop");
+  t.false("redirect" in at("/cgi-bin/onc/app.js", { PATH_INFO: "/app.js" }));
+  t.false("redirect" in at("/cgi-bin/onc", { REQUEST_METHOD: "POST" }), "a write is never redirected");
+  t.deepEqual(request({ HTTP_HOST: "evil.example", SCRIPT_NAME: "/cgi-bin/onc", REQUEST_URI: "/cgi-bin/onc" }), { refused: 403, error: "Forbidden." }, "the host first");
 });
 
 test("under uhttpd, a rebound name is refused, and the saved file's version comes in the query", (t) => {

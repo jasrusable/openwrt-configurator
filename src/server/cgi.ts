@@ -39,7 +39,10 @@ export const cgiRequest = (
 ): HttpRequest | { refused: number; error: string } | { redirect: string } => {
   if (!hostAllowed(env("HTTP_HOST"), routerNames)) return { refused: 403, error: "Forbidden." };
   const method = env("REQUEST_METHOD") || "GET";
-  if (!env("PATH_INFO") && env("SCRIPT_NAME") && (method === "GET" || method === "HEAD")) {
+  // uhttpd gives an empty PATH_INFO with and without the slash (verified on
+  // 25.12.6): only the URI asked tells them apart.
+  const asked = (env("REQUEST_URI") ?? "").split("?")[0];
+  if (env("SCRIPT_NAME") && asked === env("SCRIPT_NAME") && (method === "GET" || method === "HEAD")) {
     const query = env("QUERY_STRING");
     return { redirect: `${env("SCRIPT_NAME")}/${query ? `?${query}` : ""}` };
   }
