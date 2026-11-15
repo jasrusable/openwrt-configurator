@@ -4,7 +4,7 @@
 // lock it out, so it is refused before any device is touched.
 import type { Intent } from "./intent/schema";
 import { Platform } from "./platform";
-import { expandHome, isPublicKeyPath } from "./apply/provisionConfig";
+import { expandHome, isPublicKeyPath, loginKeyOn } from "./apply/provisionConfig";
 import { where } from "./intent/places";
 import { keyIdentity } from "./sshKeys";
 
@@ -37,10 +37,11 @@ export const ownPublicKey = async (
  */
 export const lockoutReason = async (
   intent: Intent,
-  platform: Pick<Platform, "readTextFile" | "run" | "homedir">
+  platform: Pick<Platform, "readTextFile" | "readFileHead" | "run" | "homedir">
 ): Promise<string | undefined> => {
   const { password_login, authorized_keys: keys } = intent.system.ssh;
-  const { password, key: keyPath } = intent.system.app_login;
+  const { password } = intent.system.app_login;
+  const keyPath = loginKeyOn(intent.system.app_login.key, platform);
   if (password_login && password) return undefined;
   const off = password_login ? "This app has no password to log in with" : "Password login would be off";
   if (!keyPath) {
@@ -53,8 +54,11 @@ export const lockoutReason = async (
     : `${off}, and this app's key is not among the authorized keys: applying would lock it out. Add it under ${where("system", "Authorized keys")}.`;
 };
 
-/** The public half of the key this app logs in with (system.app_login.key), when it can be read. */
+/** The public half of the key this app logs in with on this machine (loginKeyOn), when it can be read. */
 export const appPublicKey = async (
   intent: Pick<Intent, "system">,
-  platform: Pick<Platform, "readTextFile" | "run" | "homedir">
-): Promise<string | undefined> => (intent.system.app_login.key ? ownPublicKey(platform, intent.system.app_login.key) : undefined);
+  platform: Pick<Platform, "readTextFile" | "readFileHead" | "run" | "homedir">
+): Promise<string | undefined> => {
+  const key = loginKeyOn(intent.system.app_login.key, platform);
+  return key ? ownPublicKey(platform, key) : undefined;
+};

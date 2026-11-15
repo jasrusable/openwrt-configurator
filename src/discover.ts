@@ -23,7 +23,7 @@ import { dirname } from "./posixPath";
 import { knownKey, Located, locateEach, macsProbe, Neighbour } from "./locate";
 import { PlanDevice } from "./plan/types";
 import { Platform } from "./platform";
-import { provisionableDevices, sshConnectOptions } from "./apply/provisionConfig";
+import { loginKeyOn, provisionableDevices, sshConnectOptions } from "./apply/provisionConfig";
 import { fail, Problem } from "./problem";
 import { map, messageOf, ok, Result } from "./result";
 import { loadSettings } from "./settings";
@@ -202,8 +202,9 @@ export const inspect = async ({
    */
   knownHostsFile?: string;
 }): Promise<Result<Inspected, Problem>> => {
+  const key = loginKeyOn(intent.system.app_login.key, platform);
   const tries: NonNullable<PlanDevice["login"]>[] = [
-    ...(intent.system.app_login.key ? [{ username: "root", privateKeyPath: intent.system.app_login.key }] : []),
+    ...(key ? [{ username: "root", privateKeyPath: key }] : []),
     { username: "root", password: stockPassword },
   ];
   const failures: string[] = [];

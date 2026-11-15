@@ -26,6 +26,30 @@ export const expandHome = (path: string, home: string) =>
 
 export const isPublicKeyPath = (path: string) => path.endsWith(".pub");
 
+/** A router hosting this app logs in with its own key, here (/etc/onc survives an upgrade). */
+export const machineLoginKey = "/etc/onc/id_ed25519";
+
+const readable = (platform: Pick<Platform, "readFileHead">, path: string) => {
+  try {
+    platform.readFileHead(path, 1);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The key this machine logs in with: the settings' (system.app_login.key)
+ * where this machine has it, else its own (machineLoginKey) where it has one,
+ * else the settings' still (its error says which file). The settings travel
+ * between machines (the router's, copied to a Mac to work on), a key file
+ * does not; whichever is used must be among the authorized keys.
+ */
+export const loginKeyOn = (named: string | undefined, platform: Pick<Platform, "readFileHead" | "homedir">) =>
+  (named && readable(platform, expandHome(named, platform.homedir()))) || !readable(platform, machineLoginKey)
+    ? named
+    : machineLoginKey;
+
 // ssh2 reads no ssh_config, so an agent set there (1Password's IdentityAgent)
 // would be missed: asked of OpenSSH itself, once per host, else SSH_AUTH_SOCK.
 const agents = new Map<string, Promise<string | undefined>>();
@@ -55,9 +79,9 @@ export const agentSocketOf = ({
 }: {
   deviceConfig: PlanDevice;
   identityPath?: string;
-  platform: Pick<Platform, "run" | "env" | "homedir">;
+  platform: Pick<Platform, "run" | "env" | "homedir" | "readFileHead">;
 }) => {
-  const named = identityPath || deviceConfig.login?.privateKeyPath;
+  const named = identityPath || loginKeyOn(deviceConfig.login?.privateKeyPath, platform);
   return named && !isPublicKeyPath(named) ? Promise.resolve(undefined) : agentSocketFor(deviceConfig.ipaddr ?? "", platform);
 };
 
@@ -70,10 +94,10 @@ export const sshConnectOptions = ({
   deviceConfig: PlanDevice;
   identityPath?: string;
   agentSocket?: string;
-  platform: Pick<Platform, "env" | "homedir">;
+  platform: Pick<Platform, "env" | "homedir" | "readFileHead">;
 }): SshTarget => {
   const auth = deviceConfig.login;
-  const named = identityPath || auth?.privateKeyPath;
+  const named = identityPath || loginKeyOn(auth?.privateKeyPath, platform);
   // A public key names the agent's (1Password's): its private half is not on disk.
   const keyPath = named && !isPublicKeyPath(named) ? named : undefined;
   const password = auth?.password;

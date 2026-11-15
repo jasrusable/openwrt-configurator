@@ -1,5 +1,5 @@
 import test from "ava";
-import { agentSocketFor, following, provisionableDevices, sshConnectOptions } from "../../apply/provisionConfig";
+import { agentSocketFor, following, loginKeyOn, machineLoginKey, provisionableDevices, sshConnectOptions } from "../../apply/provisionConfig";
 import { PlanDevice } from "../../plan/types";
 import { planOf } from "../helpers/fixtures";
 import { deviceFromJson } from "../../lowLevel/names";
@@ -79,6 +79,22 @@ test("expands ~ in the key path", (t) => {
     }),
   });
   t.is(opts.privateKeyPath, join(homedir(), ".ssh/id_ed25519"));
+});
+
+test("a router logs in with its own key where the settings' key is another machine's", (t) => {
+  const on = (...files: string[]) => ({
+    homedir: () => "/root",
+    readFileHead: (path: string) => {
+      if (!files.includes(path)) throw new Error(`ENOENT: ${path}`);
+      return new Uint8Array(1);
+    },
+  });
+  t.is(loginKeyOn("~/.ssh/mac.pub", on(machineLoginKey)), machineLoginKey);
+  t.is(loginKeyOn(undefined, on(machineLoginKey)), machineLoginKey);
+  t.is(loginKeyOn("~/.ssh/mac.pub", on("/root/.ssh/mac.pub", machineLoginKey)), "~/.ssh/mac.pub");
+  // No key of its own: the settings' still, so its error names the file.
+  t.is(loginKeyOn("~/.ssh/mac.pub", on()), "~/.ssh/mac.pub");
+  t.is(loginKeyOn(undefined, on()), undefined);
 });
 
 test("agent is used when there is no password and no key", (t) => {
