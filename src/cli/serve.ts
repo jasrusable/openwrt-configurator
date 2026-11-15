@@ -121,7 +121,9 @@ export const cgiCommand = ({ platform, uiDir }: CliContext): CommandSpec => ({
       }
     })();
     const response =
-      "refused" in request
+      "redirect" in request
+        ? { status: 301, headers: { location: request.redirect }, body: "" }
+        : "refused" in request
         ? refusal(request)
         : statusDirRefused
         ? refusal(statusDirRefused)

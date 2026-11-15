@@ -24,7 +24,15 @@
           p.textContent = "This browser could not start the app: " + why + " (" + navigator.userAgent + ")";
           root.appendChild(p);
         };
-        addEventListener("error", function (e) { say(e.message || "a script failed to load"); }, true);
+        addEventListener("error", function (e) {
+          if (e.message) return say(e.message);
+          // A file that did not load: which, and what a plain fetch of it says (the reason Safari keeps to itself).
+          var url = (e.target && (e.target.src || e.target.href)) || "a file";
+          fetch(url).then(
+            function (r) { say(url + " did not load as a script, though a fetch of it gives " + r.status); },
+            function (x) { say(url + " did not load; a fetch of it fails too: " + x); }
+          );
+        }, true);
         addEventListener("unhandledrejection", function (e) { say(String(e.reason)); });
         setTimeout(function () { say("it did not start within 20 seconds"); }, 20000);
       })();

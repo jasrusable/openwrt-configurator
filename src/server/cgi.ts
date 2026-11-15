@@ -26,13 +26,23 @@ const queryParam = (query: string | undefined, name: string) =>
 /** As the API gives a version (src/server/api/intent.ts versionOf): a sha256, or "" with no file saved. */
 const versionPattern = /^(?:[0-9a-f]{64})?$/;
 
-/** The request, or why it is refused before anything reads it. */
+/**
+ * The request, why it is refused before anything reads it, or where it
+ * belongs: the page asked as /cgi-bin/onc, without the slash, would find its
+ * files (relative: app.js, app.css) one level up, under /cgi-bin, and show
+ * blank (Safari's autocomplete drops the slash), so it is sent to /cgi-bin/onc/.
+ */
 export const cgiRequest = (
   env: Env,
   routerNames: string[],
   readBody: () => string
-): HttpRequest | { refused: number; error: string } => {
+): HttpRequest | { refused: number; error: string } | { redirect: string } => {
   if (!hostAllowed(env("HTTP_HOST"), routerNames)) return { refused: 403, error: "Forbidden." };
+  const method = env("REQUEST_METHOD") || "GET";
+  if (!env("PATH_INFO") && env("SCRIPT_NAME") && (method === "GET" || method === "HEAD")) {
+    const query = env("QUERY_STRING");
+    return { redirect: `${env("SCRIPT_NAME")}/${query ? `?${query}` : ""}` };
+  }
   const length = Number(env("CONTENT_LENGTH") || 0);
   // Read before any login is checked, so bounded: an intent, VPN files and
   // all, is far smaller; more is refused unread.
@@ -60,6 +70,7 @@ export const maxCgiBody = 2 * 1024 * 1024;
 const reasons: Record<number, string> = {
   200: "OK",
   202: "Accepted",
+  301: "Moved Permanently",
   304: "Not Modified",
   400: "Bad Request",
   401: "Unauthorized",
