@@ -193,6 +193,27 @@ over `src/server/`, and the React UI in `ui/`.
       eth0 is harmless while it is a bridge port (promiscuous); the fix is
       upstream ("net: stmmac: Fix VLAN handling when interface is down").
 
+## Logins
+
+With SSH password login off (`system.ssh.password_login: false`), root's
+password (`system.app_login.password`, set on every device) still opens LuCI,
+rpcd's `/ubus` and this app's web UI.
+
+- [ ] **A long, random root password, by construction.** Refuse (or at least
+      flag in the review) a short or guessable one, e.g. under 16 characters
+      or on a common-password list, and offer a generated one in System ›
+      Administration (it is rarely typed: a password manager holds it).
+- [ ] **Incremental lockout on every web login.** Today the app slows logins
+      per client only (`server/auth.ts`), and rpcd's own login is reachable
+      unthrottled through `/ubus` (LuCI uses it too). Wanted: per-client
+      attempt limits with escalating delays (e.g. 5 failures, then 1 min, 10
+      min, 1 h), covering LuCI and `/ubus`, never locking the owner out for
+      good (a per-client limit, not a shared one: a shared limit once let one
+      client lock the owner out). Options to weigh: front rpcd's
+      `session.login` with the app's throttle, an fw4 rate limit on new
+      connections to the web ports as a floor, or LuCI off where the app
+      covers it.
+
 ## Roadmap (2026-10-13)
 
 - **App updates in status.** The Apply sheet now names an app update, a fix or a change on the device per line (`src/applyChanges.ts`, a stamp of hashes beside the intent, `<intent>.state/applied/`). Still to do: Overview says "not applied" when the current app would write something other than what the stamp holds, without opening Apply (a compile against stored facts, no device read).
